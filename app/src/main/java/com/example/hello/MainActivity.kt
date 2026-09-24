@@ -36,7 +36,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.google.firebase.Firebase
-import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.toObject
 import kotlin.math.roundToInt
@@ -51,7 +50,7 @@ data class Record(
     val note: String = "",
     val category: String = "飲食",
     val timestamp: Long = System.currentTimeMillis(),
-    @DocumentId var id: String = ""
+    var id: String = ""
 )
 
 sealed interface DialogState {
@@ -101,7 +100,10 @@ fun LedgerScreen() {
                     records.clear()
                     snapshot.documents.forEach { doc ->
                         val r = doc.toObject(Record::class.java)
-                        if (r != null) records.add(r)
+                        if (r != null) {
+                            r.id = doc.id
+                            records.add(r)
+                        }
                     }
                 }
             }
@@ -308,65 +310,56 @@ fun SwipeableRecordItem(
     val maxLeftReveal = -actionWidthPx * 4f
     val maxRightReveal = actionWidthPx * 1f
 
-    var targetOffset by remember { mutableFloatStateOf(0f) }
+    var targetOffset by remember { mutableStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
     val offsetX by animateFloatAsState(
         targetValue = targetOffset,
-        animationSpec = if (isDragging) snap() else spring(
-            stiffness = Spring.StiffnessMediumLow,
-            dampingRatio = Spring.DampingRatioNoBouncy
-        ),
+        animationSpec = if (isDragging) {
+            snap<Float>()
+        } else {
+            spring<Float>(
+                stiffness = Spring.StiffnessMediumLow,
+                dampingRatio = Spring.DampingRatioNoBouncy
+            )
+        },
         label = "swipe"
     )
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
+            .wrapContentHeight()
     ) {
-        // 右側（向左滑顯示）：4 個按鈕
         Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .fillMaxHeight()
+                .matchParentSize()
         ) {
             ActionButton(
                 Icons.Default.ContentCopy, "複制", Color(0xFF607D8B)
-            ) {
-                targetOffset = 0f; onCopy()
-            }
+            ) { targetOffset = 0f; onCopy() }
             ActionButton(
                 Icons.Default.Edit, "編輯", Color(0xFF2196F3)
-            ) {
-                targetOffset = 0f; onEdit()
-            }
+            ) { targetOffset = 0f; onEdit() }
             ActionButton(
                 Icons.Default.FilterList, "篩選", Color(0xFF9C27B0)
-            ) {
-                targetOffset = 0f; onFilter()
-            }
+            ) { targetOffset = 0f; onFilter() }
             ActionButton(
                 Icons.Default.Delete, "刪除", Color(0xFFF44336)
-            ) {
-                targetOffset = 0f; onDelete()
-            }
+            ) { targetOffset = 0f; onDelete() }
         }
 
-        // 左側（向右滑顯示）：1 個按鈕
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .fillMaxHeight()
+                .matchParentSize()
         ) {
             ActionButton(
                 Icons.Default.Edit, "編輯/新增", Color(0xFF4CAF50)
-            ) {
-                targetOffset = 0f; onQuickEdit()
-            }
+            ) { targetOffset = 0f; onQuickEdit() }
         }
 
-        // 上層：ListItem
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -409,7 +402,7 @@ fun SwipeableRecordItem(
 }
 
 @Composable
-private fun RowScope.ActionButton(
+private fun ActionButton(
     icon: ImageVector,
     label: String,
     background: Color,
