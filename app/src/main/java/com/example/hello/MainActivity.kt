@@ -22,7 +22,6 @@ import com.google.firebase.Firebase
 import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.toObject
 
-// 9 個類別,順序跟住你俾我嗰個
 val CATEGORIES = listOf(
     "收入", "娛樂", "家用", "飲食", "交通",
     "個人", "購物", "月費", "旅遊"
@@ -55,10 +54,10 @@ fun LedgerScreen() {
     val db = Firebase.firestore
     val records = remember { mutableStateListOf<Record>() }
     var showDialog by remember { mutableStateOf(false) }
+    var dialogInitialNote by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
 
-    // 即時監聽 Firestore
     DisposableEffect(Unit) {
         val listener = db.collection("records")
             .orderBy("timestamp")
@@ -82,14 +81,24 @@ fun LedgerScreen() {
         onDispose { listener.remove() }
     }
 
-    // 根據揀咗嘅類別篩選
     val filtered = if (selectedCategory == null) records
                    else records.filter { it.category == selectedCategory }
+
+    // === 快速輸入：統計目前顯示範圍內最常用嘅項目，取頭 20 ===
+    val topNotes: List<Pair<String, Int>> = filtered
+        .filter { it.note.isNotBlank() }
+        .groupBy { it.note }
+        .map { (name, list) -> name to list.size }
+        .sortedByDescending { it.second }
+        .take(20)
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("記帳") }) },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }) {
+            FloatingActionButton(onClick = {
+                dialogInitialNote = ""
+                showDialog = true
+            }) {
                 Icon(Icons.Default.Add, contentDescription = "新增")
             }
         }
@@ -99,7 +108,7 @@ fun LedgerScreen() {
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // 頂部類別篩選列
+            // 頂部類別篩選
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -130,37 +139,62 @@ fun LedgerScreen() {
                     Box(
                         Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
+                    ) { CircularProgressIndicator() }
                 }
                 filtered.isEmpty() -> {
                     Box(
                         Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
-                    ) {
-                        Text("仲未有記錄,撳右下角 + 新增")
-                    }
+                    ) { Text("仲未有記錄,撳右下角 + 新增") }
                 }
                 else -> {
                     val total = filtered.sumOf { it.amount }
                     Text(
                         text = "總數:$total",
                         style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(16.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
+
+                    // === 快速輸入區 ===
+                    if (topNotes.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Text(
+                                text = "快速輸入",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(topNotes) { pair ->
+                                    val name = pair.first
+                                    val count = pair.second
+                                    SuggestionChip(
+                                        onClick = {
+                                            dialogInitialNote = name
+                                            showDialog = true
+                                        },
+                                        label = { Text("$name · $count") }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        HorizontalDivider()
+                    }
+
+                    // 記錄列表
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(filtered, key = { it.id }) { r ->
                             ListItem(
                                 headlineContent = {
                                     Text(r.note.ifBlank { "(無備註)" })
                                 },
-                                supportingContent = {
-                                    Text(r.category)
-                                },
-                                trailingContent = {
-                                    Text(r.amount.toString())
-                                }
+                                supportingContent = { Text(r.category) },
+                                trailingContent = { Text(r.amount.toString()) }
                             )
                             HorizontalDivider()
                         }
@@ -172,6 +206,7 @@ fun LedgerScreen() {
 
     if (showDialog) {
         AddDialog(
+            initialNote = dialogInitialNote,
             onDismiss = { showDialog = false },
             onConfirm = { amount, note, category ->
                 val record = Record(
@@ -193,11 +228,12 @@ fun LedgerScreen() {
 
 @Composable
 fun AddDialog(
+    initialNote: String = "",
     onDismiss: () -> Unit,
     onConfirm: (Double, String, String) -> Unit
 ) {
     var amountText by remember { mutableStateOf("") }
-    var noteText by remember { mutableStateOf("") }
+    var noteText by remember(initialNote) { mutableStateOf(initialNote) }
     var category by remember { mutableStateOf("飲食") }
     var showCategoryPicker by remember { mutableStateOf(false) }
 
@@ -225,17 +261,12 @@ fun AddDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    "類別",
-                    style = MaterialTheme.typography.labelLarge
-                )
+                Text("類別", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.height(4.dp))
                 OutlinedButton(
                     onClick = { showCategoryPicker = true },
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(category)
-                }
+                ) { Text(category) }
             }
         },
         confirmButton = {
@@ -285,10 +316,7 @@ fun CategoryPickerDialog(
                             onClick = { onSelect(cat) }
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            cat,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
+                        Text(cat, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }
