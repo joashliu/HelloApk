@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -27,6 +28,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -86,6 +88,9 @@ fun LedgerScreen() {
     var dialogState by remember { mutableStateOf<DialogState?>(null) }
     var loading by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
+
+    // 邊一行展開緊（跨行互斥）
+    var expandedId by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(Unit) {
         val listener = db.collection("records")
@@ -200,9 +205,7 @@ fun LedgerScreen() {
                                                 initialNote = pair.first
                                             )
                                         },
-                                        label = {
-                                            Text("${pair.first} · ${pair.second}")
-                                        }
+                                        label = { Text(pair.first) }
                                     )
                                 }
                             }
@@ -215,6 +218,8 @@ fun LedgerScreen() {
                         items(filtered, key = { it.id }) { r ->
                             SwipeableRecordItem(
                                 record = r,
+                                expandedId = expandedId,
+                                onExpand = { expandedId = it },
                                 onCopy = {
                                     val copy = r.copy(
                                         id = "",
@@ -297,6 +302,8 @@ fun LedgerScreen() {
 @Composable
 fun SwipeableRecordItem(
     record: Record,
+    expandedId: String?,
+    onExpand: (String?) -> Unit,
     onCopy: () -> Unit,
     onEdit: () -> Unit,
     onFilter: () -> Unit,
@@ -304,14 +311,27 @@ fun SwipeableRecordItem(
     onQuickEdit: () -> Unit,
 ) {
     val density = LocalDensity.current
-    val actionWidth = 76.dp
-    val actionWidthPx = with(density) { actionWidth.toPx() }
+    val buttonWidth = 64.dp
+    val gap = 6.dp
+    val buttonWidthPx = with(density) { buttonWidth.toPx() }
+    val gapPx = with(density) { gap.toPx() }
 
-    val maxLeftReveal = -actionWidthPx * 4f
-    val maxRightReveal = actionWidthPx * 1f
+    // 左邊露出 4 個按鈕 + 3 個 gap
+    val leftTotalPx = buttonWidthPx * 4 + gapPx * 3
+    val rightTotalPx = buttonWidthPx
+
+    val maxLeftReveal = -leftTotalPx
+    val maxRightReveal = rightTotalPx
 
     var targetOffset by remember { mutableStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
+
+    // 當其他行展開時，自動收起自己
+    LaunchedEffect(expandedId) {
+        if (expandedId != record.id && targetOffset != 0f) {
+            targetOffset = 0f
+        }
+    }
 
     val offsetX by animateFloatAsState(
         targetValue = targetOffset,
@@ -331,53 +351,69 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
+        // 右側（向左滑顯示）：4 個按鈕
         Row(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .matchParentSize()
+                .matchParentSize(),
+            horizontalArrangement = Arrangement.spacedBy(
+                gap, Alignment.End
+            )
         ) {
             ActionButton(
                 Icons.Default.ContentCopy, "複制", Color(0xFF607D8B)
-            ) { targetOffset = 0f; onCopy() }
+            ) { targetOffset = 0f; onExpand(null); onCopy() }
             ActionButton(
                 Icons.Default.Edit, "編輯", Color(0xFF2196F3)
-            ) { targetOffset = 0f; onEdit() }
+            ) { targetOffset = 0f; onExpand(null); onEdit() }
             ActionButton(
                 Icons.Default.FilterList, "篩選", Color(0xFF9C27B0)
-            ) { targetOffset = 0f; onFilter() }
+            ) { targetOffset = 0f; onExpand(null); onFilter() }
             ActionButton(
                 Icons.Default.Delete, "刪除", Color(0xFFF44336)
-            ) { targetOffset = 0f; onDelete() }
+            ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
+        // 左側（向右滑顯示）：1 個按鈕
         Row(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .matchParentSize()
+                .matchParentSize(),
+            horizontalArrangement = Arrangement.spacedBy(
+                gap, Alignment.Start
+            )
         ) {
             ActionButton(
                 Icons.Default.Edit, "編輯/新增", Color(0xFF4CAF50)
-            ) { targetOffset = 0f; onQuickEdit() }
+            ) { targetOffset = 0f; onExpand(null); onQuickEdit() }
         }
 
+        // 上層：ListItem
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
-                .pointerInput(Unit) {
+                .pointerInput(record.id) {
                     detectHorizontalDragGestures(
-                        onDragStart = { isDragging = true },
+                        onDragStart = {
+                            isDragging = true
+                            // 一開始拖就通知父層：我係展開緊嗰行
+                            onExpand(record.id)
+                        },
                         onDragEnd = {
                             isDragging = false
-                            targetOffset = when {
+                            val newOffset = when {
                                 targetOffset < maxLeftReveal / 2 -> maxLeftReveal
                                 targetOffset > maxRightReveal / 2 -> maxRightReveal
                                 else -> 0f
                             }
+                            targetOffset = newOffset
+                            if (newOffset == 0f) onExpand(null)
                         },
                         onDragCancel = {
                             isDragging = false
                             targetOffset = 0f
+                            onExpand(null)
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
@@ -410,8 +446,10 @@ private fun ActionButton(
 ) {
     Column(
         modifier = Modifier
-            .width(76.dp)
+            .width(64.dp)
             .fillMaxHeight()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(background)
             .clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -421,9 +459,9 @@ private fun ActionButton(
             icon,
             contentDescription = label,
             tint = Color.White,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(20.dp)
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
         Text(
             label,
             color = Color.White,
