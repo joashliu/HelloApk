@@ -52,6 +52,8 @@ val CATEGORIES = listOf(
     "個人", "購物", "月費", "旅遊"
 )
 
+val INCOME_CATEGORY = "收入"
+
 data class Record(
     val amount: Double = 0.0,
     val note: String = "",
@@ -121,6 +123,15 @@ fun LedgerScreen() {
     val filtered = if (selectedCategory == null) records
                    else records.filter { it.category == selectedCategory }
 
+    // 收入 / 支出 / 餘額
+    val totalIncome = filtered
+        .filter { it.category == INCOME_CATEGORY }
+        .sumOf { it.amount }
+    val totalExpense = filtered
+        .filter { it.category != INCOME_CATEGORY }
+        .sumOf { it.amount }
+    val balance = totalIncome - totalExpense
+
     val topNotes: List<Pair<String, Int>> = filtered
         .filter { it.note.isNotBlank() }
         .groupBy { it.note }
@@ -180,15 +191,28 @@ fun LedgerScreen() {
                 ) { Text("仲未有記錄,撳右下角 + 新增") }
 
                 else -> {
-                    val total = filtered.sumOf { it.amount }
-                    Text(
-                        text = "總數:$total",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(
-                            horizontal = 16.dp,
-                            vertical = 8.dp
+                    // 餘額 / 收入 / 支出
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "餘額:$balance",
+                            style = MaterialTheme.typography.titleMedium
                         )
-                    )
+                        Text(
+                            text = "收入:$totalIncome",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFF2E7D32)
+                        )
+                        Text(
+                            text = "支出:$totalExpense",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFFC62828)
+                        )
+                    }
 
                     if (topNotes.isNotEmpty()) {
                         Column(Modifier.padding(horizontal = 16.dp)) {
@@ -224,11 +248,12 @@ fun LedgerScreen() {
                                 expandedId = expandedId,
                                 onExpand = { expandedId = it },
                                 onCopy = {
-                                    val copy = r.copy(
-                                        id = "",
-                                        timestamp = System.currentTimeMillis()
+                                    dialogState = DialogState.Add(
+                                        title = "複製記錄",
+                                        initialNote = r.note,
+                                        initialAmount = r.amount.toString(),
+                                        initialCategory = r.category
                                     )
-                                    db.collection("records").add(copy)
                                 },
                                 onEdit = {
                                     dialogState = DialogState.Edit(r)
@@ -268,6 +293,7 @@ fun LedgerScreen() {
                 initialNote = state.initialNote,
                 initialAmount = state.initialAmount,
                 initialCategory = state.initialCategory,
+                allRecords = records,
                 onDismiss = { dialogState = null },
                 onConfirm = { amount, note, category ->
                     db.collection("records").add(
@@ -285,6 +311,7 @@ fun LedgerScreen() {
                 initialNote = state.record.note,
                 initialAmount = state.record.amount.toString(),
                 initialCategory = state.record.category,
+                allRecords = records,
                 onDismiss = { dialogState = null },
                 onConfirm = { amount, note, category ->
                     val updated = state.record.copy(
@@ -353,8 +380,7 @@ fun SwipeableRecordItem(
             .wrapContentHeight()
     ) {
         Row(
-            modifier = Modifier
-                .matchParentSize(),
+            modifier = Modifier.matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.End
             )
@@ -374,8 +400,7 @@ fun SwipeableRecordItem(
         }
 
         Row(
-            modifier = Modifier
-                .matchParentSize(),
+            modifier = Modifier.matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.Start
             )
@@ -421,7 +446,7 @@ fun SwipeableRecordItem(
             Column {
                 ListItem(
                     headlineContent = {
-                        Text(record.note.ifBlank { "(無備註)" })
+                        Text(record.note.ifBlank { "(無名稱)" })
                     },
                     supportingContent = { Text(record.category) },
                     trailingContent = { Text(record.amount.toString()) }
@@ -464,6 +489,7 @@ fun AddDialog(
     initialNote: String = "",
     initialAmount: String = "",
     initialCategory: String = "飲食",
+    allRecords: List<Record> = emptyList(),
     onDismiss: () -> Unit,
     onConfirm: (Double, String, String) -> Unit
 ) {
@@ -476,12 +502,22 @@ fun AddDialog(
     val noteFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // 對話框一出現就 focus 金額框
+    // 名稱一變，就查返上次同名項目嘅類別
+    LaunchedEffect(noteText) {
+        if (noteText.isNotBlank()) {
+            val match = allRecords
+                .filter { it.note == noteText }
+                .maxByOrNull { it.timestamp }
+            if (match != null) {
+                category = match.category
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         amountFocusRequester.requestFocus()
     }
 
-    // 儲存邏輯
     val doSave: () -> Unit = {
         val amt = amountText.toDoubleOrNull()
         if (amt != null) {
@@ -490,7 +526,6 @@ fun AddDialog(
         }
     }
 
-    // 備註有冇內容決定金額框嘅 tick 係 Next 定 Done
     val amountImeAction = if (noteText.isNotBlank()) ImeAction.Done
                           else ImeAction.Next
 
@@ -520,7 +555,7 @@ fun AddDialog(
                 OutlinedTextField(
                     value = noteText,
                     onValueChange = { noteText = it },
-                    label = { Text("備註") },
+                    label = { Text("名稱") },
                     keyboardOptions = KeyboardOptions(
                         imeAction = ImeAction.Done
                     ),
