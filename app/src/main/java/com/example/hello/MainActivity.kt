@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -29,11 +30,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -88,8 +93,6 @@ fun LedgerScreen() {
     var dialogState by remember { mutableStateOf<DialogState?>(null) }
     var loading by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
-
-    // 邊一行展開緊（跨行互斥）
     var expandedId by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(Unit) {
@@ -311,12 +314,11 @@ fun SwipeableRecordItem(
     onQuickEdit: () -> Unit,
 ) {
     val density = LocalDensity.current
-    val buttonWidth = 64.dp
+    val buttonWidth = 56.dp
     val gap = 6.dp
     val buttonWidthPx = with(density) { buttonWidth.toPx() }
     val gapPx = with(density) { gap.toPx() }
 
-    // 左邊露出 4 個按鈕 + 3 個 gap
     val leftTotalPx = buttonWidthPx * 4 + gapPx * 3
     val rightTotalPx = buttonWidthPx
 
@@ -326,7 +328,6 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
-    // 當其他行展開時，自動收起自己
     LaunchedEffect(expandedId) {
         if (expandedId != record.id && targetOffset != 0f) {
             targetOffset = 0f
@@ -351,10 +352,8 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
-        // 右側（向左滑顯示）：4 個按鈕
         Row(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
                 .matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.End
@@ -374,10 +373,8 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        // 左側（向右滑顯示）：1 個按鈕
         Row(
             modifier = Modifier
-                .align(Alignment.CenterStart)
                 .matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.Start
@@ -388,7 +385,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onQuickEdit() }
         }
 
-        // 上層：ListItem
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -397,7 +393,6 @@ fun SwipeableRecordItem(
                     detectHorizontalDragGestures(
                         onDragStart = {
                             isDragging = true
-                            // 一開始拖就通知父層：我係展開緊嗰行
                             onExpand(record.id)
                         },
                         onDragEnd = {
@@ -444,28 +439,21 @@ private fun ActionButton(
     background: Color,
     onClick: () -> Unit
 ) {
-    Column(
+    Box(
         modifier = Modifier
-            .width(64.dp)
+            .width(56.dp)
             .fillMaxHeight()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .padding(vertical = 2.dp)
+            .clip(RoundedCornerShape(14.dp))
             .background(background)
             .clickable { onClick() },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        contentAlignment = Alignment.Center
     ) {
         Icon(
             icon,
             contentDescription = label,
             tint = Color.White,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            label,
-            color = Color.White,
-            style = MaterialTheme.typography.labelSmall
+            modifier = Modifier.size(24.dp)
         )
     }
 }
@@ -484,6 +472,28 @@ fun AddDialog(
     var category by remember(initialCategory) { mutableStateOf(initialCategory) }
     var showCategoryPicker by remember { mutableStateOf(false) }
 
+    val amountFocusRequester = remember { FocusRequester() }
+    val noteFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // 對話框一出現就 focus 金額框
+    LaunchedEffect(Unit) {
+        amountFocusRequester.requestFocus()
+    }
+
+    // 儲存邏輯
+    val doSave: () -> Unit = {
+        val amt = amountText.toDoubleOrNull()
+        if (amt != null) {
+            keyboardController?.hide()
+            onConfirm(amt, noteText, category)
+        }
+    }
+
+    // 備註有冇內容決定金額框嘅 tick 係 Next 定 Done
+    val amountImeAction = if (noteText.isNotBlank()) ImeAction.Done
+                          else ImeAction.Next
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -494,18 +504,33 @@ fun AddDialog(
                     onValueChange = { amountText = it },
                     label = { Text("金額") },
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number
+                        keyboardType = KeyboardType.Number,
+                        imeAction = amountImeAction
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onNext = { noteFocusRequester.requestFocus() },
+                        onDone = { doSave() }
                     ),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(amountFocusRequester)
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = noteText,
                     onValueChange = { noteText = it },
                     label = { Text("備註") },
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { doSave() }
+                    ),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(noteFocusRequester)
                 )
                 Spacer(Modifier.height(12.dp))
                 Text("類別", style = MaterialTheme.typography.labelLarge)
@@ -517,10 +542,7 @@ fun AddDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                val amt = amountText.toDoubleOrNull()
-                if (amt != null) onConfirm(amt, noteText, category)
-            }) { Text("確定") }
+            TextButton(onClick = { doSave() }) { Text("確定") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
