@@ -1,6 +1,7 @@
 package com.example.hello
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -15,8 +16,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.firestore
+import com.google.firebase.firestore.toObject
 
-data class Record(val amount: Double, val note: String)
+data class Record(
+    val amount: Double = 0.0,
+    val note: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    var id: String = ""
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,13 +43,37 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LedgerScreen() {
+    val db = Firebase.firestore
     val records = remember { mutableStateListOf<Record>() }
     var showDialog by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(true) }
+
+    // 即時監聽 Firestore 變化
+    DisposableEffect(Unit) {
+        val listener = db.collection("records")
+            .orderBy("timestamp")
+            .addSnapshotListener { snapshot, error ->
+                loading = false
+                if (error != null) {
+                    Log.w("Ledger", "Listen failed.", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    records.clear()
+                    snapshot.documents.forEach { doc ->
+                        val r = doc.toObject(Record::class.java)
+                        if (r != null) {
+                            r.id = doc.id
+                            records.add(r)
+                        }
+                    }
+                }
+            }
+        onDispose { listener.remove() }
+    }
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("記帳") })
-        },
+        topBar = { TopAppBar(title = { Text("記帳") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = { showDialog = true }) {
                 Icon(Icons.Default.Add, contentDescription = "新增")
@@ -52,31 +85,34 @@ fun LedgerScreen() {
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            if (records.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("仲未有記錄,撳右下角 + 新增")
+            when {
+                loading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            } else {
-                val total = records.sumOf { it.amount }
-                Text(
-                    text = "總數:$total",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(16.dp)
-                )
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(records) { r ->
-                        ListItem(
-                            headlineContent = {
-                                Text(r.note.ifBlank { "(無備註)" })
-                            },
-                            trailingContent = {
-                                Text(r.amount.toString())
-                            }
-                        )
-                        HorizontalDivider()
+                records.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("仲未有記錄,撳右下角 + 新增")
+                    }
+                }
+                else -> {
+                    val total = records.sumOf { it.amount }
+                    Text(
+                        text = "總數:$total",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(records, key = { it.id }) { r ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(r.note.ifBlank { "(無備註)" })
+                                },
+                                trailingContent = { Text(r.amount.toString()) }
+                            )
+                            HorizontalDivider()
+                        }
                     }
                 }
             }
@@ -87,7 +123,15 @@ fun LedgerScreen() {
         AddDialog(
             onDismiss = { showDialog = false },
             onConfirm = { amount, note ->
-                records.add(Record(amount, note))
+                val record = Record(amount = amount, note = note)
+                db.collection("records")
+                    .add(record)
+                    .addOnSuccessListener {
+                        Log.d("Ledger", "新增成功")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w("Ledger", "新增失敗", e)
+                    }
                 showDialog = false
             }
         )
@@ -128,17 +172,11 @@ fun AddDialog(
         confirmButton = {
             TextButton(onClick = {
                 val amt = amountText.toDoubleOrNull()
-                if (amt != null) {
-                    onConfirm(amt, noteText)
-                }
-            }) {
-                Text("確定")
-            }
+                if (amt != null) onConfirm(amt, noteText)
+            }) { Text("確定") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
+            TextButton(onClick = onDismiss) { Text("取消") }
         }
     )
 }
