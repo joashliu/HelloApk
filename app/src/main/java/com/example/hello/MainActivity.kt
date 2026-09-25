@@ -30,6 +30,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -87,6 +89,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Calendar
 import java.util.Locale
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 // ===== 常數 =====
@@ -154,7 +157,6 @@ fun formatRecordTime(timestamp: Long): String {
     return "$week．$hh:$mm"
 }
 
-// ===== 日期分組工具 =====
 fun dateKeyFromTimestamp(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
     return String.format(
@@ -328,7 +330,6 @@ fun LedgerScreen() {
         .sumOf { it.amount }
     val balance = totalIncome - totalExpense
 
-    // ===== 按日期分組 =====
     val groupedByDate: List<Pair<String, List<Record>>> = filtered
         .groupBy { dateKeyFromTimestamp(it.timestamp) }
         .toList()
@@ -399,7 +400,6 @@ fun LedgerScreen() {
                     ) { Text("仲未有記錄,撳右下角 + 新增") }
 
                     else -> {
-                        // ===== 頂部統計（垂直排版 + 圖標） =====
                         TopStats(
                             balance = balance,
                             income = totalIncome,
@@ -407,36 +407,19 @@ fun LedgerScreen() {
                         )
 
                         if (topNotes.isNotEmpty()) {
-                            LazyRow(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(topNotes) { pair ->
-                                    val name = pair.first
-                                    SuggestionChip(
-                                        onClick = {
-                                            dialogState = DialogState.Add(
-                                                initialNote = name
-                                            )
-                                        },
-                                        label = { Text(name) },
-                                        icon = {
-                                            IconView(
-                                                iconUrl = noteIconMap[name] ?: "",
-                                                name = name,
-                                                size = 22.dp
-                                            )
-                                        }
+                            QuickInputSection(
+                                topNotes = topNotes,
+                                noteIconMap = noteIconMap,
+                                onClick = { name ->
+                                    dialogState = DialogState.Add(
+                                        initialNote = name
                                     )
                                 }
-                            }
+                            )
                             Spacer(Modifier.height(8.dp))
                             HorizontalDivider()
                         }
 
-                        // ===== 分組列表 =====
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize()
@@ -702,6 +685,91 @@ fun LedgerScreen() {
     }
 }
 
+// ===== 快速輸入(4 行 × 分頁) =====
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun QuickInputSection(
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    onClick: (String) -> Unit
+) {
+    if (topNotes.isEmpty()) return
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val availWidth = maxWidth - 32.dp
+        val chipEstimate = 110.dp
+        val perRow = max(1, (availWidth / chipEstimate).toInt())
+        val perPage = perRow * 4
+        val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
+        val pagerState = rememberPagerState { pageCount }
+
+        Column {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+            ) { page ->
+                val start = page * perPage
+                val end = minOf(start + perPage, topNotes.size)
+                if (start >= end) return@HorizontalPager
+
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    maxItemsInEachRow = perRow,
+                    maxLines = 4
+                ) {
+                    for (i in start until end) {
+                        val name = topNotes[i].first
+                        SuggestionChip(
+                            onClick = { onClick(name) },
+                            label = { Text(name) },
+                            icon = {
+                                IconView(
+                                    iconUrl = noteIconMap[name] ?: "",
+                                    name = name,
+                                    size = 22.dp
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (pageCount > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(pageCount) { index ->
+                        val active = index == pagerState.currentPage
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 3.dp)
+                                .size(if (active) 7.dp else 5.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (active)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                            .copy(alpha = 0.3f)
+                                )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ===== 頂部統計（垂直排版 + 圖標 + 逐位滾動） =====
 @Composable
 fun TopStats(balance: Double, income: Double, expense: Double) {
@@ -753,14 +821,15 @@ fun StatColumn(
                 text = label,
                 fontSize = STAT_LABEL_FONT_SIZE,
                 color = color,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Bold
             )
         }
         Spacer(Modifier.height(4.dp))
         AnimatedAmount(
             text = amountText,
             color = color,
-            fontSize = STAT_AMOUNT_FONT_SIZE
+            fontSize = STAT_AMOUNT_FONT_SIZE,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -771,7 +840,7 @@ fun AnimatedAmount(
     text: String,
     color: Color,
     fontSize: TextUnit,
-    fontWeight: FontWeight = FontWeight.SemiBold
+    fontWeight: FontWeight = FontWeight.Bold
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         text.forEachIndexed { index, c ->
@@ -831,7 +900,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                     text = formatAmount(income),
                     fontSize = 13.sp,
                     color = COLOR_INCOME,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.SemiBold
                 )
             }
             if (income > 0 && expense > 0) {
@@ -849,7 +918,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                     text = formatAmount(expense),
                     fontSize = 13.sp,
                     color = COLOR_EXPENSE,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -1280,10 +1349,12 @@ fun SwipeableRecordItem(
                         )
                     },
                     supportingContent = {
+                        // 類別/時間顏色再淺一級
                         Text(
                             text = "${record.category}．${formatRecordTime(record.timestamp)}",
                             fontSize = META_FONT_SIZE,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                                .copy(alpha = 0.7f)
                         )
                     },
                     trailingContent = {
@@ -1291,7 +1362,7 @@ fun SwipeableRecordItem(
                             text = displayAmount(record),
                             color = amountColor(record.category),
                             fontSize = AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 )
