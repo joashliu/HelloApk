@@ -24,7 +24,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -246,7 +245,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ===== 主 App（管理頁面切換） =====
+// ===== 主 App =====
 @Composable
 fun MainApp() {
     val db = Firebase.firestore
@@ -267,6 +266,53 @@ fun MainApp() {
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
+
+    // ===== 派生數據（缓存，切頁唔重算）=====
+    val filtered by remember {
+        derivedStateOf {
+            val snapshot = records.toList()
+            if (selectedCategory == null) snapshot
+            else snapshot.filter { it.category == selectedCategory }
+        }
+    }
+    val totalIncome by remember {
+        derivedStateOf {
+            filtered.filter { it.category == INCOME_CATEGORY }
+                .sumOf { it.amount }
+        }
+    }
+    val totalExpense by remember {
+        derivedStateOf {
+            filtered.filter { it.category != INCOME_CATEGORY }
+                .sumOf { it.amount }
+        }
+    }
+    val balance by remember {
+        derivedStateOf { totalIncome - totalExpense }
+    }
+    val groupedByDate by remember {
+        derivedStateOf {
+            filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
+        }
+    }
+    val topNotes by remember {
+        derivedStateOf {
+            filtered.filter { it.note.isNotBlank() }
+                .groupBy { it.note }
+                .map { (name, list) -> name to list.size }
+                .sortedByDescending { it.second }
+                .take(20)
+        }
+    }
+    val noteIconMap by remember {
+        derivedStateOf {
+            filtered.filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+                .groupBy { it.note }
+                .mapValues { (_, list) ->
+                    list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
+                }
+        }
+    }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -325,12 +371,18 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-        Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
         // 頁面內容（位置 0）
         when (currentPage) {
             0 -> LedgerContent(
-                records = records,
                 loading = loading,
+                filtered = filtered,
+                groupedByDate = groupedByDate,
+                topNotes = topNotes,
+                noteIconMap = noteIconMap,
+                totalIncome = totalIncome,
+                totalExpense = totalExpense,
+                balance = balance,
                 selectedCategory = selectedCategory,
                 onCategoryChange = { selectedCategory = it },
                 expandedId = expandedId,
@@ -386,7 +438,7 @@ fun MainApp() {
             )
         }
 
-        // ===== 導航欄（放喺 FAB 之前，位置永遠穩定） =====
+        // ===== 導航欄（位置永遠穩定） =====
         key("navbar") {
             FloatingNavBar(
                 items = listOf(
@@ -401,7 +453,7 @@ fun MainApp() {
             )
         }
 
-        // ===== FAB（放喺導航欄之後，條件性出現唔會影響導航欄位置） =====
+        // ===== FAB =====
         key("fab") {
             if (currentPage == 0) {
                 FloatingActionButton(
@@ -418,7 +470,7 @@ fun MainApp() {
             }
         }
 
-        // ===== 上傳遮罩（放最後） =====
+        // ===== 上傳遮罩 =====
         key("uploading") {
             if (uploading) {
                 Box(
@@ -622,7 +674,7 @@ fun MainApp() {
     }
 }
 
-// ===== 懸浮導航欄（iOS 風格，可拖動泡泡，無 ripple） =====
+// ===== 懸浮導航欄 =====
 @Composable
 fun FloatingNavBar(
     items: List<NavItem>,
@@ -636,7 +688,7 @@ fun FloatingNavBar(
     val maxOffset = totalWidthPx - tabWidthPx
     val viewConfiguration = LocalViewConfiguration.current
 
-    // ===== 關鍵：用 rememberUpdatedState 包住，確保 closure 睇到最新值 =====
+    // 關鍵：用 rememberUpdatedState 包住，確保 closure 睇到最新值
     val latestSelectedIndex by rememberUpdatedState(selectedIndex)
     val latestOnIndexChange by rememberUpdatedState(onIndexChange)
     val latestItemsSize by rememberUpdatedState(items.size)
@@ -646,7 +698,6 @@ fun FloatingNavBar(
     }
     var isDragging by remember { mutableStateOf(false) }
 
-    // 外部切換（撳 tab 或程式碼改 currentPage）時同步泡泡位置
     LaunchedEffect(selectedIndex) {
         if (!isDragging) {
             bubbleOffset = selectedIndex * tabWidthPx
@@ -679,8 +730,6 @@ fun FloatingNavBar(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    // 用 awaitPointerEventScope + 外層 while(true)
-                    // 唔用 awaitEachGesture，避免抬手後唔重啟
                     awaitPointerEventScope {
                         while (true) {
                             val down = awaitFirstDown(
@@ -691,16 +740,14 @@ fun FloatingNavBar(
                             var totalDx = 0f
                             var dragged = false
 
-                            // 內層：追蹤今次手勢直到抬手
                             while (true) {
                                 val event = awaitPointerEvent()
                                 val change = event.changes
                                     .firstOrNull { it.id == pointerId }
 
-                                // 抬手（或者 pointer 消失）
                                 if (change == null || !change.pressed) {
                                     if (!dragged) {
-                                        // ===== Tap =====
+                                        // Tap
                                         val index = (downX / tabWidthPx)
                                             .toInt()
                                             .coerceIn(
@@ -710,10 +757,9 @@ fun FloatingNavBar(
                                         if (index != latestSelectedIndex) {
                                             latestOnIndexChange(index)
                                         }
-                                        bubbleOffset =
-                                            index * tabWidthPx
+                                        bubbleOffset = index * tabWidthPx
                                     } else {
-                                        // ===== Drag 結束：吸附 =====
+                                        // Drag 結束：吸附
                                         val targetIndex =
                                             (bubbleOffset / tabWidthPx)
                                                 .roundToInt()
@@ -774,7 +820,7 @@ fun FloatingNavBar(
                     .background(MaterialTheme.colorScheme.primaryContainer)
             )
 
-            // Tab 內容（冇 clickable，靠上面嘅手勢處理）
+            // Tab 內容
             Row(modifier = Modifier.fillMaxSize()) {
                 items.forEachIndexed { index, item ->
                     val selected = index == selectedIndex
@@ -814,12 +860,18 @@ fun FloatingNavBar(
     }
 }
 
-// ===== 記帳頁內容 =====
+// ===== 記帳頁（純渲染元件） =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LedgerContent(
-    records: List<Record>,
     loading: Boolean,
+    filtered: List<Record>,
+    groupedByDate: List<Pair<String, List<Record>>>,
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    totalIncome: Double,
+    totalExpense: Double,
+    balance: Double,
     selectedCategory: String?,
     onCategoryChange: (String?) -> Unit,
     expandedId: String?,
@@ -831,35 +883,6 @@ fun LedgerContent(
     onChangeIconClick: (Record) -> Unit,
     onFilterClick: () -> Unit,
 ) {
-    val filtered = if (selectedCategory == null) records
-                   else records.filter { it.category == selectedCategory }
-
-    val totalIncome = filtered
-        .filter { it.category == INCOME_CATEGORY }
-        .sumOf { it.amount }
-    val totalExpense = filtered
-        .filter { it.category != INCOME_CATEGORY }
-        .sumOf { it.amount }
-    val balance = totalIncome - totalExpense
-
-    val groupedByDate: List<Pair<String, List<Record>>> = filtered
-        .groupBy { dateKeyFromTimestamp(it.timestamp) }
-        .toList()
-
-    val topNotes: List<Pair<String, Int>> = filtered
-        .filter { it.note.isNotBlank() }
-        .groupBy { it.note }
-        .map { (name, list) -> name to list.size }
-        .sortedByDescending { it.second }
-        .take(20)
-
-    val noteIconMap: Map<String, String> = filtered
-        .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
-        .groupBy { it.note }
-        .mapValues { (_, list) ->
-            list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
-        }
-
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -962,7 +985,7 @@ fun LedgerContent(
     }
 }
 
-// ===== 篩選頁內容 =====
+// ===== 篩選頁 =====
 @Composable
 fun FilterContent(
     records: List<Record>,
@@ -1036,7 +1059,7 @@ fun FilterContent(
             }
         }
 
-        // 底部搜索框（浮在導航欄上方）
+        // 底部搜索框
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1243,27 +1266,25 @@ fun AnimatedAmount(
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         text.forEachIndexed { index, c ->
-            key(index) {
-                AnimatedContent(
-                    targetState = c,
-                    transitionSpec = {
-                        if (targetState > initialState) {
-                            (slideInVertically { it } + fadeIn()) togetherWith
-                                (slideOutVertically { -it } + fadeOut())
-                        } else {
-                            (slideInVertically { -it } + fadeIn()) togetherWith
-                                (slideOutVertically { it } + fadeOut())
-                        }
-                    },
-                    label = "digit_$index"
-                ) { char ->
-                    Text(
-                        text = char.toString(),
-                        color = color,
-                        fontSize = fontSize,
-                        fontWeight = fontWeight
-                    )
-                }
+            AnimatedContent(
+                targetState = c,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInVertically { it } + fadeIn()) togetherWith
+                            (slideOutVertically { -it } + fadeOut())
+                    } else {
+                        (slideInVertically { -it } + fadeIn()) togetherWith
+                            (slideOutVertically { it } + fadeOut())
+                    }
+                },
+                label = "digit_$index"
+            ) { char ->
+                Text(
+                    text = char.toString(),
+                    color = color,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight
+                )
             }
         }
     }
