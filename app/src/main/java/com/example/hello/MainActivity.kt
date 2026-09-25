@@ -12,10 +12,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -29,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -38,6 +45,8 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.TrendingDown
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,6 +66,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
@@ -95,9 +105,11 @@ const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
 const val ICON_SIZE = 100
 
 // ===== 字體大小 =====
-val NOTE_FONT_SIZE = 19.sp       // 項目名（原 16sp 大 1 號）
-val META_FONT_SIZE = 13.sp       // 類別時間（原 14sp 細 1 號）
-val AMOUNT_FONT_SIZE = 20.sp     // 金額
+val NOTE_FONT_SIZE = 19.sp
+val META_FONT_SIZE = 13.sp
+val AMOUNT_FONT_SIZE = 20.sp
+val STAT_AMOUNT_FONT_SIZE = 19.sp
+val STAT_LABEL_FONT_SIZE = 12.sp
 
 // ===== 資料模型 =====
 data class Record(
@@ -137,10 +149,40 @@ fun formatRecordTime(timestamp: Long): String {
         "週日", "週一", "週二", "週三", "週四", "週五", "週六"
     )
     val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
-
     val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
     val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
-    val time = "$hh:$mm"
+    return "$week．$hh:$mm"
+}
+
+// ===== 日期分組工具 =====
+fun dateKeyFromTimestamp(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    return String.format(
+        Locale.US, "%04d-%02d-%02d",
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH) + 1,
+        cal.get(Calendar.DAY_OF_MONTH)
+    )
+}
+
+fun formatDateHeader(dateKey: String): String {
+    val parts = dateKey.split("-")
+    if (parts.size != 3) return dateKey
+    val year = parts[0].toIntOrNull() ?: return dateKey
+    val month = parts[1].toIntOrNull() ?: return dateKey
+    val day = parts[2].toIntOrNull() ?: return dateKey
+
+    val cal = Calendar.getInstance().apply {
+        set(year, month - 1, day)
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    val weekNames = arrayOf(
+        "週日", "週一", "週二", "週三", "週四", "週五", "週六"
+    )
+    val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
 
     val todayStart = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0)
@@ -149,24 +191,15 @@ fun formatRecordTime(timestamp: Long): String {
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis
 
-    val recordStart = Calendar.getInstance().apply {
-        timeInMillis = timestamp
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
+    val daysDiff = ((todayStart - cal.timeInMillis) / 86_400_000L).toInt()
 
-    val daysDiff = ((todayStart - recordStart) / 86_400_000L).toInt()
-
-    val relative = when {
+    val datePart = when {
         daysDiff <= 0 -> "今日"
         daysDiff == 1 -> "琴日"
         daysDiff == 2 -> "前日"
-        else -> "${daysDiff}日前"
+        else -> "${month}月${day}日"
     }
-
-    return "$week．$time．$relative"
+    return "$datePart $week"
 }
 
 // ===== 文字頭像調色盤 =====
@@ -217,14 +250,11 @@ fun LedgerScreen() {
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
 
-    // 列表滾動狀態 + 新增後自動滾頂
     val listState = rememberLazyListState()
     var pendingScrollToTop by remember { mutableStateOf(false) }
 
-    // 當 records 數量增加,而且係新增後,滾返最頂
     LaunchedEffect(records.size) {
         if (pendingScrollToTop && records.isNotEmpty()) {
-            // 等一拍先讓動畫播完,再滾到頂
             listState.animateScrollToItem(0)
             pendingScrollToTop = false
         }
@@ -298,6 +328,11 @@ fun LedgerScreen() {
         .sumOf { it.amount }
     val balance = totalIncome - totalExpense
 
+    // ===== 按日期分組 =====
+    val groupedByDate: List<Pair<String, List<Record>>> = filtered
+        .groupBy { dateKeyFromTimestamp(it.timestamp) }
+        .toList()
+
     val topNotes: List<Pair<String, Int>> = filtered
         .filter { it.note.isNotBlank() }
         .groupBy { it.note }
@@ -364,106 +399,101 @@ fun LedgerScreen() {
                     ) { Text("仲未有記錄,撳右下角 + 新增") }
 
                     else -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "餘額:${formatAmount(balance)}",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (balance >= 0) COLOR_INCOME
-                                        else COLOR_EXPENSE
-                            )
-                            Text(
-                                text = "收入:${formatAmount(totalIncome)}",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = COLOR_INCOME
-                            )
-                            Text(
-                                text = "支出:${formatAmount(totalExpense)}",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = COLOR_EXPENSE
-                            )
-                        }
+                        // ===== 頂部統計（垂直排版 + 圖標） =====
+                        TopStats(
+                            balance = balance,
+                            income = totalIncome,
+                            expense = totalExpense
+                        )
 
                         if (topNotes.isNotEmpty()) {
-                            Column(Modifier.padding(horizontal = 16.dp)) {
-                                Text(
-                                    text = "快速輸入",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    items(topNotes) { pair ->
-                                        val name = pair.first
-                                        SuggestionChip(
-                                            onClick = {
-                                                dialogState = DialogState.Add(
-                                                    initialNote = name
-                                                )
-                                            },
-                                            label = { Text(name) },
-                                            icon = {
-                                                IconView(
-                                                    iconUrl = noteIconMap[name] ?: "",
-                                                    name = name,
-                                                    size = 22.dp
-                                                )
-                                            }
-                                        )
-                                    }
+                            LazyRow(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(topNotes) { pair ->
+                                    val name = pair.first
+                                    SuggestionChip(
+                                        onClick = {
+                                            dialogState = DialogState.Add(
+                                                initialNote = name
+                                            )
+                                        },
+                                        label = { Text(name) },
+                                        icon = {
+                                            IconView(
+                                                iconUrl = noteIconMap[name] ?: "",
+                                                name = name,
+                                                size = 22.dp
+                                            )
+                                        }
+                                    )
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
                             HorizontalDivider()
                         }
 
+                        // ===== 分組列表 =====
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            items(
-                                items = filtered,
-                                key = { it.id }
-                            ) { r ->
-                                SwipeableRecordItem(
-                                    modifier = Modifier.animateItem(),
-                                    record = r,
-                                    expandedId = expandedId,
-                                    onExpand = { expandedId = it },
-                                    onCopy = {
-                                        dialogState = DialogState.Add(
-                                            title = "複製記錄",
-                                            initialNote = r.note,
-                                            initialAmount = r.amount.toString(),
-                                            initialCategory = r.category
-                                        )
-                                    },
-                                    onEdit = {
-                                        dialogState = DialogState.Edit(r)
-                                    },
-                                    onFilter = {
-                                        Toast.makeText(
-                                            context,
-                                            "篩選功能開發中",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    onDelete = {
-                                        db.collection("records")
-                                            .document(r.id)
-                                            .delete()
-                                    },
-                                    onChangeIcon = {
-                                        iconTargetRecord = r
-                                        showIconSourceDialog = true
-                                    }
-                                )
+                            groupedByDate.forEach { (dateKey, dayRecords) ->
+                                val dayIncome = dayRecords.sumOf {
+                                    if (it.category == INCOME_CATEGORY) it.amount
+                                    else 0.0
+                                }
+                                val dayExpense = dayRecords.sumOf {
+                                    if (it.category != INCOME_CATEGORY) it.amount
+                                    else 0.0
+                                }
+
+                                item(key = "header_$dateKey") {
+                                    DayHeader(
+                                        dateKey = dateKey,
+                                        income = dayIncome,
+                                        expense = dayExpense
+                                    )
+                                }
+
+                                items(dayRecords, key = { it.id }) { r ->
+                                    SwipeableRecordItem(
+                                        modifier = Modifier.animateItem(),
+                                        record = r,
+                                        expandedId = expandedId,
+                                        onExpand = { expandedId = it },
+                                        onCopy = {
+                                            dialogState = DialogState.Add(
+                                                title = "複製記錄",
+                                                initialNote = r.note,
+                                                initialAmount = r.amount.toString(),
+                                                initialCategory = r.category
+                                            )
+                                        },
+                                        onEdit = {
+                                            dialogState = DialogState.Edit(r)
+                                        },
+                                        onFilter = {
+                                            Toast.makeText(
+                                                context,
+                                                "篩選功能開發中",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        },
+                                        onDelete = {
+                                            db.collection("records")
+                                                .document(r.id)
+                                                .delete()
+                                        },
+                                        onChangeIcon = {
+                                            iconTargetRecord = r
+                                            showIconSourceDialog = true
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -506,7 +536,6 @@ fun LedgerScreen() {
                         .filter { it.note == note && it.note.isNotBlank() }
                         .maxByOrNull { it.timestamp }
                         ?.iconUrl ?: ""
-                    // 標記:新增完要滾返最頂
                     pendingScrollToTop = true
                     db.collection("records").add(
                         Record(
@@ -670,6 +699,160 @@ fun LedgerScreen() {
                 }) { Text("取消") }
             }
         )
+    }
+}
+
+// ===== 頂部統計（垂直排版 + 圖標 + 逐位滾動） =====
+@Composable
+fun TopStats(balance: Double, income: Double, expense: Double) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.Top
+    ) {
+        StatColumn(
+            icon = Icons.Default.AccountBalanceWallet,
+            label = "餘額",
+            amountText = formatAmount(balance),
+            color = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
+        )
+        StatColumn(
+            icon = Icons.Default.TrendingUp,
+            label = "收入",
+            amountText = formatAmount(income),
+            color = COLOR_INCOME
+        )
+        StatColumn(
+            icon = Icons.Default.TrendingDown,
+            label = "支出",
+            amountText = formatAmount(expense),
+            color = COLOR_EXPENSE
+        )
+    }
+}
+
+@Composable
+fun StatColumn(
+    icon: ImageVector,
+    label: String,
+    amountText: String,
+    color: Color
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = label,
+                fontSize = STAT_LABEL_FONT_SIZE,
+                color = color,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        AnimatedAmount(
+            text = amountText,
+            color = color,
+            fontSize = STAT_AMOUNT_FONT_SIZE
+        )
+    }
+}
+
+// ===== 逐位滾動金額 =====
+@Composable
+fun AnimatedAmount(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.SemiBold
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        text.forEachIndexed { index, c ->
+            key(index) {
+                AnimatedContent(
+                    targetState = c,
+                    transitionSpec = {
+                        if (targetState > initialState) {
+                            (slideInVertically { it } + fadeIn()) togetherWith
+                                (slideOutVertically { -it } + fadeOut())
+                        } else {
+                            (slideInVertically { -it } + fadeIn()) togetherWith
+                                (slideOutVertically { it } + fadeOut())
+                        }
+                    },
+                    label = "digit_$index"
+                ) { char ->
+                    Text(
+                        text = char.toString(),
+                        color = color,
+                        fontSize = fontSize,
+                        fontWeight = fontWeight
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ===== 日期分組標題 =====
+@Composable
+fun DayHeader(dateKey: String, income: Double, expense: Double) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = formatDateHeader(dateKey),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (income > 0) {
+                Icon(
+                    Icons.Default.TrendingUp,
+                    contentDescription = null,
+                    tint = COLOR_INCOME,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(2.dp))
+                Text(
+                    text = formatAmount(income),
+                    fontSize = 13.sp,
+                    color = COLOR_INCOME,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            if (income > 0 && expense > 0) {
+                Spacer(Modifier.width(12.dp))
+            }
+            if (expense > 0) {
+                Icon(
+                    Icons.Default.TrendingDown,
+                    contentDescription = null,
+                    tint = COLOR_EXPENSE,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(2.dp))
+                Text(
+                    text = formatAmount(expense),
+                    fontSize = 13.sp,
+                    color = COLOR_EXPENSE,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
     }
 }
 
@@ -1089,7 +1272,6 @@ fun SwipeableRecordItem(
                         IconView(record.iconUrl, record.note)
                     },
                     headlineContent = {
-                        // 項目名 - 大 1 號
                         Text(
                             text = record.note.ifBlank { "(無名稱)" },
                             fontSize = NOTE_FONT_SIZE,
@@ -1098,7 +1280,6 @@ fun SwipeableRecordItem(
                         )
                     },
                     supportingContent = {
-                        // 類別 + 時間 - 細 1 號 + 淺色
                         Text(
                             text = "${record.category}．${formatRecordTime(record.timestamp)}",
                             fontSize = META_FONT_SIZE,
