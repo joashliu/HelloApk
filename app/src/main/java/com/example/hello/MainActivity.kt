@@ -1,5 +1,7 @@
 package com.example.hello
 
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -1135,9 +1137,9 @@ fun LedgerKeyboardPanel(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp),
-            verticalArrangement = Arrangement.Bottom  // 內容貼底
+            verticalArrangement = Arrangement.Bottom
         ) {
-            // 金額顯示
+            // ===== 金額顯示（冇動畫）=====
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1154,51 +1156,23 @@ fun LedgerKeyboardPanel(
                 ) {
                     val showText = if (state.amountText.isEmpty()) "0"
                                    else state.amountText
-                    AnimatedContent(
-                        targetState = showText,
-                        transitionSpec = {
-                            if (targetState.length > initialState.length) {
-                                // 加字符：由右滑入
-                                slideInHorizontally(
-                                    initialOffsetX = { it / 2 },
-                                    animationSpec = tween(150)
-                                ) togetherWith slideOutHorizontally(
-                                    targetOffsetX = { -it / 2 },
-                                    animationSpec = tween(150)
-                                )
-                            } else if (targetState.length < initialState.length) {
-                                // 刪字符：由左滑入
-                                slideInHorizontally(
-                                    initialOffsetX = { -it / 2 },
-                                    animationSpec = tween(150)
-                                ) togetherWith slideOutHorizontally(
-                                    targetOffsetX = { it / 2 },
-                                    animationSpec = tween(150)
-                                )
-                            } else {
-                                fadeIn(tween(120)) togetherWith fadeOut(tween(120))
-                            }
-                        },
-                        label = "amountDisplay"
-                    ) { text ->
-                        Text(
-                            text = text,
-                            fontSize = 38.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (state.amountText.isEmpty())
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            else
-                                MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.End,
-                            maxLines = 1
-                        )
-                    }
+                    Text(
+                        text = showText,
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.amountText.isEmpty())
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.End,
+                        maxLines = 1
+                    )
                 }
             }
 
             Spacer(Modifier.height(10.dp))
 
-            // 數字鍵盤
+            // ===== 數字鍵盤 =====
             val rows = listOf(
                 listOf("1", "2", "3"),
                 listOf("4", "5", "6"),
@@ -1268,7 +1242,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // 名稱 + 類別（同高）
+            // ===== 名稱 + 類別 =====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1277,14 +1251,28 @@ fun LedgerKeyboardPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (state.editingNote) {
+                    // 用 TextFieldValue 實現全選
+                    var tfValue by remember(state.editingNote) {
+                        mutableStateOf(
+                            TextFieldValue(
+                                text = state.noteText,
+                                selection = TextRange(
+                                    0, state.noteText.length
+                                )
+                            )
+                        )
+                    }
                     val noteFocusRequester = remember { FocusRequester() }
                     LaunchedEffect(Unit) {
                         noteFocusRequester.requestFocus()
                     }
                     TextField(
-                        value = state.noteText,
-                        onValueChange = {
-                            onStateChange(state.copy(noteText = it))
+                        value = tfValue,
+                        onValueChange = { newValue ->
+                            tfValue = newValue
+                            onStateChange(
+                                state.copy(noteText = newValue.text)
+                            )
                         },
                         placeholder = { Text("名稱") },
                         singleLine = true,
@@ -1348,12 +1336,12 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // 底部按鈕（貼底，冇多餘 padding）
+            // ===== 底部按鈕（升高避開圓角）=====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp)
-                    .padding(bottom = 12.dp),
+                    .padding(bottom = 32.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
