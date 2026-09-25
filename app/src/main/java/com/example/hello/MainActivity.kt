@@ -1,5 +1,7 @@
 package com.example.hello
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import android.content.Context
@@ -1139,7 +1141,7 @@ fun LedgerKeyboardPanel(
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp),
             verticalArrangement = Arrangement.Bottom
         ) {
-            // ===== 金額顯示（冇動畫）=====
+            // ===== 金額顯示（平移動畫）=====
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1151,22 +1153,53 @@ fun LedgerKeyboardPanel(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .clip(RoundedCornerShape(14.dp))
                         .padding(horizontal = 20.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     val showText = if (state.amountText.isEmpty()) "0"
                                    else state.amountText
-                    Text(
-                        text = showText,
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (state.amountText.isEmpty())
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else
-                            MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.End,
-                        maxLines = 1
-                    )
+                    AnimatedContent(
+                        targetState = showText,
+                        transitionSpec = {
+                            if (targetState.length > initialState.length) {
+                                // 加字：新字由右滑入,舊字向左滑出
+                                slideInHorizontally(
+                                    initialOffsetX = { it },
+                                    animationSpec = tween(180)
+                                ) togetherWith slideOutHorizontally(
+                                    targetOffsetX = { -it },
+                                    animationSpec = tween(180)
+                                )
+                            } else if (targetState.length < initialState.length) {
+                                // 刪字：新字由左滑入,舊字向右滑出
+                                slideInHorizontally(
+                                    initialOffsetX = { -it },
+                                    animationSpec = tween(180)
+                                ) togetherWith slideOutHorizontally(
+                                    targetOffsetX = { it },
+                                    animationSpec = tween(180)
+                                )
+                            } else {
+                                // 同長度：直接切換,冇動畫
+                                EnterTransition.None togetherWith
+                                    ExitTransition.None
+                            }
+                        },
+                        label = "amountDisplay"
+                    ) { text ->
+                        Text(
+                            text = text,
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (state.amountText.isEmpty())
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else
+                                MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.End,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
@@ -1251,7 +1284,6 @@ fun LedgerKeyboardPanel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (state.editingNote) {
-                    // 用 TextFieldValue 實現全選
                     var tfValue by remember(state.editingNote) {
                         mutableStateOf(
                             TextFieldValue(
@@ -1336,12 +1368,11 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 底部按鈕（升高避開圓角）=====
+            // ===== 底部按鈕（保持 64dp 高，用 Spacer 避開圓角）=====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
-                    .padding(bottom = 32.dp),
+                    .height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
@@ -1390,6 +1421,9 @@ fun LedgerKeyboardPanel(
                     )
                 }
             }
+
+            // 避開圓角的底部留白（放喺按鈕之後,因為 Arrangement.Bottom 會推到底）
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
