@@ -1160,59 +1160,17 @@ fun LedgerKeyboardPanel(
                 ) {
                     val showText = if (state.amountText.isEmpty()) "0"
                                    else state.amountText
-                                        AnimatedContent(
-                        targetState = showText,
-                        transitionSpec = {
-                            if (targetState.length > initialState.length) {
-                                // 加字：新字由右滑入,舊字向左滑出
-                                slideInHorizontally(
-                                    initialOffsetX = { it },
-                                    animationSpec = tween(
-                                        durationMillis = 160,
-                                        easing = LinearEasing
-                                    )
-                                ) togetherWith slideOutHorizontally(
-                                    targetOffsetX = { -it },
-                                    animationSpec = tween(
-                                        durationMillis = 160,
-                                        easing = LinearEasing
-                                    )
-                                )
-                            } else if (targetState.length < initialState.length) {
-                                // 刪字：新字由左滑入,舊字向右滑出
-                                slideInHorizontally(
-                                    initialOffsetX = { -it },
-                                    animationSpec = tween(
-                                        durationMillis = 160,
-                                        easing = LinearEasing
-                                    )
-                                ) togetherWith slideOutHorizontally(
-                                    targetOffsetX = { it },
-                                    animationSpec = tween(
-                                        durationMillis = 160,
-                                        easing = LinearEasing
-                                    )
-                                )
-                            } else {
-                                // 同長度：直接切換,冇動畫
-                                EnterTransition.None togetherWith
-                                    ExitTransition.None
-                            }
-                        },
-                        label = "amountDisplay"
-                    ) { text ->
-                        Text(
-                            text = text,
-                            fontSize = 38.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (state.amountText.isEmpty())
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            else
-                                MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.End,
-                            maxLines = 1
-                        )
-                    }
+                                                            Text(
+                        text = showText,
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.amountText.isEmpty())
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.End,
+                        maxLines = 1
+                    )
                 }
             }
 
