@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.animation.animateColorAsState
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -1141,106 +1142,133 @@ fun LedgerKeyboardPanel(
                 .fillMaxSize()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // ===== 金額顯示 =====
+            // ===== 金額顯示（大咗，有滑動動畫）=====
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp),
-                shape = RoundedCornerShape(12.dp),
+                    .height(76.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant
                     .copy(alpha = 0.5f)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 20.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     val showText = if (state.amountText.isEmpty()) "0"
                                    else state.amountText
-                    Text(
-                        text = showText,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (state.amountText.isEmpty())
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else
-                            MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.End,
-                        maxLines = 1
-                    )
+                    AnimatedContent(
+                        targetState = showText,
+                        transitionSpec = {
+                            if (targetState.length > initialState.length) {
+                                // 加字符：新字由右滑入
+                                (slideInVertically { it / 2 } + fadeIn()) togetherWith
+                                    (slideOutVertically { -it / 2 } + fadeOut())
+                            } else if (targetState.length < initialState.length) {
+                                // 刪字符：舊字向右滑出
+                                (slideInVertically { -it / 2 } + fadeIn()) togetherWith
+                                    (slideOutVertically { it / 2 } + fadeOut())
+                            } else {
+                                // 同長度（例如加小數點）：淡入淡出
+                                fadeIn() togetherWith fadeOut()
+                            }
+                        },
+                        label = "amountDisplay"
+                    ) { text ->
+                        Text(
+                            text = text,
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (state.amountText.isEmpty())
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else
+                                MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.End,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // ===== 數字鍵盤（4 行 × 3 列）=====
+            // ===== 數字鍵盤（每粒掣矮啲）=====
             val rows = listOf(
                 listOf("1", "2", "3"),
                 listOf("4", "5", "6"),
                 listOf("7", "8", "9"),
                 listOf(".", "0", "backspace")
             )
-            rows.forEach { row ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    row.forEach { key ->
-                        KeyboardKey(
-                            label = key,
-                            onClick = {
-                                when (key) {
-                                    "backspace" -> {
-                                        val t = state.amountText
-                                        onStateChange(
-                                            state.copy(
-                                                amountText = if (t.isEmpty())
-                                                    t else t.dropLast(1)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rows.forEach { row ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        row.forEach { key ->
+                            KeyboardKey(
+                                label = key,
+                                onClick = {
+                                    when (key) {
+                                        "backspace" -> {
+                                            val t = state.amountText
+                                            onStateChange(
+                                                state.copy(
+                                                    amountText = if (t.isEmpty())
+                                                        t else t.dropLast(1)
+                                                )
                                             )
-                                        )
-                                    }
-                                    "." -> {
-                                        val t = state.amountText
-                                        if (t.contains(".")) return@KeyboardKey
-                                        val newT = if (t.isEmpty()) "0."
-                                                   else "$t."
-                                        onStateChange(
-                                            state.copy(amountText = newT)
-                                        )
-                                    }
-                                    else -> {
-                                        val t = state.amountText
-                                        val dotIdx = t.indexOf(".")
-                                        val newT = if (dotIdx >= 0) {
-                                            if (t.length - dotIdx - 1 >= 2) t
-                                            else "$t$key"
-                                        } else {
-                                            if (t.length >= 9) t
-                                            else "$t$key"
                                         }
-                                        onStateChange(
-                                            state.copy(amountText = newT)
-                                        )
+                                        "." -> {
+                                            val t = state.amountText
+                                            if (t.contains(".")) return@KeyboardKey
+                                            val newT = if (t.isEmpty()) "0."
+                                                       else "$t."
+                                            onStateChange(
+                                                state.copy(amountText = newT)
+                                            )
+                                        }
+                                        else -> {
+                                            val t = state.amountText
+                                            val dotIdx = t.indexOf(".")
+                                            val newT = if (dotIdx >= 0) {
+                                                if (t.length - dotIdx - 1 >= 2) t
+                                                else "$t$key"
+                                            } else {
+                                                if (t.length >= 9) t
+                                                else "$t$key"
+                                            }
+                                            onStateChange(
+                                                state.copy(amountText = newT)
+                                            )
+                                        }
                                     }
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                        )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
+                        }
                     }
                 }
-                Spacer(Modifier.height(6.dp))
             }
 
-            // ===== 項目名 + 類別 =====
+            Spacer(Modifier.height(10.dp))
+
+            // ===== 項目名 + 類別（加大、圓角）=====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1256,6 +1284,7 @@ fun LedgerKeyboardPanel(
                         },
                         label = { Text("名稱") },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         keyboardOptions = KeyboardOptions(
                             imeAction = ImeAction.Done
                         ),
@@ -1268,6 +1297,7 @@ fun LedgerKeyboardPanel(
                         ),
                         modifier = Modifier
                             .weight(1f)
+                            .fillMaxHeight()
                             .focusRequester(noteFocusRequester)
                     )
                 } else {
@@ -1275,7 +1305,10 @@ fun LedgerKeyboardPanel(
                         onClick = {
                             onStateChange(state.copy(editingNote = true))
                         },
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
                     ) {
                         Text(
                             text = if (state.noteText.isBlank())
@@ -1283,6 +1316,7 @@ fun LedgerKeyboardPanel(
                             else
                                 state.noteText,
                             maxLines = 1,
+                            fontSize = 16.sp,
                             color = if (state.noteText.isBlank())
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             else
@@ -1292,32 +1326,38 @@ fun LedgerKeyboardPanel(
                 }
                 OutlinedButton(
                     onClick = onPickCategory,
-                    modifier = Modifier.width(96.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .width(110.dp)
+                        .fillMaxHeight()
                 ) {
-                    Text(state.category, maxLines = 1)
+                    Text(state.category, maxLines = 1, fontSize = 16.sp)
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // ===== 底部按鈕 =====
+            // ===== 底部按鈕（加大）=====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
                     onClick = onDismiss,
-                    modifier = Modifier.weight(1f)
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 ) {
                     Icon(
                         Icons.Default.KeyboardArrowDown,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(Modifier.width(4.dp))
-                    Text("收起")
+                    Text("收起", fontSize = 16.sp)
                 }
                 Button(
                     onClick = {
@@ -1327,14 +1367,17 @@ fun LedgerKeyboardPanel(
                             onConfirm()
                         }
                     },
-                    modifier = Modifier.weight(2f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(2f)
+                        .fillMaxHeight(),
                     enabled = state.amountText.isNotEmpty() &&
                         state.amountText != "0"
                 ) {
                     Icon(
                         Icons.Default.Check,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
@@ -1342,7 +1385,8 @@ fun LedgerKeyboardPanel(
                             state.noteText.isBlank() -> "下一步"
                             state.editingRecordId != null -> "更新"
                             else -> "入帳"
-                        }
+                        },
+                        fontSize = 16.sp
                     )
                 }
             }
@@ -1368,15 +1412,19 @@ fun KeyboardKey(
         label = "keyScale"
     )
 
+    val bgColor by animateColorAsState(
+        targetValue = if (pressed)
+            MaterialTheme.colorScheme.primaryContainer
+        else
+            MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "keyBg"
+    )
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(
-                if (pressed)
-                    MaterialTheme.colorScheme.primaryContainer
-                else
-                    MaterialTheme.colorScheme.surfaceVariant
-            )
+            .background(bgColor)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -1391,13 +1439,13 @@ fun KeyboardKey(
             Icon(
                 Icons.Default.Backspace,
                 contentDescription = "退格",
-                modifier = Modifier.size(26.dp),
+                modifier = Modifier.size(22.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
             Text(
                 text = label,
-                fontSize = 24.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Medium
             )
         }
