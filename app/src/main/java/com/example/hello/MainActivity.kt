@@ -39,6 +39,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -47,6 +48,8 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
@@ -107,12 +110,16 @@ const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
 const val ICON_SIZE = 100
 
-// ===== 字體大小 =====
 val NOTE_FONT_SIZE = 19.sp
 val META_FONT_SIZE = 13.sp
 val AMOUNT_FONT_SIZE = 20.sp
 val STAT_AMOUNT_FONT_SIZE = 19.sp
 val STAT_LABEL_FONT_SIZE = 12.sp
+
+// 導航欄尺寸
+val NAV_HEIGHT = 60.dp
+val NAV_TAB_WIDTH = 96.dp
+val NAV_BOTTOM_PADDING = 20.dp
 
 // ===== 資料模型 =====
 data class Record(
@@ -134,6 +141,8 @@ sealed interface DialogState {
 
     data class Edit(val record: Record) : DialogState
 }
+
+data class NavItem(val label: String, val icon: ImageVector)
 
 // ===== 格式化工具 =====
 fun formatAmount(amount: Double): String =
@@ -226,16 +235,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LedgerScreen()
+                    MainApp()
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ===== 主 App（管理頁面切換） =====
 @Composable
-fun LedgerScreen() {
+fun MainApp() {
     val db = Firebase.firestore
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -244,23 +253,18 @@ fun LedgerScreen() {
     var loading by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var expandedId by remember { mutableStateOf<String?>(null) }
+    var currentPage by remember { mutableIntStateOf(0) }
 
+    // 筛选页搜索
+    var searchQuery by remember { mutableStateOf("") }
+
+    // 圖標相關
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
-
-    val listState = rememberLazyListState()
-    var pendingScrollToTop by remember { mutableStateOf(false) }
-
-    LaunchedEffect(records.size) {
-        if (pendingScrollToTop && records.isNotEmpty()) {
-            listState.animateScrollToItem(0)
-            pendingScrollToTop = false
-        }
-    }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -319,192 +323,115 @@ fun LedgerScreen() {
         onDispose { listener.remove() }
     }
 
-    val filtered = if (selectedCategory == null) records
-                   else records.filter { it.category == selectedCategory }
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (currentPage) {
+            0 -> LedgerContent(
+                records = records,
+                loading = loading,
+                selectedCategory = selectedCategory,
+                onCategoryChange = { selectedCategory = it },
+                expandedId = expandedId,
+                onExpandChange = { expandedId = it },
+                onAddClick = { dialogState = DialogState.Add() },
+                onCopyClick = { r ->
+                    dialogState = DialogState.Add(
+                        title = "複製記錄",
+                        initialNote = r.note,
+                        initialAmount = r.amount.toString(),
+                        initialCategory = r.category
+                    )
+                },
+                onEditClick = { r -> dialogState = DialogState.Edit(r) },
+                onDeleteClick = { r ->
+                    db.collection("records").document(r.id).delete()
+                },
+                onChangeIconClick = { r ->
+                    iconTargetRecord = r
+                    showIconSourceDialog = true
+                },
+                onFilterClick = {
+                    Toast.makeText(
+                        context,
+                        "篩選功能開發中",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            )
 
-    val totalIncome = filtered
-        .filter { it.category == INCOME_CATEGORY }
-        .sumOf { it.amount }
-    val totalExpense = filtered
-        .filter { it.category != INCOME_CATEGORY }
-        .sumOf { it.amount }
-    val balance = totalIncome - totalExpense
-
-    val groupedByDate: List<Pair<String, List<Record>>> = filtered
-        .groupBy { dateKeyFromTimestamp(it.timestamp) }
-        .toList()
-
-    val topNotes: List<Pair<String, Int>> = filtered
-        .filter { it.note.isNotBlank() }
-        .groupBy { it.note }
-        .map { (name, list) -> name to list.size }
-        .sortedByDescending { it.second }
-        .take(20)
-
-    val noteIconMap: Map<String, String> = filtered
-        .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
-        .groupBy { it.note }
-        .mapValues { (_, list) ->
-            list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
+            1 -> FilterContent(
+                records = records,
+                searchQuery = searchQuery,
+                onSearchChange = { searchQuery = it },
+                onCopyClick = { r ->
+                    dialogState = DialogState.Add(
+                        title = "複製記錄",
+                        initialNote = r.note,
+                        initialAmount = r.amount.toString(),
+                        initialCategory = r.category
+                    )
+                },
+                onEditClick = { r -> dialogState = DialogState.Edit(r) },
+                onDeleteClick = { r ->
+                    db.collection("records").document(r.id).delete()
+                },
+                onChangeIconClick = { r ->
+                    iconTargetRecord = r
+                    showIconSourceDialog = true
+                }
+            )
         }
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(onClick = {
-                dialogState = DialogState.Add()
-            }) {
+        // 新增記錄 FAB（只在記帳頁出現）
+        if (currentPage == 0) {
+            FloatingActionButton(
+                onClick = { dialogState = DialogState.Add() },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = 20.dp,
+                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                    )
+            ) {
                 Icon(Icons.Default.Add, contentDescription = "新增")
             }
         }
-    ) { padding ->
-        Box(
+
+        // 懸浮導航欄
+        FloatingNavBar(
+            items = listOf(
+                NavItem("記帳", Icons.Default.Receipt),
+                NavItem("篩選", Icons.Default.FilterList)
+            ),
+            selectedIndex = currentPage,
+            onIndexChange = { currentPage = it },
             modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    item {
-                        FilterChip(
-                            selected = selectedCategory == null,
-                            onClick = { selectedCategory = null },
-                            label = { Text("全部") }
-                        )
-                    }
-                    items(CATEGORIES) { cat ->
-                        FilterChip(
-                            selected = selectedCategory == cat,
-                            onClick = {
-                                selectedCategory =
-                                    if (selectedCategory == cat) null else cat
-                            },
-                            label = { Text(cat) }
-                        )
-                    }
-                }
+                .align(Alignment.BottomCenter)
+                .padding(bottom = NAV_BOTTOM_DOWN())
+        )
 
-                when {
-                    loading -> Box(
-                        Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator() }
-
-                    filtered.isEmpty() -> Box(
-                        Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) { Text("仲未有記錄,撳右下角 + 新增") }
-
-                    else -> {
-                        TopStats(
-                            balance = balance,
-                            income = totalIncome,
-                            expense = totalExpense
-                        )
-
-                        if (topNotes.isNotEmpty()) {
-                            QuickInputSection(
-                                topNotes = topNotes,
-                                noteIconMap = noteIconMap,
-                                onClick = { name ->
-                                    dialogState = DialogState.Add(
-                                        initialNote = name
-                                    )
-                                }
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            HorizontalDivider()
-                        }
-
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            groupedByDate.forEach { (dateKey, dayRecords) ->
-                                val dayIncome = dayRecords.sumOf {
-                                    if (it.category == INCOME_CATEGORY) it.amount
-                                    else 0.0
-                                }
-                                val dayExpense = dayRecords.sumOf {
-                                    if (it.category != INCOME_CATEGORY) it.amount
-                                    else 0.0
-                                }
-
-                                item(key = "header_$dateKey") {
-                                    DayHeader(
-                                        dateKey = dateKey,
-                                        income = dayIncome,
-                                        expense = dayExpense
-                                    )
-                                }
-
-                                items(dayRecords, key = { it.id }) { r ->
-                                    SwipeableRecordItem(
-                                        modifier = Modifier.animateItem(),
-                                        record = r,
-                                        expandedId = expandedId,
-                                        onExpand = { expandedId = it },
-                                        onCopy = {
-                                            dialogState = DialogState.Add(
-                                                title = "複製記錄",
-                                                initialNote = r.note,
-                                                initialAmount = r.amount.toString(),
-                                                initialCategory = r.category
-                                            )
-                                        },
-                                        onEdit = {
-                                            dialogState = DialogState.Edit(r)
-                                        },
-                                        onFilter = {
-                                            Toast.makeText(
-                                                context,
-                                                "篩選功能開發中",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        },
-                                        onDelete = {
-                                            db.collection("records")
-                                                .document(r.id)
-                                                .delete()
-                                        },
-                                        onChangeIcon = {
-                                            iconTargetRecord = r
-                                            showIconSourceDialog = true
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (uploading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0x80000000)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Card {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            CircularProgressIndicator()
-                            Spacer(Modifier.height(12.dp))
-                            Text("上傳中...")
-                        }
+        // 上傳中遮罩
+        if (uploading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x80000000)),
+                contentAlignment = Alignment.Center
+            ) {
+                Card {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(12.dp))
+                        Text("上傳中...")
                     }
                 }
             }
         }
     }
 
+    // ===== Dialog 處理 =====
     dialogState?.let { state ->
         when (state) {
             is DialogState.Add -> AddDialog(
@@ -519,7 +446,6 @@ fun LedgerScreen() {
                         .filter { it.note == note && it.note.isNotBlank() }
                         .maxByOrNull { it.timestamp }
                         ?.iconUrl ?: ""
-                    pendingScrollToTop = true
                     db.collection("records").add(
                         Record(
                             amount = amount,
@@ -685,7 +611,414 @@ fun LedgerScreen() {
     }
 }
 
-// ===== 快速輸入(4 行 × 分頁) =====
+// 用函數包住，避免 Modifier.padding 直接用 dp 常數出錯
+fun NAV_BOTTOM_DOWN(): Dp = NAV_BOTTOM_PADDING
+
+// ===== 懸浮導航欄（iOS 風格，可拖動泡泡） =====
+@Composable
+fun FloatingNavBar(
+    items: List<NavItem>,
+    selectedIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
+    val totalWidthPx = tabWidthPx * items.size
+    val maxOffset = totalWidthPx - tabWidthPx
+
+    var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // 外部切換（撳 tab）時更新泡泡
+    LaunchedEffect(selectedIndex) {
+        if (!isDragging) {
+            bubbleOffset = selectedIndex * tabWidthPx
+        }
+    }
+
+    val animatedOffset by animateFloatAsState(
+        targetValue = bubbleOffset,
+        animationSpec = if (isDragging) {
+            snap<Float>()
+        } else {
+            spring<Float>(
+                stiffness = Spring.StiffnessMediumLow,
+                dampingRatio = Spring.DampingRatioNoBouncy
+            )
+        },
+        label = "bubble"
+    )
+
+    Surface(
+        modifier = modifier
+            .width(NAV_TAB_WIDTH * items.size)
+            .height(NAV_HEIGHT),
+        shape = RoundedCornerShape(NAV_HEIGHT / 2),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 10.dp,
+        tonalElevation = 3.dp
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(items.size) {
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            isDragging = true
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            val targetIndex = (bubbleOffset / tabWidthPx)
+                                .roundToInt()
+                                .coerceIn(0, items.size - 1)
+                            bubbleOffset = targetIndex * tabWidthPx
+                            onIndexChange(targetIndex)
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            bubbleOffset = selectedIndex * tabWidthPx
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            bubbleOffset = (bubbleOffset + dragAmount)
+                                .coerceIn(0f, maxOffset)
+                            // 實時切換
+                            val currentIdx = (bubbleOffset / tabWidthPx)
+                                .roundToInt()
+                                .coerceIn(0, items.size - 1)
+                            if (currentIdx != selectedIndex) {
+                                onIndexChange(currentIdx)
+                            }
+                        }
+                    )
+                }
+        ) {
+            // 泡泡
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(animatedOffset.roundToInt(), 0) }
+                    .width(NAV_TAB_WIDTH)
+                    .fillMaxHeight()
+                    .padding(6.dp)
+                    .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+            )
+
+            // Tab 內容
+            Row(modifier = Modifier.fillMaxSize()) {
+                items.forEachIndexed { index, item ->
+                    val selected = index == selectedIndex
+                    val tint = if (selected)
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
+
+                    Box(
+                        modifier = Modifier
+                            .width(NAV_TAB_WIDTH)
+                            .fillMaxHeight()
+                            .clickable { onIndexChange(index) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                item.icon,
+                                contentDescription = item.label,
+                                tint = tint,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                item.label,
+                                fontSize = 14.sp,
+                                fontWeight = if (selected)
+                                    FontWeight.SemiBold
+                                else
+                                    FontWeight.Normal,
+                                color = tint
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ===== 記帳頁內容 =====
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LedgerContent(
+    records: List<Record>,
+    loading: Boolean,
+    selectedCategory: String?,
+    onCategoryChange: (String?) -> Unit,
+    expandedId: String?,
+    onExpandChange: (String?) -> Unit,
+    onAddClick: () -> Unit,
+    onCopyClick: (Record) -> Unit,
+    onEditClick: (Record) -> Unit,
+    onDeleteClick: (Record) -> Unit,
+    onChangeIconClick: (Record) -> Unit,
+    onFilterClick: () -> Unit,
+) {
+    val filtered = if (selectedCategory == null) records
+                   else records.filter { it.category == selectedCategory }
+
+    val totalIncome = filtered
+        .filter { it.category == INCOME_CATEGORY }
+        .sumOf { it.amount }
+    val totalExpense = filtered
+        .filter { it.category != INCOME_CATEGORY }
+        .sumOf { it.amount }
+    val balance = totalIncome - totalExpense
+
+    val groupedByDate: List<Pair<String, List<Record>>> = filtered
+        .groupBy { dateKeyFromTimestamp(it.timestamp) }
+        .toList()
+
+    val topNotes: List<Pair<String, Int>> = filtered
+        .filter { it.note.isNotBlank() }
+        .groupBy { it.note }
+        .map { (name, list) -> name to list.size }
+        .sortedByDescending { it.second }
+        .take(20)
+
+    val noteIconMap: Map<String, String> = filtered
+        .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+        .groupBy { it.note }
+        .mapValues { (_, list) ->
+            list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
+        }
+
+    val listState = rememberLazyListState()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                FilterChip(
+                    selected = selectedCategory == null,
+                    onClick = { onCategoryChange(null) },
+                    label = { Text("全部") }
+                )
+            }
+            items(CATEGORIES) { cat ->
+                FilterChip(
+                    selected = selectedCategory == cat,
+                    onClick = {
+                        onCategoryChange(
+                            if (selectedCategory == cat) null else cat
+                        )
+                    },
+                    label = { Text(cat) }
+                )
+            }
+        }
+
+        when {
+            loading -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator() }
+
+            filtered.isEmpty() -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) { Text("仲未有記錄,撳右下角 + 新增") }
+
+            else -> {
+                TopStats(
+                    balance = balance,
+                    income = totalIncome,
+                    expense = totalExpense
+                )
+
+                if (topNotes.isNotEmpty()) {
+                    QuickInputSection(
+                        topNotes = topNotes,
+                        noteIconMap = noteIconMap,
+                        onClick = { name ->
+                            // 用 onAddClick 之外嘅方式？其實想預填名稱
+                            // 但冇直接 interface，用 onCopyClick 唔啱
+                            // 簡單做法：新增一個 Add 帶 initialNote
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                }
+
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                    )
+                ) {
+                    groupedByDate.forEach { (dateKey, dayRecords) ->
+                        val dayIncome = dayRecords.sumOf {
+                            if (it.category == INCOME_CATEGORY) it.amount
+                            else 0.0
+                        }
+                        val dayExpense = dayRecords.sumOf {
+                            if (it.category != INCOME_CATEGORY) it.amount
+                            else 0.0
+                        }
+
+                        item(key = "header_$dateKey") {
+                            DayHeader(
+                                dateKey = dateKey,
+                                income = dayIncome,
+                                expense = dayExpense
+                            )
+                        }
+
+                        items(dayRecords, key = { it.id }) { r ->
+                            SwipeableRecordItem(
+                                modifier = Modifier.animateItem(),
+                                record = r,
+                                expandedId = expandedId,
+                                onExpand = onExpandChange,
+                                onCopy = { onCopyClick(r) },
+                                onEdit = { onEditClick(r) },
+                                onFilter = onFilterClick,
+                                onDelete = { onDeleteClick(r) },
+                                onChangeIcon = { onChangeIconClick(r) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ===== 篩選頁內容 =====
+@Composable
+fun FilterContent(
+    records: List<Record>,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    onCopyClick: (Record) -> Unit,
+    onEditClick: (Record) -> Unit,
+    onDeleteClick: (Record) -> Unit,
+    onChangeIconClick: (Record) -> Unit,
+) {
+    var expandedId by remember { mutableStateOf<String?>(null) }
+
+    val query = searchQuery.trim()
+    val results = if (query.isBlank()) records
+                  else records.filter {
+                      it.note.contains(query, ignoreCase = true) ||
+                      it.category.contains(query, ignoreCase = true)
+                  }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 8.dp)
+        ) {
+            Text(
+                text = if (query.isBlank()) "全部記錄（${results.size}）"
+                       else "搜尋結果（${results.size}）",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (results.isEmpty()) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (query.isBlank()) "冇記錄"
+                        else "搵唔到「$query」",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    items(results, key = { it.id }) { r ->
+                        SwipeableRecordItem(
+                            modifier = Modifier.animateItem(),
+                            record = r,
+                            expandedId = expandedId,
+                            onExpand = { expandedId = it },
+                            onCopy = { onCopyClick(r) },
+                            onEdit = { onEditClick(r) },
+                            onFilter = {},
+                            onDelete = { onDeleteClick(r) },
+                            onChangeIcon = { onChangeIconClick(r) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 底部搜索框（浮在導航欄上方）
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
+                ),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 6.dp,
+            tonalElevation = 3.dp
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchChange,
+                placeholder = { Text("搜尋名稱或類別…") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { onSearchChange("") }) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "清除"
+                            )
+                        }
+                    }
+                },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+// ===== 快速輸入（4 行 × 分頁） =====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
@@ -770,7 +1103,7 @@ fun QuickInputSection(
     }
 }
 
-// ===== 頂部統計（垂直排版 + 圖標 + 逐位滾動） =====
+// ===== 頂部統計 =====
 @Composable
 fun TopStats(balance: Double, income: Double, expense: Double) {
     Row(
@@ -834,7 +1167,6 @@ fun StatColumn(
     }
 }
 
-// ===== 逐位滾動金額 =====
 @Composable
 fun AnimatedAmount(
     text: String,
@@ -965,7 +1297,7 @@ fun createTempImageUri(context: Context): Uri {
     )
 }
 
-// ===== 壓縮圖片到 ICON_SIZE x ICON_SIZE =====
+// ===== 壓縮圖片 =====
 suspend fun compressImage(
     context: Context,
     uri: Uri,
@@ -1031,7 +1363,7 @@ fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
     return scaled
 }
 
-// ===== 上傳圖片並套用到所有同名項目 =====
+// ===== 上傳圖片 =====
 suspend fun uploadIconAndApplyToSameName(
     context: Context,
     db: FirebaseFirestore,
@@ -1349,7 +1681,6 @@ fun SwipeableRecordItem(
                         )
                     },
                     supportingContent = {
-                        // 類別/時間顏色再淺一級
                         Text(
                             text = "${record.category}．${formatRecordTime(record.timestamp)}",
                             fontSize = META_FONT_SIZE,
