@@ -26,6 +26,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -61,6 +63,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -179,6 +182,25 @@ fun dateKeyFromTimestamp(timestamp: Long): String {
     )
 }
 
+fun monthKeyFromTimestamp(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    return String.format(
+        Locale.US, "%04d-%02d",
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH) + 1
+    )
+}
+
+fun formatMonthLabel(ym: String): String {
+    // ym = "2026-01"
+    val parts = ym.split("-")
+    if (parts.size != 2) return ym
+    val y = parts[0].toIntOrNull() ?: return ym
+    val m = parts[1].toIntOrNull() ?: return ym
+    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+    return if (y == currentYear) "${m}月" else "${y % 100}年${m}月"
+}
+
 fun formatDateHeader(dateKey: String): String {
     val parts = dateKey.split("-")
     if (parts.size != 3) return dateKey
@@ -260,6 +282,10 @@ fun MainApp() {
 
     var searchQuery by remember { mutableStateOf("") }
 
+    // ===== 篩選頁的篩選狀態 =====
+    var filterCategory by remember { mutableStateOf<String?>(null) }
+    var filterMonth by remember { mutableStateOf<String?>(null) }
+
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
@@ -267,7 +293,7 @@ fun MainApp() {
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
 
-    // ===== 派生數據（缓存，切頁唔重算）=====
+    // ===== 派生數據（缓存）=====
     val filtered by remember {
         derivedStateOf {
             val snapshot = records.toList()
@@ -311,6 +337,15 @@ fun MainApp() {
                 .mapValues { (_, list) ->
                     list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
                 }
+        }
+    }
+
+    // ===== 可用月份（由記錄動態產生，倒序） =====
+    val availableMonths by remember {
+        derivedStateOf {
+            records.map { monthKeyFromTimestamp(it.timestamp) }
+                .distinct()
+                .sortedDescending()
         }
     }
 
@@ -372,7 +407,6 @@ fun MainApp() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 頁面內容（位置 0）
         when (currentPage) {
             0 -> LedgerContent(
                 loading = loading,
@@ -419,6 +453,11 @@ fun MainApp() {
                 records = records,
                 searchQuery = searchQuery,
                 onSearchChange = { searchQuery = it },
+                filterCategory = filterCategory,
+                onFilterCategoryChange = { filterCategory = it },
+                filterMonth = filterMonth,
+                onFilterMonthChange = { filterMonth = it },
+                availableMonths = availableMonths,
                 onCopyClick = { r ->
                     dialogState = DialogState.Add(
                         title = "複製記錄",
@@ -438,7 +477,6 @@ fun MainApp() {
             )
         }
 
-        // ===== 導航欄（位置永遠穩定） =====
         key("navbar") {
             FloatingNavBar(
                 items = listOf(
@@ -453,7 +491,6 @@ fun MainApp() {
             )
         }
 
-        // ===== FAB =====
         key("fab") {
             if (currentPage == 0) {
                 FloatingActionButton(
@@ -470,7 +507,6 @@ fun MainApp() {
             }
         }
 
-        // ===== 上傳遮罩 =====
         key("uploading") {
             if (uploading) {
                 Box(
@@ -688,7 +724,6 @@ fun FloatingNavBar(
     val maxOffset = totalWidthPx - tabWidthPx
     val viewConfiguration = LocalViewConfiguration.current
 
-    // 關鍵：用 rememberUpdatedState 包住，確保 closure 睇到最新值
     val latestSelectedIndex by rememberUpdatedState(selectedIndex)
     val latestOnIndexChange by rememberUpdatedState(onIndexChange)
     val latestItemsSize by rememberUpdatedState(items.size)
@@ -747,7 +782,6 @@ fun FloatingNavBar(
 
                                 if (change == null || !change.pressed) {
                                     if (!dragged) {
-                                        // Tap
                                         val index = (downX / tabWidthPx)
                                             .toInt()
                                             .coerceIn(
@@ -759,7 +793,6 @@ fun FloatingNavBar(
                                         }
                                         bubbleOffset = index * tabWidthPx
                                     } else {
-                                        // Drag 結束：吸附
                                         val targetIndex =
                                             (bubbleOffset / tabWidthPx)
                                                 .roundToInt()
@@ -809,7 +842,6 @@ fun FloatingNavBar(
                     }
                 }
         ) {
-            // 泡泡
             Box(
                 modifier = Modifier
                     .offset { IntOffset(animatedOffset.roundToInt(), 0) }
@@ -820,7 +852,6 @@ fun FloatingNavBar(
                     .background(MaterialTheme.colorScheme.primaryContainer)
             )
 
-            // Tab 內容
             Row(modifier = Modifier.fillMaxSize()) {
                 items.forEachIndexed { index, item ->
                     val selected = index == selectedIndex
@@ -860,7 +891,7 @@ fun FloatingNavBar(
     }
 }
 
-// ===== 記帳頁（純渲染元件） =====
+// ===== 記帳頁 =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LedgerContent(
@@ -986,11 +1017,17 @@ fun LedgerContent(
 }
 
 // ===== 篩選頁 =====
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FilterContent(
     records: List<Record>,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
+    filterCategory: String?,
+    onFilterCategoryChange: (String?) -> Unit,
+    filterMonth: String?,
+    onFilterMonthChange: (String?) -> Unit,
+    availableMonths: List<String>,
     onCopyClick: (Record) -> Unit,
     onEditClick: (Record) -> Unit,
     onDeleteClick: (Record) -> Unit,
@@ -999,11 +1036,15 @@ fun FilterContent(
     var expandedId by remember { mutableStateOf<String?>(null) }
 
     val query = searchQuery.trim()
-    val results = if (query.isBlank()) records
-                  else records.filter {
-                      it.note.contains(query, ignoreCase = true) ||
-                      it.category.contains(query, ignoreCase = true)
-                  }
+    val results = records.filter { r ->
+        val catOk = filterCategory == null || r.category == filterCategory
+        val monthOk = filterMonth == null ||
+            monthKeyFromTimestamp(r.timestamp) == filterMonth
+        val searchOk = query.isBlank() ||
+            r.note.contains(query, ignoreCase = true) ||
+            r.category.contains(query, ignoreCase = true)
+        catOk && monthOk && searchOk
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -1011,15 +1052,74 @@ fun FilterContent(
                 .fillMaxSize()
                 .padding(top = 8.dp)
         ) {
+            // ===== 標題 =====
             Text(
                 text = if (query.isBlank()) "全部記錄（${results.size}）"
                        else "搜尋結果（${results.size}）",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 color = MaterialTheme.colorScheme.onSurface
             )
 
+            // ===== 類別 chips（FlowRow，自動換行，無橫向滑動） =====
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                AnimatedFilterChip(
+                    selected = filterCategory == null,
+                    label = "全部",
+                    onClick = { onFilterCategoryChange(null) }
+                )
+                CATEGORIES.forEach { cat ->
+                    AnimatedFilterChip(
+                        selected = filterCategory == cat,
+                        label = cat,
+                        onClick = {
+                            onFilterCategoryChange(
+                                if (filterCategory == cat) null else cat
+                            )
+                        }
+                    )
+                }
+            }
+
+            // ===== 月份 chips（FlowRow，自動換行） =====
+            if (availableMonths.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    AnimatedFilterChip(
+                        selected = filterMonth == null,
+                        label = "全年",
+                        onClick = { onFilterMonthChange(null) }
+                    )
+                    availableMonths.forEach { month ->
+                        AnimatedFilterChip(
+                            selected = filterMonth == month,
+                            label = formatMonthLabel(month),
+                            onClick = {
+                                onFilterMonthChange(
+                                    if (filterMonth == month) null else month
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+            HorizontalDivider()
+
+            // ===== 結果列表 =====
             if (results.isEmpty()) {
                 Box(
                     Modifier
@@ -1028,8 +1128,12 @@ fun FilterContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        if (query.isBlank()) "冇記錄"
-                        else "搵唔到「$query」",
+                        when {
+                            query.isNotBlank() -> "搵唔到「$query」"
+                            filterCategory != null || filterMonth != null ->
+                                "冇符合篩選條件嘅記錄"
+                            else -> "冇記錄"
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1059,7 +1163,7 @@ fun FilterContent(
             }
         }
 
-        // 底部搜索框
+        // ===== 底部搜索框 =====
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1108,7 +1212,39 @@ fun FilterContent(
     }
 }
 
-// ===== 快速輸入（4 行 × 分頁） =====
+// ===== 帶縮放動畫嘅 FilterChip =====
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AnimatedFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "chipScale"
+    )
+
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        interactionSource = interactionSource,
+        modifier = Modifier.graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+    )
+}
+
+// ===== 快速輸入 =====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
