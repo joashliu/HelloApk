@@ -34,6 +34,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -117,7 +120,6 @@ fun displayAmount(record: Record): String =
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
-// ===== 文字頭像用嘅調色盤 =====
 val AVATAR_COLORS = listOf(
     Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8),
     Color(0xFF9575CD), Color(0xFF7986CB), Color(0xFF64B5F6),
@@ -239,8 +241,15 @@ fun LedgerScreen() {
         .sortedByDescending { it.second }
         .take(20)
 
+    // 名稱 → 最新圖標 URL(用喺快速輸入 chip)
+    val noteIconMap: Map<String, String> = filtered
+        .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+        .groupBy { it.note }
+        .mapValues { (_, list) ->
+            list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
+        }
+
     Scaffold(
-        topBar = { TopAppBar(title = { Text("記帳") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = {
                 dialogState = DialogState.Add()
@@ -249,7 +258,11 @@ fun LedgerScreen() {
             }
         }
     ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 LazyRow(
                     modifier = Modifier
@@ -324,13 +337,21 @@ fun LedgerScreen() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     items(topNotes) { pair ->
+                                        val name = pair.first
                                         SuggestionChip(
                                             onClick = {
                                                 dialogState = DialogState.Add(
-                                                    initialNote = pair.first
+                                                    initialNote = name
                                                 )
                                             },
-                                            label = { Text(pair.first) }
+                                            label = { Text(name) },
+                                            leadingIcon = {
+                                                IconView(
+                                                    iconUrl = noteIconMap[name] ?: "",
+                                                    name = name,
+                                                    size = 22.dp
+                                                )
+                                            }
                                         )
                                     }
                                 }
@@ -379,7 +400,6 @@ fun LedgerScreen() {
                 }
             }
 
-            // 上傳中遮罩
             if (uploading) {
                 Box(
                     modifier = Modifier
@@ -445,37 +465,72 @@ fun LedgerScreen() {
     }
 
     if (showIconSourceDialog) {
+        val target = iconTargetRecord
+        val hasIcon = target?.iconUrl?.isNotBlank() == true
+
         AlertDialog(
             onDismissRequest = {
                 showIconSourceDialog = false
                 iconTargetRecord = null
             },
-            title = { Text("選擇圖標來源") },
-            text = { Text("揀相冊、即時影相,定係貼上網址?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showIconSourceDialog = false
-                    pickImageLauncher.launch(
-                        PickVisualMediaRequest(
-                            ActivityResultContracts.PickVisualMedia.ImageOnly
-                        )
-                    )
-                }) { Text("相冊") }
-            },
-            dismissButton = {
+            title = { Text("圖標設定") },
+            text = {
                 Column {
-                    TextButton(onClick = {
+                    IconSourceOption(
+                        icon = Icons.Default.PhotoLibrary,
+                        label = "從相冊揀"
+                    ) {
+                        showIconSourceDialog = false
+                        pickImageLauncher.launch(
+                            PickVisualMediaRequest(
+                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                            )
+                        )
+                    }
+                    IconSourceOption(
+                        icon = Icons.Default.PhotoCamera,
+                        label = "即時拍照"
+                    ) {
                         showIconSourceDialog = false
                         val uri = createTempImageUri(context)
                         pendingCameraUri = uri
                         takePictureLauncher.launch(uri)
-                    }) { Text("拍照") }
-                    TextButton(onClick = {
+                    }
+                    IconSourceOption(
+                        icon = Icons.Default.Link,
+                        label = "貼上網址"
+                    ) {
                         showIconSourceDialog = false
                         urlInput = ""
                         showUrlInputDialog = true
-                    }) { Text("網址") }
+                    }
+                    if (hasIcon) {
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        IconSourceOption(
+                            icon = Icons.Default.Delete,
+                            label = "刪除圖標",
+                            tint = Color(0xFFF44336)
+                        ) {
+                            showIconSourceDialog = false
+                            if (target != null) {
+                                scope.launch {
+                                    uploading = true
+                                    removeIconFromSameName(
+                                        context, db, target.note
+                                    )
+                                    uploading = false
+                                }
+                            }
+                            iconTargetRecord = null
+                        }
+                    }
                 }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showIconSourceDialog = false
+                    iconTargetRecord = null
+                }) { Text("取消") }
             }
         )
     }
@@ -541,6 +596,36 @@ fun LedgerScreen() {
     }
 }
 
+@Composable
+fun IconSourceOption(
+    icon: ImageVector,
+    label: String,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(vertical = 12.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(Modifier.width(16.dp))
+        Text(
+            label,
+            color = tint,
+            style = MaterialTheme.typography.bodyLarge
+        )
+    }
+}
+
 // ===== 建立拍照用嘅臨時檔案 URI =====
 fun createTempImageUri(context: Context): Uri {
     val file = File.createTempFile("camera_", ".jpg", context.cacheDir)
@@ -568,7 +653,6 @@ suspend fun compressImage(
         val h = boundsOpts.outHeight
         if (w <= 0 || h <= 0) return@withContext null
 
-        // 計 inSampleSize（減少記憶體用量）
         var sample = 1
         val minDim = minOf(w, h)
         while (minDim / (sample * 2) >= maxSize) {
@@ -595,7 +679,6 @@ suspend fun compressImage(
     }
 }
 
-// 先中心裁切正方形,再縮放到 size x size
 fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
     val w = src.width
     val h = src.height
@@ -628,21 +711,18 @@ suspend fun uploadIconAndApplyToSameName(
     uri: Uri
 ) {
     try {
-        // 1. 壓縮到 100x100
         val bytes = compressImage(context, uri)
         if (bytes == null) {
             Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_LONG).show()
             return
         }
 
-        // 2. 上傳到 Cloudinary
         val imageUrl = uploadBytesToCloudinary(bytes)
         if (imageUrl == null) {
             Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_LONG).show()
             return
         }
 
-        // 3. 更新所有同名記錄（包括自己）
         applyUrlToSameName(context, db, recordName, imageUrl)
     } catch (e: Exception) {
         Log.e("Ledger", "upload failed", e)
@@ -658,10 +738,7 @@ suspend fun applyUrlToSameName(
     imageUrl: String
 ) {
     try {
-        if (recordName.isBlank()) {
-            // 冇名,只更新... 但冇名嘅情況本身唔會 upload,呢度安全起見 skip
-            return
-        }
+        if (recordName.isBlank()) return
         val snapshot = db.collection("records")
             .whereEqualTo("note", recordName)
             .get()
@@ -686,7 +763,41 @@ suspend fun applyUrlToSameName(
     }
 }
 
-// ===== 上傳 ByteArray 到 Cloudinary =====
+// ===== 清除所有同名記錄嘅圖標 =====
+suspend fun removeIconFromSameName(
+    context: Context,
+    db: FirebaseFirestore,
+    recordName: String
+) {
+    try {
+        if (recordName.isBlank()) {
+            Toast.makeText(context, "冇名稱,無法刪除", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val snapshot = db.collection("records")
+            .whereEqualTo("note", recordName)
+            .get()
+            .await()
+
+        val batch = db.batch()
+        snapshot.documents.forEach { doc ->
+            batch.update(doc.reference, "iconUrl", "")
+        }
+        batch.commit().await()
+
+        val count = snapshot.size()
+        Toast.makeText(
+            context,
+            if (count > 1) "已刪除 $count 條同名記錄嘅圖標"
+            else "圖標已刪除",
+            Toast.LENGTH_SHORT
+        ).show()
+    } catch (e: Exception) {
+        Log.e("Ledger", "remove icon failed", e)
+        Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
     withContext(Dispatchers.IO) {
         try {
@@ -747,7 +858,6 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
-        // 文字頭像
         val firstChar = name.trim().take(1).ifBlank { "?" }
         Box(
             modifier = Modifier
