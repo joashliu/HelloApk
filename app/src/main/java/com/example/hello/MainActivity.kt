@@ -1,10 +1,15 @@
 package com.example.hello
 
+import android.content.Context
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -16,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,6 +31,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,19 +43,32 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.toObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.roundToInt
 
 val CATEGORIES = listOf(
@@ -57,14 +78,19 @@ val CATEGORIES = listOf(
 
 val INCOME_CATEGORY = "收入"
 
-val COLOR_INCOME = Color(0xFF1B5E20)   // 深綠
-val COLOR_EXPENSE = Color(0xFFB71C1C)  // 深紅
+val COLOR_INCOME = Color(0xFF1B5E20)
+val COLOR_EXPENSE = Color(0xFFB71C1C)
+
+// ===== Cloudinary 設定 =====
+const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
+const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
 
 data class Record(
     val amount: Double = 0.0,
     val note: String = "",
     val category: String = "飲食",
     val timestamp: Long = System.currentTimeMillis(),
+    val iconUrl: String = "",
     var id: String = ""
 )
 
@@ -79,11 +105,9 @@ sealed interface DialogState {
     data class Edit(val record: Record) : DialogState
 }
 
-// ===== 金額格式化 =====
 fun formatAmount(amount: Double): String =
     String.format("%,.1f", amount)
 
-// 顯示用：收入唔加負號，其他加負號
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount)
     else formatAmount(-record.amount)
@@ -109,11 +133,42 @@ class MainActivity : ComponentActivity() {
 fun LedgerScreen() {
     val db = Firebase.firestore
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val records = remember { mutableStateListOf<Record>() }
     var dialogState by remember { mutableStateOf<DialogState?>(null) }
     var loading by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var expandedId by remember { mutableStateOf<String?>(null) }
+
+    var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
+    var showIconSourceDialog by remember { mutableStateOf(false) }
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        val target = iconTargetRecord
+        if (uri != null && target != null) {
+            scope.launch {
+                uploadIcon(context, db, target.id, uri)
+            }
+        }
+        iconTargetRecord = null
+    }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val target = iconTargetRecord
+        val uri = pendingCameraUri
+        if (success && target != null && uri != null) {
+            scope.launch {
+                uploadIcon(context, db, target.id, uri)
+            }
+        }
+        pendingCameraUri = null
+        iconTargetRecord = null
+    }
 
     DisposableEffect(Unit) {
         val listener = db.collection("records")
@@ -288,13 +343,9 @@ fun LedgerScreen() {
                                         .document(r.id)
                                         .delete()
                                 },
-                                onQuickEdit = {
-                                    dialogState = DialogState.Add(
-                                        title = "新增類似記錄",
-                                        initialNote = r.note,
-                                        initialAmount = r.amount.toString(),
-                                        initialCategory = r.category
-                                    )
+                                onChangeIcon = {
+                                    iconTargetRecord = r
+                                    showIconSourceDialog = true
                                 }
                             )
                         }
@@ -345,6 +396,185 @@ fun LedgerScreen() {
             )
         }
     }
+
+    if (showIconSourceDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showIconSourceDialog = false
+                iconTargetRecord = null
+            },
+            title = { Text("選擇圖標來源") },
+            text = { Text("揀相冊入面嘅相,定係即時影一張?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showIconSourceDialog = false
+                    pickImageLauncher.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
+                }) { Text("相冊") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showIconSourceDialog = false
+                    val uri = createTempImageUri(context)
+                    pendingCameraUri = uri
+                    takePictureLauncher.launch(uri)
+                }) { Text("拍照") }
+            }
+        )
+    }
+}
+
+// ===== 建立拍照用嘅臨時檔案 URI =====
+fun createTempImageUri(context: Context): Uri {
+    val file = File.createTempFile(
+        "camera_",
+        ".jpg",
+        context.cacheDir
+    )
+    return FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file
+    )
+}
+
+// ===== 上傳圖標到 Cloudinary,再更新 Firestore =====
+suspend fun uploadIcon(
+    context: Context,
+    db: FirebaseFirestore,
+    recordId: String,
+    uri: Uri
+) {
+    try {
+        val imageUrl = withContext(Dispatchers.IO) {
+            uploadToCloudinary(context, uri)
+        }
+
+        if (imageUrl == null) {
+            Toast.makeText(
+                context,
+                "上傳失敗,請檢查網絡",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        db.collection("records").document(recordId)
+            .update("iconUrl", imageUrl)
+            .await()
+
+        Toast.makeText(context, "圖標已更新", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Log.e("Ledger", "上傳圖標失敗", e)
+        Toast.makeText(
+            context,
+            "上傳失敗:${e.message}",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}
+
+// ===== 打 Cloudinary API 上傳圖片,回傳 secure_url =====
+suspend fun uploadToCloudinary(
+    context: Context,
+    uri: Uri
+): String? = withContext(Dispatchers.IO) {
+    try {
+        val endpoint =
+            "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
+        val boundary = "----LedgerBoundary${System.currentTimeMillis()}"
+        val lineEnd = "\r\n"
+
+        val connection = URL(endpoint).openConnection() as HttpURLConnection
+        connection.requestMethod = "POST"
+        connection.doOutput = true
+        connection.connectTimeout = 30_000
+        connection.readTimeout = 60_000
+        connection.setRequestProperty(
+            "Content-Type",
+            "multipart/form-data; boundary=$boundary"
+        )
+
+        connection.outputStream.use { output ->
+            // upload_preset 欄位
+            output.write("--$boundary$lineEnd".toByteArray())
+            output.write(
+                "Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd"
+                    .toByteArray()
+            )
+            output.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
+
+            // file 欄位
+            output.write("--$boundary$lineEnd".toByteArray())
+            output.write(
+                "Content-Disposition: form-data; name=\"file\"; filename=\"icon.jpg\"$lineEnd"
+                    .toByteArray()
+            )
+            output.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
+
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.copyTo(output)
+            } ?: run {
+                Log.e("Ledger", "開唔到圖片 stream")
+                return@withContext null
+            }
+
+            output.write("$lineEnd".toByteArray())
+            output.write("--$boundary--$lineEnd".toByteArray())
+            output.flush()
+        }
+
+        val responseCode = connection.responseCode
+        val responseText = if (responseCode in 200..299) {
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } else {
+            connection.errorStream?.bufferedReader()?.use { it.readText() }
+                ?: ""
+        }
+
+        if (responseCode in 200..299) {
+            val json = JSONObject(responseText)
+            json.optString("secure_url").takeIf { it.isNotBlank() }
+        } else {
+            Log.e("Ledger", "Cloudinary $responseCode: $responseText")
+            null
+        }
+    } catch (e: Exception) {
+        Log.e("Ledger", "Cloudinary upload error", e)
+        null
+    }
+}
+
+@Composable
+fun IconView(iconUrl: String, size: Dp = 40.dp) {
+    if (iconUrl.isBlank()) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.ReceiptLong,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(size * 0.55f)
+            )
+        }
+    } else {
+        AsyncImage(
+            model = iconUrl,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(size)
+                .clip(CircleShape)
+        )
+    }
 }
 
 @Composable
@@ -356,7 +586,7 @@ fun SwipeableRecordItem(
     onEdit: () -> Unit,
     onFilter: () -> Unit,
     onDelete: () -> Unit,
-    onQuickEdit: () -> Unit,
+    onChangeIcon: () -> Unit,
 ) {
     val density = LocalDensity.current
     val buttonWidth = 56.dp
@@ -398,7 +628,6 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
-        // 右側 4 粒掣
         Row(
             modifier = Modifier.matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
@@ -424,7 +653,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        // 左側 1 粒掣
         Row(
             modifier = Modifier.matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
@@ -433,9 +661,9 @@ fun SwipeableRecordItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ActionButton(
-                Icons.Default.Edit, "編輯/新增", Color(0xFF4CAF50),
+                Icons.Default.Image, "改圖標", Color(0xFF4CAF50),
                 buttonWidth, buttonHeight
-            ) { targetOffset = 0f; onExpand(null); onQuickEdit() }
+            ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
         Surface(
@@ -473,6 +701,7 @@ fun SwipeableRecordItem(
         ) {
             Column {
                 ListItem(
+                    leadingContent = { IconView(record.iconUrl) },
                     headlineContent = {
                         Text(record.note.ifBlank { "(無名稱)" })
                     },
@@ -497,8 +726,8 @@ private fun ActionButton(
     icon: ImageVector,
     label: String,
     background: Color,
-    width: androidx.compose.ui.unit.Dp,
-    height: androidx.compose.ui.unit.Dp,
+    width: Dp,
+    height: Dp,
     onClick: () -> Unit
 ) {
     Box(
