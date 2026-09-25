@@ -325,7 +325,8 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
+        // 頁面內容（位置 0）
         when (currentPage) {
             0 -> LedgerContent(
                 records = records,
@@ -385,50 +386,56 @@ fun MainApp() {
             )
         }
 
-        // 新增記錄 FAB（只在記帳頁出現）
-        if (currentPage == 0) {
-            FloatingActionButton(
-                onClick = { dialogState = DialogState.Add() },
+        // ===== 導航欄（放喺 FAB 之前，位置永遠穩定） =====
+        key("navbar") {
+            FloatingNavBar(
+                items = listOf(
+                    NavItem("記帳", Icons.Default.Receipt),
+                    NavItem("篩選", Icons.Default.FilterList)
+                ),
+                selectedIndex = currentPage,
+                onIndexChange = { currentPage = it },
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = 20.dp,
-                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
-                    )
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "新增")
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = NAV_BOTTOM_PADDING)
+            )
+        }
+
+        // ===== FAB（放喺導航欄之後，條件性出現唔會影響導航欄位置） =====
+        key("fab") {
+            if (currentPage == 0) {
+                FloatingActionButton(
+                    onClick = { dialogState = DialogState.Add() },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = 20.dp,
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                        )
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "新增")
+                }
             }
         }
 
-        // 懸浮導航欄
-        FloatingNavBar(
-            items = listOf(
-                NavItem("記帳", Icons.Default.Receipt),
-                NavItem("篩選", Icons.Default.FilterList)
-            ),
-            selectedIndex = currentPage,
-            onIndexChange = { currentPage = it },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = NAV_BOTTOM_PADDING)
-        )
-
-        // 上傳中遮罩
-        if (uploading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0x80000000)),
-                contentAlignment = Alignment.Center
-            ) {
-                Card {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(12.dp))
-                        Text("上傳中...")
+        // ===== 上傳遮罩（放最後） =====
+        key("uploading") {
+            if (uploading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x80000000)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator()
+                            Spacer(Modifier.height(12.dp))
+                            Text("上傳中...")
+                        }
                     }
                 }
             }
