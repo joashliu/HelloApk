@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -92,6 +93,11 @@ val COLOR_EXPENSE = Color(0xFFB71C1C)
 const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
 const val ICON_SIZE = 100
+
+// ===== 字體大小 =====
+val NOTE_FONT_SIZE = 19.sp       // 項目名（原 16sp 大 1 號）
+val META_FONT_SIZE = 13.sp       // 類別時間（原 14sp 細 1 號）
+val AMOUNT_FONT_SIZE = 20.sp     // 金額
 
 // ===== 資料模型 =====
 data class Record(
@@ -211,6 +217,19 @@ fun LedgerScreen() {
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
 
+    // 列表滾動狀態 + 新增後自動滾頂
+    val listState = rememberLazyListState()
+    var pendingScrollToTop by remember { mutableStateOf(false) }
+
+    // 當 records 數量增加,而且係新增後,滾返最頂
+    LaunchedEffect(records.size) {
+        if (pendingScrollToTop && records.isNotEmpty()) {
+            // 等一拍先讓動畫播完,再滾到頂
+            listState.animateScrollToItem(0)
+            pendingScrollToTop = false
+        }
+    }
+
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -286,7 +305,6 @@ fun LedgerScreen() {
         .sortedByDescending { it.second }
         .take(20)
 
-    // 名稱 → 最新圖標 URL(快速輸入 chip 用)
     val noteIconMap: Map<String, String> = filtered
         .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
         .groupBy { it.note }
@@ -405,9 +423,16 @@ fun LedgerScreen() {
                             HorizontalDivider()
                         }
 
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(filtered, key = { it.id }) { r ->
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(
+                                items = filtered,
+                                key = { it.id }
+                            ) { r ->
                                 SwipeableRecordItem(
+                                    modifier = Modifier.animateItem(),
                                     record = r,
                                     expandedId = expandedId,
                                     onExpand = { expandedId = it },
@@ -477,11 +502,12 @@ fun LedgerScreen() {
                 allRecords = records,
                 onDismiss = { dialogState = null },
                 onConfirm = { amount, note, category ->
-                    // 新增時自動繼承同名記錄嘅圖標
                     val inheritedIcon = records
                         .filter { it.note == note && it.note.isNotBlank() }
                         .maxByOrNull { it.timestamp }
                         ?.iconUrl ?: ""
+                    // 標記:新增完要滾返最頂
+                    pendingScrollToTop = true
                     db.collection("records").add(
                         Record(
                             amount = amount,
@@ -781,7 +807,6 @@ suspend fun uploadIconAndApplyToSameName(
     }
 }
 
-// ===== 將 iconUrl 寫入所有同名記錄 =====
 suspend fun applyUrlToSameName(
     context: Context,
     db: FirebaseFirestore,
@@ -814,7 +839,6 @@ suspend fun applyUrlToSameName(
     }
 }
 
-// ===== 清除所有同名記錄嘅圖標 =====
 suspend fun removeIconFromSameName(
     context: Context,
     db: FirebaseFirestore,
@@ -849,7 +873,6 @@ suspend fun removeIconFromSameName(
     }
 }
 
-// ===== 上傳 ByteArray 到 Cloudinary =====
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
     withContext(Dispatchers.IO) {
         try {
@@ -907,7 +930,6 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
         }
     }
 
-// ===== 圖標顯示（有圖顯示圖,冇圖顯示文字頭像）=====
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
@@ -940,6 +962,7 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
 
 @Composable
 fun SwipeableRecordItem(
+    modifier: Modifier = Modifier,
     record: Record,
     expandedId: String?,
     onExpand: (String?) -> Unit,
@@ -985,7 +1008,7 @@ fun SwipeableRecordItem(
     )
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
@@ -1066,18 +1089,27 @@ fun SwipeableRecordItem(
                         IconView(record.iconUrl, record.note)
                     },
                     headlineContent = {
-                        Text(record.note.ifBlank { "(無名稱)" })
+                        // 項目名 - 大 1 號
+                        Text(
+                            text = record.note.ifBlank { "(無名稱)" },
+                            fontSize = NOTE_FONT_SIZE,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     },
                     supportingContent = {
+                        // 類別 + 時間 - 細 1 號 + 淺色
                         Text(
-                            "${record.category}．${formatRecordTime(record.timestamp)}"
+                            text = "${record.category}．${formatRecordTime(record.timestamp)}",
+                            fontSize = META_FONT_SIZE,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
                     trailingContent = {
                         Text(
                             text = displayAmount(record),
                             color = amountColor(record.category),
-                            fontSize = 20.sp,
+                            fontSize = AMOUNT_FONT_SIZE,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
