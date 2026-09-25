@@ -141,7 +141,7 @@ val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 
-val ROW_ALT_COLOR = Color(0xFFEFF5FF)
+val ROW_ALT_COLOR = Color(0xFFE3F2FD)
 
 // ===== 資料模型 =====
 data class Record(
@@ -2227,11 +2227,13 @@ fun SwipeableRecordItem(
     val buttonWidthPx = with(density) { buttonWidth.toPx() }
     val gapPx = with(density) { gap.toPx() }
 
+        val edgePadding = 8.dp
+    val edgePaddingPx = with(density) { edgePadding.toPx() }
     val leftTotalPx = buttonWidthPx * 4 + gapPx * 3
     val rightTotalPx = buttonWidthPx
 
-    val maxLeftReveal = -leftTotalPx
-    val maxRightReveal = rightTotalPx
+    val maxLeftReveal = -(leftTotalPx + edgePaddingPx)
+    val maxRightReveal = rightTotalPx + edgePaddingPx
 
     var targetOffset by remember { mutableStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
