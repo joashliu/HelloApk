@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.ui.text.TextRange
