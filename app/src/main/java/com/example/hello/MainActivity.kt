@@ -24,6 +24,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -62,10 +64,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -92,6 +96,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Calendar
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -116,7 +121,6 @@ val AMOUNT_FONT_SIZE = 20.sp
 val STAT_AMOUNT_FONT_SIZE = 19.sp
 val STAT_LABEL_FONT_SIZE = 12.sp
 
-// 導航欄尺寸
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
@@ -255,10 +259,8 @@ fun MainApp() {
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
 
-    // 筛选页搜索
     var searchQuery by remember { mutableStateOf("") }
 
-    // 圖標相關
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
@@ -332,7 +334,9 @@ fun MainApp() {
                 onCategoryChange = { selectedCategory = it },
                 expandedId = expandedId,
                 onExpandChange = { expandedId = it },
-                onAddClick = { dialogState = DialogState.Add() },
+                onQuickInputClick = { name ->
+                    dialogState = DialogState.Add(initialNote = name)
+                },
                 onCopyClick = { r ->
                     dialogState = DialogState.Add(
                         title = "複製記錄",
@@ -406,7 +410,7 @@ fun MainApp() {
             onIndexChange = { currentPage = it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = NAV_BOTTOM_DOWN())
+                .padding(bottom = NAV_BOTTOM_PADDING)
         )
 
         // 上傳中遮罩
@@ -611,10 +615,7 @@ fun MainApp() {
     }
 }
 
-// 用函數包住，避免 Modifier.padding 直接用 dp 常數出錯
-fun NAV_BOTTOM_DOWN(): Dp = NAV_BOTTOM_PADDING
-
-// ===== 懸浮導航欄（iOS 風格，可拖動泡泡） =====
+// ===== 懸浮導航欄（iOS 風格，可拖動泡泡，無 ripple） =====
 @Composable
 fun FloatingNavBar(
     items: List<NavItem>,
@@ -626,11 +627,14 @@ fun FloatingNavBar(
     val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
     val totalWidthPx = tabWidthPx * items.size
     val maxOffset = totalWidthPx - tabWidthPx
+    val viewConfiguration = LocalViewConfiguration.current
 
-    var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
+    var bubbleOffset by remember {
+        mutableFloatStateOf(selectedIndex * tabWidthPx)
+    }
     var isDragging by remember { mutableStateOf(false) }
 
-    // 外部切換（撳 tab）時更新泡泡
+    // 外部切換（例如程式碼改 currentPage）時同步泡泡位置
     LaunchedEffect(selectedIndex) {
         if (!isDragging) {
             bubbleOffset = selectedIndex * tabWidthPx
@@ -662,36 +666,71 @@ fun FloatingNavBar(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(items.size) {
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            isDragging = true
-                        },
-                        onDragEnd = {
-                            isDragging = false
-                            val targetIndex = (bubbleOffset / tabWidthPx)
-                                .roundToInt()
-                                .coerceIn(0, items.size - 1)
-                            bubbleOffset = targetIndex * tabWidthPx
-                            onIndexChange(targetIndex)
-                        },
-                        onDragCancel = {
-                            isDragging = false
-                            bubbleOffset = selectedIndex * tabWidthPx
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            bubbleOffset = (bubbleOffset + dragAmount)
-                                .coerceIn(0f, maxOffset)
-                            // 實時切換
-                            val currentIdx = (bubbleOffset / tabWidthPx)
-                                .roundToInt()
-                                .coerceIn(0, items.size - 1)
-                            if (currentIdx != selectedIndex) {
-                                onIndexChange(currentIdx)
+                .pointerInput(items.size, tabWidthPx) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val downX = down.position.x
+                        var totalDx = 0f
+                        var dragged = false
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes
+                                .firstOrNull { it.id == down.id } ?: break
+
+                            // 手指抬起
+                            if (!change.pressed) {
+                                if (!dragged) {
+                                    // ===== Tap =====
+                                    val index = (downX / tabWidthPx)
+                                        .toInt()
+                                        .coerceIn(0, items.size - 1)
+                                    if (index != selectedIndex) {
+                                        onIndexChange(index)
+                                    }
+                                    bubbleOffset = index * tabWidthPx
+                                } else {
+                                    // ===== Drag 結束：吸附 =====
+                                    val targetIndex =
+                                        (bubbleOffset / tabWidthPx)
+                                            .roundToInt()
+                                            .coerceIn(0, items.size - 1)
+                                    bubbleOffset = targetIndex * tabWidthPx
+                                    if (targetIndex != selectedIndex) {
+                                        onIndexChange(targetIndex)
+                                    }
+                                }
+                                isDragging = false
+                                break
+                            }
+
+                            val dx = change.positionChange().x
+                            totalDx += dx
+
+                            // 未過 touch slop 唔當拖動
+                            if (!dragged && abs(totalDx) >
+                                viewConfiguration.touchSlop
+                            ) {
+                                dragged = true
+                                isDragging = true
+                            }
+
+                            if (dragged) {
+                                bubbleOffset = (bubbleOffset + dx)
+                                    .coerceIn(0f, maxOffset)
+                                change.consume()
+
+                                // 即時切換頁面
+                                val currentIdx =
+                                    (bubbleOffset / tabWidthPx)
+                                        .roundToInt()
+                                        .coerceIn(0, items.size - 1)
+                                if (currentIdx != selectedIndex) {
+                                    onIndexChange(currentIdx)
+                                }
                             }
                         }
-                    )
+                    }
                 }
         ) {
             // 泡泡
@@ -705,7 +744,7 @@ fun FloatingNavBar(
                     .background(MaterialTheme.colorScheme.primaryContainer)
             )
 
-            // Tab 內容
+            // Tab 內容（冇 clickable，靠上面嘅手勢處理）
             Row(modifier = Modifier.fillMaxSize()) {
                 items.forEachIndexed { index, item ->
                     val selected = index == selectedIndex
@@ -717,8 +756,7 @@ fun FloatingNavBar(
                     Box(
                         modifier = Modifier
                             .width(NAV_TAB_WIDTH)
-                            .fillMaxHeight()
-                            .clickable { onIndexChange(index) },
+                            .fillMaxHeight(),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -756,7 +794,7 @@ fun LedgerContent(
     onCategoryChange: (String?) -> Unit,
     expandedId: String?,
     onExpandChange: (String?) -> Unit,
-    onAddClick: () -> Unit,
+    onQuickInputClick: (String) -> Unit,
     onCopyClick: (Record) -> Unit,
     onEditClick: (Record) -> Unit,
     onDeleteClick: (Record) -> Unit,
@@ -843,11 +881,7 @@ fun LedgerContent(
                     QuickInputSection(
                         topNotes = topNotes,
                         noteIconMap = noteIconMap,
-                        onClick = { name ->
-                            // 用 onAddClick 之外嘅方式？其實想預填名稱
-                            // 但冇直接 interface，用 onCopyClick 唔啱
-                            // 簡單做法：新增一個 Add 帶 initialNote
-                        }
+                        onClick = onQuickInputClick
                     )
                     Spacer(Modifier.height(8.dp))
                     HorizontalDivider()
@@ -950,7 +984,10 @@ fun FilterContent(
                 LazyColumn(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth()
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
+                    )
                 ) {
                     items(results, key = { it.id }) { r ->
                         SwipeableRecordItem(
