@@ -636,12 +636,17 @@ fun FloatingNavBar(
     val maxOffset = totalWidthPx - tabWidthPx
     val viewConfiguration = LocalViewConfiguration.current
 
+    // ===== 關鍵：用 rememberUpdatedState 包住，確保 closure 睇到最新值 =====
+    val latestSelectedIndex by rememberUpdatedState(selectedIndex)
+    val latestOnIndexChange by rememberUpdatedState(onIndexChange)
+    val latestItemsSize by rememberUpdatedState(items.size)
+
     var bubbleOffset by remember {
         mutableFloatStateOf(selectedIndex * tabWidthPx)
     }
     var isDragging by remember { mutableStateOf(false) }
 
-    // 外部切換（例如程式碼改 currentPage）時同步泡泡位置
+    // 外部切換（撳 tab 或程式碼改 currentPage）時同步泡泡位置
     LaunchedEffect(selectedIndex) {
         if (!isDragging) {
             bubbleOffset = selectedIndex * tabWidthPx
@@ -673,67 +678,85 @@ fun FloatingNavBar(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(items.size, tabWidthPx) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val downX = down.position.x
-                        var totalDx = 0f
-                        var dragged = false
-
+                .pointerInput(Unit) {
+                    // 用 awaitPointerEventScope + 外層 while(true)
+                    // 唔用 awaitEachGesture，避免抬手後唔重啟
+                    awaitPointerEventScope {
                         while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes
-                                .firstOrNull { it.id == down.id } ?: break
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false
+                            )
+                            val downX = down.position.x
+                            val pointerId = down.id
+                            var totalDx = 0f
+                            var dragged = false
 
-                            // 手指抬起
-                            if (!change.pressed) {
-                                if (!dragged) {
-                                    // ===== Tap =====
-                                    val index = (downX / tabWidthPx)
-                                        .toInt()
-                                        .coerceIn(0, items.size - 1)
-                                    if (index != selectedIndex) {
-                                        onIndexChange(index)
+                            // 內層：追蹤今次手勢直到抬手
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes
+                                    .firstOrNull { it.id == pointerId }
+
+                                // 抬手（或者 pointer 消失）
+                                if (change == null || !change.pressed) {
+                                    if (!dragged) {
+                                        // ===== Tap =====
+                                        val index = (downX / tabWidthPx)
+                                            .toInt()
+                                            .coerceIn(
+                                                0,
+                                                latestItemsSize - 1
+                                            )
+                                        if (index != latestSelectedIndex) {
+                                            latestOnIndexChange(index)
+                                        }
+                                        bubbleOffset =
+                                            index * tabWidthPx
+                                    } else {
+                                        // ===== Drag 結束：吸附 =====
+                                        val targetIndex =
+                                            (bubbleOffset / tabWidthPx)
+                                                .roundToInt()
+                                                .coerceIn(
+                                                    0,
+                                                    latestItemsSize - 1
+                                                )
+                                        bubbleOffset =
+                                            targetIndex * tabWidthPx
+                                        if (targetIndex != latestSelectedIndex) {
+                                            latestOnIndexChange(targetIndex)
+                                        }
                                     }
-                                    bubbleOffset = index * tabWidthPx
-                                } else {
-                                    // ===== Drag 結束：吸附 =====
-                                    val targetIndex =
+                                    isDragging = false
+                                    break
+                                }
+
+                                val dx = change.positionChange().x
+                                totalDx += dx
+
+                                if (!dragged &&
+                                    abs(totalDx) > viewConfiguration.touchSlop
+                                ) {
+                                    dragged = true
+                                    isDragging = true
+                                }
+
+                                if (dragged) {
+                                    bubbleOffset =
+                                        (bubbleOffset + dx)
+                                            .coerceIn(0f, maxOffset)
+                                    change.consume()
+
+                                    val currentIdx =
                                         (bubbleOffset / tabWidthPx)
                                             .roundToInt()
-                                            .coerceIn(0, items.size - 1)
-                                    bubbleOffset = targetIndex * tabWidthPx
-                                    if (targetIndex != selectedIndex) {
-                                        onIndexChange(targetIndex)
+                                            .coerceIn(
+                                                0,
+                                                latestItemsSize - 1
+                                            )
+                                    if (currentIdx != latestSelectedIndex) {
+                                        latestOnIndexChange(currentIdx)
                                     }
-                                }
-                                isDragging = false
-                                break
-                            }
-
-                            val dx = change.positionChange().x
-                            totalDx += dx
-
-                            // 未過 touch slop 唔當拖動
-                            if (!dragged && abs(totalDx) >
-                                viewConfiguration.touchSlop
-                            ) {
-                                dragged = true
-                                isDragging = true
-                            }
-
-                            if (dragged) {
-                                bubbleOffset = (bubbleOffset + dx)
-                                    .coerceIn(0f, maxOffset)
-                                change.consume()
-
-                                // 即時切換頁面
-                                val currentIdx =
-                                    (bubbleOffset / tabWidthPx)
-                                        .roundToInt()
-                                        .coerceIn(0, items.size - 1)
-                                if (currentIdx != selectedIndex) {
-                                    onIndexChange(currentIdx)
                                 }
                             }
                         }
