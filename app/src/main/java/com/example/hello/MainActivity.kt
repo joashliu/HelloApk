@@ -425,23 +425,28 @@ fun LedgerScreen() {
     dialogState?.let { state ->
         when (state) {
             is DialogState.Add -> AddDialog(
-                title = state.title,
-                initialNote = state.initialNote,
-                initialAmount = state.initialAmount,
-                initialCategory = state.initialCategory,
-                allRecords = records,
-                onDismiss = { dialogState = null },
-                onConfirm = { amount, note, category ->
-                    db.collection("records").add(
-                        Record(
-                            amount = amount,
-                            note = note,
-                            category = category
-                        )
-                    )
-                    dialogState = null
-                }
+    title = state.title,
+    initialNote = state.initialNote,
+    initialAmount = state.initialAmount,
+    initialCategory = state.initialCategory,
+    allRecords = records,
+    onDismiss = { dialogState = null },
+    onConfirm = { amount, note, category ->
+        val inheritedIcon = records
+            .filter { it.note == note && it.note.isNotBlank() }
+            .maxByOrNull { it.timestamp }
+            ?.iconUrl ?: ""
+        db.collection("records").add(
+            Record(
+                amount = amount,
+                note = note,
+                category = category,
+                iconUrl = inheritedIcon
             )
+        )
+        dialogState = null
+    }
+)
             is DialogState.Edit -> AddDialog(
                 title = "編輯記錄",
                 initialNote = state.record.note,
