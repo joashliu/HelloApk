@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -42,12 +43,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -75,6 +79,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -137,18 +142,15 @@ data class Record(
     var id: String = ""
 )
 
-sealed interface DialogState {
-    data class Add(
-        val title: String = "新增記錄",
-        val initialNote: String = "",
-        val initialAmount: String = "",
-        val initialCategory: String = "飲食"
-    ) : DialogState
-
-    data class Edit(val record: Record) : DialogState
-}
-
 data class NavItem(val label: String, val icon: ImageVector)
+
+data class KeyboardState(
+    val amountText: String = "",
+    val noteText: String = "",
+    val category: String = "飲食",
+    val editingNote: Boolean = false,
+    val editingRecordId: String? = null
+)
 
 // ===== 格式化工具 =====
 fun formatAmount(amount: Double): String =
@@ -192,7 +194,6 @@ fun monthKeyFromTimestamp(timestamp: Long): String {
 }
 
 fun formatMonthLabel(ym: String): String {
-    // ym = "2026-01"
     val parts = ym.split("-")
     if (parts.size != 2) return ym
     val y = parts[0].toIntOrNull() ?: return ym
@@ -274,7 +275,6 @@ fun MainApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val records = remember { mutableStateListOf<Record>() }
-    var dialogState by remember { mutableStateOf<DialogState?>(null) }
     var loading by remember { mutableStateOf(true) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var expandedId by remember { mutableStateOf<String?>(null) }
@@ -282,10 +282,11 @@ fun MainApp() {
 
     var searchQuery by remember { mutableStateOf("") }
 
-    // ===== 篩選頁的篩選狀態 =====
+    // 篩選頁
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
 
+    // 圖標相關
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
@@ -293,7 +294,12 @@ fun MainApp() {
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
 
-    // ===== 派生數據（缓存）=====
+    // ===== 記帳鍵盤 =====
+    var showKeyboard by remember { mutableStateOf(false) }
+    var keyboardState by remember { mutableStateOf(KeyboardState()) }
+    var showKeyboardCategoryPicker by remember { mutableStateOf(false) }
+
+    // ===== 派生數據 =====
     val filtered by remember {
         derivedStateOf {
             val snapshot = records.toList()
@@ -339,8 +345,6 @@ fun MainApp() {
                 }
         }
     }
-
-    // ===== 可用月份（由記錄動態產生，倒序） =====
     val availableMonths by remember {
         derivedStateOf {
             records.map { monthKeyFromTimestamp(it.timestamp) }
@@ -406,6 +410,74 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
+    // ===== 打開鍵盤的輔助函數 =====
+    fun openKeyboardForNew(initialNote: String = "") {
+        keyboardState = KeyboardState(noteText = initialNote)
+        showKeyboard = true
+    }
+
+    fun openKeyboardForCopy(r: Record) {
+        keyboardState = KeyboardState(
+            amountText = "",
+            noteText = r.note,
+            category = r.category
+        )
+        showKeyboard = true
+    }
+
+    fun openKeyboardForEdit(r: Record) {
+        val amt = if (r.amount % 1.0 == 0.0)
+            r.amount.toInt().toString()
+        else
+            r.amount.toString()
+        keyboardState = KeyboardState(
+            amountText = amt,
+            noteText = r.note,
+            category = r.category,
+            editingRecordId = r.id
+        )
+        showKeyboard = true
+    }
+
+    // ===== 保存 =====
+    fun saveFromKeyboard() {
+        val amt = keyboardState.amountText.toDoubleOrNull() ?: return
+        if (amt <= 0.0) {
+            Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val note = keyboardState.noteText
+        val category = keyboardState.category
+        val editId = keyboardState.editingRecordId
+
+        if (editId != null) {
+            // 更新
+            db.collection("records").document(editId).update(
+                mapOf(
+                    "amount" to amt,
+                    "note" to note,
+                    "category" to category
+                )
+            )
+        } else {
+            // 新增（自動繼承同名圖標）
+            val inheritedIcon = records
+                .filter { it.note == note && it.note.isNotBlank() }
+                .maxByOrNull { it.timestamp }
+                ?.iconUrl ?: ""
+            db.collection("records").add(
+                Record(
+                    amount = amt,
+                    note = note,
+                    category = category,
+                    iconUrl = inheritedIcon
+                )
+            )
+        }
+        showKeyboard = false
+        keyboardState = KeyboardState()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentPage) {
             0 -> LedgerContent(
@@ -422,17 +494,10 @@ fun MainApp() {
                 expandedId = expandedId,
                 onExpandChange = { expandedId = it },
                 onQuickInputClick = { name ->
-                    dialogState = DialogState.Add(initialNote = name)
+                    openKeyboardForNew(name)
                 },
-                onCopyClick = { r ->
-                    dialogState = DialogState.Add(
-                        title = "複製記錄",
-                        initialNote = r.note,
-                        initialAmount = r.amount.toString(),
-                        initialCategory = r.category
-                    )
-                },
-                onEditClick = { r -> dialogState = DialogState.Edit(r) },
+                onCopyClick = { r -> openKeyboardForCopy(r) },
+                onEditClick = { r -> openKeyboardForEdit(r) },
                 onDeleteClick = { r ->
                     db.collection("records").document(r.id).delete()
                 },
@@ -446,6 +511,22 @@ fun MainApp() {
                         "篩選功能開發中",
                         Toast.LENGTH_SHORT
                     ).show()
+                },
+                // 鍵盤相關
+                showKeyboard = showKeyboard,
+                keyboardState = keyboardState,
+                onKeyboardStateChange = { keyboardState = it },
+                onKeyboardDismiss = {
+                    showKeyboard = false
+                    keyboardState = KeyboardState()
+                },
+                onKeyboardConfirm = { saveFromKeyboard() },
+                onKeyboardNext = {
+                    // 名稱空白 → 進入名稱編輯模式
+                    keyboardState = keyboardState.copy(editingNote = true)
+                },
+                onKeyboardPickCategory = {
+                    showKeyboardCategoryPicker = true
                 }
             )
 
@@ -458,15 +539,8 @@ fun MainApp() {
                 filterMonth = filterMonth,
                 onFilterMonthChange = { filterMonth = it },
                 availableMonths = availableMonths,
-                onCopyClick = { r ->
-                    dialogState = DialogState.Add(
-                        title = "複製記錄",
-                        initialNote = r.note,
-                        initialAmount = r.amount.toString(),
-                        initialCategory = r.category
-                    )
-                },
-                onEditClick = { r -> dialogState = DialogState.Edit(r) },
+                onCopyClick = { r -> openKeyboardForCopy(r) },
+                onEditClick = { r -> openKeyboardForEdit(r) },
                 onDeleteClick = { r ->
                     db.collection("records").document(r.id).delete()
                 },
@@ -477,32 +551,35 @@ fun MainApp() {
             )
         }
 
-        key("navbar") {
-            FloatingNavBar(
-                items = listOf(
-                    NavItem("記帳", Icons.Default.Receipt),
-                    NavItem("篩選", Icons.Default.FilterList)
-                ),
-                selectedIndex = currentPage,
-                onIndexChange = { currentPage = it },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = NAV_BOTTOM_PADDING)
-            )
-        }
-
-        key("fab") {
-            if (currentPage == 0) {
-                FloatingActionButton(
-                    onClick = { dialogState = DialogState.Add() },
+        // 導航欄（鍵盤顯示時隱藏）
+        if (!showKeyboard) {
+            key("navbar") {
+                FloatingNavBar(
+                    items = listOf(
+                        NavItem("記帳", Icons.Default.Receipt),
+                        NavItem("篩選", Icons.Default.FilterList)
+                    ),
+                    selectedIndex = currentPage,
+                    onIndexChange = { currentPage = it },
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(
-                            end = 20.dp,
-                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
-                        )
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "新增")
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = NAV_BOTTOM_PADDING)
+                )
+            }
+
+            key("fab") {
+                if (currentPage == 0) {
+                    FloatingActionButton(
+                        onClick = { openKeyboardForNew() },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(
+                                end = 20.dp,
+                                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                            )
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "新增")
+                    }
                 }
             }
         }
@@ -530,54 +607,54 @@ fun MainApp() {
         }
     }
 
-    // ===== Dialog 處理 =====
-    dialogState?.let { state ->
-        when (state) {
-            is DialogState.Add -> AddDialog(
-                title = state.title,
-                initialNote = state.initialNote,
-                initialAmount = state.initialAmount,
-                initialCategory = state.initialCategory,
-                allRecords = records,
-                onDismiss = { dialogState = null },
-                onConfirm = { amount, note, category ->
-                    val inheritedIcon = records
-                        .filter { it.note == note && it.note.isNotBlank() }
-                        .maxByOrNull { it.timestamp }
-                        ?.iconUrl ?: ""
-                    db.collection("records").add(
-                        Record(
-                            amount = amount,
-                            note = note,
-                            category = category,
-                            iconUrl = inheritedIcon
-                        )
-                    )
-                    dialogState = null
+    // ===== 鍵盤類別 picker =====
+    if (showKeyboardCategoryPicker) {
+        AlertDialog(
+            onDismissRequest = { showKeyboardCategoryPicker = false },
+            title = { Text("揀類別") },
+            text = {
+                Column {
+                    CATEGORIES.forEach { cat ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    keyboardState =
+                                        keyboardState.copy(category = cat)
+                                    showKeyboardCategoryPicker = false
+                                }
+                                .padding(
+                                    vertical = 10.dp,
+                                    horizontal = 4.dp
+                                ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = cat == keyboardState.category,
+                                onClick = {
+                                    keyboardState =
+                                        keyboardState.copy(category = cat)
+                                    showKeyboardCategoryPicker = false
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                cat,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
                 }
-            )
-            is DialogState.Edit -> AddDialog(
-                title = "編輯記錄",
-                initialNote = state.record.note,
-                initialAmount = state.record.amount.toString(),
-                initialCategory = state.record.category,
-                allRecords = records,
-                onDismiss = { dialogState = null },
-                onConfirm = { amount, note, category ->
-                    val updated = state.record.copy(
-                        amount = amount,
-                        note = note,
-                        category = category
-                    )
-                    db.collection("records")
-                        .document(state.record.id)
-                        .set(updated)
-                    dialogState = null
-                }
-            )
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showKeyboardCategoryPicker = false
+                }) { Text("取消") }
+            }
+        )
     }
 
+    // ===== 圖標來源 dialog =====
     if (showIconSourceDialog) {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
@@ -649,6 +726,7 @@ fun MainApp() {
         )
     }
 
+    // ===== URL 輸入 dialog =====
     if (showUrlInputDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -913,10 +991,19 @@ fun LedgerContent(
     onDeleteClick: (Record) -> Unit,
     onChangeIconClick: (Record) -> Unit,
     onFilterClick: () -> Unit,
+    // 鍵盤
+    showKeyboard: Boolean,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    onKeyboardPickCategory: () -> Unit,
 ) {
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // ===== 類別 chips =====
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -949,7 +1036,7 @@ fun LedgerContent(
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
 
-            filtered.isEmpty() -> Box(
+            filtered.isEmpty() && !showKeyboard -> Box(
                 Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) { Text("仲未有記錄,撳右下角 + 新增") }
@@ -961,6 +1048,7 @@ fun LedgerContent(
                     expense = totalExpense
                 )
 
+                // ===== 快速輸入（永遠顯示）=====
                 if (topNotes.isNotEmpty()) {
                     QuickInputSection(
                         topNotes = topNotes,
@@ -971,47 +1059,347 @@ fun LedgerContent(
                     HorizontalDivider()
                 }
 
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                // ===== 鍵盤 or 列表 =====
+                if (showKeyboard) {
+                    LedgerKeyboardPanel(
+                        state = keyboardState,
+                        onStateChange = onKeyboardStateChange,
+                        onDismiss = onKeyboardDismiss,
+                        onConfirm = onKeyboardConfirm,
+                        onNext = onKeyboardNext,
+                        onPickCategory = onKeyboardPickCategory,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
                     )
-                ) {
-                    groupedByDate.forEach { (dateKey, dayRecords) ->
-                        val dayIncome = dayRecords.sumOf {
-                            if (it.category == INCOME_CATEGORY) it.amount
-                            else 0.0
-                        }
-                        val dayExpense = dayRecords.sumOf {
-                            if (it.category != INCOME_CATEGORY) it.amount
-                            else 0.0
-                        }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                        )
+                    ) {
+                        groupedByDate.forEach { (dateKey, dayRecords) ->
+                            val dayIncome = dayRecords.sumOf {
+                                if (it.category == INCOME_CATEGORY) it.amount
+                                else 0.0
+                            }
+                            val dayExpense = dayRecords.sumOf {
+                                if (it.category != INCOME_CATEGORY) it.amount
+                                else 0.0
+                            }
 
-                        item(key = "header_$dateKey") {
-                            DayHeader(
-                                dateKey = dateKey,
-                                income = dayIncome,
-                                expense = dayExpense
-                            )
-                        }
+                            item(key = "header_$dateKey") {
+                                DayHeader(
+                                    dateKey = dateKey,
+                                    income = dayIncome,
+                                    expense = dayExpense
+                                )
+                            }
 
-                        items(dayRecords, key = { it.id }) { r ->
-                            SwipeableRecordItem(
-                                modifier = Modifier.animateItem(),
-                                record = r,
-                                expandedId = expandedId,
-                                onExpand = onExpandChange,
-                                onCopy = { onCopyClick(r) },
-                                onEdit = { onEditClick(r) },
-                                onFilter = onFilterClick,
-                                onDelete = { onDeleteClick(r) },
-                                onChangeIcon = { onChangeIconClick(r) }
-                            )
+                            items(dayRecords, key = { it.id }) { r ->
+                                SwipeableRecordItem(
+                                    modifier = Modifier.animateItem(),
+                                    record = r,
+                                    expandedId = expandedId,
+                                    onExpand = onExpandChange,
+                                    onCopy = { onCopyClick(r) },
+                                    onEdit = { onEditClick(r) },
+                                    onFilter = onFilterClick,
+                                    onDelete = { onDeleteClick(r) },
+                                    onChangeIcon = { onChangeIconClick(r) }
+                                )
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+// ===== 記帳鍵盤面板 =====
+@Composable
+fun LedgerKeyboardPanel(
+    state: KeyboardState,
+    onStateChange: (KeyboardState) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    onNext: () -> Unit,
+    onPickCategory: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            // ===== 金額顯示 =====
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+                    .copy(alpha = 0.5f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    val showText = if (state.amountText.isEmpty()) "0"
+                                   else state.amountText
+                    Text(
+                        text = showText,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.amountText.isEmpty())
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.End,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ===== 數字鍵盤（4 行 × 3 列）=====
+            val rows = listOf(
+                listOf("1", "2", "3"),
+                listOf("4", "5", "6"),
+                listOf("7", "8", "9"),
+                listOf(".", "0", "backspace")
+            )
+            rows.forEach { row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    row.forEach { key ->
+                        KeyboardKey(
+                            label = key,
+                            onClick = {
+                                when (key) {
+                                    "backspace" -> {
+                                        val t = state.amountText
+                                        onStateChange(
+                                            state.copy(
+                                                amountText = if (t.isEmpty())
+                                                    t else t.dropLast(1)
+                                            )
+                                        )
+                                    }
+                                    "." -> {
+                                        val t = state.amountText
+                                        if (t.contains(".")) return@KeyboardKey
+                                        val newT = if (t.isEmpty()) "0."
+                                                   else "$t."
+                                        onStateChange(
+                                            state.copy(amountText = newT)
+                                        )
+                                    }
+                                    else -> {
+                                        val t = state.amountText
+                                        val dotIdx = t.indexOf(".")
+                                        val newT = if (dotIdx >= 0) {
+                                            if (t.length - dotIdx - 1 >= 2) t
+                                            else "$t$key"
+                                        } else {
+                                            if (t.length >= 9) t
+                                            else "$t$key"
+                                        }
+                                        onStateChange(
+                                            state.copy(amountText = newT)
+                                        )
+                                    }
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+
+            // ===== 項目名 + 類別 =====
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (state.editingNote) {
+                    val noteFocusRequester = remember { FocusRequester() }
+                    LaunchedEffect(Unit) {
+                        noteFocusRequester.requestFocus()
+                    }
+                    OutlinedTextField(
+                        value = state.noteText,
+                        onValueChange = {
+                            onStateChange(state.copy(noteText = it))
+                        },
+                        label = { Text("名稱") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                onStateChange(
+                                    state.copy(editingNote = false)
+                                )
+                            }
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(noteFocusRequester)
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            onStateChange(state.copy(editingNote = true))
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = if (state.noteText.isBlank())
+                                "輸入名稱"
+                            else
+                                state.noteText,
+                            maxLines = 1,
+                            color = if (state.noteText.isBlank())
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else
+                                MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = onPickCategory,
+                    modifier = Modifier.width(96.dp)
+                ) {
+                    Text(state.category, maxLines = 1)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ===== 底部按鈕 =====
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("收起")
+                }
+                Button(
+                    onClick = {
+                        if (state.noteText.isBlank()) {
+                            onNext()
+                        } else {
+                            onConfirm()
+                        }
+                    },
+                    modifier = Modifier.weight(2f),
+                    enabled = state.amountText.isNotEmpty() &&
+                        state.amountText != "0"
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        when {
+                            state.noteText.isBlank() -> "下一步"
+                            state.editingRecordId != null -> "更新"
+                            else -> "入帳"
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun KeyboardKey(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "keyScale"
+    )
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (pressed)
+                    MaterialTheme.colorScheme.primaryContainer
+                else
+                    MaterialTheme.colorScheme.surfaceVariant
+            )
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null
+            ) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (label == "backspace") {
+            Icon(
+                Icons.Default.Backspace,
+                contentDescription = "退格",
+                modifier = Modifier.size(26.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(
+                text = label,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
@@ -1052,7 +1440,6 @@ fun FilterContent(
                 .fillMaxSize()
                 .padding(top = 8.dp)
         ) {
-            // ===== 標題 =====
             Text(
                 text = if (query.isBlank()) "全部記錄（${results.size}）"
                        else "搜尋結果（${results.size}）",
@@ -1062,7 +1449,6 @@ fun FilterContent(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            // ===== 類別 chips（FlowRow，自動換行，無橫向滑動） =====
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1088,7 +1474,6 @@ fun FilterContent(
                 }
             }
 
-            // ===== 月份 chips（FlowRow，自動換行） =====
             if (availableMonths.isNotEmpty()) {
                 FlowRow(
                     modifier = Modifier
@@ -1119,7 +1504,6 @@ fun FilterContent(
             Spacer(Modifier.height(4.dp))
             HorizontalDivider()
 
-            // ===== 結果列表 =====
             if (results.isEmpty()) {
                 Box(
                     Modifier
@@ -1163,7 +1547,6 @@ fun FilterContent(
             }
         }
 
-        // ===== 底部搜索框 =====
         Surface(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1212,7 +1595,6 @@ fun FilterContent(
     }
 }
 
-// ===== 帶縮放動畫嘅 FilterChip =====
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedFilterChip(
@@ -1952,151 +2334,4 @@ private fun ActionButton(
             modifier = Modifier.size(22.dp)
         )
     }
-}
-
-@Composable
-fun AddDialog(
-    title: String = "新增記錄",
-    initialNote: String = "",
-    initialAmount: String = "",
-    initialCategory: String = "飲食",
-    allRecords: List<Record> = emptyList(),
-    onDismiss: () -> Unit,
-    onConfirm: (Double, String, String) -> Unit
-) {
-    var amountText by remember(initialAmount) { mutableStateOf(initialAmount) }
-    var noteText by remember(initialNote) { mutableStateOf(initialNote) }
-    var category by remember(initialCategory) { mutableStateOf(initialCategory) }
-    var showCategoryPicker by remember { mutableStateOf(false) }
-
-    val amountFocusRequester = remember { FocusRequester() }
-    val noteFocusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    LaunchedEffect(noteText) {
-        if (noteText.isNotBlank()) {
-            val match = allRecords
-                .filter { it.note == noteText }
-                .maxByOrNull { it.timestamp }
-            if (match != null) {
-                category = match.category
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        amountFocusRequester.requestFocus()
-    }
-
-    val doSave: () -> Unit = {
-        val amt = amountText.toDoubleOrNull()
-        if (amt != null) {
-            keyboardController?.hide()
-            onConfirm(amt, noteText, category)
-        }
-    }
-
-    val amountImeAction = if (noteText.isNotBlank()) ImeAction.Done
-                          else ImeAction.Next
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { amountText = it },
-                    label = { Text("金額") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = amountImeAction
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { noteFocusRequester.requestFocus() },
-                        onDone = { doSave() }
-                    ),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(amountFocusRequester)
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = noteText,
-                    onValueChange = { noteText = it },
-                    label = { Text("名稱") },
-                    keyboardOptions = KeyboardOptions(
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { doSave() }
-                    ),
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(noteFocusRequester)
-                )
-                Spacer(Modifier.height(12.dp))
-                Text("類別", style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.height(4.dp))
-                OutlinedButton(
-                    onClick = { showCategoryPicker = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text(category) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { doSave() }) { Text("確定") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
-
-    if (showCategoryPicker) {
-        CategoryPickerDialog(
-            current = category,
-            onDismiss = { showCategoryPicker = false },
-            onSelect = {
-                category = it
-                showCategoryPicker = false
-            }
-        )
-    }
-}
-
-@Composable
-fun CategoryPickerDialog(
-    current: String,
-    onDismiss: () -> Unit,
-    onSelect: (String) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("揀類別") },
-        text = {
-            Column {
-                CATEGORIES.forEach { cat ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(cat) }
-                            .padding(vertical = 10.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = cat == current,
-                            onClick = { onSelect(cat) }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(cat, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
-    )
 }
