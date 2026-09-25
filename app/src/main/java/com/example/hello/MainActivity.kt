@@ -74,8 +74,11 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Calendar
+import java.util.Locale
 import kotlin.math.roundToInt
 
+// ===== 常數 =====
 val CATEGORIES = listOf(
     "收入", "娛樂", "家用", "飲食", "交通",
     "個人", "購物", "月費", "旅遊"
@@ -90,6 +93,7 @@ const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
 const val ICON_SIZE = 100
 
+// ===== 資料模型 =====
 data class Record(
     val amount: Double = 0.0,
     val note: String = "",
@@ -110,8 +114,9 @@ sealed interface DialogState {
     data class Edit(val record: Record) : DialogState
 }
 
+// ===== 格式化工具 =====
 fun formatAmount(amount: Double): String =
-    String.format("%,.1f", amount)
+    String.format(Locale.US, "%,.1f", amount)
 
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount)
@@ -120,6 +125,45 @@ fun displayAmount(record: Record): String =
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
+fun formatRecordTime(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val weekNames = arrayOf(
+        "週日", "週一", "週二", "週三", "週四", "週五", "週六"
+    )
+    val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
+
+    val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
+    val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
+    val time = "$hh:$mm"
+
+    val todayStart = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    val recordStart = Calendar.getInstance().apply {
+        timeInMillis = timestamp
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    val daysDiff = ((todayStart - recordStart) / 86_400_000L).toInt()
+
+    val relative = when {
+        daysDiff <= 0 -> "今日"
+        daysDiff == 1 -> "琴日"
+        daysDiff == 2 -> "前日"
+        else -> "${daysDiff}日前"
+    }
+
+    return "$week．$time．$relative"
+}
+
+// ===== 文字頭像調色盤 =====
 val AVATAR_COLORS = listOf(
     Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8),
     Color(0xFF9575CD), Color(0xFF7986CB), Color(0xFF64B5F6),
@@ -134,6 +178,7 @@ fun avatarColor(name: String): Color {
     return AVATAR_COLORS[idx]
 }
 
+// ===== 主 Activity =====
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -241,7 +286,7 @@ fun LedgerScreen() {
         .sortedByDescending { it.second }
         .take(20)
 
-    // 名稱 → 最新圖標 URL(用喺快速輸入 chip)
+    // 名稱 → 最新圖標 URL(快速輸入 chip 用)
     val noteIconMap: Map<String, String> = filtered
         .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
         .groupBy { it.note }
@@ -337,23 +382,23 @@ fun LedgerScreen() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     items(topNotes) { pair ->
-    val name = pair.first
-    SuggestionChip(
-        onClick = {
-            dialogState = DialogState.Add(
-                initialNote = name
-            )
-        },
-        label = { Text(name) },
-        icon = {
-            IconView(
-                iconUrl = noteIconMap[name] ?: "",
-                name = name,
-                size = 22.dp
-            )
-        }
-    )
-}
+                                        val name = pair.first
+                                        SuggestionChip(
+                                            onClick = {
+                                                dialogState = DialogState.Add(
+                                                    initialNote = name
+                                                )
+                                            },
+                                            label = { Text(name) },
+                                            icon = {
+                                                IconView(
+                                                    iconUrl = noteIconMap[name] ?: "",
+                                                    name = name,
+                                                    size = 22.dp
+                                                )
+                                            }
+                                        )
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
@@ -425,28 +470,29 @@ fun LedgerScreen() {
     dialogState?.let { state ->
         when (state) {
             is DialogState.Add -> AddDialog(
-    title = state.title,
-    initialNote = state.initialNote,
-    initialAmount = state.initialAmount,
-    initialCategory = state.initialCategory,
-    allRecords = records,
-    onDismiss = { dialogState = null },
-    onConfirm = { amount, note, category ->
-        val inheritedIcon = records
-            .filter { it.note == note && it.note.isNotBlank() }
-            .maxByOrNull { it.timestamp }
-            ?.iconUrl ?: ""
-        db.collection("records").add(
-            Record(
-                amount = amount,
-                note = note,
-                category = category,
-                iconUrl = inheritedIcon
+                title = state.title,
+                initialNote = state.initialNote,
+                initialAmount = state.initialAmount,
+                initialCategory = state.initialCategory,
+                allRecords = records,
+                onDismiss = { dialogState = null },
+                onConfirm = { amount, note, category ->
+                    // 新增時自動繼承同名記錄嘅圖標
+                    val inheritedIcon = records
+                        .filter { it.note == note && it.note.isNotBlank() }
+                        .maxByOrNull { it.timestamp }
+                        ?.iconUrl ?: ""
+                    db.collection("records").add(
+                        Record(
+                            amount = amount,
+                            note = note,
+                            category = category,
+                            iconUrl = inheritedIcon
+                        )
+                    )
+                    dialogState = null
+                }
             )
-        )
-        dialogState = null
-    }
-)
             is DialogState.Edit -> AddDialog(
                 title = "編輯記錄",
                 initialNote = state.record.note,
@@ -803,6 +849,7 @@ suspend fun removeIconFromSameName(
     }
 }
 
+// ===== 上傳 ByteArray 到 Cloudinary =====
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
     withContext(Dispatchers.IO) {
         try {
@@ -860,6 +907,7 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
         }
     }
 
+// ===== 圖標顯示（有圖顯示圖,冇圖顯示文字頭像）=====
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
@@ -1020,7 +1068,11 @@ fun SwipeableRecordItem(
                     headlineContent = {
                         Text(record.note.ifBlank { "(無名稱)" })
                     },
-                    supportingContent = { Text(record.category) },
+                    supportingContent = {
+                        Text(
+                            "${record.category}．${formatRecordTime(record.timestamp)}"
+                        )
+                    },
                     trailingContent = {
                         Text(
                             text = displayAmount(record),
