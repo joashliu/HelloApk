@@ -38,11 +38,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.toObject
 import kotlin.math.roundToInt
@@ -53,6 +56,9 @@ val CATEGORIES = listOf(
 )
 
 val INCOME_CATEGORY = "收入"
+
+val COLOR_INCOME = Color(0xFF1B5E20)   // 深綠
+val COLOR_EXPENSE = Color(0xFFB71C1C)  // 深紅
 
 data class Record(
     val amount: Double = 0.0,
@@ -72,6 +78,18 @@ sealed interface DialogState {
 
     data class Edit(val record: Record) : DialogState
 }
+
+// ===== 金額格式化 =====
+fun formatAmount(amount: Double): String =
+    String.format("%,.1f", amount)
+
+// 顯示用：收入唔加負號，其他加負號
+fun displayAmount(record: Record): String =
+    if (record.category == INCOME_CATEGORY) formatAmount(record.amount)
+    else formatAmount(-record.amount)
+
+fun amountColor(category: String): Color =
+    if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,7 +117,7 @@ fun LedgerScreen() {
 
     DisposableEffect(Unit) {
         val listener = db.collection("records")
-            .orderBy("timestamp")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 loading = false
                 if (error != null) {
@@ -123,7 +141,6 @@ fun LedgerScreen() {
     val filtered = if (selectedCategory == null) records
                    else records.filter { it.category == selectedCategory }
 
-    // 收入 / 支出 / 餘額
     val totalIncome = filtered
         .filter { it.category == INCOME_CATEGORY }
         .sumOf { it.amount }
@@ -191,7 +208,6 @@ fun LedgerScreen() {
                 ) { Text("仲未有記錄,撳右下角 + 新增") }
 
                 else -> {
-                    // 餘額 / 收入 / 支出
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -199,18 +215,20 @@ fun LedgerScreen() {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "餘額:$balance",
-                            style = MaterialTheme.typography.titleMedium
+                            text = "餘額:${formatAmount(balance)}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (balance >= 0) COLOR_INCOME
+                                    else COLOR_EXPENSE
                         )
                         Text(
-                            text = "收入:$totalIncome",
+                            text = "收入:${formatAmount(totalIncome)}",
                             style = MaterialTheme.typography.titleMedium,
-                            color = Color(0xFF2E7D32)
+                            color = COLOR_INCOME
                         )
                         Text(
-                            text = "支出:$totalExpense",
+                            text = "支出:${formatAmount(totalExpense)}",
                             style = MaterialTheme.typography.titleMedium,
-                            color = Color(0xFFC62828)
+                            color = COLOR_EXPENSE
                         )
                     }
 
@@ -342,6 +360,7 @@ fun SwipeableRecordItem(
 ) {
     val density = LocalDensity.current
     val buttonWidth = 56.dp
+    val buttonHeight = 44.dp
     val gap = 6.dp
     val buttonWidthPx = with(density) { buttonWidth.toPx() }
     val gapPx = with(density) { gap.toPx() }
@@ -379,34 +398,43 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
+        // 右側 4 粒掣
         Row(
             modifier = Modifier.matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.End
-            )
+            ),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             ActionButton(
-                Icons.Default.ContentCopy, "複制", Color(0xFF607D8B)
+                Icons.Default.ContentCopy, "複制", Color(0xFF607D8B),
+                buttonWidth, buttonHeight
             ) { targetOffset = 0f; onExpand(null); onCopy() }
             ActionButton(
-                Icons.Default.Edit, "編輯", Color(0xFF2196F3)
+                Icons.Default.Edit, "編輯", Color(0xFF2196F3),
+                buttonWidth, buttonHeight
             ) { targetOffset = 0f; onExpand(null); onEdit() }
             ActionButton(
-                Icons.Default.FilterList, "篩選", Color(0xFF9C27B0)
+                Icons.Default.FilterList, "篩選", Color(0xFF9C27B0),
+                buttonWidth, buttonHeight
             ) { targetOffset = 0f; onExpand(null); onFilter() }
             ActionButton(
-                Icons.Default.Delete, "刪除", Color(0xFFF44336)
+                Icons.Default.Delete, "刪除", Color(0xFFF44336),
+                buttonWidth, buttonHeight
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
+        // 左側 1 粒掣
         Row(
             modifier = Modifier.matchParentSize(),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.Start
-            )
+            ),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             ActionButton(
-                Icons.Default.Edit, "編輯/新增", Color(0xFF4CAF50)
+                Icons.Default.Edit, "編輯/新增", Color(0xFF4CAF50),
+                buttonWidth, buttonHeight
             ) { targetOffset = 0f; onExpand(null); onQuickEdit() }
         }
 
@@ -449,7 +477,14 @@ fun SwipeableRecordItem(
                         Text(record.note.ifBlank { "(無名稱)" })
                     },
                     supportingContent = { Text(record.category) },
-                    trailingContent = { Text(record.amount.toString()) }
+                    trailingContent = {
+                        Text(
+                            text = displayAmount(record),
+                            color = amountColor(record.category),
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 )
                 HorizontalDivider()
             }
@@ -462,14 +497,15 @@ private fun ActionButton(
     icon: ImageVector,
     label: String,
     background: Color,
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
-            .width(56.dp)
-            .fillMaxHeight()
-            .padding(vertical = 2.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(12.dp))
             .background(background)
             .clickable { onClick() },
         contentAlignment = Alignment.Center
@@ -478,7 +514,7 @@ private fun ActionButton(
             icon,
             contentDescription = label,
             tint = Color.White,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(22.dp)
         )
     }
 }
@@ -502,7 +538,6 @@ fun AddDialog(
     val noteFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // 名稱一變，就查返上次同名項目嘅類別
     LaunchedEffect(noteText) {
         if (noteText.isNotBlank()) {
             val match = allRecords
