@@ -337,23 +337,23 @@ fun LedgerScreen() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     items(topNotes) { pair ->
-                                        val name = pair.first
-                                        SuggestionChip(
-                                            onClick = {
-                                                dialogState = DialogState.Add(
-                                                    initialNote = name
-                                                )
-                                            },
-                                            label = { Text(name) },
-                                            leadingIcon = {
-                                                IconView(
-                                                    iconUrl = noteIconMap[name] ?: "",
-                                                    name = name,
-                                                    size = 22.dp
-                                                )
-                                            }
-                                        )
-                                    }
+    val name = pair.first
+    SuggestionChip(
+        onClick = {
+            dialogState = DialogState.Add(
+                initialNote = name
+            )
+        },
+        label = { Text(name) },
+        icon = {
+            IconView(
+                iconUrl = noteIconMap[name] ?: "",
+                name = name,
+                size = 22.dp
+            )
+        }
+    )
+}
                                 }
                             }
                             Spacer(Modifier.height(8.dp))
