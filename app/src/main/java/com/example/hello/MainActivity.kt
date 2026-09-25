@@ -1,5 +1,7 @@
 package com.example.hello
 
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.animateColorAsState
 import android.content.Context
 import android.graphics.Bitmap
@@ -1140,9 +1142,9 @@ fun LedgerKeyboardPanel(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp)
         ) {
-            // ===== 金額顯示（大咗，有滑動動畫）=====
+            // ===== 金額顯示 =====
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1163,15 +1165,14 @@ fun LedgerKeyboardPanel(
                         targetState = showText,
                         transitionSpec = {
                             if (targetState.length > initialState.length) {
-                                // 加字符：新字由右滑入
-                                (slideInVertically { it / 2 } + fadeIn()) togetherWith
-                                    (slideOutVertically { -it / 2 } + fadeOut())
+                                // 加字符：新字從右滑入,舊字向左滑出
+                                (slideInHorizontally { it / 2 } + fadeIn()) togetherWith
+                                    (slideOutHorizontally { -it / 2 } + fadeOut())
                             } else if (targetState.length < initialState.length) {
-                                // 刪字符：舊字向右滑出
-                                (slideInVertically { -it / 2 } + fadeIn()) togetherWith
-                                    (slideOutVertically { it / 2 } + fadeOut())
+                                // 刪字符：新字從左滑入,舊字向右滑出
+                                (slideInHorizontally { -it / 2 } + fadeIn()) togetherWith
+                                    (slideOutHorizontally { it / 2 } + fadeOut())
                             } else {
-                                // 同長度（例如加小數點）：淡入淡出
                                 fadeIn() togetherWith fadeOut()
                             }
                         },
@@ -1194,7 +1195,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 數字鍵盤（每粒掣矮啲）=====
+            // ===== 數字鍵盤 =====
             val rows = listOf(
                 listOf("1", "2", "3"),
                 listOf("4", "5", "6"),
@@ -1264,7 +1265,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 項目名 + 類別（加大、圓角）=====
+            // ===== 項目名 + 類別（高度永遠一致）=====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1277,14 +1278,21 @@ fun LedgerKeyboardPanel(
                     LaunchedEffect(Unit) {
                         noteFocusRequester.requestFocus()
                     }
-                    OutlinedTextField(
+                    TextField(
                         value = state.noteText,
                         onValueChange = {
                             onStateChange(state.copy(noteText = it))
                         },
-                        label = { Text("名稱") },
+                        placeholder = { Text("名稱") },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        ),
                         keyboardOptions = KeyboardOptions(
                             imeAction = ImeAction.Done
                         ),
@@ -1337,11 +1345,12 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 底部按鈕（加大）=====
+            // ===== 底部按鈕（貼底）=====
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp),
+                    .height(64.dp)
+                    .padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
