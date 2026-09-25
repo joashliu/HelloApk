@@ -1,6 +1,8 @@
 package com.example.hello
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -32,7 +34,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -66,6 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -81,9 +83,9 @@ val INCOME_CATEGORY = "收入"
 val COLOR_INCOME = Color(0xFF1B5E20)
 val COLOR_EXPENSE = Color(0xFFB71C1C)
 
-// ===== Cloudinary 設定 =====
 const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
+const val ICON_SIZE = 100
 
 data class Record(
     val amount: Double = 0.0,
@@ -115,6 +117,21 @@ fun displayAmount(record: Record): String =
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
+// ===== 文字頭像用嘅調色盤 =====
+val AVATAR_COLORS = listOf(
+    Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8),
+    Color(0xFF9575CD), Color(0xFF7986CB), Color(0xFF64B5F6),
+    Color(0xFF4FC3F7), Color(0xFF4DB6AC), Color(0xFF81C784),
+    Color(0xFFAED581), Color(0xFFFFB74D), Color(0xFFFF8A65),
+    Color(0xFFA1887F), Color(0xFF90A4AE)
+)
+
+fun avatarColor(name: String): Color {
+    if (name.isBlank()) return AVATAR_COLORS[0]
+    val idx = (name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size
+    return AVATAR_COLORS[idx]
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,7 +159,10 @@ fun LedgerScreen() {
 
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
+    var showUrlInputDialog by remember { mutableStateOf(false) }
+    var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var uploading by remember { mutableStateOf(false) }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -150,7 +170,11 @@ fun LedgerScreen() {
         val target = iconTargetRecord
         if (uri != null && target != null) {
             scope.launch {
-                uploadIcon(context, db, target.id, uri)
+                uploading = true
+                uploadIconAndApplyToSameName(
+                    context, db, target.id, target.note, uri
+                )
+                uploading = false
             }
         }
         iconTargetRecord = null
@@ -163,7 +187,11 @@ fun LedgerScreen() {
         val uri = pendingCameraUri
         if (success && target != null && uri != null) {
             scope.launch {
-                uploadIcon(context, db, target.id, uri)
+                uploading = true
+                uploadIconAndApplyToSameName(
+                    context, db, target.id, target.note, uri
+                )
+                uploading = false
             }
         }
         pendingCameraUri = null
@@ -221,133 +249,152 @@ fun LedgerScreen() {
             }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-        ) {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedCategory == null,
-                        onClick = { selectedCategory = null },
-                        label = { Text("全部") }
-                    )
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedCategory == null,
+                            onClick = { selectedCategory = null },
+                            label = { Text("全部") }
+                        )
+                    }
+                    items(CATEGORIES) { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = {
+                                selectedCategory =
+                                    if (selectedCategory == cat) null else cat
+                            },
+                            label = { Text(cat) }
+                        )
+                    }
                 }
-                items(CATEGORIES) { cat ->
-                    FilterChip(
-                        selected = selectedCategory == cat,
-                        onClick = {
-                            selectedCategory =
-                                if (selectedCategory == cat) null else cat
-                        },
-                        label = { Text(cat) }
-                    )
+
+                when {
+                    loading -> Box(
+                        Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator() }
+
+                    filtered.isEmpty() -> Box(
+                        Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) { Text("仲未有記錄,撳右下角 + 新增") }
+
+                    else -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "餘額:${formatAmount(balance)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (balance >= 0) COLOR_INCOME
+                                        else COLOR_EXPENSE
+                            )
+                            Text(
+                                text = "收入:${formatAmount(totalIncome)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = COLOR_INCOME
+                            )
+                            Text(
+                                text = "支出:${formatAmount(totalExpense)}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = COLOR_EXPENSE
+                            )
+                        }
+
+                        if (topNotes.isNotEmpty()) {
+                            Column(Modifier.padding(horizontal = 16.dp)) {
+                                Text(
+                                    text = "快速輸入",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(topNotes) { pair ->
+                                        SuggestionChip(
+                                            onClick = {
+                                                dialogState = DialogState.Add(
+                                                    initialNote = pair.first
+                                                )
+                                            },
+                                            label = { Text(pair.first) }
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            HorizontalDivider()
+                        }
+
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(filtered, key = { it.id }) { r ->
+                                SwipeableRecordItem(
+                                    record = r,
+                                    expandedId = expandedId,
+                                    onExpand = { expandedId = it },
+                                    onCopy = {
+                                        dialogState = DialogState.Add(
+                                            title = "複製記錄",
+                                            initialNote = r.note,
+                                            initialAmount = r.amount.toString(),
+                                            initialCategory = r.category
+                                        )
+                                    },
+                                    onEdit = {
+                                        dialogState = DialogState.Edit(r)
+                                    },
+                                    onFilter = {
+                                        Toast.makeText(
+                                            context,
+                                            "篩選功能開發中",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    onDelete = {
+                                        db.collection("records")
+                                            .document(r.id)
+                                            .delete()
+                                    },
+                                    onChangeIcon = {
+                                        iconTargetRecord = r
+                                        showIconSourceDialog = true
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            when {
-                loading -> Box(
-                    Modifier.fillMaxSize(),
+            // 上傳中遮罩
+            if (uploading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x80000000)),
                     contentAlignment = Alignment.Center
-                ) { CircularProgressIndicator() }
-
-                filtered.isEmpty() -> Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) { Text("仲未有記錄,撳右下角 + 新增") }
-
-                else -> {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "餘額:${formatAmount(balance)}",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (balance >= 0) COLOR_INCOME
-                                    else COLOR_EXPENSE
-                        )
-                        Text(
-                            text = "收入:${formatAmount(totalIncome)}",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = COLOR_INCOME
-                        )
-                        Text(
-                            text = "支出:${formatAmount(totalExpense)}",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = COLOR_EXPENSE
-                        )
-                    }
-
-                    if (topNotes.isNotEmpty()) {
-                        Column(Modifier.padding(horizontal = 16.dp)) {
-                            Text(
-                                text = "快速輸入",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(topNotes) { pair ->
-                                    SuggestionChip(
-                                        onClick = {
-                                            dialogState = DialogState.Add(
-                                                initialNote = pair.first
-                                            )
-                                        },
-                                        label = { Text(pair.first) }
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        HorizontalDivider()
-                    }
-
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(filtered, key = { it.id }) { r ->
-                            SwipeableRecordItem(
-                                record = r,
-                                expandedId = expandedId,
-                                onExpand = { expandedId = it },
-                                onCopy = {
-                                    dialogState = DialogState.Add(
-                                        title = "複製記錄",
-                                        initialNote = r.note,
-                                        initialAmount = r.amount.toString(),
-                                        initialCategory = r.category
-                                    )
-                                },
-                                onEdit = {
-                                    dialogState = DialogState.Edit(r)
-                                },
-                                onFilter = {
-                                    Toast.makeText(
-                                        context,
-                                        "篩選功能開發中",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                },
-                                onDelete = {
-                                    db.collection("records")
-                                        .document(r.id)
-                                        .delete()
-                                },
-                                onChangeIcon = {
-                                    iconTargetRecord = r
-                                    showIconSourceDialog = true
-                                }
-                            )
+                ) {
+                    Card {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator()
+                            Spacer(Modifier.height(12.dp))
+                            Text("上傳中...")
                         }
                     }
                 }
@@ -404,7 +451,7 @@ fun LedgerScreen() {
                 iconTargetRecord = null
             },
             title = { Text("選擇圖標來源") },
-            text = { Text("揀相冊入面嘅相,定係即時影一張?") },
+            text = { Text("揀相冊、即時影相,定係貼上網址?") },
             confirmButton = {
                 TextButton(onClick = {
                     showIconSourceDialog = false
@@ -416,12 +463,79 @@ fun LedgerScreen() {
                 }) { Text("相冊") }
             },
             dismissButton = {
+                Column {
+                    TextButton(onClick = {
+                        showIconSourceDialog = false
+                        val uri = createTempImageUri(context)
+                        pendingCameraUri = uri
+                        takePictureLauncher.launch(uri)
+                    }) { Text("拍照") }
+                    TextButton(onClick = {
+                        showIconSourceDialog = false
+                        urlInput = ""
+                        showUrlInputDialog = true
+                    }) { Text("網址") }
+                }
+            }
+        )
+    }
+
+    if (showUrlInputDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showUrlInputDialog = false
+                urlInput = ""
+                iconTargetRecord = null
+            },
+            title = { Text("輸入圖片網址") },
+            text = {
+                Column {
+                    Text(
+                        "貼上 PNG / JPG / WebP 圖片連結",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        label = { Text("URL") },
+                        placeholder = { Text("https://...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
                 TextButton(onClick = {
-                    showIconSourceDialog = false
-                    val uri = createTempImageUri(context)
-                    pendingCameraUri = uri
-                    takePictureLauncher.launch(uri)
-                }) { Text("拍照") }
+                    val url = urlInput.trim()
+                    val target = iconTargetRecord
+                    val valid = url.startsWith("http://") ||
+                                url.startsWith("https://")
+                    if (target != null && url.isNotBlank() && valid) {
+                        scope.launch {
+                            uploading = true
+                            applyUrlToSameName(context, db, target.note, url)
+                            uploading = false
+                        }
+                    } else if (!valid) {
+                        Toast.makeText(
+                            context,
+                            "網址要 http:// 或 https:// 開頭",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    showUrlInputDialog = false
+                    urlInput = ""
+                    iconTargetRecord = null
+                }) { Text("確定") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showUrlInputDialog = false
+                    urlInput = ""
+                    iconTargetRecord = null
+                }) { Text("取消") }
             }
         )
     }
@@ -429,11 +543,7 @@ fun LedgerScreen() {
 
 // ===== 建立拍照用嘅臨時檔案 URI =====
 fun createTempImageUri(context: Context): Uri {
-    val file = File.createTempFile(
-        "camera_",
-        ".jpg",
-        context.cacheDir
-    )
+    val file = File.createTempFile("camera_", ".jpg", context.cacheDir)
     return FileProvider.getUriForFile(
         context,
         "${context.packageName}.fileprovider",
@@ -441,128 +551,216 @@ fun createTempImageUri(context: Context): Uri {
     )
 }
 
-// ===== 上傳圖標到 Cloudinary,再更新 Firestore =====
-suspend fun uploadIcon(
+// ===== 壓縮圖片到 ICON_SIZE x ICON_SIZE =====
+suspend fun compressImage(
     context: Context,
-    db: FirebaseFirestore,
-    recordId: String,
-    uri: Uri
-) {
+    uri: Uri,
+    maxSize: Int = ICON_SIZE
+): ByteArray? = withContext(Dispatchers.IO) {
     try {
-        val imageUrl = withContext(Dispatchers.IO) {
-            uploadToCloudinary(context, uri)
+        val boundsOpts = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, boundsOpts)
+        }
+        val w = boundsOpts.outWidth
+        val h = boundsOpts.outHeight
+        if (w <= 0 || h <= 0) return@withContext null
+
+        // 計 inSampleSize（減少記憶體用量）
+        var sample = 1
+        val minDim = minOf(w, h)
+        while (minDim / (sample * 2) >= maxSize) {
+            sample *= 2
         }
 
-        if (imageUrl == null) {
-            Toast.makeText(
-                context,
-                "上傳失敗,請檢查網絡",
-                Toast.LENGTH_LONG
-            ).show()
-            return
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = sample
         }
+        val src = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, decodeOpts)
+        } ?: return@withContext null
 
-        db.collection("records").document(recordId)
-            .update("iconUrl", imageUrl)
-            .await()
+        val scaled = scaleCropCenter(src, maxSize)
+        if (scaled !== src) src.recycle()
 
-        Toast.makeText(context, "圖標已更新", Toast.LENGTH_SHORT).show()
+        val baos = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+        scaled.recycle()
+        baos.toByteArray()
     } catch (e: Exception) {
-        Log.e("Ledger", "上傳圖標失敗", e)
-        Toast.makeText(
-            context,
-            "上傳失敗:${e.message}",
-            Toast.LENGTH_LONG
-        ).show()
-    }
-}
-
-// ===== 打 Cloudinary API 上傳圖片,回傳 secure_url =====
-suspend fun uploadToCloudinary(
-    context: Context,
-    uri: Uri
-): String? = withContext(Dispatchers.IO) {
-    try {
-        val endpoint =
-            "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
-        val boundary = "----LedgerBoundary${System.currentTimeMillis()}"
-        val lineEnd = "\r\n"
-
-        val connection = URL(endpoint).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.connectTimeout = 30_000
-        connection.readTimeout = 60_000
-        connection.setRequestProperty(
-            "Content-Type",
-            "multipart/form-data; boundary=$boundary"
-        )
-
-        connection.outputStream.use { output ->
-            // upload_preset 欄位
-            output.write("--$boundary$lineEnd".toByteArray())
-            output.write(
-                "Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd"
-                    .toByteArray()
-            )
-            output.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
-
-            // file 欄位
-            output.write("--$boundary$lineEnd".toByteArray())
-            output.write(
-                "Content-Disposition: form-data; name=\"file\"; filename=\"icon.jpg\"$lineEnd"
-                    .toByteArray()
-            )
-            output.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
-
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                input.copyTo(output)
-            } ?: run {
-                Log.e("Ledger", "開唔到圖片 stream")
-                return@withContext null
-            }
-
-            output.write("$lineEnd".toByteArray())
-            output.write("--$boundary--$lineEnd".toByteArray())
-            output.flush()
-        }
-
-        val responseCode = connection.responseCode
-        val responseText = if (responseCode in 200..299) {
-            connection.inputStream.bufferedReader().use { it.readText() }
-        } else {
-            connection.errorStream?.bufferedReader()?.use { it.readText() }
-                ?: ""
-        }
-
-        if (responseCode in 200..299) {
-            val json = JSONObject(responseText)
-            json.optString("secure_url").takeIf { it.isNotBlank() }
-        } else {
-            Log.e("Ledger", "Cloudinary $responseCode: $responseText")
-            null
-        }
-    } catch (e: Exception) {
-        Log.e("Ledger", "Cloudinary upload error", e)
+        Log.e("Ledger", "compress error", e)
         null
     }
 }
 
+// 先中心裁切正方形,再縮放到 size x size
+fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
+    val w = src.width
+    val h = src.height
+    val minDim = minOf(w, h)
+    val x = (w - minDim) / 2
+    val y = (h - minDim) / 2
+
+    val cropped = if (x == 0 && y == 0 && w == minDim && h == minDim) {
+        src
+    } else {
+        Bitmap.createBitmap(src, x, y, minDim, minDim)
+    }
+
+    val scaled = if (cropped.width == size && cropped.height == size) {
+        cropped
+    } else {
+        Bitmap.createScaledBitmap(cropped, size, size, true)
+    }
+
+    if (cropped !== src && cropped !== scaled) cropped.recycle()
+    return scaled
+}
+
+// ===== 上傳圖片並套用到所有同名項目 =====
+suspend fun uploadIconAndApplyToSameName(
+    context: Context,
+    db: FirebaseFirestore,
+    recordId: String,
+    recordName: String,
+    uri: Uri
+) {
+    try {
+        // 1. 壓縮到 100x100
+        val bytes = compressImage(context, uri)
+        if (bytes == null) {
+            Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // 2. 上傳到 Cloudinary
+        val imageUrl = uploadBytesToCloudinary(bytes)
+        if (imageUrl == null) {
+            Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        // 3. 更新所有同名記錄（包括自己）
+        applyUrlToSameName(context, db, recordName, imageUrl)
+    } catch (e: Exception) {
+        Log.e("Ledger", "upload failed", e)
+        Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
+// ===== 將 iconUrl 寫入所有同名記錄 =====
+suspend fun applyUrlToSameName(
+    context: Context,
+    db: FirebaseFirestore,
+    recordName: String,
+    imageUrl: String
+) {
+    try {
+        if (recordName.isBlank()) {
+            // 冇名,只更新... 但冇名嘅情況本身唔會 upload,呢度安全起見 skip
+            return
+        }
+        val snapshot = db.collection("records")
+            .whereEqualTo("note", recordName)
+            .get()
+            .await()
+
+        val batch = db.batch()
+        snapshot.documents.forEach { doc ->
+            batch.update(doc.reference, "iconUrl", imageUrl)
+        }
+        batch.commit().await()
+
+        val count = snapshot.size()
+        Toast.makeText(
+            context,
+            if (count > 1) "圖標已套用到 $count 條同名記錄"
+            else "圖標已更新",
+            Toast.LENGTH_SHORT
+        ).show()
+    } catch (e: Exception) {
+        Log.e("Ledger", "apply url failed", e)
+        Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
+// ===== 上傳 ByteArray 到 Cloudinary =====
+suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? =
+    withContext(Dispatchers.IO) {
+        try {
+            val endpoint =
+                "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
+            val boundary = "----LedgerBoundary${System.currentTimeMillis()}"
+            val lineEnd = "\r\n"
+
+            val conn = URL(endpoint).openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.doOutput = true
+            conn.connectTimeout = 30_000
+            conn.readTimeout = 60_000
+            conn.setRequestProperty(
+                "Content-Type",
+                "multipart/form-data; boundary=$boundary"
+            )
+
+            conn.outputStream.use { output ->
+                output.write("--$boundary$lineEnd".toByteArray())
+                output.write(
+                    ("Content-Disposition: form-data; " +
+                        "name=\"upload_preset\"$lineEnd$lineEnd").toByteArray()
+                )
+                output.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
+
+                output.write("--$boundary$lineEnd".toByteArray())
+                output.write(
+                    ("Content-Disposition: form-data; " +
+                        "name=\"file\"; filename=\"icon.jpg\"$lineEnd").toByteArray()
+                )
+                output.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
+                output.write(bytes)
+                output.write("$lineEnd".toByteArray())
+                output.write("--$boundary--$lineEnd".toByteArray())
+                output.flush()
+            }
+
+            val code = conn.responseCode
+            val text = if (code in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            }
+
+            if (code in 200..299) {
+                JSONObject(text).optString("secure_url").takeIf { it.isNotBlank() }
+            } else {
+                Log.e("Ledger", "Cloudinary $code: $text")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("Ledger", "Cloudinary upload error", e)
+            null
+        }
+    }
+
 @Composable
-fun IconView(iconUrl: String, size: Dp = 40.dp) {
+fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
+        // 文字頭像
+        val firstChar = name.trim().take(1).ifBlank { "?" }
         Box(
             modifier = Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
+                .background(avatarColor(name)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                Icons.Default.ReceiptLong,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(size * 0.55f)
+            Text(
+                text = firstChar,
+                color = Color.White,
+                fontSize = (size.value * 0.42f).sp,
+                fontWeight = FontWeight.Bold
             )
         }
     } else {
@@ -701,7 +899,9 @@ fun SwipeableRecordItem(
         ) {
             Column {
                 ListItem(
-                    leadingContent = { IconView(record.iconUrl) },
+                    leadingContent = {
+                        IconView(record.iconUrl, record.note)
+                    },
                     headlineContent = {
                         Text(record.note.ifBlank { "(無名稱)" })
                     },
