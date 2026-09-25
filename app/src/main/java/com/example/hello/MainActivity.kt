@@ -1,8 +1,5 @@
 package com.example.hello
 
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.animateColorAsState
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -16,14 +13,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -134,6 +135,8 @@ val STAT_LABEL_FONT_SIZE = 12.sp
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
+
+val ROW_ALT_COLOR = Color(0xFFEFF5FF)
 
 // ===== 資料模型 =====
 data class Record(
@@ -285,11 +288,9 @@ fun MainApp() {
 
     var searchQuery by remember { mutableStateOf("") }
 
-    // 篩選頁
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
 
-    // 圖標相關
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
@@ -297,12 +298,10 @@ fun MainApp() {
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
 
-    // ===== 記帳鍵盤 =====
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showKeyboardCategoryPicker by remember { mutableStateOf(false) }
 
-    // ===== 派生數據 =====
     val filtered by remember {
         derivedStateOf {
             val snapshot = records.toList()
@@ -413,7 +412,6 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-    // ===== 打開鍵盤的輔助函數 =====
     fun openKeyboardForNew(initialNote: String = "") {
         keyboardState = KeyboardState(noteText = initialNote)
         showKeyboard = true
@@ -442,7 +440,6 @@ fun MainApp() {
         showKeyboard = true
     }
 
-    // ===== 保存 =====
     fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) {
@@ -454,7 +451,6 @@ fun MainApp() {
         val editId = keyboardState.editingRecordId
 
         if (editId != null) {
-            // 更新
             db.collection("records").document(editId).update(
                 mapOf(
                     "amount" to amt,
@@ -463,7 +459,6 @@ fun MainApp() {
                 )
             )
         } else {
-            // 新增（自動繼承同名圖標）
             val inheritedIcon = records
                 .filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }
@@ -515,7 +510,6 @@ fun MainApp() {
                         Toast.LENGTH_SHORT
                     ).show()
                 },
-                // 鍵盤相關
                 showKeyboard = showKeyboard,
                 keyboardState = keyboardState,
                 onKeyboardStateChange = { keyboardState = it },
@@ -525,7 +519,6 @@ fun MainApp() {
                 },
                 onKeyboardConfirm = { saveFromKeyboard() },
                 onKeyboardNext = {
-                    // 名稱空白 → 進入名稱編輯模式
                     keyboardState = keyboardState.copy(editingNote = true)
                 },
                 onKeyboardPickCategory = {
@@ -554,7 +547,6 @@ fun MainApp() {
             )
         }
 
-        // 導航欄（鍵盤顯示時隱藏）
         if (!showKeyboard) {
             key("navbar") {
                 FloatingNavBar(
@@ -610,7 +602,6 @@ fun MainApp() {
         }
     }
 
-    // ===== 鍵盤類別 picker =====
     if (showKeyboardCategoryPicker) {
         AlertDialog(
             onDismissRequest = { showKeyboardCategoryPicker = false },
@@ -657,7 +648,6 @@ fun MainApp() {
         )
     }
 
-    // ===== 圖標來源 dialog =====
     if (showIconSourceDialog) {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
@@ -729,7 +719,6 @@ fun MainApp() {
         )
     }
 
-    // ===== URL 輸入 dialog =====
     if (showUrlInputDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -994,7 +983,6 @@ fun LedgerContent(
     onDeleteClick: (Record) -> Unit,
     onChangeIconClick: (Record) -> Unit,
     onFilterClick: () -> Unit,
-    // 鍵盤
     showKeyboard: Boolean,
     keyboardState: KeyboardState,
     onKeyboardStateChange: (KeyboardState) -> Unit,
@@ -1006,7 +994,6 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ===== 類別 chips =====
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1051,7 +1038,7 @@ fun LedgerContent(
                     expense = totalExpense
                 )
 
-                // ===== 快速輸入（永遠顯示）=====
+                // 快速輸入（冇分隔線）
                 if (topNotes.isNotEmpty()) {
                     QuickInputSection(
                         topNotes = topNotes,
@@ -1059,10 +1046,8 @@ fun LedgerContent(
                         onClick = onQuickInputClick
                     )
                     Spacer(Modifier.height(8.dp))
-                    HorizontalDivider()
                 }
 
-                // ===== 鍵盤 or 列表 =====
                 if (showKeyboard) {
                     LedgerKeyboardPanel(
                         state = keyboardState,
@@ -1103,9 +1088,16 @@ fun LedgerContent(
                                 )
                             }
 
-                            items(dayRecords, key = { it.id }) { r ->
+                            itemsIndexed(
+                                dayRecords,
+                                key = { _, r -> r.id }
+                            ) { idx, r ->
                                 SwipeableRecordItem(
                                     modifier = Modifier.animateItem(),
+                                    backgroundColor = if (idx % 2 == 0)
+                                        MaterialTheme.colorScheme.surface
+                                    else
+                                        ROW_ALT_COLOR,
                                     record = r,
                                     expandedId = expandedId,
                                     onExpand = onExpandChange,
@@ -1124,7 +1116,7 @@ fun LedgerContent(
     }
 }
 
-// ===== 記帳鍵盤面板 =====
+// ===== 記帳鍵盤面板（貼底）=====
 @Composable
 fun LedgerKeyboardPanel(
     state: KeyboardState,
@@ -1142,9 +1134,10 @@ fun LedgerKeyboardPanel(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            verticalArrangement = Arrangement.Bottom  // 內容貼底
         ) {
-            // ===== 金額顯示 =====
+            // 金額顯示
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1165,15 +1158,25 @@ fun LedgerKeyboardPanel(
                         targetState = showText,
                         transitionSpec = {
                             if (targetState.length > initialState.length) {
-                                // 加字符：新字從右滑入,舊字向左滑出
-                                (slideInHorizontally { it / 2 } + fadeIn()) togetherWith
-                                    (slideOutHorizontally { -it / 2 } + fadeOut())
+                                // 加字符：由右滑入
+                                slideInHorizontally(
+                                    initialOffsetX = { it / 2 },
+                                    animationSpec = tween(150)
+                                ) togetherWith slideOutHorizontally(
+                                    targetOffsetX = { -it / 2 },
+                                    animationSpec = tween(150)
+                                )
                             } else if (targetState.length < initialState.length) {
-                                // 刪字符：新字從左滑入,舊字向右滑出
-                                (slideInHorizontally { -it / 2 } + fadeIn()) togetherWith
-                                    (slideOutHorizontally { it / 2 } + fadeOut())
+                                // 刪字符：由左滑入
+                                slideInHorizontally(
+                                    initialOffsetX = { -it / 2 },
+                                    animationSpec = tween(150)
+                                ) togetherWith slideOutHorizontally(
+                                    targetOffsetX = { it / 2 },
+                                    animationSpec = tween(150)
+                                )
                             } else {
-                                fadeIn() togetherWith fadeOut()
+                                fadeIn(tween(120)) togetherWith fadeOut(tween(120))
                             }
                         },
                         label = "amountDisplay"
@@ -1195,7 +1198,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 數字鍵盤 =====
+            // 數字鍵盤
             val rows = listOf(
                 listOf("1", "2", "3"),
                 listOf("4", "5", "6"),
@@ -1265,7 +1268,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 項目名 + 類別（高度永遠一致）=====
+            // 名稱 + 類別（同高）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1345,12 +1348,12 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 底部按鈕（貼底）=====
+            // 底部按鈕（貼底，冇多餘 padding）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp)
-                    .padding(bottom = 8.dp),
+                    .padding(bottom = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
@@ -1587,9 +1590,13 @@ fun FilterContent(
                         bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                     )
                 ) {
-                    items(results, key = { it.id }) { r ->
+                    itemsIndexed(results, key = { _, r -> r.id }) { idx, r ->
                         SwipeableRecordItem(
                             modifier = Modifier.animateItem(),
+                            backgroundColor = if (idx % 2 == 0)
+                                MaterialTheme.colorScheme.surface
+                            else
+                                ROW_ALT_COLOR,
                             record = r,
                             expandedId = expandedId,
                             onExpand = { expandedId = it },
@@ -2210,6 +2217,7 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
 @Composable
 fun SwipeableRecordItem(
     modifier: Modifier = Modifier,
+    backgroundColor: Color = MaterialTheme.colorScheme.surface,
     record: Record,
     expandedId: String?,
     onExpand: (String?) -> Unit,
@@ -2259,8 +2267,11 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
+        // 左滑露出的 4 顆按鈕（右側有 padding）
         Row(
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier
+                .matchParentSize()
+                .padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.End
             ),
@@ -2284,8 +2295,11 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
+        // 右滑露出的 1 顆按鈕（左側有 padding）
         Row(
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier
+                .matchParentSize()
+                .padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(
                 gap, Alignment.Start
             ),
@@ -2328,40 +2342,39 @@ fun SwipeableRecordItem(
                                 .coerceIn(maxLeftReveal, maxRightReveal)
                         }
                     )
-                }
+                },
+            color = backgroundColor
         ) {
-            Column {
-                ListItem(
-                    leadingContent = {
-                        IconView(record.iconUrl, record.note)
-                    },
-                    headlineContent = {
-                        Text(
-                            text = record.note.ifBlank { "(無名稱)" },
-                            fontSize = NOTE_FONT_SIZE,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    },
-                    supportingContent = {
-                        Text(
-                            text = "${record.category}．${formatRecordTime(record.timestamp)}",
-                            fontSize = META_FONT_SIZE,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                .copy(alpha = 0.7f)
-                        )
-                    },
-                    trailingContent = {
-                        Text(
-                            text = displayAmount(record),
-                            color = amountColor(record.category),
-                            fontSize = AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                )
-                HorizontalDivider()
-            }
+            // 冇 HorizontalDivider 了
+            ListItem(
+                leadingContent = {
+                    IconView(record.iconUrl, record.note)
+                },
+                headlineContent = {
+                    Text(
+                        text = record.note.ifBlank { "(無名稱)" },
+                        fontSize = NOTE_FONT_SIZE,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        text = "${record.category}．${formatRecordTime(record.timestamp)}",
+                        fontSize = META_FONT_SIZE,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                            .copy(alpha = 0.7f)
+                    )
+                },
+                trailingContent = {
+                    Text(
+                        text = displayAmount(record),
+                        color = amountColor(record.category),
+                        fontSize = AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            )
         }
     }
 }
