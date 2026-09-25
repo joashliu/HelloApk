@@ -1159,26 +1159,38 @@ fun LedgerKeyboardPanel(
                 ) {
                     val showText = if (state.amountText.isEmpty()) "0"
                                    else state.amountText
-                    AnimatedContent(
+                                        AnimatedContent(
                         targetState = showText,
                         transitionSpec = {
                             if (targetState.length > initialState.length) {
                                 // 加字：新字由右滑入,舊字向左滑出
                                 slideInHorizontally(
                                     initialOffsetX = { it },
-                                    animationSpec = tween(180)
+                                    animationSpec = tween(
+                                        durationMillis = 160,
+                                        easing = LinearEasing
+                                    )
                                 ) togetherWith slideOutHorizontally(
                                     targetOffsetX = { -it },
-                                    animationSpec = tween(180)
+                                    animationSpec = tween(
+                                        durationMillis = 160,
+                                        easing = LinearEasing
+                                    )
                                 )
                             } else if (targetState.length < initialState.length) {
                                 // 刪字：新字由左滑入,舊字向右滑出
                                 slideInHorizontally(
                                     initialOffsetX = { -it },
-                                    animationSpec = tween(180)
+                                    animationSpec = tween(
+                                        durationMillis = 160,
+                                        easing = LinearEasing
+                                    )
                                 ) togetherWith slideOutHorizontally(
                                     targetOffsetX = { it },
-                                    animationSpec = tween(180)
+                                    animationSpec = tween(
+                                        durationMillis = 160,
+                                        easing = LinearEasing
+                                    )
                                 )
                             } else {
                                 // 同長度：直接切換,冇動畫
