@@ -2316,11 +2316,12 @@ fun SwipeableRecordItem(
                             isDragging = true
                             onExpand(record.id)
                         },
-                        onDragEnd = {
+                                                onDragEnd = {
                             isDragging = false
+                            // 只要滑到 25% 就當展開
                             val newOffset = when {
-                                targetOffset < maxLeftReveal / 2 -> maxLeftReveal
-                                targetOffset > maxRightReveal / 2 -> maxRightReveal
+                                targetOffset < maxLeftReveal * 0.25f -> maxLeftReveal
+                                targetOffset > maxRightReveal * 0.25f -> maxRightReveal
                                 else -> 0f
                             }
                             targetOffset = newOffset
