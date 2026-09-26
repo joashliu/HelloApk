@@ -24,6 +24,8 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
@@ -535,6 +537,12 @@ fun MainApp() {
                     iconTargetRecord = r
                     showIconSourceDialog = true
                 },
+                onFilterByName = { name ->
+                    filterCategory = null
+                    filterMonth = null
+                    filterSearch = name
+                    filterModeOn = true
+                },
                 showKeyboard = showKeyboard,
                 keyboardState = keyboardState,
                 onKeyboardStateChange = { keyboardState = it },
@@ -593,12 +601,27 @@ fun MainApp() {
                 )
             }
 
-            key("fab") {
-                if (currentPage == 0 && filterModeOn) {
-                    // 篩選模式：搜尋欄 + 篩選關 + 新增FAB（同一行）
+            // ===== 篩選模式底部（Spring 彈入）=====
+            key("filter_bottom") {
+                AnimatedVisibility(
+                    visible = filterModeOn && currentPage == 0,
+                    enter = slideInVertically(
+                        initialOffsetY = { it * 3 },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeIn(animationSpec = tween(180)),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it * 3 },
+                        animationSpec = tween(220)
+                    ) + fadeOut(tween(150)),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                ) {
                     Row(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .padding(
                                 start = 16.dp,
@@ -694,14 +717,32 @@ fun MainApp() {
                             )
                         }
                     }
-                } else if (currentPage == 0) {
+                }
+            }
+
+            // ===== 一般模式 FAB =====
+            key("fab") {
+                AnimatedVisibility(
+                    visible = !filterModeOn && currentPage == 0,
+                    enter = fadeIn(tween(180)) + scaleIn(
+                        initialScale = 0.6f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        )
+                    ),
+                    exit = fadeOut(tween(150)) + scaleOut(
+                        targetScale = 0.6f,
+                        animationSpec = tween(180)
+                    ),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = 20.dp,
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                        )
+                ) {
                     Row(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(
-                                end = 20.dp,
-                                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
-                            ),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1136,6 +1177,7 @@ fun LedgerContent(
     onEditClick: (Record) -> Unit,
     onDeleteClick: (Record) -> Unit,
     onChangeIconClick: (Record) -> Unit,
+    onFilterByName: (String) -> Unit,
     showKeyboard: Boolean,
     keyboardState: KeyboardState,
     onKeyboardStateChange: (KeyboardState) -> Unit,
@@ -1147,7 +1189,6 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ===== 篩選模式下頂部顯示類別 / 月份 chips =====
         AnimatedVisibility(
             visible = filterMode,
             enter = fadeIn(tween(220)) + expandVertically(
@@ -1311,7 +1352,7 @@ fun LedgerContent(
                                     onExpand = onExpandChange,
                                     onCopy = { onCopyClick(r) },
                                     onEdit = { onEditClick(r) },
-                                    onFilter = {},
+                                    onFilter = { onFilterByName(r.note) },
                                     onDelete = { onDeleteClick(r) },
                                     onChangeIcon = { onChangeIconClick(r) }
                                 )
