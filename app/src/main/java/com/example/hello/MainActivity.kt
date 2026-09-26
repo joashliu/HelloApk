@@ -1,10 +1,5 @@
 package com.example.hello
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -18,14 +13,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -55,9 +54,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -85,9 +86,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -121,6 +124,7 @@ val CATEGORIES = listOf(
     "收入", "娛樂", "家用", "飲食", "交通",
     "個人", "購物", "月費", "旅遊"
 )
+val EXPENSE_CATEGORIES = CATEGORIES.filter { it != "收入" }
 
 val INCOME_CATEGORY = "收入"
 
@@ -287,14 +291,17 @@ fun MainApp() {
     val scope = rememberCoroutineScope()
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
-    var selectedCategory by remember { mutableStateOf<String?>(null) }
     var expandedId by remember { mutableStateOf<String?>(null) }
+
+    // 頁面：0=記帳 1=比較 2=篩選
     var currentPage by remember { mutableIntStateOf(0) }
 
-    var searchQuery by remember { mutableStateOf("") }
-
+    // 記帳頁的篩選模式
+    var filterModeOn by remember { mutableStateOf(false) }
+    // 共用的篩選條件
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
+    var filterSearch by remember { mutableStateOf("") }
 
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
@@ -307,22 +314,36 @@ fun MainApp() {
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showKeyboardCategoryPicker by remember { mutableStateOf(false) }
 
+    // 篩選結果（記帳頁 + 篩選頁共用）
     val filtered by remember {
         derivedStateOf {
             val snapshot = records.toList()
-            if (selectedCategory == null) snapshot
-            else snapshot.filter { it.category == selectedCategory }
+            snapshot.filter { r ->
+                val catOk = filterCategory == null ||
+                    r.category == filterCategory
+                val monthOk = filterMonth == null ||
+                    monthKeyFromTimestamp(r.timestamp) == filterMonth
+                val searchOk = filterSearch.isBlank() ||
+                    r.note.contains(filterSearch, ignoreCase = true) ||
+                    r.category.contains(filterSearch, ignoreCase = true)
+                catOk && monthOk && searchOk
+            }
         }
     }
+    // 記帳頁要顯示的資料（filter mode 關閉 = 全部）
+    val ledgerRecords by remember {
+        derivedStateOf { if (filterModeOn) filtered else records.toList() }
+    }
+
     val totalIncome by remember {
         derivedStateOf {
-            filtered.filter { it.category == INCOME_CATEGORY }
+            ledgerRecords.filter { it.category == INCOME_CATEGORY }
                 .sumOf { it.amount }
         }
     }
     val totalExpense by remember {
         derivedStateOf {
-            filtered.filter { it.category != INCOME_CATEGORY }
+            ledgerRecords.filter { it.category != INCOME_CATEGORY }
                 .sumOf { it.amount }
         }
     }
@@ -331,12 +352,12 @@ fun MainApp() {
     }
     val groupedByDate by remember {
         derivedStateOf {
-            filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
+            ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
         }
     }
     val topNotes by remember {
         derivedStateOf {
-            filtered.filter { it.note.isNotBlank() }
+            ledgerRecords.filter { it.note.isNotBlank() }
                 .groupBy { it.note }
                 .map { (name, list) -> name to list.size }
                 .sortedByDescending { it.second }
@@ -345,7 +366,7 @@ fun MainApp() {
     }
     val noteIconMap by remember {
         derivedStateOf {
-            filtered.filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+            ledgerRecords.filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
                 .groupBy { it.note }
                 .mapValues { (_, list) ->
                     list.maxByOrNull { it.timestamp }?.iconUrl ?: ""
@@ -485,20 +506,24 @@ fun MainApp() {
         when (currentPage) {
             0 -> LedgerContent(
                 loading = loading,
-                filtered = filtered,
+                filtered = ledgerRecords,
                 groupedByDate = groupedByDate,
                 topNotes = topNotes,
                 noteIconMap = noteIconMap,
                 totalIncome = totalIncome,
                 totalExpense = totalExpense,
                 balance = balance,
-                selectedCategory = selectedCategory,
-                onCategoryChange = { selectedCategory = it },
+                filterMode = filterModeOn,
+                filterCategory = filterCategory,
+                onFilterCategoryChange = { filterCategory = it },
+                filterMonth = filterMonth,
+                onFilterMonthChange = { filterMonth = it },
+                filterSearch = filterSearch,
+                onFilterSearchChange = { filterSearch = it },
+                availableMonths = availableMonths,
                 expandedId = expandedId,
                 onExpandChange = { expandedId = it },
-                onQuickInputClick = { name ->
-                    openKeyboardForNew(name)
-                },
+                onQuickInputClick = { name -> openKeyboardForNew(name) },
                 onCopyClick = { r -> openKeyboardForCopy(r) },
                 onEditClick = { r -> openKeyboardForEdit(r) },
                 onDeleteClick = { r ->
@@ -507,13 +532,6 @@ fun MainApp() {
                 onChangeIconClick = { r ->
                     iconTargetRecord = r
                     showIconSourceDialog = true
-                },
-                onFilterClick = {
-                    Toast.makeText(
-                        context,
-                        "篩選功能開發中",
-                        Toast.LENGTH_SHORT
-                    ).show()
                 },
                 showKeyboard = showKeyboard,
                 keyboardState = keyboardState,
@@ -531,10 +549,15 @@ fun MainApp() {
                 }
             )
 
-            1 -> FilterContent(
+            1 -> CompareContent(
                 records = records,
-                searchQuery = searchQuery,
-                onSearchChange = { searchQuery = it },
+                availableMonths = availableMonths
+            )
+
+            2 -> FilterContent(
+                records = records,
+                searchQuery = filterSearch,
+                onSearchChange = { filterSearch = it },
                 filterCategory = filterCategory,
                 onFilterCategoryChange = { filterCategory = it },
                 filterMonth = filterMonth,
@@ -552,11 +575,13 @@ fun MainApp() {
             )
         }
 
+        // ===== 導航欄 =====
         if (!showKeyboard) {
             key("navbar") {
                 FloatingNavBar(
                     items = listOf(
                         NavItem("記帳", Icons.Default.Receipt),
+                        NavItem("比較", Icons.Default.CompareArrows),
                         NavItem("篩選", Icons.Default.FilterList)
                     ),
                     selectedIndex = currentPage,
@@ -567,18 +592,43 @@ fun MainApp() {
                 )
             }
 
+            // ===== FAB Row（只在記帳頁） =====
             key("fab") {
                 if (currentPage == 0) {
-                    FloatingActionButton(
-                        onClick = { openKeyboardForNew() },
+                    Row(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(
                                 end = 20.dp,
                                 bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
-                            )
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = "新增")
+                        SmallFloatingActionButton(
+                            onClick = { filterModeOn = !filterModeOn },
+                            containerColor = if (filterModeOn)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (filterModeOn)
+                                MaterialTheme.colorScheme.onPrimary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        ) {
+                            Icon(
+                                Icons.Default.FilterAlt,
+                                contentDescription = "篩選開關"
+                            )
+                        }
+                        FloatingActionButton(
+                            onClick = { openKeyboardForNew() }
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "新增"
+                            )
+                        }
                     }
                 }
             }
@@ -607,6 +657,7 @@ fun MainApp() {
         }
     }
 
+    // ===== 鍵盤類別 picker =====
     if (showKeyboardCategoryPicker) {
         AlertDialog(
             onDismissRequest = { showKeyboardCategoryPicker = false },
@@ -653,6 +704,7 @@ fun MainApp() {
         )
     }
 
+    // ===== 圖標來源 =====
     if (showIconSourceDialog) {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
@@ -967,7 +1019,7 @@ fun FloatingNavBar(
 }
 
 // ===== 記帳頁 =====
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LedgerContent(
     loading: Boolean,
@@ -978,8 +1030,14 @@ fun LedgerContent(
     totalIncome: Double,
     totalExpense: Double,
     balance: Double,
-    selectedCategory: String?,
-    onCategoryChange: (String?) -> Unit,
+    filterMode: Boolean,
+    filterCategory: String?,
+    onFilterCategoryChange: (String?) -> Unit,
+    filterMonth: String?,
+    onFilterMonthChange: (String?) -> Unit,
+    filterSearch: String,
+    onFilterSearchChange: (String) -> Unit,
+    availableMonths: List<String>,
     expandedId: String?,
     onExpandChange: (String?) -> Unit,
     onQuickInputClick: (String) -> Unit,
@@ -987,7 +1045,6 @@ fun LedgerContent(
     onEditClick: (Record) -> Unit,
     onDeleteClick: (Record) -> Unit,
     onChangeIconClick: (Record) -> Unit,
-    onFilterClick: () -> Unit,
     showKeyboard: Boolean,
     keyboardState: KeyboardState,
     onKeyboardStateChange: (KeyboardState) -> Unit,
@@ -999,29 +1056,117 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // ===== 篩選模式：搜尋 bar + 類別 + 月份 chips（動畫顯示）=====
+        AnimatedVisibility(
+            visible = filterMode,
+            enter = fadeIn(tween(220)) + expandVertically(
+                animationSpec = tween(250),
+                expandFrom = Alignment.Top
+            ),
+            exit = fadeOut(tween(180)) + shrinkVertically(
+                animationSpec = tween(220),
+                shrinkTowards = Alignment.Top
+            )
         ) {
-            item {
-                FilterChip(
-                    selected = selectedCategory == null,
-                    onClick = { onCategoryChange(null) },
-                    label = { Text("全部") }
-                )
-            }
-            items(CATEGORIES) { cat ->
-                FilterChip(
-                    selected = selectedCategory == cat,
-                    onClick = {
-                        onCategoryChange(
-                            if (selectedCategory == cat) null else cat
+            Column {
+                // 搜尋 bar
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                        .copy(alpha = 0.6f)
+                ) {
+                    OutlinedTextField(
+                        value = filterSearch,
+                        onValueChange = onFilterSearchChange,
+                        placeholder = { Text("搜尋名稱或類別…") },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        trailingIcon = {
+                            if (filterSearch.isNotBlank()) {
+                                IconButton(onClick = {
+                                    onFilterSearchChange("")
+                                }) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "清除"
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // 類別 chips
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    AnimatedFilterChip(
+                        selected = filterCategory == null,
+                        label = "全部",
+                        onClick = { onFilterCategoryChange(null) }
+                    )
+                    CATEGORIES.forEach { cat ->
+                        AnimatedFilterChip(
+                            selected = filterCategory == cat,
+                            label = cat,
+                            onClick = {
+                                onFilterCategoryChange(
+                                    if (filterCategory == cat) null else cat
+                                )
+                            }
                         )
-                    },
-                    label = { Text(cat) }
-                )
+                    }
+                }
+
+                // 月份 chips
+                if (availableMonths.isNotEmpty()) {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        AnimatedFilterChip(
+                            selected = filterMonth == null,
+                            label = "全年",
+                            onClick = { onFilterMonthChange(null) }
+                        )
+                        availableMonths.forEach { month ->
+                            AnimatedFilterChip(
+                                selected = filterMonth == month,
+                                label = formatMonthLabel(month),
+                                onClick = {
+                                    onFilterMonthChange(
+                                        if (filterMonth == month) null
+                                        else month
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
             }
         }
 
@@ -1034,7 +1179,12 @@ fun LedgerContent(
             filtered.isEmpty() && !showKeyboard -> Box(
                 Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
-            ) { Text("仲未有記錄,撳右下角 + 新增") }
+            ) {
+                Text(
+                    if (filterMode) "冇符合篩選條件嘅記錄"
+                    else "仲未有記錄,撳右下角 + 新增"
+                )
+            }
 
             else -> {
                 TopStats(
@@ -1043,7 +1193,6 @@ fun LedgerContent(
                     expense = totalExpense
                 )
 
-                // 快速輸入（冇分隔線）
                 if (topNotes.isNotEmpty()) {
                     QuickInputSection(
                         topNotes = topNotes,
@@ -1108,7 +1257,7 @@ fun LedgerContent(
                                     onExpand = onExpandChange,
                                     onCopy = { onCopyClick(r) },
                                     onEdit = { onEditClick(r) },
-                                    onFilter = onFilterClick,
+                                    onFilter = {},
                                     onDelete = { onDeleteClick(r) },
                                     onChangeIcon = { onChangeIconClick(r) }
                                 )
@@ -1121,343 +1270,280 @@ fun LedgerContent(
     }
 }
 
-// ===== 記帳鍵盤面板（貼底）=====
+// ===== 比較頁 =====
 @Composable
-fun LedgerKeyboardPanel(
-    state: KeyboardState,
-    onStateChange: (KeyboardState) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-    onNext: () -> Unit,
-    onPickCategory: () -> Unit,
-    modifier: Modifier = Modifier
+fun CompareContent(
+    records: List<Record>,
+    availableMonths: List<String>,
 ) {
-    Surface(
-        modifier = modifier,
-        color = MaterialTheme.colorScheme.surface
+    var monthA by remember { mutableStateOf<String?>(null) }
+    var monthB by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(availableMonths) {
+        if (monthA == null || monthA !in availableMonths) {
+            monthA = availableMonths.getOrNull(0)
+        }
+        if (monthB == null || monthB !in availableMonths) {
+            monthB = availableMonths.getOrNull(1)
+                ?: availableMonths.getOrNull(0)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp),
-            verticalArrangement = Arrangement.Bottom
+        Text(
+            "月份比較",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // ===== 金額顯示（平移動畫）=====
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(76.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-                    .copy(alpha = 0.5f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .padding(horizontal = 20.dp),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    val showText = if (state.amountText.isEmpty()) "0"
-                                   else state.amountText
-                                                            Text(
-                        text = showText,
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (state.amountText.isEmpty())
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        else
-                            MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.End,
-                        maxLines = 1
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // ===== 數字鍵盤 =====
-            val rows = listOf(
-                listOf("1", "2", "3"),
-                listOf("4", "5", "6"),
-                listOf("7", "8", "9"),
-                listOf(".", "0", "backspace")
+            MonthDropdown(
+                label = "月份 A",
+                value = monthA,
+                months = availableMonths,
+                onChange = { monthA = it },
+                modifier = Modifier.weight(1f)
             )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                rows.forEach { row ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        row.forEach { key ->
-                            KeyboardKey(
-                                label = key,
-                                onClick = {
-                                    when (key) {
-                                        "backspace" -> {
-                                            val t = state.amountText
-                                            onStateChange(
-                                                state.copy(
-                                                    amountText = if (t.isEmpty())
-                                                        t else t.dropLast(1)
-                                                )
-                                            )
-                                        }
-                                        "." -> {
-                                            val t = state.amountText
-                                            if (t.contains(".")) return@KeyboardKey
-                                            val newT = if (t.isEmpty()) "0."
-                                                       else "$t."
-                                            onStateChange(
-                                                state.copy(amountText = newT)
-                                            )
-                                        }
-                                        else -> {
-                                            val t = state.amountText
-                                            val dotIdx = t.indexOf(".")
-                                            val newT = if (dotIdx >= 0) {
-                                                if (t.length - dotIdx - 1 >= 2) t
-                                                else "$t$key"
-                                            } else {
-                                                if (t.length >= 9) t
-                                                else "$t$key"
-                                            }
-                                            onStateChange(
-                                                state.copy(amountText = newT)
-                                            )
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                            )
-                        }
-                    }
-                }
-            }
+            MonthDropdown(
+                label = "月份 B",
+                value = monthB,
+                months = availableMonths,
+                onChange = { monthB = it },
+                modifier = Modifier.weight(1f)
+            )
+        }
 
-            Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(16.dp))
 
-            // ===== 名稱 + 類別 =====
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (state.editingNote) {
-                    var tfValue by remember(state.editingNote) {
-                        mutableStateOf(
-                            TextFieldValue(
-                                text = state.noteText,
-                                selection = TextRange(
-                                    0, state.noteText.length
-                                )
-                            )
-                        )
-                    }
-                    val noteFocusRequester = remember { FocusRequester() }
-                    LaunchedEffect(Unit) {
-                        noteFocusRequester.requestFocus()
-                    }
-                    TextField(
-                        value = tfValue,
-                        onValueChange = { newValue ->
-                            tfValue = newValue
-                            onStateChange(
-                                state.copy(noteText = newValue.text)
-                            )
-                        },
-                        placeholder = { Text("名稱") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                onStateChange(
-                                    state.copy(editingNote = false)
-                                )
-                            }
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .focusRequester(noteFocusRequester)
-                    )
-                } else {
-                    OutlinedButton(
-                        onClick = {
-                            onStateChange(state.copy(editingNote = true))
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    ) {
-                        Text(
-                            text = if (state.noteText.isBlank())
-                                "輸入名稱"
-                            else
-                                state.noteText,
-                            maxLines = 1,
-                            fontSize = 16.sp,
-                            color = if (state.noteText.isBlank())
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            else
-                                MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-                OutlinedButton(
-                    onClick = onPickCategory,
-                    shape = RoundedCornerShape(14.dp),
+        // 表頭
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "類別",
+                modifier = Modifier.weight(1.2f),
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Text(
+                monthA?.let { formatMonthLabel(it) } ?: "-",
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                textAlign = TextAlign.End
+            )
+            Text(
+                monthB?.let { formatMonthLabel(it) } ?: "-",
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                textAlign = TextAlign.End
+            )
+            Text(
+                "差異",
+                modifier = Modifier.weight(1f),
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                textAlign = TextAlign.End
+            )
+        }
+        HorizontalDivider()
+
+        // 內容
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+            )
+        ) {
+            items(EXPENSE_CATEGORIES) { cat ->
+                val amtA = if (monthA != null)
+                    sumByCategoryAndMonth(records, cat, monthA!!)
+                else 0.0
+                val amtB = if (monthB != null)
+                    sumByCategoryAndMonth(records, cat, monthB!!)
+                else 0.0
+                val diff = amtB - amtA
+
+                Row(
                     modifier = Modifier
-                        .width(110.dp)
-                        .fillMaxHeight()
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(state.category, maxLines = 1, fontSize = 16.sp)
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // ===== 底部按鈕（保持 64dp 高，用 Spacer 避開圓角）=====
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                ) {
-                    Icon(
-                        Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("收起", fontSize = 16.sp)
-                }
-                Button(
-                    onClick = {
-                        if (state.noteText.isBlank()) {
-                            onNext()
-                        } else {
-                            onConfirm()
-                        }
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .weight(2f)
-                        .fillMaxHeight(),
-                    enabled = state.amountText.isNotEmpty() &&
-                        state.amountText != "0"
-                ) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
                     Text(
-                        when {
-                            state.noteText.isBlank() -> "下一步"
-                            state.editingRecordId != null -> "更新"
-                            else -> "入帳"
-                        },
-                        fontSize = 16.sp
+                        cat,
+                        modifier = Modifier.weight(1.2f),
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        formatAmount(amtA),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 15.sp,
+                        color = COLOR_EXPENSE,
+                        textAlign = TextAlign.End
+                    )
+                    Text(
+                        formatAmount(amtB),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 15.sp,
+                        color = COLOR_EXPENSE,
+                        textAlign = TextAlign.End
+                    )
+                    Text(
+                        (if (diff > 0) "+" else "") + formatAmount(diff),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (diff > 0) COLOR_EXPENSE
+                                else if (diff < 0) COLOR_INCOME
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End
+                    )
+                }
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        .copy(alpha = 0.15f)
+                )
+            }
+
+            // 總計
+            item {
+                val totalA = if (monthA != null)
+                    EXPENSE_CATEGORIES.sumOf {
+                        sumByCategoryAndMonth(records, it, monthA!!)
+                    }
+                else 0.0
+                val totalB = if (monthB != null)
+                    EXPENSE_CATEGORIES.sumOf {
+                        sumByCategoryAndMonth(records, it, monthB!!)
+                    }
+                else 0.0
+                val totalDiff = totalB - totalA
+
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant
+                                .copy(alpha = 0.4f)
+                        )
+                        .padding(vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "總計",
+                        modifier = Modifier.weight(1.2f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        formatAmount(totalA),
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = COLOR_EXPENSE,
+                        textAlign = TextAlign.End
+                    )
+                    Text(
+                        formatAmount(totalB),
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = COLOR_EXPENSE,
+                        textAlign = TextAlign.End
+                    )
+                    Text(
+                        (if (totalDiff > 0) "+" else "") +
+                            formatAmount(totalDiff),
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = if (totalDiff > 0) COLOR_EXPENSE
+                                else if (totalDiff < 0) COLOR_INCOME
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End
                     )
                 }
             }
-
-            // 避開圓角的底部留白（放喺按鈕之後,因為 Arrangement.Bottom 會推到底）
-            Spacer(Modifier.height(32.dp))
         }
     }
 }
+
+fun sumByCategoryAndMonth(
+    records: List<Record>,
+    category: String,
+    month: String
+): Double =
+    records
+        .filter {
+            it.category == category &&
+            monthKeyFromTimestamp(it.timestamp) == month
+        }
+        .sumOf { it.amount }
 
 @Composable
-fun KeyboardKey(
+fun MonthDropdown(
     label: String,
-    onClick: () -> Unit,
+    value: String?,
+    months: List<String>,
+    onChange: (String?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
+    var expanded by remember { mutableStateOf(false) }
 
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.94f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "keyScale"
-    )
-
-    val bgColor by animateColorAsState(
-        targetValue = if (pressed)
-            MaterialTheme.colorScheme.primaryContainer
-        else
-            MaterialTheme.colorScheme.surfaceVariant,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-        label = "keyBg"
-    )
-
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(bgColor)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.Start
+            ) {
+                Text(
+                    label,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    value?.let { formatMonthLabel(it) } ?: "未選擇",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null
-            ) { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        if (label == "backspace") {
-            Icon(
-                Icons.Default.Backspace,
-                contentDescription = "退格",
-                modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            Text(
-                text = label,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Medium
-            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            months.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(formatMonthLabel(m)) },
+                    onClick = {
+                        onChange(m)
+                        expanded = false
+                    }
+                )
+            }
         }
     }
 }
 
-// ===== 篩選頁 =====
+// ===== 篩選頁（保留） =====
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FilterContent(
@@ -1647,6 +1733,338 @@ fun FilterContent(
                     unfocusedContainerColor = Color.Transparent
                 ),
                 modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+// ===== 記帳鍵盤面板 =====
+@Composable
+fun LedgerKeyboardPanel(
+    state: KeyboardState,
+    onStateChange: (KeyboardState) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    onNext: () -> Unit,
+    onPickCategory: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            // 金額顯示（冇動畫）
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(76.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+                    .copy(alpha = 0.5f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(14.dp))
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    val showText = if (state.amountText.isEmpty()) "0"
+                                   else state.amountText
+                    Text(
+                        text = showText,
+                        fontSize = 38.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.amountText.isEmpty())
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.End,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            val rows = listOf(
+                listOf("1", "2", "3"),
+                listOf("4", "5", "6"),
+                listOf("7", "8", "9"),
+                listOf(".", "0", "backspace")
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                rows.forEach { row ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        row.forEach { key ->
+                            KeyboardKey(
+                                label = key,
+                                onClick = {
+                                    when (key) {
+                                        "backspace" -> {
+                                            val t = state.amountText
+                                            onStateChange(
+                                                state.copy(
+                                                    amountText = if (t.isEmpty())
+                                                        t else t.dropLast(1)
+                                                )
+                                            )
+                                        }
+                                        "." -> {
+                                            val t = state.amountText
+                                            if (t.contains(".")) return@KeyboardKey
+                                            val newT = if (t.isEmpty()) "0."
+                                                       else "$t."
+                                            onStateChange(
+                                                state.copy(amountText = newT)
+                                            )
+                                        }
+                                        else -> {
+                                            val t = state.amountText
+                                            val dotIdx = t.indexOf(".")
+                                            val newT = if (dotIdx >= 0) {
+                                                if (t.length - dotIdx - 1 >= 2) t
+                                                else "$t$key"
+                                            } else {
+                                                if (t.length >= 9) t
+                                                else "$t$key"
+                                            }
+                                            onStateChange(
+                                                state.copy(amountText = newT)
+                                            )
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (state.editingNote) {
+                    var tfValue by remember(state.editingNote) {
+                        mutableStateOf(
+                            TextFieldValue(
+                                text = state.noteText,
+                                selection = TextRange(
+                                    0, state.noteText.length
+                                )
+                            )
+                        )
+                    }
+                    val noteFocusRequester = remember { FocusRequester() }
+                    LaunchedEffect(Unit) {
+                        noteFocusRequester.requestFocus()
+                    }
+                    TextField(
+                        value = tfValue,
+                        onValueChange = { newValue ->
+                            tfValue = newValue
+                            onStateChange(
+                                state.copy(noteText = newValue.text)
+                            )
+                        },
+                        placeholder = { Text("名稱") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        ),
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                onStateChange(
+                                    state.copy(editingNote = false)
+                                )
+                            }
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .focusRequester(noteFocusRequester)
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = {
+                            onStateChange(state.copy(editingNote = true))
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        Text(
+                            text = if (state.noteText.isBlank())
+                                "輸入名稱"
+                            else
+                                state.noteText,
+                            maxLines = 1,
+                            fontSize = 16.sp,
+                            color = if (state.noteText.isBlank())
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            else
+                                MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                OutlinedButton(
+                    onClick = onPickCategory,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .width(110.dp)
+                        .fillMaxHeight()
+                ) {
+                    Text(state.category, maxLines = 1, fontSize = 16.sp)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("收起", fontSize = 16.sp)
+                }
+                Button(
+                    onClick = {
+                        if (state.noteText.isBlank()) {
+                            onNext()
+                        } else {
+                            onConfirm()
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(2f)
+                        .fillMaxHeight(),
+                    enabled = state.amountText.isNotEmpty() &&
+                        state.amountText != "0"
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        when {
+                            state.noteText.isBlank() -> "下一步"
+                            state.editingRecordId != null -> "更新"
+                            else -> "入帳"
+                        },
+                        fontSize = 16.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+fun KeyboardKey(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "keyScale"
+    )
+
+    val bgColor by animateColorAsState(
+        targetValue = if (pressed)
+            MaterialTheme.colorScheme.primaryContainer
+        else
+            MaterialTheme.colorScheme.surfaceVariant,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "keyBg"
+    )
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgColor)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null
+            ) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (label == "backspace") {
+            Icon(
+                Icons.Default.Backspace,
+                contentDescription = "退格",
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(
+                text = label,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Medium
             )
         }
     }
@@ -2226,9 +2644,9 @@ fun SwipeableRecordItem(
     val gap = 6.dp
     val buttonWidthPx = with(density) { buttonWidth.toPx() }
     val gapPx = with(density) { gap.toPx() }
-
-        val edgePadding = 8.dp
+    val edgePadding = 8.dp
     val edgePaddingPx = with(density) { edgePadding.toPx() }
+
     val leftTotalPx = buttonWidthPx * 4 + gapPx * 3
     val rightTotalPx = buttonWidthPx
 
@@ -2262,7 +2680,7 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
-        // 左滑露出的 4 顆按鈕（右側有 padding）
+        // 左滑露出的 4 顆按鈕
         Row(
             modifier = Modifier
                 .matchParentSize()
@@ -2290,7 +2708,7 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        // 右滑露出的 1 顆按鈕（左側有 padding）
+        // 右滑露出的 1 顆按鈕
         Row(
             modifier = Modifier
                 .matchParentSize()
@@ -2316,9 +2734,8 @@ fun SwipeableRecordItem(
                             isDragging = true
                             onExpand(record.id)
                         },
-                                                onDragEnd = {
+                        onDragEnd = {
                             isDragging = false
-                            // 只要滑到 25% 就當展開
                             val newOffset = when {
                                 targetOffset < maxLeftReveal * 0.25f -> maxLeftReveal
                                 targetOffset > maxRightReveal * 0.25f -> maxRightReveal
@@ -2338,10 +2755,18 @@ fun SwipeableRecordItem(
                                 .coerceIn(maxLeftReveal, maxRightReveal)
                         }
                     )
+                }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    // 點擊時收起任何展開嘅按鈕
+                    if (expandedId != null) {
+                        onExpand(null)
+                    }
                 },
             color = backgroundColor
         ) {
-            // 冇 HorizontalDivider 了
             ListItem(
                 leadingContent = {
                     IconView(record.iconUrl, record.note)
