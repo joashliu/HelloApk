@@ -150,6 +150,9 @@ val NAV_BOTTOM_PADDING = 20.dp
 
 val ROW_ALT_COLOR = Color(0xFFE3F2FD)
 
+// 篩選模式進出動畫時長（統一用呢個，避免列表跳動）
+const val FILTER_ANIM_MS = 250
+
 // ===== 資料模型 =====
 data class Record(
     val amount: Double = 0.0,
@@ -601,7 +604,7 @@ fun MainApp() {
                 )
             }
 
-            // ===== 篩選模式底部（Spring 彈入）=====
+            // ===== 篩選模式底部 =====
             key("filter_bottom") {
                 AnimatedVisibility(
                     visible = filterModeOn && currentPage == 0,
@@ -1189,14 +1192,15 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // ===== 篩選模式下頂部 chips（時間統一 250ms）=====
         AnimatedVisibility(
             visible = filterMode,
-            enter = fadeIn(tween(220)) + expandVertically(
-                animationSpec = tween(250),
+            enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
+                animationSpec = tween(FILTER_ANIM_MS),
                 expandFrom = Alignment.Top
             ),
-            exit = fadeOut(tween(180)) + shrinkVertically(
-                animationSpec = tween(220),
+            exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(
+                animationSpec = tween(FILTER_ANIM_MS),
                 shrinkTowards = Alignment.Top
             )
         ) {
@@ -1281,10 +1285,17 @@ fun LedgerContent(
                     expense = totalExpense
                 )
 
+                // ===== 快速輸入（與頂部 chips 同步動畫,避免列表跳動）=====
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
-                    enter = fadeIn(tween(220)),
-                    exit = fadeOut(tween(180))
+                    enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
+                        animationSpec = tween(FILTER_ANIM_MS),
+                        expandFrom = Alignment.Top
+                    ),
+                    exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(
+                        animationSpec = tween(FILTER_ANIM_MS),
+                        shrinkTowards = Alignment.Top
+                    )
                 ) {
                     Column {
                         QuickInputSection(
@@ -2277,7 +2288,7 @@ fun QuickInputSection(
     }
 }
 
-// ===== 頂部統計（只顯示收入或支出） =====
+// ===== 頂部統計 =====
 @Composable
 fun TopStats(
     hasIncome: Boolean,
