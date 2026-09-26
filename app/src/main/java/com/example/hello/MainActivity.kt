@@ -15,19 +15,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -254,7 +251,6 @@ fun formatDateHeader(dateKey: String): String {
     return "$datePart $week"
 }
 
-// ===== 文字頭像調色盤 =====
 val AVATAR_COLORS = listOf(
     Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8),
     Color(0xFF9575CD), Color(0xFF7986CB), Color(0xFF64B5F6),
@@ -293,12 +289,9 @@ fun MainApp() {
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
 
-    // 頁面：0=記帳 1=比較 2=篩選
     var currentPage by remember { mutableIntStateOf(0) }
 
-    // 記帳頁的篩選模式
     var filterModeOn by remember { mutableStateOf(false) }
-    // 共用的篩選條件
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
     var filterSearch by remember { mutableStateOf("") }
@@ -314,7 +307,6 @@ fun MainApp() {
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showKeyboardCategoryPicker by remember { mutableStateOf(false) }
 
-    // 篩選結果（記帳頁 + 篩選頁共用）
     val filtered by remember {
         derivedStateOf {
             val snapshot = records.toList()
@@ -330,11 +322,20 @@ fun MainApp() {
             }
         }
     }
-    // 記帳頁要顯示的資料（filter mode 關閉 = 全部）
     val ledgerRecords by remember {
         derivedStateOf { if (filterModeOn) filtered else records.toList() }
     }
 
+    val hasIncome by remember {
+        derivedStateOf {
+            ledgerRecords.any { it.category == INCOME_CATEGORY }
+        }
+    }
+    val hasExpense by remember {
+        derivedStateOf {
+            ledgerRecords.any { it.category != INCOME_CATEGORY }
+        }
+    }
     val totalIncome by remember {
         derivedStateOf {
             ledgerRecords.filter { it.category == INCOME_CATEGORY }
@@ -346,9 +347,6 @@ fun MainApp() {
             ledgerRecords.filter { it.category != INCOME_CATEGORY }
                 .sumOf { it.amount }
         }
-    }
-    val balance by remember {
-        derivedStateOf { totalIncome - totalExpense }
     }
     val groupedByDate by remember {
         derivedStateOf {
@@ -510,17 +508,11 @@ fun MainApp() {
                 groupedByDate = groupedByDate,
                 topNotes = topNotes,
                 noteIconMap = noteIconMap,
+                hasIncome = hasIncome,
+                hasExpense = hasExpense,
                 totalIncome = totalIncome,
                 totalExpense = totalExpense,
-                balance = balance,
                 filterMode = filterModeOn,
-                filterCategory = filterCategory,
-                onFilterCategoryChange = { filterCategory = it },
-                filterMonth = filterMonth,
-                onFilterMonthChange = { filterMonth = it },
-                filterSearch = filterSearch,
-                onFilterSearchChange = { filterSearch = it },
-                availableMonths = availableMonths,
                 expandedId = expandedId,
                 onExpandChange = { expandedId = it },
                 onQuickInputClick = { name -> openKeyboardForNew(name) },
@@ -575,7 +567,6 @@ fun MainApp() {
             )
         }
 
-        // ===== 導航欄 =====
         if (!showKeyboard) {
             key("navbar") {
                 FloatingNavBar(
@@ -592,9 +583,82 @@ fun MainApp() {
                 )
             }
 
-            // ===== FAB Row（只在記帳頁） =====
+            // ===== FAB / 底部搜尋欄（只在記帳頁）=====
             key("fab") {
-                if (currentPage == 0) {
+                if (currentPage == 0 && filterModeOn) {
+                    // 篩選模式：底部搜尋欄 + 篩選開關（同一行）
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(
+                                start = 16.dp,
+                                end = 16.dp,
+                                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp),
+                            shape = RoundedCornerShape(26.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 6.dp,
+                            tonalElevation = 3.dp
+                        ) {
+                            OutlinedTextField(
+                                value = filterSearch,
+                                onValueChange = { filterSearch = it },
+                                placeholder = {
+                                    Text(
+                                        "搜尋名稱或類別…",
+                                        fontSize = 14.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (filterSearch.isNotBlank()) {
+                                        IconButton(onClick = {
+                                            filterSearch = ""
+                                        }) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "清除"
+                                            )
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent,
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent
+                                ),
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        SmallFloatingActionButton(
+                            onClick = { filterModeOn = false },
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ) {
+                            Icon(
+                                Icons.Default.FilterAlt,
+                                contentDescription = "退出篩選"
+                            )
+                        }
+                    }
+                } else if (currentPage == 0) {
+                    // 一般模式：篩選開關 + 新增 FAB
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -606,15 +670,9 @@ fun MainApp() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         SmallFloatingActionButton(
-                            onClick = { filterModeOn = !filterModeOn },
-                            containerColor = if (filterModeOn)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (filterModeOn)
-                                MaterialTheme.colorScheme.onPrimary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                            onClick = { filterModeOn = true },
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ) {
                             Icon(
                                 Icons.Default.FilterAlt,
@@ -657,7 +715,6 @@ fun MainApp() {
         }
     }
 
-    // ===== 鍵盤類別 picker =====
     if (showKeyboardCategoryPicker) {
         AlertDialog(
             onDismissRequest = { showKeyboardCategoryPicker = false },
@@ -704,7 +761,6 @@ fun MainApp() {
         )
     }
 
-    // ===== 圖標來源 =====
     if (showIconSourceDialog) {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
@@ -1027,17 +1083,11 @@ fun LedgerContent(
     groupedByDate: List<Pair<String, List<Record>>>,
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
+    hasIncome: Boolean,
+    hasExpense: Boolean,
     totalIncome: Double,
     totalExpense: Double,
-    balance: Double,
     filterMode: Boolean,
-    filterCategory: String?,
-    onFilterCategoryChange: (String?) -> Unit,
-    filterMonth: String?,
-    onFilterMonthChange: (String?) -> Unit,
-    filterSearch: String,
-    onFilterSearchChange: (String) -> Unit,
-    availableMonths: List<String>,
     expandedId: String?,
     onExpandChange: (String?) -> Unit,
     onQuickInputClick: (String) -> Unit,
@@ -1056,120 +1106,6 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ===== 篩選模式：搜尋 bar + 類別 + 月份 chips（動畫顯示）=====
-        AnimatedVisibility(
-            visible = filterMode,
-            enter = fadeIn(tween(220)) + expandVertically(
-                animationSpec = tween(250),
-                expandFrom = Alignment.Top
-            ),
-            exit = fadeOut(tween(180)) + shrinkVertically(
-                animationSpec = tween(220),
-                shrinkTowards = Alignment.Top
-            )
-        ) {
-            Column {
-                // 搜尋 bar
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                        .copy(alpha = 0.6f)
-                ) {
-                    OutlinedTextField(
-                        value = filterSearch,
-                        onValueChange = onFilterSearchChange,
-                        placeholder = { Text("搜尋名稱或類別…") },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        trailingIcon = {
-                            if (filterSearch.isNotBlank()) {
-                                IconButton(onClick = {
-                                    onFilterSearchChange("")
-                                }) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "清除"
-                                    )
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                // 類別 chips
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    AnimatedFilterChip(
-                        selected = filterCategory == null,
-                        label = "全部",
-                        onClick = { onFilterCategoryChange(null) }
-                    )
-                    CATEGORIES.forEach { cat ->
-                        AnimatedFilterChip(
-                            selected = filterCategory == cat,
-                            label = cat,
-                            onClick = {
-                                onFilterCategoryChange(
-                                    if (filterCategory == cat) null else cat
-                                )
-                            }
-                        )
-                    }
-                }
-
-                // 月份 chips
-                if (availableMonths.isNotEmpty()) {
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        AnimatedFilterChip(
-                            selected = filterMonth == null,
-                            label = "全年",
-                            onClick = { onFilterMonthChange(null) }
-                        )
-                        availableMonths.forEach { month ->
-                            AnimatedFilterChip(
-                                selected = filterMonth == month,
-                                label = formatMonthLabel(month),
-                                onClick = {
-                                    onFilterMonthChange(
-                                        if (filterMonth == month) null
-                                        else month
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-        }
-
         when {
             loading -> Box(
                 Modifier.fillMaxSize(),
@@ -1187,19 +1123,28 @@ fun LedgerContent(
             }
 
             else -> {
+                // 統計（只顯示收入或支出）
                 TopStats(
-                    balance = balance,
+                    hasIncome = hasIncome,
+                    hasExpense = hasExpense,
                     income = totalIncome,
                     expense = totalExpense
                 )
 
-                if (topNotes.isNotEmpty()) {
-                    QuickInputSection(
-                        topNotes = topNotes,
-                        noteIconMap = noteIconMap,
-                        onClick = onQuickInputClick
-                    )
-                    Spacer(Modifier.height(8.dp))
+                // 快速輸入：篩選模式下隱藏
+                AnimatedVisibility(
+                    visible = !filterMode && topNotes.isNotEmpty(),
+                    enter = fadeIn(tween(220)),
+                    exit = fadeOut(tween(180))
+                ) {
+                    Column {
+                        QuickInputSection(
+                            topNotes = topNotes,
+                            noteIconMap = noteIconMap,
+                            onClick = onQuickInputClick
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
                 }
 
                 if (showKeyboard) {
@@ -1221,7 +1166,8 @@ fun LedgerContent(
                             .weight(1f)
                             .fillMaxWidth(),
                         contentPadding = PaddingValues(
-                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING +
+                                if (filterMode) 90.dp else 20.dp
                         )
                     ) {
                         groupedByDate.forEach { (dateKey, dayRecords) ->
@@ -1323,7 +1269,6 @@ fun CompareContent(
 
         Spacer(Modifier.height(16.dp))
 
-        // 表頭
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1360,7 +1305,6 @@ fun CompareContent(
         }
         HorizontalDivider()
 
-        // 內容
         LazyColumn(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(
@@ -1418,7 +1362,6 @@ fun CompareContent(
                 )
             }
 
-            // 總計
             item {
                 val totalA = if (monthA != null)
                     EXPENSE_CATEGORIES.sumOf {
@@ -1738,7 +1681,7 @@ fun FilterContent(
     }
 }
 
-// ===== 記帳鍵盤面板 =====
+// ===== 記帳鍵盤 =====
 @Composable
 fun LedgerKeyboardPanel(
     state: KeyboardState,
@@ -1759,7 +1702,6 @@ fun LedgerKeyboardPanel(
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp),
             verticalArrangement = Arrangement.Bottom
         ) {
-            // 金額顯示（冇動畫）
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2186,9 +2128,14 @@ fun QuickInputSection(
     }
 }
 
-// ===== 頂部統計 =====
+// ===== 頂部統計（只顯示收入或支出,有動畫） =====
 @Composable
-fun TopStats(balance: Double, income: Double, expense: Double) {
+fun TopStats(
+    hasIncome: Boolean,
+    hasExpense: Boolean,
+    income: Double,
+    expense: Double
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2196,24 +2143,38 @@ fun TopStats(balance: Double, income: Double, expense: Double) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.Top
     ) {
-        StatColumn(
-            icon = Icons.Default.AccountBalanceWallet,
-            label = "餘額",
-            amountText = formatAmount(balance),
-            color = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
-        )
-        StatColumn(
-            icon = Icons.Default.TrendingUp,
-            label = "收入",
-            amountText = formatAmount(income),
-            color = COLOR_INCOME
-        )
-        StatColumn(
-            icon = Icons.Default.TrendingDown,
-            label = "支出",
-            amountText = formatAmount(expense),
-            color = COLOR_EXPENSE
-        )
+        AnimatedVisibility(
+            visible = hasIncome,
+            enter = fadeIn(tween(220)) + expandHorizontally(
+                animationSpec = tween(260)
+            ),
+            exit = fadeOut(tween(180)) + shrinkHorizontally(
+                animationSpec = tween(220)
+            )
+        ) {
+            StatColumn(
+                icon = Icons.Default.TrendingUp,
+                label = "收入",
+                amountText = formatAmount(income),
+                color = COLOR_INCOME
+            )
+        }
+        AnimatedVisibility(
+            visible = hasExpense,
+            enter = fadeIn(tween(220)) + expandHorizontally(
+                animationSpec = tween(260)
+            ),
+            exit = fadeOut(tween(180)) + shrinkHorizontally(
+                animationSpec = tween(220)
+            )
+        ) {
+            StatColumn(
+                icon = Icons.Default.TrendingDown,
+                label = "支出",
+                amountText = formatAmount(expense),
+                color = COLOR_EXPENSE
+            )
+        }
     }
 }
 
@@ -2680,7 +2641,6 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
     ) {
-        // 左滑露出的 4 顆按鈕
         Row(
             modifier = Modifier
                 .matchParentSize()
@@ -2708,7 +2668,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        // 右滑露出的 1 顆按鈕
         Row(
             modifier = Modifier
                 .matchParentSize()
@@ -2760,7 +2719,6 @@ fun SwipeableRecordItem(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) {
-                    // 點擊時收起任何展開嘅按鈕
                     if (expandedId != null) {
                         onExpand(null)
                     }
