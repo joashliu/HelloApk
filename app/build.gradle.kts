@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 36
-        versionName = "4.5"
+        versionCode = 39
+        versionName = "4.8"
     }
 
     buildTypes {
