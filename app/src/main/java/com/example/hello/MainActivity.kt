@@ -1782,7 +1782,7 @@ fun LedgerKeyboardPanel(
                     LaunchedEffect(Unit) {
                         noteFocusRequester.requestFocus()
                     }
-                    TextField(
+                                        TextField(
                         value = tfValue,
                         onValueChange = { newValue ->
                             tfValue = newValue
@@ -1805,9 +1805,8 @@ fun LedgerKeyboardPanel(
                         ),
                         keyboardActions = KeyboardActions(
                             onDone = {
-                                onStateChange(
-                                    state.copy(editingNote = false)
-                                )
+                                // 直接儲存（會自動關閉鍵盤）
+                                onConfirm()
                             }
                         ),
                         modifier = Modifier
