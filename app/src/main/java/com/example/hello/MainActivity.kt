@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
@@ -34,6 +35,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -114,6 +116,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import com.google.firebase.firestore.toObject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -346,7 +349,9 @@ fun MainApp() {
     var filterModeOn by remember { mutableStateOf(false) }
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
-    var filterSearch by remember { mutableStateOf("") }
+    var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
+    var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
+    val filterSearchFocusRequester = remember { FocusRequester() }
 
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
@@ -366,9 +371,9 @@ fun MainApp() {
                     r.category == filterCategory
                 val monthOk = filterMonth == null ||
                     monthKeyFromTimestamp(r.timestamp) == filterMonth
-                val searchOk = filterSearch.isBlank() ||
-                    r.note.contains(filterSearch, ignoreCase = true) ||
-                    r.category.contains(filterSearch, ignoreCase = true)
+                val searchOk = filterSearch.text.isBlank() ||
+                    r.note.contains(filterSearch.text, ignoreCase = true) ||
+                    r.category.contains(filterSearch.text, ignoreCase = true)
                 catOk && monthOk && searchOk
             }
         }
@@ -557,6 +562,25 @@ fun MainApp() {
         keyboardState = KeyboardState()
     }
 
+    // ===== 系統返回鍵：鍵盤顯示時先關鍵盤 =====
+    BackHandler(enabled = showKeyboard) {
+        showKeyboard = false
+        keyboardState = KeyboardState()
+    }
+
+    // ===== 雙擊篩選後：聚焦搜尋欄 + 全選 =====
+    LaunchedEffect(filterSelectAllTrigger) {
+        if (filterSelectAllTrigger > 0 && filterModeOn) {
+            delay(300)
+            try {
+                filterSearchFocusRequester.requestFocus()
+                filterSearch = filterSearch.copy(
+                    selection = TextRange(0, filterSearch.text.length)
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentPage) {
             0 -> LedgerContent(
@@ -591,7 +615,7 @@ fun MainApp() {
                 onFilterByName = { name ->
                     filterCategory = null
                     filterMonth = null
-                    filterSearch = name
+                    filterSearch = TextFieldValue(name)
                     filterModeOn = true
                 },
                 showKeyboard = showKeyboard,
@@ -696,7 +720,7 @@ fun MainApp() {
                                             modifier = Modifier.fillMaxWidth(),
                                             contentAlignment = Alignment.CenterStart
                                         ) {
-                                            if (filterSearch.isEmpty()) {
+                                            if (filterSearch.text.isEmpty()) {
                                                 Text(
                                                     "搜尋名稱或類別…",
                                                     fontSize = 15.sp,
@@ -707,9 +731,11 @@ fun MainApp() {
                                             inner()
                                         }
                                     },
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .focusRequester(filterSearchFocusRequester)
                                 )
-                                if (filterSearch.isNotBlank()) {
+                                if (filterSearch.text.isNotBlank()) {
                                     Spacer(Modifier.width(4.dp))
                                     Icon(
                                         Icons.Default.Close,
@@ -717,7 +743,9 @@ fun MainApp() {
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier
                                             .size(20.dp)
-                                            .clickable { filterSearch = "" }
+                                            .clickable {
+                                                filterSearch = TextFieldValue("")
+                                            }
                                     )
                                 }
                             }
@@ -772,14 +800,27 @@ fun MainApp() {
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SmallFloatingActionButton(
-                            onClick = { filterModeOn = true },
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        // ===== 篩選按鈕（雙擊進入 + 聚焦搜尋）=====
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onDoubleTap = {
+                                            filterModeOn = true
+                                            filterSelectAllTrigger++
+                                        }
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.FilterAlt,
-                                contentDescription = "篩選開關"
+                                contentDescription = "篩選開關（雙擊）",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
                         FloatingActionButton(
@@ -1861,10 +1902,9 @@ fun LedgerKeyboardPanel(
                     DropdownMenu(
                         expanded = showCategoryMenu,
                         onDismissRequest = { showCategoryMenu = false },
-                        modifier = Modifier
-                            .width(296.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surface)
+                        modifier = Modifier.width(288.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        containerColor = MaterialTheme.colorScheme.surface
                     ) {
                         FlowRow(
                             modifier = Modifier
