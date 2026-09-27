@@ -145,7 +145,7 @@ val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 
-val ROW_ALT_COLOR = Color(0xFFE3F2FD)
+val ROW_ALT_COLOR = Color(0xFFBBDEFB)
 
 const val FILTER_ANIM_MS = 250
 
@@ -385,14 +385,6 @@ fun MainApp() {
         }
     }
 
-    // ===== 全局交替 index（跨日期分組）=====
-    val globalIndexMap by remember {
-        derivedStateOf {
-            val flat = groupedByDate.flatMap { it.second }
-            flat.withIndex().associate { (i, r) -> r.id to i }
-        }
-    }
-
     val pickImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -520,7 +512,6 @@ fun MainApp() {
                 loading = loading,
                 filtered = ledgerRecords,
                 groupedByDate = groupedByDate,
-                globalIndexMap = globalIndexMap,
                 topNotes = topNotes,
                 noteIconMap = noteIconMap,
                 hasIncome = hasIncome,
@@ -1143,7 +1134,6 @@ fun LedgerContent(
     loading: Boolean,
     filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
-    globalIndexMap: Map<String, Int>,
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     hasIncome: Boolean,
@@ -1175,7 +1165,6 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ===== 篩選模式頂部 chips =====
         AnimatedVisibility(
             visible = filterMode,
             enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
@@ -1281,7 +1270,6 @@ fun LedgerContent(
                     expense = totalExpense
                 )
 
-                // 快速輸入
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
                     enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
@@ -1326,6 +1314,7 @@ fun LedgerContent(
                                 if (filterMode) 90.dp else 20.dp
                         )
                     ) {
+                        var runningIndex = 0
                         groupedByDate.forEach { (dateKey, dayRecords) ->
                             val dayIncome = dayRecords.sumOf {
                                 if (it.category == INCOME_CATEGORY) it.amount
@@ -1348,10 +1337,11 @@ fun LedgerContent(
                                 dayRecords,
                                 key = { _, r -> r.id }
                             ) { _, r ->
-                                val globalIdx = globalIndexMap[r.id] ?: 0
+                                val idx = runningIndex
+                                runningIndex++
                                 SwipeableRecordItem(
                                     modifier = Modifier.animateItem(),
-                                    backgroundColor = if (globalIdx % 2 == 0)
+                                    backgroundColor = if (idx % 2 == 0)
                                         MaterialTheme.colorScheme.surface
                                     else
                                         ROW_ALT_COLOR,
@@ -2090,7 +2080,7 @@ fun QuickInputSection(
     }
 }
 
-// ===== 頂部統計（weight 固定位置,只淡入淡出）=====
+// ===== 頂部統計（位置平滑移動）=====
 @Composable
 fun TopStats(
     hasIncome: Boolean,
@@ -2108,20 +2098,17 @@ fun TopStats(
         val halfWidthPx = fullWidthPx / 2f
         val slotWidth = maxWidth / 2
 
-        // 收入左邊緣的目標 X
         val incomeTargetX = when {
             hasIncome && hasExpense -> 0f
             hasIncome -> halfWidthPx / 2f
             else -> -halfWidthPx
         }
-        // 支出左邊緣的目標 X
         val expenseTargetX = when {
             hasIncome && hasExpense -> halfWidthPx
             hasExpense -> halfWidthPx / 2f
             else -> fullWidthPx
         }
 
-        // 平滑 X 位移（LowBouncy 有少少彈跳感）
         val incomeX by animateFloatAsState(
             targetValue = incomeTargetX,
             animationSpec = spring(
