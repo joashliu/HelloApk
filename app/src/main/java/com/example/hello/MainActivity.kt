@@ -488,7 +488,7 @@ fun MainApp() {
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                allNoteNames = allNoteNames
+                allNoteNames = allNoteNames,
                 scrollToTopTrigger = scrollToTopTrigger
             )
             1 -> CompareContent(records = records, availableMonths = availableMonths)
