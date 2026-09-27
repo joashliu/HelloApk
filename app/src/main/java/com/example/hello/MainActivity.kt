@@ -47,11 +47,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -69,6 +71,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -79,11 +82,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.google.firebase.Firebase
@@ -223,6 +228,18 @@ fun formatDateHeader(dateKey: String): String {
     return "$dp $wk"
 }
 
+// 建議列表：前綴優先，然後含字
+fun filterNoteSuggestions(query: String, all: List<String>): List<String> {
+    if (query.isBlank()) return emptyList()
+    val q = query.trim()
+    if (q.isEmpty()) return emptyList()
+    val prefix = all.filter { it.startsWith(q, ignoreCase = true) && it != q }
+    val contains = all.filter {
+        !it.startsWith(q, ignoreCase = true) && it.contains(q, ignoreCase = true)
+    }
+    return (prefix + contains).take(8)
+}
+
 val AVATAR_COLORS = listOf(
     Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD),
     Color(0xFF7986CB), Color(0xFF64B5F6), Color(0xFF4FC3F7), Color(0xFF4DB6AC),
@@ -269,6 +286,13 @@ fun MainApp() {
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
+
+    // 所有唯一項目名（供應下拉建議）
+    val allNoteNames by remember {
+        derivedStateOf {
+            records.map { it.note }.filter { it.isNotBlank() }.distinct()
+        }
+    }
 
     val filtered by remember {
         derivedStateOf {
@@ -383,11 +407,9 @@ fun MainApp() {
         showKeyboard = false; keyboardState = KeyboardState()
     }
 
-    // 系統返回鍵：先關鍵盤
     BackHandler(enabled = showKeyboard) {
         showKeyboard = false; keyboardState = KeyboardState()
     }
-    // 系統返回鍵：再退篩選模式
     BackHandler(enabled = filterModeOn && !showKeyboard) {
         filterModeOn = false
     }
@@ -429,7 +451,11 @@ fun MainApp() {
                 onKeyboardConfirm = { saveFromKeyboard() },
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
-                showFuture = showFuture, onShowFutureChange = { showFuture = it }
+                showFuture = showFuture, onShowFutureChange = { showFuture = it },
+                allNoteNames = allNoteNames,
+                filterSearch = filterSearch,
+                onFilterSearchChange = { filterSearch = it },
+                filterSearchFocusRequester = filterSearchFocusRequester
             )
             1 -> CompareContent(records = records, availableMonths = availableMonths)
         }
@@ -476,20 +502,59 @@ fun MainApp() {
                                 Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    BasicTextField(
-                                        value = filterSearch,
-                                        onValueChange = { filterSearch = it },
-                                        singleLine = true,
-                                        textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                        cursorBrush = SolidColor(BRAND_PRIMARY),
-                                        decorationBox = { inner ->
-                                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                if (filterSearch.text.isEmpty()) Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                inner()
+                                                                        Box(Modifier.weight(1f)) {
+                                        BasicTextField(
+                                            value = filterSearch,
+                                            onValueChange = { filterSearch = it },
+                                            singleLine = true,
+                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                            cursorBrush = SolidColor(BRAND_PRIMARY),
+                                            decorationBox = { inner ->
+                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                    if (filterSearch.text.isEmpty()) Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                    inner()
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
+                                        )
+
+                                        val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
+                                        if (filterSuggestions.isNotEmpty()) {
+                                            androidx.compose.ui.window.Popup(
+                                                alignment = Alignment.TopStart,
+                                                offset = androidx.compose.ui.unit.IntOffset(0, -320),
+                                                onDismissRequest = { },
+                                                properties = PopupProperties(focusable = false)
+                                            ) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    color = SURFACE_CARD,
+                                                    shadowElevation = 8.dp,
+                                                    modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                                                ) {
+                                                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                                                        filterSuggestions.forEach { s ->
+                                                            Row(
+                                                                Modifier.fillMaxWidth()
+                                                                    .clickable {
+                                                                        filterSearch = TextFieldValue(s)
+                                                                    }
+                                                                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                                                    modifier = Modifier.size(16.dp))
+                                                                Spacer(Modifier.width(8.dp))
+                                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                            }
+                                                            HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                                        }
+                                                    }
+                                                }
                                             }
-                                        },
-                                        modifier = Modifier.weight(1f).focusRequester(filterSearchFocusRequester)
-                                    )
+                                        }
+                                    }
                                     if (filterSearch.text.isNotBlank()) {
                                         Spacer(Modifier.width(4.dp))
                                         Icon(Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
@@ -497,7 +562,6 @@ fun MainApp() {
                                     }
                                 }
                             }
-                            // 篩選模式內：紫底白漏斗
                             SmallFloatingActionButton(
                                 onClick = { filterModeOn = false },
                                 containerColor = BRAND_PRIMARY,
@@ -521,7 +585,6 @@ fun MainApp() {
                             end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            // 非篩選模式：白底 + 紫漏斗 + 紫邊框
                             Box(
                                 Modifier.size(44.dp).clip(CircleShape)
                                     .background(Color.White)
@@ -732,6 +795,7 @@ fun LedgerContent(
     onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
+    allNoteNames: List<String>,
 ) {
     val listState = rememberLazyListState()
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
@@ -797,8 +861,7 @@ fun LedgerContent(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            start = 12.dp, end = 12.dp,
-                            top = 4.dp,
+                            start = 12.dp, end = 12.dp, top = 4.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + if (filterMode) 90.dp else 20.dp)
                     ) {
                         groupedByDate.forEach { (dateKey, dayRecords) ->
@@ -806,7 +869,6 @@ fun LedgerContent(
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
                             item(key = "card_$dateKey") {
-                                // 每日一張圓角卡片
                                 Box(
                                     Modifier.fillMaxWidth()
                                         .padding(vertical = 5.dp)
@@ -848,6 +910,7 @@ fun LedgerContent(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
+                            allNoteNames = allNoteNames,
                             modifier = Modifier.fillMaxSize())
                     }
                 }
@@ -864,7 +927,6 @@ fun CompareContent(records: List<Record>, availableMonths: List<String>) {
         if (monthA == null || monthA !in availableMonths) monthA = availableMonths.getOrNull(0)
         if (monthB == null || monthB !in availableMonths) monthB = availableMonths.getOrNull(1) ?: availableMonths.getOrNull(0)
     }
-    // 收入永遠喺頂,其他按 monthB 金額倒序
     val sortedCategories = remember(records, monthB) {
         val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
             if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
@@ -950,19 +1012,137 @@ fun MonthDropdown(value: String?, months: List<String>, onChange: (String?) -> U
         }
     }
 }
+
+// ===== 快速輸入（自動擴寬 chip 填滿整行 + 縮窄行距 + 冇標題）=====
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun QuickInputSection(
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    onClick: (String) -> Unit
+) {
+    if (topNotes.isEmpty()) return
+
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val availWidth = maxWidth - 32.dp
+        val perRow = max(1, (availWidth / 90.dp).toInt()).coerceIn(2, 5)
+        val perPage = perRow * 4
+        val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
+        val pagerState = rememberPagerState { pageCount }
+
+        val linesToShow = if (pageCount == 1) {
+            ((topNotes.size + perRow - 1) / perRow).coerceAtLeast(1)
+        } else 4
+
+        val rowHeight = 40.dp
+        val vGap = 4.dp
+        val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1).coerceAtLeast(0)
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .shadow(2.dp, RoundedCornerShape(18.dp))
+                .background(SURFACE_CARD, RoundedCornerShape(18.dp))
+                .padding(vertical = 10.dp)
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxWidth().height(pagerHeight)
+                ) { page ->
+                    val start = page * perPage
+                    val end = minOf(start + perPage, topNotes.size)
+                    if (start >= end) return@HorizontalPager
+
+                    Column(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(vGap)
+                    ) {
+                        for (line in 0 until linesToShow) {
+                            val lineStart = start + line * perRow
+                            val lineEnd = minOf(lineStart + perRow, end)
+                            if (lineStart >= lineEnd) break
+
+                            Row(
+                                Modifier.fillMaxWidth().height(rowHeight),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                for (i in lineStart until lineEnd) {
+                                    val name = topNotes[i].first
+                                    Surface(
+                                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                                        shape = RoundedCornerShape(11.dp),
+                                        color = SURFACE_ELEVATED,
+                                        onClick = { onClick(name) }
+                                    ) {
+                                        Row(
+                                            Modifier.padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            IconView(noteIconMap[name] ?: "", name, size = 18.dp)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text(
+                                                name,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = TEXT_PRIMARY,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (pageCount > 1) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(pageCount) { i ->
+                            val active = i == pagerState.currentPage
+                            Box(
+                                Modifier.padding(horizontal = 3.dp)
+                                    .size(if (active) 6.dp else 4.dp)
+                                    .clip(CircleShape)
+                                    .background(if (active) BRAND_PRIMARY else DIVIDER_COLOR)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+// ===== 記帳鍵盤（帶名稱下拉建議）=====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
-    state: KeyboardState, onStateChange: (KeyboardState) -> Unit,
-    onDismiss: () -> Unit, onConfirm: () -> Unit,
-    onNext: () -> Unit, onPickCategory: () -> Unit,
+    state: KeyboardState,
+    onStateChange: (KeyboardState) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    onNext: () -> Unit,
+    onPickCategory: () -> Unit,
+    allNoteNames: List<String>,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
-    Surface(modifier = modifier, color = SURFACE_CARD,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), shadowElevation = 16.dp) {
-        Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp),
-            verticalArrangement = Arrangement.Bottom) {
+    Surface(
+        modifier = modifier, color = SURFACE_CARD,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shadowElevation = 16.dp
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp),
+            verticalArrangement = Arrangement.Bottom
+        ) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(DIVIDER_COLOR))
             }
@@ -1053,45 +1233,98 @@ fun LedgerKeyboardPanel(
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                if (state.editingNote) {
-                    var tfValue by remember(state.editingNote) {
-                        mutableStateOf(TextFieldValue(text = state.noteText,
-                            selection = TextRange(0, state.noteText.length)))
-                    }
-                    val focusReq = remember { FocusRequester() }
-                    LaunchedEffect(Unit) { focusReq.requestFocus() }
-                    TextField(
-                        value = tfValue, onValueChange = { nv -> tfValue = nv; onStateChange(state.copy(noteText = nv.text)) },
-                        placeholder = { Text("名稱") }, singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = SURFACE_ELEVATED, unfocusedContainerColor = SURFACE_ELEVATED,
-                            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                        modifier = Modifier.weight(1f).fillMaxHeight().focusRequester(focusReq)
-                    )
-                } else {
-                    OutlinedButton(
-                        onClick = { onStateChange(state.copy(editingNote = true)) },
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
-                    ) {
-                        Text(if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
-                            maxLines = 1, fontSize = 15.sp,
-                            color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY)
+
+                // 名稱輸入框 + 下拉建議
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    if (state.editingNote) {
+                        var tfValue by remember(state.editingNote) {
+                            mutableStateOf(TextFieldValue(text = state.noteText,
+                                selection = TextRange(0, state.noteText.length)))
+                        }
+                        val focusReq = remember { FocusRequester() }
+                        LaunchedEffect(Unit) { focusReq.requestFocus() }
+
+                        // 下拉建議（最多 6 個）
+                        val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
+
+                        Column {
+                            TextField(
+                                value = tfValue,
+                                onValueChange = { nv -> tfValue = nv; onStateChange(state.copy(noteText = nv.text)) },
+                                placeholder = { Text("名稱") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = SURFACE_ELEVATED,
+                                    unfocusedContainerColor = SURFACE_ELEVATED,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+                                modifier = Modifier.fillMaxWidth().fillMaxHeight().focusRequester(focusReq)
+                            )
+                        }
+
+                        // 建議用 Popup 顯示喺輸入框上方
+                        if (suggestions.isNotEmpty()) {
+                            androidx.compose.ui.window.Popup(
+                                alignment = Alignment.TopStart,
+                                offset = androidx.compose.ui.unit.IntOffset(0, -260),
+                                onDismissRequest = { },
+                                properties = PopupProperties(focusable = false)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = SURFACE_CARD,
+                                    shadowElevation = 8.dp,
+                                    modifier = Modifier.width(260.dp).heightIn(max = 240.dp)
+                                ) {
+                                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                                        suggestions.forEach { suggestion ->
+                                            Row(
+                                                Modifier.fillMaxWidth()
+                                                    .clickable {
+                                                        tfValue = TextFieldValue(suggestion)
+                                                        onStateChange(state.copy(noteText = suggestion))
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                                    modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(suggestion, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onStateChange(state.copy(editingNote = true)) },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
+                        ) {
+                            Text(if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
+                                maxLines = 1, fontSize = 15.sp,
+                                color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY)
+                        }
                     }
                 }
 
+                // 類別按鈕
                 var showCategoryMenu by remember { mutableStateOf(false) }
                 val currentStyle = CATEGORY_STYLES[state.category]
                 Box {
                     OutlinedButton(
                         onClick = { showCategoryMenu = true },
                         shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.width(120.dp).fillMaxHeight(),
+                        modifier = Modifier.width(110.dp).fillMaxHeight(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
                     ) {
                         if (currentStyle != null) {
@@ -1199,66 +1432,6 @@ fun AnimatedFilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
             selectedContainerColor = BRAND_PRIMARY, selectedLabelColor = Color.White,
             containerColor = SURFACE_CARD, labelColor = TEXT_SECONDARY),
         modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun QuickInputSection(topNotes: List<Pair<String, Int>>, noteIconMap: Map<String, String>, onClick: (String) -> Unit) {
-    if (topNotes.isEmpty()) return
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val availWidth = maxWidth - 32.dp
-        val perRow = max(1, (availWidth / 110.dp).toInt())
-        val perPage = perRow * 4
-        val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
-        val pagerState = rememberPagerState { pageCount }
-        val linesToShow = if (pageCount == 1) (topNotes.size + perRow - 1) / perRow else 4
-        val rowHeight = 48.dp; val vGap = 6.dp
-        val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1)
-
-        Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-            .shadow(2.dp, RoundedCornerShape(18.dp))
-            .background(SURFACE_CARD, RoundedCornerShape(18.dp))
-            .padding(vertical = 8.dp)) {
-            Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("快速輸入", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TEXT_TERTIARY)
-                }
-                Spacer(Modifier.height(6.dp))
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().height(pagerHeight)) { page ->
-                    val start = page * perPage
-                    val end = minOf(start + perPage, topNotes.size)
-                    if (start >= end) return@HorizontalPager
-                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(vGap),
-                        maxItemsInEachRow = perRow, maxLines = 4) {
-                        for (i in start until end) {
-                            val name = topNotes[i].first
-                            SuggestionChip(
-                                onClick = { onClick(name) },
-                                label = { Text(name, fontSize = 13.sp) },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = SURFACE_ELEVATED, labelColor = TEXT_PRIMARY),
-                                border = null,
-                                icon = { IconView(noteIconMap[name] ?: "", name, size = 20.dp) })
-                        }
-                    }
-                }
-                if (pageCount > 1) {
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        repeat(pageCount) { i ->
-                            val active = i == pagerState.currentPage
-                            Box(Modifier.padding(horizontal = 3.dp).size(if (active) 7.dp else 5.dp)
-                                .clip(CircleShape).background(if (active) BRAND_PRIMARY else DIVIDER_COLOR))
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable
