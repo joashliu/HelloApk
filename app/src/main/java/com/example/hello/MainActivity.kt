@@ -559,11 +559,20 @@ fun MainApp() {
                                     }
                                 }
                             }
-                            SmallFloatingActionButton(
-                                onClick = { filterModeOn = false },
-                                containerColor = BRAND_PRIMARY,
-                                contentColor = Color.White
-                            ) { Icon(Icons.Default.FilterAlt, "退出篩選") }
+                                                        Box(
+                                Modifier.size(44.dp).clip(CircleShape)
+                                    .background(BRAND_PRIMARY)
+                                    .shadow(4.dp, CircleShape)
+                                    .clickable { filterModeOn = false },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.FilterAlt,
+                                    "退出篩選",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                             FloatingActionButton(
                                 onClick = { filterModeOn = false; openKeyboardForNew() },
                                 containerColor = BRAND_PRIMARY,
@@ -582,11 +591,11 @@ fun MainApp() {
                             end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(
+                                                        Box(
                                 Modifier.size(44.dp).clip(CircleShape)
                                     .background(Color.White)
                                     .shadow(4.dp, CircleShape)
-                                    .border(1.5.dp, BRAND_PRIMARY, CircleShape)
+                                    .border(2.dp, BRAND_PRIMARY, CircleShape)
                                     .pointerInput(Unit) {
                                         detectTapGestures(
                                             onTap = { filterModeOn = true },
@@ -594,7 +603,12 @@ fun MainApp() {
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.FilterAlt, "篩選", tint = BRAND_PRIMARY, modifier = Modifier.size(22.dp))
+                                Icon(
+                                    Icons.Default.FilterAlt,
+                                    "篩選",
+                                    tint = BRAND_PRIMARY,
+                                    modifier = Modifier.size(22.dp)
+                                )
                             }
                             FloatingActionButton(
                                 onClick = { openKeyboardForNew() },
