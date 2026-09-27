@@ -516,8 +516,8 @@ fun MainApp() {
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                allNoteNames = allNoteNames,
-                scrollToTopTrigger = scrollToTopTrigger
+                                allNoteNames = allNoteNames,
+                scrollToTopTrigger = scrollToTopTrigger,
                 nameFlashTrigger = nameFlashTrigger,
                 justAddedId = justAddedId,
                 afterSaveHint = afterSaveHint,
@@ -1090,7 +1090,7 @@ fun LedgerContent(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                     ) {
-                                                LedgerKeyboardPanel(
+                                                                        LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
@@ -1100,6 +1100,85 @@ fun LedgerContent(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun AnimatedRecordItem(
+    animateOnMount: Boolean,
+    content: @Composable () -> Unit
+) {
+    var appeared by remember { mutableStateOf(!animateOnMount) }
+    LaunchedEffect(Unit) {
+        if (animateOnMount) {
+            delay(16)
+            appeared = true
+        }
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "arA"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0.94f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "arS"
+    )
+    Box(
+        Modifier.graphicsLayer {
+            this.alpha = alpha
+            scaleX = scale
+            scaleY = scale
+        }
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun CategoryTotalHint(
+    hint: AfterSaveHint,
+    onDismiss: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        visible = true
+        delay(5000)
+        visible = false
+        delay(320)
+        onDismiss()
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(250)) + expandVertically(tween(250), expandFrom = Alignment.Top),
+        exit = fadeOut(tween(250)) + shrinkVertically(tween(250), shrinkTowards = Alignment.Top)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(BRAND_PRIMARY_LIGHT)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Info, null,
+                tint = BRAND_PRIMARY_DARK,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
+                fontSize = 13.sp,
+                color = BRAND_PRIMARY_DARK,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
