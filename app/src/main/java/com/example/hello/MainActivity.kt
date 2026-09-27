@@ -1,9 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.animation.core.Animatable
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Schedule
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -22,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -78,6 +75,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -144,8 +142,6 @@ val STAT_LABEL_FONT_SIZE = 11.sp
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
-
-// 交替行顏色（比白色深少少）
 val ROW_ALT_COLOR = Color(0xFFF1F5F9)
 const val FILTER_ANIM_MS = 250
 
@@ -194,20 +190,12 @@ data class AfterSaveHint(
     val monthTotal: Double
 )
 
-data class FlyingCard(
-    val note: String,
-    val amount: Double,
-    val category: String,
-    val iconUrl: String
-)
-
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount) else formatAmount(-record.amount)
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
-// 相對日期
 fun relativeDayLabel(timestamp: Long): String {
     val todayStart = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
@@ -338,18 +326,13 @@ fun MainApp() {
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
+    var scrollToTopTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
-    val config = LocalConfiguration.current
-    val density = LocalDensity.current
-    val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
-    var scrollToTopTrigger by remember { mutableIntStateOf(0) }
 
     val allNoteNames by remember {
-        derivedStateOf {
-            records.map { it.note }.filter { it.isNotBlank() }.distinct()
-        }
+        derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
     }
 
     val filtered by remember {
@@ -429,7 +412,7 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-        fun openKeyboardForNew(note: String = "") {
+    fun openKeyboardForNew(note: String = "") {
         keyboardState = KeyboardState(noteText = note)
         showKeyboard = true
         if (note.isNotBlank()) nameFlashTrigger++
@@ -447,7 +430,7 @@ fun MainApp() {
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
-        fun saveFromKeyboard() {
+    fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
         val note = keyboardState.noteText
@@ -459,7 +442,7 @@ fun MainApp() {
             db.collection("records").document(editId).update(mapOf(
                 "amount" to amt, "note" to note, "category" to category,
                 "timestamp" to ts))
-                } else {
+        } else {
             val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
             val newRef = db.collection("records").add(Record(
@@ -528,201 +511,24 @@ fun MainApp() {
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                                allNoteNames = allNoteNames,
+                allNoteNames = allNoteNames,
                 scrollToTopTrigger = scrollToTopTrigger,
                 nameFlashTrigger = nameFlashTrigger,
                 justAddedId = justAddedId,
                 afterSaveHint = afterSaveHint,
                 onAfterSaveHintDismiss = { afterSaveHint = null }
             )
-                        1 -> CompareContent(
+            1 -> CompareContent(
                 records = records,
                 availableMonths = availableMonths,
                 onAddClick = {
                     currentPage = 0
                     openKeyboardForNew()
-                        }
-    }
-    FloatingActionButton(
-        onClick = onAddClick,
-        containerColor = BRAND_PRIMARY,
-        contentColor = Color.White,
-        modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-    ) {
-        Icon(Icons.Default.Add, "新增")
-    }
-    }
-}
-
-        @Composable
-fun AnimatedRecordItem(
-    animateOnMount: Boolean,
-    content: @Composable () -> Unit
-) {
-    var appeared by remember { mutableStateOf(!animateOnMount) }
-    LaunchedEffect(Unit) {
-        if (animateOnMount) {
-            delay(16)
-            appeared = true
-        }
-    }
-
-    // 進入時：由下 40% 高度滑入
-    val slideY by animateFloatAsState(
-        targetValue = if (appeared) 0f else 60f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "arSlide"
-    )
-    // 縮放：由 0.75 放大到 1
-    val scale by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0.75f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "arScale"
-    )
-    // 透明度：由 0 到 1
-    val alpha by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0f,
-        animationSpec = tween(280, easing = FastOutSlowInEasing),
-        label = "arAlpha"
-    )
-
-    Box(
-        Modifier.graphicsLayer {
-            translationY = slideY
-            scaleX = scale
-            scaleY = scale
-            this.alpha = alpha
-        }
-    ) {
-        content()
-    }
-}
-
-@Composable
-fun FlyingRecordCard(
-    card: FlyingCard,
-    screenHeightPx: Float,
-    onFinished: () -> Unit
-) {
-    val startY = screenHeightPx * 0.65f
-    val endY = screenHeightPx * 0.38f
-
-    val progress = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        delay(16)
-        progress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(750, easing = FastOutSlowInEasing)
-        )
-        delay(80)
-        onFinished()
-    }
-
-    val p = progress.value
-    val y = startY + (endY - startY) * p
-    val scale = 1f - 0.35f * p
-    val alpha = if (p < 0.80f) 1f else (1f - p) / 0.20f
-
-    Box(Modifier.fillMaxSize()) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .offset { IntOffset(0, y.toInt()) }
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha.coerceIn(0f, 1f)
-                },
-            shape = RoundedCornerShape(18.dp),
-            color = SURFACE_CARD,
-            shadowElevation = 16.dp
-        ) {
-            ListItem(
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                leadingContent = { IconView(card.iconUrl, card.note) },
-                headlineContent = {
-                    Text(
-                        card.note.ifBlank { "(無名稱)" },
-                        fontSize = NOTE_FONT_SIZE,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TEXT_PRIMARY
-                    )
-                },
-                supportingContent = {
-                    Text(
-                        card.category,
-                        fontSize = META_FONT_SIZE,
-                        color = TEXT_TERTIARY
-                    )
-                },
-                trailingContent = {
-                    Text(
-                        if (card.category == INCOME_CATEGORY) formatAmount(card.amount)
-                        else formatAmount(-card.amount),
-                        color = if (card.category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE,
-                        fontSize = AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             )
         }
-    }
-}
 
-@Composable
-fun CategoryTotalHint(
-    hint: AfterSaveHint,
-    onDismiss: () -> Unit
-) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        visible = true
-        delay(5000)
-        visible = false
-        delay(320)
-        onDismiss()
-    }
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(250)) + expandVertically(tween(250), expandFrom = Alignment.Top),
-        exit = fadeOut(tween(250)) + shrinkVertically(tween(250), shrinkTowards = Alignment.Top)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(BRAND_PRIMARY_LIGHT)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Info, null,
-                tint = BRAND_PRIMARY_DARK,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
-                fontSize = 13.sp,
-                color = BRAND_PRIMARY_DARK,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
-}
-
-        // 底部導航欄（鍵盤時淡出）
-                androidx.compose.animation.AnimatedVisibility(
+        androidx.compose.animation.AnimatedVisibility(
             visible = !showKeyboard,
             enter = fadeIn(tween(220)),
             exit = fadeOut(tween(200)),
@@ -736,25 +542,20 @@ fun CategoryTotalHint(
                     NavItem("比較", Icons.Default.CompareArrows)),
                 selectedIndex = currentPage,
                 onIndexChange = { currentPage = it },
-                modifier = Modifier
-            )
+                modifier = Modifier)
         }
 
-        // ===== FAB + 篩選按鈕（常駐,只換色）=====
         if (!showKeyboard && currentPage == 0) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(
-                        start = 16.dp,
-                        end = 20.dp,
-                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
-                    ),
+                        start = 16.dp, end = 20.dp,
+                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 左側搜尋欄（只在篩選模式展開）
                 Box(Modifier.weight(1f)) {
                     androidx.compose.animation.AnimatedVisibility(
                         visible = filterModeOn,
@@ -842,7 +643,6 @@ fun CategoryTotalHint(
                     }
                 }
 
-                // 篩選按鈕（常駐,只換色）
                 Box(
                     modifier = Modifier
                         .size(44.dp)
@@ -863,14 +663,11 @@ fun CategoryTotalHint(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.Default.FilterAlt,
-                        "篩選",
+                        Icons.Default.FilterAlt, "篩選",
                         tint = if (filterModeOn) Color.White else BRAND_PRIMARY,
-                        modifier = Modifier.size(22.dp)
-                    )
+                        modifier = Modifier.size(22.dp))
                 }
 
-                // FAB（常駐）
                 FloatingActionButton(
                     onClick = {
                         if (filterModeOn) filterModeOn = false
@@ -969,6 +766,7 @@ fun CategoryTotalHint(
         )
     }
 }
+
 @Composable
 fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
@@ -1069,7 +867,7 @@ fun LedgerContent(
     onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
-            allNoteNames: List<String>,
+    allNoteNames: List<String>,
     scrollToTopTrigger: Int,
     nameFlashTrigger: Int,
     justAddedId: String?,
@@ -1141,7 +939,7 @@ fun LedgerContent(
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                                        LazyColumn(
+                    LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -1152,18 +950,13 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            // ===== 日期頭（頂部圓角 + 淡灰底）=====
-                                                        item(key = "header_$dateKey") {
+                            item(key = "header_$dateKey") {
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .animateItem()
                                         .padding(top = 6.dp)
-                                        .shadow(
-                                            elevation = 1.dp,
-                                            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
-                                            clip = false
-                                        )
+                                        .shadow(1.dp, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp), clip = false)
                                         .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                                         .background(SURFACE_ELEVATED)
                                 ) {
@@ -1171,8 +964,7 @@ fun LedgerContent(
                                 }
                             }
 
-                            // ===== 每條記錄獨立 item（animateItem 令位置平滑移動）=====
-                                                        itemsIndexed(
+                            itemsIndexed(
                                 items = dayRecords,
                                 key = { _, r -> r.id }
                             ) { idx, r ->
@@ -1181,15 +973,11 @@ fun LedgerContent(
                                     bottomStart = if (isLast) 18.dp else 0.dp,
                                     bottomEnd = if (isLast) 18.dp else 0.dp
                                 )
-                                                                Box(
+                                Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .animateItem()
-                                        .shadow(
-                                            elevation = 1.dp,
-                                            shape = rowShape,
-                                            clip = false
-                                        )
+                                        .shadow(1.dp, rowShape, clip = false)
                                         .clip(rowShape)
                                 ) {
                                     Column {
@@ -1209,23 +997,17 @@ fun LedgerContent(
                                             )
                                         }
                                         if (afterSaveHint?.recordId == r.id) {
-                                            CategoryTotalHint(
-                                                hint = afterSaveHint,
-                                                onDismiss = onAfterSaveHintDismiss
-                                            )
+                                            CategoryTotalHint(hint = afterSaveHint, onDismiss = onAfterSaveHintDismiss)
                                         }
                                     }
                                 }
                             }
 
-                            // ===== 分組之間間距 =====
-                            item(key = "gap_$dateKey") {
-                                Spacer(Modifier.height(12.dp))
-                            }
+                            item(key = "gap_$dateKey") { Spacer(Modifier.height(12.dp)) }
                         }
                     }
 
-                                        androidx.compose.animation.AnimatedVisibility(
+                    androidx.compose.animation.AnimatedVisibility(
                         visible = showKeyboard,
                         enter = slideInVertically(initialOffsetY = { it },
                             animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
@@ -1237,7 +1019,7 @@ fun LedgerContent(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                     ) {
-                                                                        LedgerKeyboardPanel(
+                        LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
@@ -1263,24 +1045,33 @@ fun AnimatedRecordItem(
             appeared = true
         }
     }
+    val slideY by animateFloatAsState(
+        targetValue = if (appeared) 0f else 60f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "arSlide"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0.75f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "arScale"
+    )
     val alpha by animateFloatAsState(
         targetValue = if (appeared) 1f else 0f,
         animationSpec = tween(280, easing = FastOutSlowInEasing),
-        label = "arA"
-    )
-    val scale by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0.94f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "arS"
+        label = "arAlpha"
     )
     Box(
         Modifier.graphicsLayer {
-            this.alpha = alpha
+            translationY = slideY
             scaleX = scale
             scaleY = scale
+            this.alpha = alpha
         }
     ) {
         content()
@@ -1314,11 +1105,7 @@ fun CategoryTotalHint(
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                Icons.Default.Info, null,
-                tint = BRAND_PRIMARY_DARK,
-                modifier = Modifier.size(18.dp)
-            )
+            Icon(Icons.Default.Info, null, tint = BRAND_PRIMARY_DARK, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
                 text = "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
@@ -1349,56 +1136,68 @@ fun CompareContent(
         listOf(INCOME_CATEGORY) + expenses
     }
 
-        Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text("月份比較", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
-            modifier = Modifier.padding(vertical = 8.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MonthDropdown(monthA, availableMonths, { monthA = it }, Modifier.weight(1f))
-            MonthDropdown(monthB, availableMonths, { monthB = it }, Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(16.dp))
-
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("類別", Modifier.weight(1.4f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY)
-            Text(monthA?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
-                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
-            Text(monthB?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
-                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
-        }
-        HorizontalDivider(color = DIVIDER_COLOR)
-
-        LazyColumn(Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)) {
-            items(sortedCategories) { cat ->
-                val amtA = if (monthA != null) sumByCategoryAndMonth(records, cat, monthA!!) else 0.0
-                val amtB = if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
-                val style = CATEGORY_STYLES[cat]
-                val isIncome = cat == INCOME_CATEGORY
-
-                Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1.4f), verticalAlignment = Alignment.CenterVertically) {
-                        if (style != null) {
-                            Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(style.bgColor),
-                                contentAlignment = Alignment.Center) {
-                                Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
-                            }
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
-                            fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
-                    }
-                    Text(formatAmount(amtA), Modifier.weight(1f), fontSize = 15.sp,
-                        color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
-                        fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
-                        textAlign = TextAlign.End)
-                    Text(formatAmount(amtB), Modifier.weight(1f), fontSize = 15.sp,
-                        color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
-                        fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
-                        textAlign = TextAlign.End)
-                }
-                HorizontalDivider(color = DIVIDER_COLOR)
+    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text("月份比較", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
+                modifier = Modifier.padding(vertical = 8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MonthDropdown(monthA, availableMonths, { monthA = it }, Modifier.weight(1f))
+                MonthDropdown(monthB, availableMonths, { monthB = it }, Modifier.weight(1f))
             }
+            Spacer(Modifier.height(16.dp))
+
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("類別", Modifier.weight(1.4f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY)
+                Text(monthA?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
+                    fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
+                Text(monthB?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
+                    fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
+            }
+            HorizontalDivider(color = DIVIDER_COLOR)
+
+            LazyColumn(Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)) {
+                items(sortedCategories) { cat ->
+                    val amtA = if (monthA != null) sumByCategoryAndMonth(records, cat, monthA!!) else 0.0
+                    val amtB = if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
+                    val style = CATEGORY_STYLES[cat]
+                    val isIncome = cat == INCOME_CATEGORY
+
+                    Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1.4f), verticalAlignment = Alignment.CenterVertically) {
+                            if (style != null) {
+                                Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(style.bgColor),
+                                    contentAlignment = Alignment.Center) {
+                                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
+                                }
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
+                                fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
+                        }
+                        Text(formatAmount(amtA), Modifier.weight(1f), fontSize = 15.sp,
+                            color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
+                            fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
+                            textAlign = TextAlign.End)
+                        Text(formatAmount(amtB), Modifier.weight(1f), fontSize = 15.sp,
+                            color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
+                            fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
+                            textAlign = TextAlign.End)
+                    }
+                    HorizontalDivider(color = DIVIDER_COLOR)
+                }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = onAddClick,
+            containerColor = BRAND_PRIMARY,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) {
+            Icon(Icons.Default.Add, "新增")
         }
     }
 }
@@ -1437,18 +1236,15 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val availWidth = maxWidth - 32.dp
         val perRow = max(1, (availWidth / 90.dp).toInt()).coerceIn(2, 5)
         val perPage = perRow * 4
         val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
         val pagerState = rememberPagerState { pageCount }
-
         val linesToShow = if (pageCount == 1) {
             ((topNotes.size + perRow - 1) / perRow).coerceAtLeast(1)
         } else 4
-
         val rowHeight = 40.dp
         val vGap = 4.dp
         val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1).coerceAtLeast(0)
@@ -1535,6 +1331,7 @@ fun QuickInputSection(
         }
     }
 }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
@@ -1543,7 +1340,7 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onNext: () -> Unit,
-        onPickCategory: () -> Unit,
+    onPickCategory: () -> Unit,
     allNoteNames: List<String>,
     nameFlashTrigger: Int,
     modifier: Modifier = Modifier
@@ -1560,8 +1357,7 @@ fun LedgerKeyboardPanel(
                 .fillMaxWidth()
                 .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
         ) {
-            // ===== 日期 / 時間（分開可撳）=====
-                        // ===== 日期 / 時間（兩個獨立卡片）=====
+            // ===== 日期 / 時間 =====
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1639,7 +1435,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // 金額顯示
+            // ===== 金額顯示 =====
             Surface(Modifier.fillMaxWidth().height(76.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(horizontal = 22.dp),
                     contentAlignment = Alignment.CenterEnd) {
@@ -1652,6 +1448,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
+            // ===== 數字鍵盤 =====
             val rows = listOf(
                 listOf("1", "2", "3"), listOf("4", "5", "6"),
                 listOf("7", "8", "9"), listOf(".", "0", "backspace")
@@ -1737,7 +1534,7 @@ fun LedgerKeyboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
-                                val glowAlpha = remember { Animatable(0f) }
+                val glowAlpha = remember { Animatable(0f) }
                 LaunchedEffect(nameFlashTrigger) {
                     if (nameFlashTrigger > 0) {
                         try {
@@ -1862,6 +1659,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
+            // ===== 底部按鈕 =====
             Row(Modifier.fillMaxWidth().height(58.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onDismiss, shape = RoundedCornerShape(14.dp),
@@ -1982,10 +1780,7 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
 
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
-    Row(Modifier.fillMaxWidth()
-        .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-        .background(SURFACE_ELEVATED)
-        .padding(horizontal = 16.dp, vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(formatDateHeader(dateKey), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2119,7 +1914,7 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
         val ch = name.trim().take(1).ifBlank { "?" }
-                Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)), contentAlignment = Alignment.Center) {
             Text(
                 ch,
                 color = Color.White,
@@ -2161,12 +1956,10 @@ fun SwipeableRecordItem(
             dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
-    // 滑動進度 0–1
     val leftProgress = if (maxLeft == 0f) 0f else (-offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
     Box(modifier.fillMaxWidth().wrapContentHeight()) {
-        // 右側（左滑）：4 粒掣
         Row(Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
             verticalAlignment = Alignment.CenterVertically) {
@@ -2196,7 +1989,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        // 左側（右滑）：1 粒掣
         Row(Modifier.matchParentSize().padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
             verticalAlignment = Alignment.CenterVertically) {
@@ -2208,7 +2000,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
-        // 上層：項目
         Surface(
             modifier = Modifier.fillMaxWidth().offset { IntOffset(offsetX.roundToInt(), 0) }
                 .pointerInput(record.id) {
@@ -2256,7 +2047,6 @@ private fun AnimatedActionButton(
     progress: Float, delay: Float,
     onClick: () -> Unit,
 ) {
-    // stagger 效果：每粒掣延遲少少出現
     val p = ((progress - delay) / (1f - delay).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
     val alpha = p
     val scale = 0.4f + 0.6f * p
@@ -2278,13 +2068,5 @@ private fun AnimatedActionButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, label, tint = iconTint, modifier = Modifier.size(22.dp))
-    }
-}
-
-@Composable
-private fun ActionButton(icon: ImageVector, label: String, background: Color, width: Dp, height: Dp, onClick: () -> Unit) {
-    Box(Modifier.width(width).height(height).clip(RoundedCornerShape(14.dp)).background(background).clickable { onClick() },
-        contentAlignment = Alignment.Center) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp))
     }
 }
