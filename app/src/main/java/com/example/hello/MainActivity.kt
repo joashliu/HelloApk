@@ -495,22 +495,22 @@ fun MainApp() {
         }
 
         // 底部導航欄（鍵盤時淡出）
-        androidx.compose.animation.AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
             visible = !showKeyboard,
             enter = fadeIn(tween(220)),
-            exit = fadeOut(tween(200))
+            exit = fadeOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = NAV_BOTTOM_PADDING)
         ) {
-            key("navbar") {
-                FloatingNavBar(
-                    items = listOf(
-                        NavItem("記帳", Icons.Default.Receipt),
-                        NavItem("比較", Icons.Default.CompareArrows)),
-                    selectedIndex = currentPage,
-                    onIndexChange = { currentPage = it },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = NAV_BOTTOM_PADDING))
-            }
+            FloatingNavBar(
+                items = listOf(
+                    NavItem("記帳", Icons.Default.Receipt),
+                    NavItem("比較", Icons.Default.CompareArrows)),
+                selectedIndex = currentPage,
+                onIndexChange = { currentPage = it },
+                modifier = Modifier
+            )
         }
 
         // ===== FAB + 篩選按鈕（常駐,只換色）=====
@@ -1199,55 +1199,78 @@ fun LedgerKeyboardPanel(
                 .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
         ) {
             // ===== 日期 / 時間（分開可撳）=====
-            Surface(
+                        // ===== 日期 / 時間（兩個獨立卡片）=====
+            Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = SURFACE_ELEVATED
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                    // 日期
+                // 日期卡
+                Surface(
+                    modifier = Modifier
+                        .weight(1.4f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
+                            DatePickerDialog(ctx, { _, y, m, d ->
+                                cal.set(Calendar.YEAR, y)
+                                cal.set(Calendar.MONTH, m)
+                                cal.set(Calendar.DAY_OF_MONTH, d)
+                                onStateChange(state.copy(timestamp = cal.timeInMillis))
+                            }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH),
+                                cal.get(Calendar.DAY_OF_MONTH)).show()
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    color = SURFACE_ELEVATED
+                ) {
                     Row(
-                        modifier = Modifier.weight(1f).fillMaxHeight()
-                            .clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
-                            .clickable {
-                                val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
-                                DatePickerDialog(ctx, { _, y, m, d ->
-                                    cal.set(Calendar.YEAR, y)
-                                    cal.set(Calendar.MONTH, m)
-                                    cal.set(Calendar.DAY_OF_MONTH, d)
-                                    onStateChange(state.copy(timestamp = cal.timeInMillis))
-                                }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
-                            }
-                            .padding(horizontal = 14.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Default.Event, null, tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(formatDatePart(state.timestamp), fontSize = 14.sp, color = TEXT_PRIMARY,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            formatDatePart(state.timestamp),
+                            fontSize = 14.sp,
+                            color = TEXT_PRIMARY,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    // 分隔
-                    Box(Modifier.width(1.dp).height(24.dp).background(DIVIDER_COLOR))
-                    // 時間
+                }
+                // 時間卡
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
+                            TimePickerDialog(ctx, { _, h, mi ->
+                                cal.set(Calendar.HOUR_OF_DAY, h)
+                                cal.set(Calendar.MINUTE, mi)
+                                cal.set(Calendar.SECOND, 0)
+                                cal.set(Calendar.MILLISECOND, 0)
+                                onStateChange(state.copy(timestamp = cal.timeInMillis))
+                            }, cal.get(Calendar.HOUR_OF_DAY),
+                                cal.get(Calendar.MINUTE), true).show()
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    color = SURFACE_ELEVATED
+                ) {
                     Row(
-                        modifier = Modifier.weight(0.7f).fillMaxHeight()
-                            .clip(RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp))
-                            .clickable {
-                                val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
-                                TimePickerDialog(ctx, { _, h, mi ->
-                                    cal.set(Calendar.HOUR_OF_DAY, h)
-                                    cal.set(Calendar.MINUTE, mi)
-                                    cal.set(Calendar.SECOND, 0)
-                                    cal.set(Calendar.MILLISECOND, 0)
-                                    onStateChange(state.copy(timestamp = cal.timeInMillis))
-                                }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
-                            }
-                            .padding(horizontal = 14.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(Icons.Default.Schedule, null, tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(formatTimePart(state.timestamp), fontSize = 14.sp, color = TEXT_PRIMARY)
+                        Text(
+                            formatTimePart(state.timestamp),
+                            fontSize = 14.sp,
+                            color = TEXT_PRIMARY,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
             }
