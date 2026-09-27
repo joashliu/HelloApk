@@ -44,7 +44,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -54,36 +53,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.Backspace
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CompareArrows
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DirectionsBus
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Event
-import androidx.compose.material.icons.filled.FilterAlt
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Flight
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Receipt
-import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -92,7 +62,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -102,7 +71,6 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -139,52 +107,38 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-// ===== 現代配色 =====
-val BRAND_PRIMARY = Color(0xFF6366F1)         // Indigo
+// ===== 配色 =====
+val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
 val BRAND_PRIMARY_LIGHT = Color(0xFFE0E7FF)
-val BRAND_ACCENT = Color(0xFFEC4899)          // Pink
-val BRAND_GRADIENT_START = Color(0xFF6366F1)
-val BRAND_GRADIENT_END = Color(0xFF8B5CF6)
-val SURFACE_BG = Color(0xFFF8FAFC)            // 極淺灰白
+val SURFACE_BG = Color(0xFFF8FAFC)
 val SURFACE_CARD = Color(0xFFFFFFFF)
 val SURFACE_ELEVATED = Color(0xFFF1F5F9)
 val TEXT_PRIMARY = Color(0xFF0F172A)
 val TEXT_SECONDARY = Color(0xFF64748B)
 val TEXT_TERTIARY = Color(0xFF94A3B8)
 val DIVIDER_COLOR = Color(0xFFE2E8F0)
-
-val COLOR_INCOME = Color(0xFF059669)          // Emerald
-val COLOR_EXPENSE = Color(0xFFDC2626)         // Red
+val COLOR_INCOME = Color(0xFF059669)
+val COLOR_EXPENSE = Color(0xFFDC2626)
 
 const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
 const val ICON_SIZE = 100
 
-val NOTE_FONT_SIZE = 17.sp
+val NOTE_FONT_SIZE = 16.sp
 val META_FONT_SIZE = 12.sp
-val AMOUNT_FONT_SIZE = 19.sp
+val AMOUNT_FONT_SIZE = 18.sp
 val STAT_AMOUNT_FONT_SIZE = 22.sp
 val STAT_LABEL_FONT_SIZE = 11.sp
-
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
-
 val ROW_ALT_COLOR = Color(0xFFF8FAFC)
 const val FILTER_ANIM_MS = 250
 
-// ===== 類別樣式 =====
-data class CategoryStyle(
-    val icon: ImageVector,
-    val bgColor: Color,
-    val fgColor: Color
-)
+data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
 
-val CATEGORIES = listOf(
-    "收入", "娛樂", "家用", "飲食", "交通",
-    "個人", "購物", "月費", "旅遊"
-)
+val CATEGORIES = listOf("收入", "娛樂", "家用", "飲食", "交通", "個人", "購物", "月費", "旅遊")
 val EXPENSE_CATEGORIES = CATEGORIES.filter { it != "收入" }
 val INCOME_CATEGORY = "收入"
 
@@ -200,7 +154,6 @@ val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
     "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59))
 )
 
-// ===== 資料模型 =====
 data class Record(
     val amount: Double = 0.0,
     val note: String = "",
@@ -222,99 +175,63 @@ data class KeyboardState(
     val selectAmountOnInput: Boolean = false
 )
 
-// ===== 格式化工具 =====
-fun formatAmount(amount: Double): String =
-    String.format(Locale.US, "%,.1f", amount)
-
+fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun displayAmount(record: Record): String =
-    if (record.category == INCOME_CATEGORY) formatAmount(record.amount)
-    else formatAmount(-record.amount)
-
+    if (record.category == INCOME_CATEGORY) formatAmount(record.amount) else formatAmount(-record.amount)
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
 fun formatRecordTime(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val weekNames = arrayOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")
-    val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
-    val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
-    val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
-    return "$week．$hh:$mm"
+    val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
+    return "$wk．${String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))}:${String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))}"
 }
-
 fun formatDateTime(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val y = cal.get(Calendar.YEAR)
-    val mo = cal.get(Calendar.MONTH) + 1
-    val d = cal.get(Calendar.DAY_OF_MONTH)
-    val weekNames = arrayOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")
-    val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
-    val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
-    val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
-    return "${y}年${mo}月${d}日 $week $hh:$mm"
+    val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
+    return "${cal.get(Calendar.YEAR)}年${cal.get(Calendar.MONTH)+1}月${cal.get(Calendar.DAY_OF_MONTH)}日 $wk ${
+        String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))}:${String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))}"
 }
-
 fun dateKeyFromTimestamp(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    return String.format(Locale.US, "%04d-%02d-%02d",
-        cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
+    return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH)+1, cal.get(Calendar.DAY_OF_MONTH))
 }
-
 fun monthKeyFromTimestamp(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    return String.format(Locale.US, "%04d-%02d",
-        cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1)
+    return String.format(Locale.US, "%04d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH)+1)
 }
-
 fun formatMonthLabel(ym: String): String {
-    val parts = ym.split("-")
-    if (parts.size != 2) return ym
-    val y = parts[0].toIntOrNull() ?: return ym
-    val m = parts[1].toIntOrNull() ?: return ym
-    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-    return if (y == currentYear) "${m}月" else "${y % 100}年${m}月"
+    val p = ym.split("-"); if (p.size != 2) return ym
+    val y = p[0].toIntOrNull() ?: return ym; val m = p[1].toIntOrNull() ?: return ym
+    return if (y == Calendar.getInstance().get(Calendar.YEAR)) "${m}月" else "${y % 100}年${m}月"
 }
-
 fun formatDateHeader(dateKey: String): String {
-    val parts = dateKey.split("-")
-    if (parts.size != 3) return dateKey
-    val year = parts[0].toIntOrNull() ?: return dateKey
-    val month = parts[1].toIntOrNull() ?: return dateKey
-    val day = parts[2].toIntOrNull() ?: return dateKey
+    val p = dateKey.split("-"); if (p.size != 3) return dateKey
+    val y = p[0].toIntOrNull() ?: return dateKey
+    val mo = p[1].toIntOrNull() ?: return dateKey
+    val d = p[2].toIntOrNull() ?: return dateKey
     val cal = Calendar.getInstance().apply {
-        set(year, month - 1, day)
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+        set(y, mo - 1, d); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
-    val weekNames = arrayOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")
-    val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
+    val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
     val todayStart = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
-    val daysDiff = ((todayStart - cal.timeInMillis) / 86_400_000L).toInt()
-    val datePart = when {
-        daysDiff < 0 -> "未來"
-        daysDiff == 0 -> "今日"
-        daysDiff == 1 -> "琴日"
-        daysDiff == 2 -> "前日"
-        else -> "${month}月${day}日"
-    }
-    return "$datePart $week"
+    val diff = ((todayStart - cal.timeInMillis) / 86_400_000L).toInt()
+    val dp = when { diff < 0 -> "未來"; diff == 0 -> "今日"; diff == 1 -> "琴日"; diff == 2 -> "前日"; else -> "${mo}月${d}日" }
+    return "$dp $wk"
 }
 
 val AVATAR_COLORS = listOf(
-    Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8),
-    Color(0xFF9575CD), Color(0xFF7986CB), Color(0xFF64B5F6),
-    Color(0xFF4FC3F7), Color(0xFF4DB6AC), Color(0xFF81C784),
-    Color(0xFFAED581), Color(0xFFFFB74D), Color(0xFFFF8A65),
+    Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD),
+    Color(0xFF7986CB), Color(0xFF64B5F6), Color(0xFF4FC3F7), Color(0xFF4DB6AC),
+    Color(0xFF81C784), Color(0xFFAED581), Color(0xFFFFB74D), Color(0xFFFF8A65),
     Color(0xFFA1887F), Color(0xFF90A4AE)
 )
-
 fun avatarColor(name: String): Color {
     if (name.isBlank()) return AVATAR_COLORS[0]
-    val idx = (name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size
-    return AVATAR_COLORS[idx]
+    return AVATAR_COLORS[(name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size]
 }
 
 class MainActivity : ComponentActivity() {
@@ -322,9 +239,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = SURFACE_BG) {
-                    MainApp()
-                }
+                Surface(Modifier.fillMaxSize(), color = SURFACE_BG) { MainApp() }
             }
         }
     }
@@ -338,23 +253,19 @@ fun MainApp() {
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
-
     var currentPage by remember { mutableIntStateOf(0) }
-
     var filterModeOn by remember { mutableStateOf(false) }
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
-
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
-
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
@@ -365,8 +276,8 @@ fun MainApp() {
                 val catOk = filterCategory == null || r.category == filterCategory
                 val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
                 val searchOk = filterSearch.text.isBlank() ||
-                    r.note.contains(filterSearch.text, ignoreCase = true) ||
-                    r.category.contains(filterSearch.text, ignoreCase = true)
+                    r.note.contains(filterSearch.text, true) ||
+                    r.category.contains(filterSearch.text, true)
                 catOk && monthOk && searchOk
             }
         }
@@ -374,11 +285,9 @@ fun MainApp() {
     val ledgerRecords by remember {
         derivedStateOf {
             val base = if (filterModeOn) filtered else records.toList()
-            if (showFuture) base
-            else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
+            if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
         }
     }
-
     val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY } } }
     val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY } } }
     val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount } } }
@@ -387,29 +296,20 @@ fun MainApp() {
     val topNotes by remember {
         derivedStateOf {
             ledgerRecords.filter { it.note.isNotBlank() }.groupBy { it.note }
-                .map { (name, list) -> name to list.size }
-                .sortedByDescending { it.second }.take(20)
+                .map { (n, l) -> n to l.size }.sortedByDescending { it.second }.take(20)
         }
     }
     val noteIconMap by remember {
         derivedStateOf {
             ledgerRecords.filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
-                .groupBy { it.note }
-                .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
+                .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
         }
     }
     val availableMonths by remember {
         derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sortedDescending() }
     }
-    val globalIndexMap by remember {
-        derivedStateOf {
-            groupedByDate.flatMap { it.second }.withIndex().associate { (i, r) -> r.id to i }
-        }
-    }
 
-    val pickImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
         if (uri != null && target != null) {
             scope.launch {
@@ -420,88 +320,76 @@ fun MainApp() {
         }
         iconTargetRecord = null
     }
-
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        val target = iconTargetRecord
-        val uri = pendingCameraUri
-        if (success && target != null && uri != null) {
+    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val target = iconTargetRecord; val uri = pendingCameraUri
+        if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
             }
         }
-        pendingCameraUri = null
-        iconTargetRecord = null
+        pendingCameraUri = null; iconTargetRecord = null
     }
 
     DisposableEffect(Unit) {
-        val listener = db.collection("records")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
+        val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, err ->
                 loading = false
-                if (error != null) return@addSnapshotListener
-                if (snapshot != null) {
+                if (err != null) return@addSnapshotListener
+                if (snap != null) {
                     records.clear()
-                    snapshot.documents.forEach { doc ->
-                        val r = doc.toObject(Record::class.java)
-                        if (r != null) { r.id = doc.id; records.add(r) }
+                    snap.documents.forEach { doc ->
+                        doc.toObject(Record::class.java)?.let { it.id = doc.id; records.add(it) }
                     }
                 }
             }
         onDispose { listener.remove() }
     }
 
-    fun openKeyboardForNew(initialNote: String = "") {
-        keyboardState = KeyboardState(noteText = initialNote)
-        showKeyboard = true
+    fun openKeyboardForNew(note: String = "") {
+        keyboardState = KeyboardState(noteText = note); showKeyboard = true
     }
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
-            amountText = r.amount.toString(),
-            noteText = r.note, category = r.category,
-            selectAmountOnInput = true
-        )
+            amountText = r.amount.toString(), noteText = r.note,
+            category = r.category, selectAmountOnInput = true)
         showKeyboard = true
     }
     fun openKeyboardForEdit(r: Record) {
         val amt = if (r.amount % 1.0 == 0.0) r.amount.toInt().toString() else r.amount.toString()
         keyboardState = KeyboardState(
             amountText = amt, noteText = r.note, category = r.category,
-            editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true
-        )
+            editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
     fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
-        if (amt <= 0.0) {
-            Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
         val note = keyboardState.noteText
         val category = keyboardState.category
         val editId = keyboardState.editingRecordId
         if (editId != null) {
-            db.collection("records").document(editId).update(
-                mapOf("amount" to amt, "note" to note, "category" to category,
-                    "timestamp" to keyboardState.timestamp)
-            )
+            db.collection("records").document(editId).update(mapOf(
+                "amount" to amt, "note" to note, "category" to category,
+                "timestamp" to keyboardState.timestamp))
         } else {
-            val inheritedIcon = records.filter { it.note == note && it.note.isNotBlank() }
+            val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
             db.collection("records").add(Record(
                 amount = amt, note = note, category = category,
-                timestamp = keyboardState.timestamp, iconUrl = inheritedIcon))
+                timestamp = keyboardState.timestamp, iconUrl = inherited))
         }
-        showKeyboard = false
-        keyboardState = KeyboardState()
+        showKeyboard = false; keyboardState = KeyboardState()
     }
 
+    // 系統返回鍵：先關鍵盤
     BackHandler(enabled = showKeyboard) {
-        showKeyboard = false
-        keyboardState = KeyboardState()
+        showKeyboard = false; keyboardState = KeyboardState()
+    }
+    // 系統返回鍵：再退篩選模式
+    BackHandler(enabled = filterModeOn && !showKeyboard) {
+        filterModeOn = false
     }
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filterModeOn) {
@@ -513,11 +401,11 @@ fun MainApp() {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(SURFACE_BG)) {
+    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         when (currentPage) {
             0 -> LedgerContent(
                 loading = loading, filtered = ledgerRecords,
-                groupedByDate = groupedByDate, globalIndexMap = globalIndexMap,
+                groupedByDate = groupedByDate,
                 topNotes = topNotes, noteIconMap = noteIconMap,
                 hasIncome = hasIncome, hasExpense = hasExpense,
                 totalIncome = totalIncome, totalExpense = totalExpense,
@@ -526,11 +414,11 @@ fun MainApp() {
                 filterMonth = filterMonth, onFilterMonthChange = { filterMonth = it },
                 availableMonths = availableMonths,
                 expandedId = expandedId, onExpandChange = { expandedId = it },
-                onQuickInputClick = { name -> openKeyboardForNew(name) },
-                onCopyClick = { r -> openKeyboardForCopy(r) },
-                onEditClick = { r -> openKeyboardForEdit(r) },
-                onDeleteClick = { r -> db.collection("records").document(r.id).delete() },
-                onChangeIconClick = { r -> iconTargetRecord = r; showIconSourceDialog = true },
+                onQuickInputClick = { openKeyboardForNew(it) },
+                onCopyClick = { openKeyboardForCopy(it) },
+                onEditClick = { openKeyboardForEdit(it) },
+                onDeleteClick = { db.collection("records").document(it.id).delete() },
+                onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                 onFilterByName = { name ->
                     filterCategory = null; filterMonth = null
                     filterSearch = TextFieldValue(name); filterModeOn = true
@@ -550,24 +438,20 @@ fun MainApp() {
             visible = !showKeyboard,
             enter = fadeIn(tween(220)) + slideInVertically(
                 initialOffsetY = { it / 2 },
-                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
-            ),
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)),
             exit = fadeOut(tween(200)) + slideOutVertically(
                 targetOffsetY = { it / 2 },
-                animationSpec = tween(220, easing = FastOutSlowInEasing)
-            )
+                animationSpec = tween(220, easing = FastOutSlowInEasing))
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
                 key("navbar") {
                     FloatingNavBar(
                         items = listOf(
                             NavItem("記帳", Icons.Default.Receipt),
-                            NavItem("比較", Icons.Default.CompareArrows)
-                        ),
+                            NavItem("比較", Icons.Default.CompareArrows)),
                         selectedIndex = currentPage,
                         onIndexChange = { currentPage = it },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = NAV_BOTTOM_PADDING)
-                    )
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = NAV_BOTTOM_PADDING))
                 }
                 key("filter_bottom") {
                     AnimatedVisibility(
@@ -579,23 +463,17 @@ fun MainApp() {
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(
-                                start = 16.dp, end = 16.dp,
-                                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
-                            ),
+                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Surface(
-                                modifier = Modifier.weight(1f).height(52.dp),
+                                Modifier.weight(1f).height(52.dp),
                                 shape = RoundedCornerShape(26.dp),
                                 color = SURFACE_CARD,
                                 shadowElevation = 8.dp
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(8.dp))
                                     BasicTextField(
@@ -606,9 +484,7 @@ fun MainApp() {
                                         cursorBrush = SolidColor(BRAND_PRIMARY),
                                         decorationBox = { inner ->
                                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                if (filterSearch.text.isEmpty()) {
-                                                    Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                }
+                                                if (filterSearch.text.isEmpty()) Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
                                                 inner()
                                             }
                                         },
@@ -621,6 +497,7 @@ fun MainApp() {
                                     }
                                 }
                             }
+                            // 篩選模式內：紫底白漏斗
                             SmallFloatingActionButton(
                                 onClick = { filterModeOn = false },
                                 containerColor = BRAND_PRIMARY,
@@ -644,15 +521,16 @@ fun MainApp() {
                             end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            // 非篩選模式：白底 + 紫漏斗 + 紫邊框
                             Box(
-                                modifier = Modifier.size(40.dp).clip(CircleShape)
-                                    .background(SURFACE_CARD)
+                                Modifier.size(44.dp).clip(CircleShape)
+                                    .background(Color.White)
                                     .shadow(4.dp, CircleShape)
+                                    .border(1.5.dp, BRAND_PRIMARY, CircleShape)
                                     .pointerInput(Unit) {
                                         detectTapGestures(
                                             onTap = { filterModeOn = true },
-                                            onDoubleTap = { filterModeOn = true; filterSelectAllTrigger++ }
-                                        )
+                                            onDoubleTap = { filterModeOn = true; filterSelectAllTrigger++ })
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
@@ -718,9 +596,7 @@ fun MainApp() {
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = { showIconSourceDialog = false; iconTargetRecord = null }) { Text("取消") }
-            }
+            confirmButton = { TextButton(onClick = { showIconSourceDialog = false; iconTargetRecord = null }) { Text("取消") } }
         )
     }
 
@@ -730,14 +606,11 @@ fun MainApp() {
             title = { Text("輸入圖片網址") },
             text = {
                 Column {
-                    Text("貼上 PNG / JPG / WebP 圖片連結",
-                        style = MaterialTheme.typography.bodySmall, color = TEXT_SECONDARY)
+                    Text("貼上 PNG / JPG / WebP 圖片連結", style = MaterialTheme.typography.bodySmall, color = TEXT_SECONDARY)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = urlInput, onValueChange = { urlInput = it },
+                    OutlinedTextField(value = urlInput, onValueChange = { urlInput = it },
                         label = { Text("URL") }, placeholder = { Text("https://...") },
-                        singleLine = true, modifier = Modifier.fillMaxWidth()
-                    )
+                        singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
             },
             confirmButton = {
@@ -759,103 +632,76 @@ fun MainApp() {
         )
     }
 }
-
-// ===== 懸浮導航欄 =====
 @Composable
-fun FloatingNavBar(
-    items: List<NavItem>, selectedIndex: Int,
-    onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier
-) {
+fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
     val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
-    val totalWidthPx = tabWidthPx * items.size
-    val maxOffset = totalWidthPx - tabWidthPx
-    val viewConfiguration = LocalViewConfiguration.current
-    val latestSelectedIndex by rememberUpdatedState(selectedIndex)
-    val latestOnIndexChange by rememberUpdatedState(onIndexChange)
-    val latestItemsSize by rememberUpdatedState(items.size)
-
+    val maxOffset = tabWidthPx * items.size - tabWidthPx
+    val vc = LocalViewConfiguration.current
+    val latestSel by rememberUpdatedState(selectedIndex)
+    val latestOnChange by rememberUpdatedState(onIndexChange)
+    val latestSize by rememberUpdatedState(items.size)
     var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
     var isDragging by remember { mutableStateOf(false) }
-
     LaunchedEffect(selectedIndex) { if (!isDragging) bubbleOffset = selectedIndex * tabWidthPx }
-
     val animatedOffset by animateFloatAsState(
-        targetValue = bubbleOffset,
-        animationSpec = if (isDragging) snap<Float>() else spring(
-            stiffness = Spring.StiffnessMediumLow,
-            dampingRatio = Spring.DampingRatioNoBouncy),
-        label = "bubble"
-    )
+        bubbleOffset,
+        if (isDragging) snap<Float>() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "bubble")
 
     Surface(
         modifier = modifier.width(NAV_TAB_WIDTH * items.size).height(NAV_HEIGHT),
         shape = RoundedCornerShape(NAV_HEIGHT / 2),
-        color = SURFACE_CARD,
-        shadowElevation = 12.dp
+        color = SURFACE_CARD, shadowElevation = 12.dp
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
-                awaitPointerEventScope {
+        Box(Modifier.fillMaxSize().pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downX = down.position.x
+                    val pid = down.id
+                    var dx = 0f; var dragged = false
                     while (true) {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val downX = down.position.x
-                        val pointerId = down.id
-                        var totalDx = 0f
-                        var dragged = false
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == pointerId }
-                            if (change == null || !change.pressed) {
-                                if (!dragged) {
-                                    val index = (downX / tabWidthPx).toInt().coerceIn(0, latestItemsSize - 1)
-                                    if (index != latestSelectedIndex) latestOnIndexChange(index)
-                                    bubbleOffset = index * tabWidthPx
-                                } else {
-                                    val targetIndex = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestItemsSize - 1)
-                                    bubbleOffset = targetIndex * tabWidthPx
-                                    if (targetIndex != latestSelectedIndex) latestOnIndexChange(targetIndex)
-                                }
-                                isDragging = false
-                                break
+                        val e = awaitPointerEvent()
+                        val c = e.changes.firstOrNull { it.id == pid }
+                        if (c == null || !c.pressed) {
+                            if (!dragged) {
+                                val i = (downX / tabWidthPx).toInt().coerceIn(0, latestSize - 1)
+                                if (i != latestSel) latestOnChange(i)
+                                bubbleOffset = i * tabWidthPx
+                            } else {
+                                val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
+                                bubbleOffset = i * tabWidthPx
+                                if (i != latestSel) latestOnChange(i)
                             }
-                            val dx = change.positionChange().x
-                            totalDx += dx
-                            if (!dragged && abs(totalDx) > viewConfiguration.touchSlop) {
-                                dragged = true; isDragging = true
-                            }
-                            if (dragged) {
-                                bubbleOffset = (bubbleOffset + dx).coerceIn(0f, maxOffset)
-                                change.consume()
-                                val currentIdx = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestItemsSize - 1)
-                                if (currentIdx != latestSelectedIndex) latestOnIndexChange(currentIdx)
-                            }
+                            isDragging = false; break
+                        }
+                        val d = c.positionChange().x; dx += d
+                        if (!dragged && abs(dx) > vc.touchSlop) { dragged = true; isDragging = true }
+                        if (dragged) {
+                            bubbleOffset = (bubbleOffset + d).coerceIn(0f, maxOffset)
+                            c.consume()
+                            val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
+                            if (i != latestSel) latestOnChange(i)
                         }
                     }
                 }
             }
-        ) {
-            Box(
-                modifier = Modifier
-                    .offset { IntOffset(animatedOffset.roundToInt(), 0) }
-                    .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
-                    .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
-                    .background(BRAND_PRIMARY_LIGHT)
-            )
-            Row(modifier = Modifier.fillMaxSize()) {
-                items.forEachIndexed { index, item ->
-                    val selected = index == selectedIndex
-                    val tint = if (selected) BRAND_PRIMARY_DARK else TEXT_SECONDARY
-                    Box(
-                        modifier = Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(),
-                        contentAlignment = Alignment.Center
-                    ) {
+        }) {
+            Box(Modifier.offset { IntOffset(animatedOffset.roundToInt(), 0) }
+                .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
+                .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
+                .background(BRAND_PRIMARY_LIGHT))
+            Row(Modifier.fillMaxSize()) {
+                items.forEachIndexed { idx, item ->
+                    val sel = idx == selectedIndex
+                    val tint = if (sel) BRAND_PRIMARY_DARK else TEXT_SECONDARY
+                    Box(Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(), contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(item.label, fontSize = 14.sp,
-                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = tint)
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, color = tint)
                         }
                     }
                 }
@@ -869,7 +715,6 @@ fun FloatingNavBar(
 fun LedgerContent(
     loading: Boolean, filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
-    globalIndexMap: Map<String, Int>,
     topNotes: List<Pair<String, Int>>, noteIconMap: Map<String, String>,
     hasIncome: Boolean, hasExpense: Boolean,
     totalIncome: Double, totalExpense: Double,
@@ -889,16 +734,14 @@ fun LedgerContent(
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
 ) {
     val listState = rememberLazyListState()
-
-    Column(modifier = Modifier.fillMaxSize().background(SURFACE_BG)) {
+    Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
             visible = filterMode,
             enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
             exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     AnimatedFilterChip(filterCategory == null, "全部") { onFilterCategoryChange(null) }
                     CATEGORIES.forEach { cat ->
                         AnimatedFilterChip(filterCategory == cat, cat) {
@@ -908,12 +751,11 @@ fun LedgerContent(
                 }
                 Spacer(Modifier.height(8.dp))
                 if (availableMonths.isNotEmpty()) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         AnimatedFilterChip(filterMonth == null, "全年") { onFilterMonthChange(null) }
-                        availableMonths.forEach { month ->
-                            AnimatedFilterChip(filterMonth == month, formatMonthLabel(month)) {
-                                onFilterMonthChange(if (filterMonth == month) null else month)
+                        availableMonths.forEach { m ->
+                            AnimatedFilterChip(filterMonth == m, formatMonthLabel(m)) {
+                                onFilterMonthChange(if (filterMonth == m) null else m)
                             }
                         }
                     }
@@ -927,25 +769,15 @@ fun LedgerContent(
                 CircularProgressIndicator(color = BRAND_PRIMARY)
             }
             filtered.isEmpty() && !showKeyboard -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
-                    color = TEXT_SECONDARY
-                )
+                Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
             }
             else -> {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
-                    }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { TopStats(hasIncome, hasExpense, totalIncome, totalExpense) }
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                        Icon(
-                            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        Icon(if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             "顯示未來項目",
-                            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-                        )
+                            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY)
                     }
                 }
 
@@ -956,35 +788,48 @@ fun LedgerContent(
                 ) {
                     Column {
                         QuickInputSection(topNotes, noteIconMap, onQuickInputClick)
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(4.dp))
                     }
                 }
 
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 12.dp, end = 12.dp,
+                            top = 4.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + if (filterMode) 90.dp else 20.dp)
                     ) {
                         groupedByDate.forEach { (dateKey, dayRecords) ->
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
-                            item(key = "header_$dateKey") {
-                                DayHeader(dateKey, dayIncome, dayExpense)
-                            }
-                            itemsIndexed(dayRecords, key = { _, r -> r.id }) { _, r ->
-                                val idx = globalIndexMap[r.id] ?: 0
-                                SwipeableRecordItem(
-                                    modifier = Modifier.animateItem(),
-                                    backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                    record = r,
-                                    expandedId = expandedId, onExpand = onExpandChange,
-                                    onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
-                                    onFilter = { onFilterByName(r.note) },
-                                    onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) }
-                                )
+
+                            item(key = "card_$dateKey") {
+                                // 每日一張圓角卡片
+                                Box(
+                                    Modifier.fillMaxWidth()
+                                        .padding(vertical = 5.dp)
+                                        .shadow(2.dp, RoundedCornerShape(18.dp))
+                                        .background(SURFACE_CARD, RoundedCornerShape(18.dp))
+                                ) {
+                                    Column {
+                                        DayHeader(dateKey, dayIncome, dayExpense)
+                                        dayRecords.forEachIndexed { idx, r ->
+                                            SwipeableRecordItem(
+                                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                                record = r,
+                                                expandedId = expandedId,
+                                                onExpand = onExpandChange,
+                                                onCopy = { onCopyClick(r) },
+                                                onEdit = { onEditClick(r) },
+                                                onFilter = { onFilterByName(r.note) },
+                                                onDelete = { onDeleteClick(r) },
+                                                onChangeIcon = { onChangeIconClick(r) }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1003,8 +848,7 @@ fun LedgerContent(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                            modifier = Modifier.fillMaxSize())
                     }
                 }
             }
@@ -1012,7 +856,6 @@ fun LedgerContent(
     }
 }
 
-// ===== 比較頁 =====
 @Composable
 fun CompareContent(records: List<Record>, availableMonths: List<String>) {
     var monthA by remember { mutableStateOf<String?>(null) }
@@ -1021,53 +864,62 @@ fun CompareContent(records: List<Record>, availableMonths: List<String>) {
         if (monthA == null || monthA !in availableMonths) monthA = availableMonths.getOrNull(0)
         if (monthB == null || monthB !in availableMonths) monthB = availableMonths.getOrNull(1) ?: availableMonths.getOrNull(0)
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    // 收入永遠喺頂,其他按 monthB 金額倒序
+    val sortedCategories = remember(records, monthB) {
+        val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
+            if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
+        }
+        listOf(INCOME_CATEGORY) + expenses
+    }
+
+    Column(Modifier.fillMaxSize().background(SURFACE_BG).padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text("月份比較", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
             modifier = Modifier.padding(vertical = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            MonthDropdown("月份 A", monthA, availableMonths, { monthA = it }, Modifier.weight(1f))
-            MonthDropdown("月份 B", monthB, availableMonths, { monthB = it }, Modifier.weight(1f))
+            MonthDropdown(monthA, availableMonths, { monthA = it }, Modifier.weight(1f))
+            MonthDropdown(monthB, availableMonths, { monthB = it }, Modifier.weight(1f))
         }
         Spacer(Modifier.height(16.dp))
+
         Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("類別", Modifier.weight(1.2f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY)
-            Text(monthA?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
-            Text(monthB?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
-            Text("差異", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
+            Text("類別", Modifier.weight(1.4f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY)
+            Text(monthA?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
+                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
+            Text(monthB?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
+                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
         }
         HorizontalDivider(color = DIVIDER_COLOR)
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)) {
-            items(EXPENSE_CATEGORIES) { cat ->
+
+        LazyColumn(Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)) {
+            items(sortedCategories) { cat ->
                 val amtA = if (monthA != null) sumByCategoryAndMonth(records, cat, monthA!!) else 0.0
                 val amtB = if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
-                val diff = amtB - amtA
+                val style = CATEGORY_STYLES[cat]
+                val isIncome = cat == INCOME_CATEGORY
+
                 Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(cat, Modifier.weight(1.2f), fontSize = 15.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
-                    Text(formatAmount(amtA), Modifier.weight(1f), fontSize = 15.sp, color = TEXT_PRIMARY, textAlign = TextAlign.End)
-                    Text(formatAmount(amtB), Modifier.weight(1f), fontSize = 15.sp, color = TEXT_PRIMARY, textAlign = TextAlign.End)
-                    Text((if (diff > 0) "+" else "") + formatAmount(diff), Modifier.weight(1f), fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (diff > 0) COLOR_EXPENSE else if (diff < 0) COLOR_INCOME else TEXT_TERTIARY,
+                    Row(Modifier.weight(1.4f), verticalAlignment = Alignment.CenterVertically) {
+                        if (style != null) {
+                            Box(Modifier.size(26.dp).clip(RoundedCornerShape(8.dp)).background(style.bgColor),
+                                contentAlignment = Alignment.Center) {
+                                Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
+                            }
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
+                            fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
+                    }
+                    Text(formatAmount(amtA), Modifier.weight(1f), fontSize = 15.sp,
+                        color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
+                        fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
+                        textAlign = TextAlign.End)
+                    Text(formatAmount(amtB), Modifier.weight(1f), fontSize = 15.sp,
+                        color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
+                        fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
                         textAlign = TextAlign.End)
                 }
                 HorizontalDivider(color = DIVIDER_COLOR)
-            }
-            item {
-                val totalA = if (monthA != null) EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, monthA!!) } else 0.0
-                val totalB = if (monthB != null) EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, monthB!!) } else 0.0
-                val totalDiff = totalB - totalA
-                Spacer(Modifier.height(4.dp))
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(SURFACE_ELEVATED)
-                    .padding(vertical = 16.dp, horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("總計", Modifier.weight(1.2f), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TEXT_PRIMARY)
-                    Text(formatAmount(totalA), Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TEXT_PRIMARY, textAlign = TextAlign.End)
-                    Text(formatAmount(totalB), Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TEXT_PRIMARY, textAlign = TextAlign.End)
-                    Text((if (totalDiff > 0) "+" else "") + formatAmount(totalDiff), Modifier.weight(1f),
-                        fontWeight = FontWeight.Bold, fontSize = 15.sp,
-                        color = if (totalDiff > 0) COLOR_EXPENSE else if (totalDiff < 0) COLOR_INCOME else TEXT_TERTIARY,
-                        textAlign = TextAlign.End)
-                }
             }
         }
     }
@@ -1077,7 +929,7 @@ fun sumByCategoryAndMonth(records: List<Record>, category: String, month: String
     records.filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == month }.sumOf { it.amount }
 
 @Composable
-fun MonthDropdown(label: String, value: String?, months: List<String>, onChange: (String?) -> Unit, modifier: Modifier = Modifier) {
+fun MonthDropdown(value: String?, months: List<String>, onChange: (String?) -> Unit, modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
         OutlinedButton(
@@ -1086,14 +938,11 @@ fun MonthDropdown(label: String, value: String?, months: List<String>, onChange:
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
         ) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-                Text(label, fontSize = 11.sp, color = TEXT_TERTIARY)
-                Text(value?.let { formatMonthLabel(it) } ?: "未選擇", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            }
+            Text(value?.let { formatMonthLabel(it) } ?: "選擇月份",
+                fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
-            shape = RoundedCornerShape(14.dp),
-            containerColor = SURFACE_CARD) {
+            shape = RoundedCornerShape(14.dp), containerColor = SURFACE_CARD) {
             months.forEach { m ->
                 DropdownMenuItem(text = { Text(formatMonthLabel(m)) },
                     onClick = { onChange(m); expanded = false })
@@ -1101,8 +950,6 @@ fun MonthDropdown(label: String, value: String?, months: List<String>, onChange:
         }
     }
 }
-
-// ===== 記帳鍵盤 =====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
@@ -1113,14 +960,9 @@ fun LedgerKeyboardPanel(
 ) {
     val ctx = LocalContext.current
     Surface(modifier = modifier, color = SURFACE_CARD,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        shadowElevation = 16.dp
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp),
-            verticalArrangement = Arrangement.Bottom
-        ) {
-            // 拖動指示條
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), shadowElevation = 16.dp) {
+        Column(Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp),
+            verticalArrangement = Arrangement.Bottom) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(DIVIDER_COLOR))
             }
@@ -1128,8 +970,7 @@ fun LedgerKeyboardPanel(
 
             // 日期時間
             Surface(
-                modifier = Modifier.fillMaxWidth().height(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                modifier = Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp))
                     .clickable {
                         val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
                         DatePickerDialog(ctx, { _, y, m, d ->
@@ -1155,11 +996,7 @@ fun LedgerKeyboardPanel(
             Spacer(Modifier.height(10.dp))
 
             // 金額顯示
-            Surface(
-                modifier = Modifier.fillMaxWidth().height(82.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = SURFACE_ELEVATED
-            ) {
+            Surface(Modifier.fillMaxWidth().height(82.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(horizontal = 22.dp),
                     contentAlignment = Alignment.CenterEnd) {
                     val showText = if (state.amountText.isEmpty()) "0" else state.amountText
@@ -1221,21 +1058,19 @@ fun LedgerKeyboardPanel(
                         mutableStateOf(TextFieldValue(text = state.noteText,
                             selection = TextRange(0, state.noteText.length)))
                     }
-                    val noteFocusRequester = remember { FocusRequester() }
-                    LaunchedEffect(Unit) { noteFocusRequester.requestFocus() }
+                    val focusReq = remember { FocusRequester() }
+                    LaunchedEffect(Unit) { focusReq.requestFocus() }
                     TextField(
                         value = tfValue, onValueChange = { nv -> tfValue = nv; onStateChange(state.copy(noteText = nv.text)) },
                         placeholder = { Text("名稱") }, singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         colors = TextFieldDefaults.colors(
-                            focusedContainerColor = SURFACE_ELEVATED,
-                            unfocusedContainerColor = SURFACE_ELEVATED,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedContainerColor = SURFACE_ELEVATED, unfocusedContainerColor = SURFACE_ELEVATED,
+                            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
                             disabledIndicatorColor = Color.Transparent),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                        modifier = Modifier.weight(1f).fillMaxHeight().focusRequester(noteFocusRequester)
+                        modifier = Modifier.weight(1f).fillMaxHeight().focusRequester(focusReq)
                     )
                 } else {
                     OutlinedButton(
@@ -1244,11 +1079,9 @@ fun LedgerKeyboardPanel(
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
                     ) {
-                        Text(
-                            text = if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
+                        Text(if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
                             maxLines = 1, fontSize = 15.sp,
-                            color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY
-                        )
+                            color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY)
                     }
                 }
 
@@ -1270,23 +1103,20 @@ fun LedgerKeyboardPanel(
                     DropdownMenu(
                         expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false },
                         modifier = Modifier.width(288.dp),
-                        shape = RoundedCornerShape(18.dp),
-                        containerColor = SURFACE_CARD
+                        shape = RoundedCornerShape(18.dp), containerColor = SURFACE_CARD
                     ) {
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                        FlowRow(Modifier.fillMaxWidth().padding(10.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
-                            maxItemsInEachRow = 2
-                        ) {
+                            maxItemsInEachRow = 2) {
                             CATEGORIES.forEach { cat ->
                                 val s = CATEGORY_STYLES[cat]
-                                val selected = cat == state.category
+                                val sel = cat == state.category
                                 val chipShape = RoundedCornerShape(12.dp)
                                 Row(
-                                    modifier = Modifier.width(130.dp).clip(chipShape)
+                                    Modifier.width(130.dp).clip(chipShape)
                                         .background(s?.bgColor ?: SURFACE_ELEVATED)
-                                        .then(if (selected) Modifier.border(2.dp, BRAND_PRIMARY, chipShape) else Modifier)
+                                        .then(if (sel) Modifier.border(2.dp, BRAND_PRIMARY, chipShape) else Modifier)
                                         .clickable { onStateChange(state.copy(category = cat)); showCategoryMenu = false }
                                         .padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -1295,9 +1125,8 @@ fun LedgerKeyboardPanel(
                                         Icon(s.icon, null, tint = s.fgColor, modifier = Modifier.size(18.dp))
                                         Spacer(Modifier.width(6.dp))
                                     }
-                                    Text(cat, fontSize = 14.sp,
-                                        color = s?.fgColor ?: TEXT_PRIMARY,
-                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                                    Text(cat, fontSize = 14.sp, color = s?.fgColor ?: TEXT_PRIMARY,
+                                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
                                 }
                             }
                         }
@@ -1322,9 +1151,7 @@ fun LedgerKeyboardPanel(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.weight(2f).fillMaxHeight(),
                     enabled = state.amountText.isNotEmpty() && state.amountText != "0",
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = BRAND_PRIMARY,
-                        contentColor = Color.White)
+                    colors = ButtonDefaults.buttonColors(containerColor = BRAND_PRIMARY, contentColor = Color.White)
                 ) {
                     Icon(Icons.Default.Check, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(4.dp))
@@ -1335,7 +1162,6 @@ fun LedgerKeyboardPanel(
                     }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -1343,108 +1169,91 @@ fun LedgerKeyboardPanel(
 
 @Composable
 fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "keyScale"
-    )
-    val bgColor by animateColorAsState(
-        targetValue = if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium), label = "keyBg"
-    )
-    Box(
-        modifier = modifier.clip(RoundedCornerShape(14.dp)).background(bgColor)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .clickable(interactionSource = interactionSource, indication = null) { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        if (label == "backspace") {
-            Icon(Icons.Default.Backspace, "退格", modifier = Modifier.size(22.dp), tint = TEXT_SECONDARY)
-        } else {
-            Text(label, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = TEXT_PRIMARY)
-        }
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.94f else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "ks")
+    val bg by animateColorAsState(if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED,
+        spring(stiffness = Spring.StiffnessMedium), label = "kb")
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(bg)
+        .graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(interactionSource = src, indication = null) { onClick() },
+        contentAlignment = Alignment.Center) {
+        if (label == "backspace") Icon(Icons.Default.Backspace, "退格", modifier = Modifier.size(22.dp), tint = TEXT_SECONDARY)
+        else Text(label, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = TEXT_PRIMARY)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedFilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.9f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "chipScale"
-    )
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.9f else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "cs")
     FilterChip(
         selected = selected, onClick = onClick,
-        label = { Text(label) },
-        interactionSource = interactionSource,
+        label = { Text(label) }, interactionSource = src,
         shape = RoundedCornerShape(12.dp),
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BRAND_PRIMARY,
-            selectedLabelColor = Color.White,
-            containerColor = SURFACE_CARD,
-            labelColor = TEXT_SECONDARY
-        ),
-        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
-    )
+            selectedContainerColor = BRAND_PRIMARY, selectedLabelColor = Color.White,
+            containerColor = SURFACE_CARD, labelColor = TEXT_SECONDARY),
+        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
-// ===== 快速輸入 =====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(topNotes: List<Pair<String, Int>>, noteIconMap: Map<String, String>, onClick: (String) -> Unit) {
     if (topNotes.isEmpty()) return
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
         val availWidth = maxWidth - 32.dp
-        val chipEstimate = 110.dp
-        val perRow = max(1, (availWidth / chipEstimate).toInt())
+        val perRow = max(1, (availWidth / 110.dp).toInt())
         val perPage = perRow * 4
         val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
         val pagerState = rememberPagerState { pageCount }
         val linesToShow = if (pageCount == 1) (topNotes.size + perRow - 1) / perRow else 4
-        val rowHeight = 48.dp
-        val vGap = 6.dp
+        val rowHeight = 48.dp; val vGap = 6.dp
         val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1)
 
-        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().height(pagerHeight)) { page ->
-                val start = page * perPage
-                val end = minOf(start + perPage, topNotes.size)
-                if (start >= end) return@HorizontalPager
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(vGap),
-                    maxItemsInEachRow = perRow, maxLines = 4
-                ) {
-                    for (i in start until end) {
-                        val name = topNotes[i].first
-                        SuggestionChip(
-                            onClick = { onClick(name) },
-                            label = { Text(name) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = SuggestionChipDefaults.suggestionChipColors(
-                                containerColor = SURFACE_CARD,
-                                labelColor = TEXT_PRIMARY),
-                            border = SuggestionChipDefaults.suggestionChipBorder(
-                                enabled = true,
-                                borderColor = DIVIDER_COLOR),
-                            icon = { IconView(noteIconMap[name] ?: "", name, size = 22.dp) }
-                        )
+        Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            .shadow(2.dp, RoundedCornerShape(18.dp))
+            .background(SURFACE_CARD, RoundedCornerShape(18.dp))
+            .padding(vertical = 8.dp)) {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("快速輸入", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TEXT_TERTIARY)
+                }
+                Spacer(Modifier.height(6.dp))
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().height(pagerHeight)) { page ->
+                    val start = page * perPage
+                    val end = minOf(start + perPage, topNotes.size)
+                    if (start >= end) return@HorizontalPager
+                    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(vGap),
+                        maxItemsInEachRow = perRow, maxLines = 4) {
+                        for (i in start until end) {
+                            val name = topNotes[i].first
+                            SuggestionChip(
+                                onClick = { onClick(name) },
+                                label = { Text(name, fontSize = 13.sp) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = SURFACE_ELEVATED, labelColor = TEXT_PRIMARY),
+                                border = null,
+                                icon = { IconView(noteIconMap[name] ?: "", name, size = 20.dp) })
+                        }
                     }
                 }
-            }
-            if (pageCount > 1) {
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    repeat(pageCount) { index ->
-                        val active = index == pagerState.currentPage
-                        Box(Modifier.padding(horizontal = 3.dp).size(if (active) 7.dp else 5.dp).clip(CircleShape)
-                            .background(if (active) BRAND_PRIMARY else DIVIDER_COLOR))
+                if (pageCount > 1) {
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                        repeat(pageCount) { i ->
+                            val active = i == pagerState.currentPage
+                            Box(Modifier.padding(horizontal = 3.dp).size(if (active) 7.dp else 5.dp)
+                                .clip(CircleShape).background(if (active) BRAND_PRIMARY else DIVIDER_COLOR))
+                        }
                     }
                 }
             }
@@ -1452,109 +1261,68 @@ fun QuickInputSection(topNotes: List<Pair<String, Int>>, noteIconMap: Map<String
     }
 }
 
-// ===== 頂部統計（漸變卡片）=====
 @Composable
 fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: Double) {
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
         val density = LocalDensity.current
-        val fullWidthPx = with(density) { maxWidth.toPx() }
-        val halfWidthPx = fullWidthPx / 2f
+        val fullPx = with(density) { maxWidth.toPx() }
+        val halfPx = fullPx / 2f
         val slotWidth = maxWidth / 2
-
-        val incomeTargetX = when {
-            hasIncome && hasExpense -> 0f
-            hasIncome -> halfWidthPx / 2f
-            else -> -halfWidthPx
-        }
-        val expenseTargetX = when {
-            hasIncome && hasExpense -> halfWidthPx
-            hasExpense -> halfWidthPx / 2f
-            else -> fullWidthPx
-        }
-
-        val incomeX by animateFloatAsState(incomeTargetX,
+        val incomeX by animateFloatAsState(
+            if (hasIncome && hasExpense) 0f else if (hasIncome) halfPx / 2f else -halfPx,
             spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow), label = "ix")
-        val expenseX by animateFloatAsState(expenseTargetX,
+        val expenseX by animateFloatAsState(
+            if (hasIncome && hasExpense) halfPx else if (hasExpense) halfPx / 2f else fullPx,
             spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow), label = "ex")
-        val incomeAlpha by animateFloatAsState(if (hasIncome) 1f else 0f, tween(220), label = "ia")
-        val expenseAlpha by animateFloatAsState(if (hasExpense) 1f else 0f, tween(220), label = "ea")
+        val iAlpha by animateFloatAsState(if (hasIncome) 1f else 0f, tween(220), label = "ia")
+        val eAlpha by animateFloatAsState(if (hasExpense) 1f else 0f, tween(220), label = "ea")
 
-        Box(
-            modifier = Modifier.width(slotWidth).offset { IntOffset(incomeX.roundToInt(), 0) }
-                .graphicsLayer { alpha = incomeAlpha },
-            contentAlignment = Alignment.Center
-        ) {
-            StatCard(
-                icon = Icons.Default.TrendingUp, label = "收入",
-                amountText = formatAmount(income),
-                gradientStart = Color(0xFF10B981), gradientEnd = Color(0xFF059669)
-            )
+        Box(Modifier.width(slotWidth).offset { IntOffset(incomeX.roundToInt(), 0) }.graphicsLayer { alpha = iAlpha },
+            contentAlignment = Alignment.Center) {
+            StatCard(Icons.Default.TrendingUp, "收入", formatAmount(income), Color(0xFF10B981), Color(0xFF059669))
         }
-        Box(
-            modifier = Modifier.width(slotWidth).offset { IntOffset(expenseX.roundToInt(), 0) }
-                .graphicsLayer { alpha = expenseAlpha },
-            contentAlignment = Alignment.Center
-        ) {
-            StatCard(
-                icon = Icons.Default.TrendingDown, label = "支出",
-                amountText = formatAmount(expense),
-                gradientStart = Color(0xFFF87171), gradientEnd = Color(0xFFDC2626)
-            )
+        Box(Modifier.width(slotWidth).offset { IntOffset(expenseX.roundToInt(), 0) }.graphicsLayer { alpha = eAlpha },
+            contentAlignment = Alignment.Center) {
+            StatCard(Icons.Default.TrendingDown, "支出", formatAmount(expense), Color(0xFFF87171), Color(0xFFDC2626))
         }
     }
 }
 
 @Composable
-fun StatCard(
-    icon: ImageVector, label: String, amountText: String,
-    gradientStart: Color, gradientEnd: Color
-) {
-    Column(
-        modifier = Modifier.padding(horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+fun StatCard(icon: ImageVector, label: String, amountText: String, gradStart: Color, gradEnd: Color) {
+    Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = gradientStart, modifier = Modifier.size(16.dp))
+            Icon(icon, null, tint = gradStart, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
             Text(label, fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.height(4.dp))
-        AnimatedAmount(
-            text = amountText, color = gradientEnd,
-            fontSize = STAT_AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold
-        )
+        AnimatedAmount(amountText, gradEnd, STAT_AMOUNT_FONT_SIZE, FontWeight.Bold)
     }
 }
 
 @Composable
 fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: FontWeight = FontWeight.Bold) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        text.forEachIndexed { index, c ->
-            AnimatedContent(
-                targetState = c,
-                transitionSpec = {
-                    if (targetState > initialState) {
-                        (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
-                    } else {
-                        (slideInVertically { -it } + fadeIn()) togetherWith (slideOutVertically { it } + fadeOut())
-                    }
-                },
-                label = "digit_$index"
-            ) { char ->
-                Text(char.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight)
-            }
+        text.forEachIndexed { idx, c ->
+            AnimatedContent(c, transitionSpec = {
+                if (targetState > initialState)
+                    (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
+                else
+                    (slideInVertically { -it } + fadeIn()) togetherWith (slideOutVertically { it } + fadeOut())
+            }, label = "d_$idx") { ch -> Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight) }
         }
     }
 }
 
-// ===== 日期分組標題 =====
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(formatDateHeader(dateKey), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TEXT_SECONDARY)
+    Row(Modifier.fillMaxWidth()
+        .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+        .background(SURFACE_ELEVATED)
+        .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(formatDateHeader(dateKey), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (income > 0) {
                 Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
@@ -1573,105 +1341,87 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
 
 @Composable
 fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMARY, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .clickable { onClick() }.padding(vertical = 12.dp, horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+        .clickable { onClick() }.padding(vertical = 12.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Text(label, color = tint, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
-// ===== 建立拍照用嘅臨時檔案 URI =====
 fun createTempImageUri(context: Context): Uri {
-    val file = File.createTempFile("camera_", ".jpg", context.cacheDir)
-    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val f = File.createTempFile("camera_", ".jpg", context.cacheDir)
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
 }
 
-// ===== 壓縮圖片 =====
 suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE): ByteArray? =
     withContext(Dispatchers.IO) {
         try {
-            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, boundsOpts) }
-            val w = boundsOpts.outWidth; val h = boundsOpts.outHeight
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            val w = bounds.outWidth; val h = bounds.outHeight
             if (w <= 0 || h <= 0) return@withContext null
-            var sample = 1
-            val minDim = minOf(w, h)
-            while (minDim / (sample * 2) >= maxSize) sample *= 2
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-            val src = context.contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, decodeOpts)
-            } ?: return@withContext null
+            var s = 1; val md = minOf(w, h)
+            while (md / (s * 2) >= maxSize) s *= 2
+            val opts = BitmapFactory.Options().apply { inSampleSize = s }
+            val src = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+                ?: return@withContext null
             val scaled = scaleCropCenter(src, maxSize)
             if (scaled !== src) src.recycle()
             val baos = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-            scaled.recycle()
-            baos.toByteArray()
+            scaled.recycle(); baos.toByteArray()
         } catch (e: Exception) { null }
     }
 
 fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
-    val w = src.width; val h = src.height
-    val minDim = minOf(w, h)
-    val x = (w - minDim) / 2; val y = (h - minDim) / 2
-    val cropped = if (x == 0 && y == 0 && w == minDim && h == minDim) src
-                  else Bitmap.createBitmap(src, x, y, minDim, minDim)
+    val w = src.width; val h = src.height; val md = minOf(w, h)
+    val x = (w - md) / 2; val y = (h - md) / 2
+    val cropped = if (x == 0 && y == 0 && w == md && h == md) src else Bitmap.createBitmap(src, x, y, md, md)
     val scaled = if (cropped.width == size && cropped.height == size) cropped
                  else Bitmap.createScaledBitmap(cropped, size, size, true)
     if (cropped !== src && cropped !== scaled) cropped.recycle()
     return scaled
 }
 
-// ===== 上傳圖片 =====
-suspend fun uploadIconAndApplyToSameName(
-    context: Context, db: FirebaseFirestore,
-    recordId: String, recordName: String, uri: Uri
-) {
+suspend fun uploadIconAndApplyToSameName(context: Context, db: FirebaseFirestore,
+    recordId: String, recordName: String, uri: Uri) {
     try {
-        val bytes = compressImage(context, uri)
-        if (bytes == null) { Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_LONG).show(); return }
-        val imageUrl = uploadBytesToCloudinary(bytes)
-        if (imageUrl == null) { Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_LONG).show(); return }
-        applyUrlToSameName(context, db, recordName, imageUrl)
-    } catch (e: Exception) {
-        Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show()
-    }
+        val bytes = compressImage(context, uri) ?: run {
+            Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_LONG).show(); return
+        }
+        val url = uploadBytesToCloudinary(bytes) ?: run {
+            Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_LONG).show(); return
+        }
+        applyUrlToSameName(context, db, recordName, url)
+    } catch (e: Exception) { Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show() }
 }
 
-suspend fun applyUrlToSameName(context: Context, db: FirebaseFirestore, recordName: String, imageUrl: String) {
+suspend fun applyUrlToSameName(context: Context, db: FirebaseFirestore, name: String, url: String) {
     try {
-        if (recordName.isBlank()) return
-        val snapshot = db.collection("records").whereEqualTo("note", recordName).get().await()
+        if (name.isBlank()) return
+        val snap = db.collection("records").whereEqualTo("note", name).get().await()
         val batch = db.batch()
-        snapshot.documents.forEach { doc -> batch.update(doc.reference, "iconUrl", imageUrl) }
+        snap.documents.forEach { doc -> batch.update(doc.reference, "iconUrl", url) }
         batch.commit().await()
-        val count = snapshot.size()
         Toast.makeText(context,
-            if (count > 1) "圖標已套用到 $count 條同名記錄" else "圖標已更新",
+            if (snap.size() > 1) "圖標已套用到 ${snap.size()} 條同名記錄" else "圖標已更新",
             Toast.LENGTH_SHORT).show()
-    } catch (e: Exception) {
-        Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show()
-    }
+    } catch (e: Exception) { Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show() }
 }
 
-suspend fun removeIconFromSameName(context: Context, db: FirebaseFirestore, recordName: String) {
+suspend fun removeIconFromSameName(context: Context, db: FirebaseFirestore, name: String) {
     try {
-        if (recordName.isBlank()) { Toast.makeText(context, "冇名稱,無法刪除", Toast.LENGTH_SHORT).show(); return }
-        val snapshot = db.collection("records").whereEqualTo("note", recordName).get().await()
+        if (name.isBlank()) { Toast.makeText(context, "冇名稱", Toast.LENGTH_SHORT).show(); return }
+        val snap = db.collection("records").whereEqualTo("note", name).get().await()
         val batch = db.batch()
-        snapshot.documents.forEach { doc -> batch.update(doc.reference, "iconUrl", "") }
+        snap.documents.forEach { doc -> batch.update(doc.reference, "iconUrl", "") }
         batch.commit().await()
-        val count = snapshot.size()
         Toast.makeText(context,
-            if (count > 1) "已刪除 $count 條同名記錄嘅圖標" else "圖標已刪除",
+            if (snap.size() > 1) "已刪除 ${snap.size()} 條同名記錄嘅圖標" else "圖標已刪除",
             Toast.LENGTH_SHORT).show()
-    } catch (e: Exception) {
-        Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show()
-    }
+    } catch (e: Exception) { Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show() }
 }
 
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dispatchers.IO) {
@@ -1683,16 +1433,15 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
         conn.requestMethod = "POST"; conn.doOutput = true
         conn.connectTimeout = 30_000; conn.readTimeout = 60_000
         conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-        conn.outputStream.use { output ->
-            output.write("--$boundary$lineEnd".toByteArray())
-            output.write(("Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd").toByteArray())
-            output.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
-            output.write("--$boundary$lineEnd".toByteArray())
-            output.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.jpg\"$lineEnd").toByteArray())
-            output.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
-            output.write(bytes); output.write("$lineEnd".toByteArray())
-            output.write("--$boundary--$lineEnd".toByteArray())
-            output.flush()
+        conn.outputStream.use { o ->
+            o.write("--$boundary$lineEnd".toByteArray())
+            o.write(("Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd").toByteArray())
+            o.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
+            o.write("--$boundary$lineEnd".toByteArray())
+            o.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.jpg\"$lineEnd").toByteArray())
+            o.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
+            o.write(bytes); o.write("$lineEnd".toByteArray())
+            o.write("--$boundary--$lineEnd".toByteArray()); o.flush()
         }
         val code = conn.responseCode
         val text = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() }
@@ -1704,15 +1453,12 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
-        val firstChar = name.trim().take(1).ifBlank { "?" }
-        Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)),
-            contentAlignment = Alignment.Center) {
-            Text(firstChar, color = Color.White,
-                fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Bold)
+        val ch = name.trim().take(1).ifBlank { "?" }
+        Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)), contentAlignment = Alignment.Center) {
+            Text(ch, color = Color.White, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Bold)
         }
     } else {
-        AsyncImage(model = iconUrl, contentDescription = null,
-            contentScale = ContentScale.Crop,
+        AsyncImage(model = iconUrl, contentDescription = null, contentScale = ContentScale.Crop,
             modifier = Modifier.size(size).clip(CircleShape))
     }
 }
@@ -1727,95 +1473,69 @@ fun SwipeableRecordItem(
     onFilter: () -> Unit, onDelete: () -> Unit, onChangeIcon: () -> Unit,
 ) {
     val density = LocalDensity.current
-    val buttonWidth = 56.dp; val buttonHeight = 44.dp; val gap = 6.dp
-    val buttonWidthPx = with(density) { buttonWidth.toPx() }
+    val bw = 56.dp; val bh = 44.dp; val gap = 6.dp
+    val bwPx = with(density) { bw.toPx() }
     val gapPx = with(density) { gap.toPx() }
-    val edgePadding = 8.dp
-    val edgePaddingPx = with(density) { edgePadding.toPx() }
-    val leftTotalPx = buttonWidthPx * 4 + gapPx * 3
-    val rightTotalPx = buttonWidthPx
-    val maxLeftReveal = -(leftTotalPx + edgePaddingPx)
-    val maxRightReveal = rightTotalPx + edgePaddingPx
+    val edgePx = with(density) { 8.dp.toPx() }
+    val leftTotal = bwPx * 4 + gapPx * 3
+    val maxLeft = -(leftTotal + edgePx)
+    val maxRight = bwPx + edgePx
 
     var targetOffset by remember { mutableStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     LaunchedEffect(expandedId) { if (expandedId != record.id && targetOffset != 0f) targetOffset = 0f }
+    val offsetX by animateFloatAsState(targetOffset,
+        if (isDragging) snap<Float>() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "swipe")
 
-    val offsetX by animateFloatAsState(
-        targetValue = targetOffset,
-        animationSpec = if (isDragging) snap<Float>() else spring(
-            stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-        label = "swipe"
-    )
-
-    Box(modifier = modifier.fillMaxWidth().wrapContentHeight().padding(vertical = 3.dp)) {
-        Row(
-            modifier = Modifier.matchParentSize().padding(end = 8.dp),
+    Box(modifier.fillMaxWidth().wrapContentHeight()) {
+        Row(Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ActionButton(Icons.Default.ContentCopy, "複制", Color(0xFF64748B), buttonWidth, buttonHeight)
-                { targetOffset = 0f; onExpand(null); onCopy() }
-            ActionButton(Icons.Default.Edit, "編輯", Color(0xFF3B82F6), buttonWidth, buttonHeight)
-                { targetOffset = 0f; onExpand(null); onEdit() }
-            ActionButton(Icons.Default.FilterList, "篩選", Color(0xFF8B5CF6), buttonWidth, buttonHeight)
-                { targetOffset = 0f; onExpand(null); onFilter() }
-            ActionButton(Icons.Default.Delete, "刪除", Color(0xFFEF4444), buttonWidth, buttonHeight)
-                { targetOffset = 0f; onExpand(null); onDelete() }
+            verticalAlignment = Alignment.CenterVertically) {
+            ActionButton(Icons.Default.ContentCopy, "複制", Color(0xFF64748B), bw, bh) { targetOffset = 0f; onExpand(null); onCopy() }
+            ActionButton(Icons.Default.Edit, "編輯", Color(0xFF3B82F6), bw, bh) { targetOffset = 0f; onExpand(null); onEdit() }
+            ActionButton(Icons.Default.FilterList, "篩選", Color(0xFF8B5CF6), bw, bh) { targetOffset = 0f; onExpand(null); onFilter() }
+            ActionButton(Icons.Default.Delete, "刪除", Color(0xFFEF4444), bw, bh) { targetOffset = 0f; onExpand(null); onDelete() }
         }
-        Row(
-            modifier = Modifier.matchParentSize().padding(start = 8.dp),
+        Row(Modifier.matchParentSize().padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ActionButton(Icons.Default.Image, "改圖標", Color(0xFF10B981), buttonWidth, buttonHeight)
-                { targetOffset = 0f; onExpand(null); onChangeIcon() }
+            verticalAlignment = Alignment.CenterVertically) {
+            ActionButton(Icons.Default.Image, "改圖標", Color(0xFF10B981), bw, bh) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
         Surface(
-            modifier = Modifier.fillMaxWidth()
-                .offset { IntOffset(offsetX.roundToInt(), 0) }
+            modifier = Modifier.fillMaxWidth().offset { IntOffset(offsetX.roundToInt(), 0) }
                 .pointerInput(record.id) {
                     detectHorizontalDragGestures(
                         onDragStart = { isDragging = true; onExpand(record.id) },
                         onDragEnd = {
                             isDragging = false
                             val newOffset = when {
-                                targetOffset < maxLeftReveal * 0.25f -> maxLeftReveal
-                                targetOffset > maxRightReveal * 0.25f -> maxRightReveal
+                                targetOffset < maxLeft * 0.25f -> maxLeft
+                                targetOffset > maxRight * 0.25f -> maxRight
                                 else -> 0f
                             }
                             targetOffset = newOffset
                             if (newOffset == 0f) onExpand(null)
                         },
                         onDragCancel = { isDragging = false; targetOffset = 0f; onExpand(null) },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            targetOffset = (targetOffset + dragAmount).coerceIn(maxLeftReveal, maxRightReveal)
-                        }
-                    )
+                        onHorizontalDrag = { c, d ->
+                            c.consume(); targetOffset = (targetOffset + d).coerceIn(maxLeft, maxRight)
+                        })
                 }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     if (expandedId != null) onExpand(null)
                 },
-            shape = RoundedCornerShape(16.dp),
-            color = backgroundColor,
-            shadowElevation = 1.dp
+            color = backgroundColor
         ) {
             ListItem(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 leadingContent = { IconView(record.iconUrl, record.note) },
-                headlineContent = {
-                    Text(record.note.ifBlank { "(無名稱)" },
-                        fontSize = NOTE_FONT_SIZE, fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY)
-                },
-                supportingContent = {
-                    Text("${record.category}．${formatRecordTime(record.timestamp)}",
-                        fontSize = META_FONT_SIZE, color = TEXT_TERTIARY)
-                },
-                trailingContent = {
-                    Text(displayAmount(record), color = amountColor(record.category),
-                        fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold)
-                }
+                headlineContent = { Text(record.note.ifBlank { "(無名稱)" },
+                    fontSize = NOTE_FONT_SIZE, fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY) },
+                supportingContent = { Text("${record.category}．${formatRecordTime(record.timestamp)}",
+                    fontSize = META_FONT_SIZE, color = TEXT_TERTIARY) },
+                trailingContent = { Text(displayAmount(record), color = amountColor(record.category),
+                    fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold) }
             )
         }
     }
@@ -1823,12 +1543,8 @@ fun SwipeableRecordItem(
 
 @Composable
 private fun ActionButton(icon: ImageVector, label: String, background: Color, width: Dp, height: Dp, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier.width(width).height(height)
-            .clip(RoundedCornerShape(14.dp)).background(background)
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
+    Box(Modifier.width(width).height(height).clip(RoundedCornerShape(14.dp)).background(background).clickable { onClick() },
+        contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp))
     }
 }
