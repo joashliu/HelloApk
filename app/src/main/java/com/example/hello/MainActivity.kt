@@ -453,9 +453,6 @@ fun MainApp() {
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
                 allNoteNames = allNoteNames,
-                filterSearch = filterSearch,
-                onFilterSearchChange = { filterSearch = it },
-                filterSearchFocusRequester = filterSearchFocusRequester
             )
             1 -> CompareContent(records = records, availableMonths = availableMonths)
         }
