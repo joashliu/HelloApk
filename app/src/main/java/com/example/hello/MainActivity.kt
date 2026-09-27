@@ -1449,7 +1449,7 @@ fun LedgerContent(
                         }
                     }
 
-                    AnimatedVisibility(
+                                        androidx.compose.animation.AnimatedVisibility(
                         visible = showKeyboard,
                         enter = slideInVertically(
                             initialOffsetY = { it },
