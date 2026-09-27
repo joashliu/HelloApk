@@ -2104,12 +2104,11 @@ fun TopStats(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top
     ) {
-        // 左邊固定佔一半,顯示收入
         Box(
             modifier = Modifier.weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = hasIncome,
                 enter = fadeIn(tween(220)),
                 exit = fadeOut(tween(180))
@@ -2122,12 +2121,11 @@ fun TopStats(
                 )
             }
         }
-        // 右邊固定佔一半,顯示支出
         Box(
             modifier = Modifier.weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = hasExpense,
                 enter = fadeIn(tween(220)),
                 exit = fadeOut(tween(180))
