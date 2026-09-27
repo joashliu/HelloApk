@@ -24,11 +24,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -71,7 +73,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -138,7 +139,9 @@ val STAT_LABEL_FONT_SIZE = 11.sp
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
-val ROW_ALT_COLOR = Color(0xFFF8FAFC)
+
+// 交替行顏色（比白色深少少）
+val ROW_ALT_COLOR = Color(0xFFF1F5F9)
 const val FILTER_ANIM_MS = 250
 
 data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
@@ -186,17 +189,40 @@ fun displayAmount(record: Record): String =
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
+// 相對日期
+fun relativeDayLabel(timestamp: Long): String {
+    val todayStart = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val recStart = Calendar.getInstance().apply {
+        timeInMillis = timestamp
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val diff = ((todayStart - recStart) / 86_400_000L).toInt()
+    return when {
+        diff < 0 -> "未來"
+        diff == 0 -> "今日"
+        diff == 1 -> "琴日"
+        diff == 2 -> "前日"
+        else -> "${diff}日前"
+    }
+}
+
 fun formatRecordTime(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
     val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
-    return "$wk．${String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))}:${String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))}"
+    val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
+    val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
+    return "$wk．$hh:$mm．${relativeDayLabel(timestamp)}"
 }
+
 fun formatDateTime(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
     val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
     return "${cal.get(Calendar.YEAR)}年${cal.get(Calendar.MONTH)+1}月${cal.get(Calendar.DAY_OF_MONTH)}日 $wk ${
         String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))}:${String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))}"
 }
+
 fun dateKeyFromTimestamp(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
     return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH)+1, cal.get(Calendar.DAY_OF_MONTH))
@@ -228,15 +254,12 @@ fun formatDateHeader(dateKey: String): String {
     return "$dp $wk"
 }
 
-// 建議列表：前綴優先，然後含字
 fun filterNoteSuggestions(query: String, all: List<String>): List<String> {
     if (query.isBlank()) return emptyList()
     val q = query.trim()
     if (q.isEmpty()) return emptyList()
     val prefix = all.filter { it.startsWith(q, ignoreCase = true) && it != q }
-    val contains = all.filter {
-        !it.startsWith(q, ignoreCase = true) && it.contains(q, ignoreCase = true)
-    }
+    val contains = all.filter { !it.startsWith(q, true) && it.contains(q, true) }
     return (prefix + contains).take(8)
 }
 
@@ -287,7 +310,6 @@ fun MainApp() {
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
 
-    // 所有唯一項目名（供應下拉建議）
     val allNoteNames by remember {
         derivedStateOf {
             records.map { it.note }.filter { it.isNotBlank() }.distinct()
@@ -452,171 +474,170 @@ fun MainApp() {
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                allNoteNames = allNoteNames,
+                allNoteNames = allNoteNames
             )
             1 -> CompareContent(records = records, availableMonths = availableMonths)
         }
 
+        // 底部導航欄（鍵盤時淡出）
         androidx.compose.animation.AnimatedVisibility(
             visible = !showKeyboard,
-            enter = fadeIn(tween(220)) + slideInVertically(
-                initialOffsetY = { it / 2 },
-                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)),
-            exit = fadeOut(tween(200)) + slideOutVertically(
-                targetOffsetY = { it / 2 },
-                animationSpec = tween(220, easing = FastOutSlowInEasing))
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(200))
         ) {
-            Box(Modifier.fillMaxSize()) {
-                key("navbar") {
-                    FloatingNavBar(
-                        items = listOf(
-                            NavItem("記帳", Icons.Default.Receipt),
-                            NavItem("比較", Icons.Default.CompareArrows)),
-                        selectedIndex = currentPage,
-                        onIndexChange = { currentPage = it },
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = NAV_BOTTOM_PADDING))
-                }
-                key("filter_bottom") {
-                    AnimatedVisibility(
-                        visible = filterModeOn && currentPage == 0,
-                        enter = slideInVertically(initialOffsetY = { it * 3 },
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
-                        ) + fadeIn(tween(180)),
-                        exit = slideOutVertically(targetOffsetY = { it * 3 }, animationSpec = tween(220)) + fadeOut(tween(150)),
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Surface(
-                                Modifier.weight(1f).height(52.dp),
-                                shape = RoundedCornerShape(26.dp),
-                                color = SURFACE_CARD,
-                                shadowElevation = 8.dp
-                            ) {
-                                Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                                                        Box(Modifier.weight(1f)) {
-                                        BasicTextField(
-                                            value = filterSearch,
-                                            onValueChange = { filterSearch = it },
-                                            singleLine = true,
-                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                            cursorBrush = SolidColor(BRAND_PRIMARY),
-                                            decorationBox = { inner ->
-                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                    if (filterSearch.text.isEmpty()) Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                    inner()
-                                                }
-                                            },
-                                            modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
-                                        )
+            key("navbar") {
+                FloatingNavBar(
+                    items = listOf(
+                        NavItem("記帳", Icons.Default.Receipt),
+                        NavItem("比較", Icons.Default.CompareArrows)),
+                    selectedIndex = currentPage,
+                    onIndexChange = { currentPage = it },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = NAV_BOTTOM_PADDING))
+            }
+        }
 
-                                        val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                                        if (filterSuggestions.isNotEmpty()) {
-                                            androidx.compose.ui.window.Popup(
-                                                alignment = Alignment.TopStart,
-                                                offset = androidx.compose.ui.unit.IntOffset(0, -320),
-                                                onDismissRequest = { },
-                                                properties = PopupProperties(focusable = false)
+        // ===== FAB + 篩選按鈕（常駐,只換色）=====
+        if (!showKeyboard && currentPage == 0) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(
+                        start = 16.dp,
+                        end = 20.dp,
+                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // 左側搜尋欄（只在篩選模式展開）
+                Box(Modifier.weight(1f)) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = filterModeOn,
+                        enter = expandHorizontally(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            expandFrom = Alignment.End
+                        ) + fadeIn(tween(200)),
+                        exit = shrinkHorizontally(
+                            animationSpec = tween(260, easing = FastOutSlowInEasing),
+                            shrinkTowards = Alignment.End
+                        ) + fadeOut(tween(180))
+                    ) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(26.dp),
+                            color = SURFACE_CARD,
+                            shadowElevation = 8.dp
+                        ) {
+                            Row(
+                                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Box(Modifier.weight(1f)) {
+                                    BasicTextField(
+                                        value = filterSearch,
+                                        onValueChange = { filterSearch = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                        cursorBrush = SolidColor(BRAND_PRIMARY),
+                                        decorationBox = { inner ->
+                                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                if (filterSearch.text.isEmpty())
+                                                    Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                inner()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
+                                    )
+                                    val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
+                                    if (filterSuggestions.isNotEmpty()) {
+                                        androidx.compose.ui.window.Popup(
+                                            alignment = Alignment.TopStart,
+                                            offset = androidx.compose.ui.unit.IntOffset(0, -320),
+                                            onDismissRequest = { },
+                                            properties = PopupProperties(focusable = false)
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = SURFACE_CARD,
+                                                shadowElevation = 8.dp,
+                                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
                                             ) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(14.dp),
-                                                    color = SURFACE_CARD,
-                                                    shadowElevation = 8.dp,
-                                                    modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
-                                                ) {
-                                                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                                                        filterSuggestions.forEach { s ->
-                                                            Row(
-                                                                Modifier.fillMaxWidth()
-                                                                    .clickable {
-                                                                        filterSearch = TextFieldValue(s)
-                                                                    }
-                                                                    .padding(horizontal = 14.dp, vertical = 11.dp),
-                                                                verticalAlignment = Alignment.CenterVertically
-                                                            ) {
-                                                                Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                                                    modifier = Modifier.size(16.dp))
-                                                                Spacer(Modifier.width(8.dp))
-                                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                            }
-                                                            HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                                Column(Modifier.verticalScroll(rememberScrollState())) {
+                                                    filterSuggestions.forEach { s ->
+                                                        Row(
+                                                            Modifier.fillMaxWidth()
+                                                                .clickable { filterSearch = TextFieldValue(s) }
+                                                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                                                modifier = Modifier.size(16.dp))
+                                                            Spacer(Modifier.width(8.dp))
+                                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                         }
+                                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                    if (filterSearch.text.isNotBlank()) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                            modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") })
-                                    }
+                                }
+                                if (filterSearch.text.isNotBlank()) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                        modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
+                                    )
                                 }
                             }
-                                                        Box(
-                                Modifier.size(44.dp).clip(CircleShape)
-                                    .background(BRAND_PRIMARY)
-                                    .shadow(4.dp, CircleShape)
-                                    .clickable { filterModeOn = false },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.FilterAlt,
-                                    "退出篩選",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            FloatingActionButton(
-                                onClick = { filterModeOn = false; openKeyboardForNew() },
-                                containerColor = BRAND_PRIMARY,
-                                contentColor = Color.White
-                            ) { Icon(Icons.Default.Add, "新增") }
                         }
                     }
                 }
-                key("fab") {
-                    AnimatedVisibility(
-                        visible = !filterModeOn && currentPage == 0,
-                        enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.6f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)),
-                        exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.6f, animationSpec = tween(180)),
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(
-                            end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                        Box(
-                                Modifier.size(44.dp).clip(CircleShape)
-                                    .background(Color.White)
-                                    .shadow(4.dp, CircleShape)
-                                    .border(2.dp, BRAND_PRIMARY, CircleShape)
-                                    .pointerInput(Unit) {
-                                        detectTapGestures(
-                                            onTap = { filterModeOn = true },
-                                            onDoubleTap = { filterModeOn = true; filterSelectAllTrigger++ })
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.FilterAlt,
-                                    "篩選",
-                                    tint = BRAND_PRIMARY,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            FloatingActionButton(
-                                onClick = { openKeyboardForNew() },
-                                containerColor = BRAND_PRIMARY,
-                                contentColor = Color.White
-                            ) { Icon(Icons.Default.Add, "新增") }
-                        }
-                    }
+
+                // 篩選按鈕（常駐,只換色）
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(if (filterModeOn) BRAND_PRIMARY else Color.White)
+                        .shadow(4.dp, CircleShape)
+                        .pointerInput(filterModeOn) {
+                            detectTapGestures(
+                                onTap = { filterModeOn = !filterModeOn },
+                                onDoubleTap = {
+                                    if (!filterModeOn) {
+                                        filterModeOn = true
+                                        filterSelectAllTrigger++
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.FilterAlt,
+                        "篩選",
+                        tint = if (filterModeOn) Color.White else BRAND_PRIMARY,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                // FAB（常駐）
+                FloatingActionButton(
+                    onClick = {
+                        if (filterModeOn) filterModeOn = false
+                        openKeyboardForNew()
+                    },
+                    containerColor = BRAND_PRIMARY,
+                    contentColor = Color.White
+                ) {
+                    Icon(Icons.Default.Add, "新增")
                 }
             }
         }
@@ -873,7 +894,7 @@ fun LedgerContent(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 12.dp, end = 12.dp, top = 4.dp,
-                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + if (filterMode) 90.dp else 20.dp)
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
                     ) {
                         groupedByDate.forEach { (dateKey, dayRecords) ->
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
@@ -1024,7 +1045,6 @@ fun MonthDropdown(value: String?, months: List<String>, onChange: (String?) -> U
     }
 }
 
-// ===== 快速輸入（自動擴寬 chip 填滿整行 + 縮窄行距 + 冇標題）=====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
@@ -1131,7 +1151,6 @@ fun QuickInputSection(
         }
     }
 }
-// ===== 記帳鍵盤（帶名稱下拉建議）=====
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
@@ -1159,7 +1178,6 @@ fun LedgerKeyboardPanel(
             }
             Spacer(Modifier.height(12.dp))
 
-            // 日期時間
             Surface(
                 modifier = Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp))
                     .clickable {
@@ -1186,7 +1204,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // 金額顯示
             Surface(Modifier.fillMaxWidth().height(82.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(horizontal = 22.dp),
                     contentAlignment = Alignment.CenterEnd) {
@@ -1245,7 +1262,6 @@ fun LedgerKeyboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
-                // 名稱輸入框 + 下拉建議
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     if (state.editingNote) {
                         var tfValue by remember(state.editingNote) {
@@ -1255,7 +1271,6 @@ fun LedgerKeyboardPanel(
                         val focusReq = remember { FocusRequester() }
                         LaunchedEffect(Unit) { focusReq.requestFocus() }
 
-                        // 下拉建議（最多 6 個）
                         val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
 
                         Column {
@@ -1277,7 +1292,6 @@ fun LedgerKeyboardPanel(
                             )
                         }
 
-                        // 建議用 Popup 顯示喺輸入框上方
                         if (suggestions.isNotEmpty()) {
                             androidx.compose.ui.window.Popup(
                                 alignment = Alignment.TopStart,
@@ -1328,7 +1342,6 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
-                // 類別按鈕
                 var showCategoryMenu by remember { mutableStateOf(false) }
                 val currentStyle = CATEGORY_STYLES[state.category]
                 Box {
