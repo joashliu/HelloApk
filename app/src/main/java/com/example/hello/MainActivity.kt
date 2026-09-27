@@ -145,7 +145,7 @@ val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 
-val ROW_ALT_COLOR = Color(0xFFBBDEFB)
+val ROW_ALT_COLOR = Color(0xFF90CAF9)
 
 const val FILTER_ANIM_MS = 250
 
@@ -295,7 +295,7 @@ fun MainApp() {
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
 
-    var currentPage by remember { mutableIntStateOf(0) }  // 0=記帳,1=比較
+    var currentPage by remember { mutableIntStateOf(0) }
 
     var filterModeOn by remember { mutableStateOf(false) }
     var filterCategory by remember { mutableStateOf<String?>(null) }
@@ -382,6 +382,13 @@ fun MainApp() {
             records.map { monthKeyFromTimestamp(it.timestamp) }
                 .distinct()
                 .sortedDescending()
+        }
+    }
+    // ===== 全局交替 index（跨日期分組）=====
+    val globalIndexMap by remember {
+        derivedStateOf {
+            val flat = groupedByDate.flatMap { it.second }
+            flat.withIndex().associate { (i, r) -> r.id to i }
         }
     }
 
@@ -512,6 +519,7 @@ fun MainApp() {
                 loading = loading,
                 filtered = ledgerRecords,
                 groupedByDate = groupedByDate,
+                globalIndexMap = globalIndexMap,
                 topNotes = topNotes,
                 noteIconMap = noteIconMap,
                 hasIncome = hasIncome,
@@ -1134,6 +1142,7 @@ fun LedgerContent(
     loading: Boolean,
     filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
+    globalIndexMap: Map<String, Int>,
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     hasIncome: Boolean,
@@ -1177,7 +1186,6 @@ fun LedgerContent(
             )
         ) {
             Column {
-                // 類別 chips
                 FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1203,7 +1211,6 @@ fun LedgerContent(
                     }
                 }
 
-                // 分隔線
                 HorizontalDivider(
                     modifier = Modifier.padding(
                         horizontal = 16.dp,
@@ -1213,7 +1220,6 @@ fun LedgerContent(
                         .copy(alpha = 0.15f)
                 )
 
-                // 月份 chips
                 if (availableMonths.isNotEmpty()) {
                     FlowRow(
                         modifier = Modifier
@@ -1314,7 +1320,6 @@ fun LedgerContent(
                                 if (filterMode) 90.dp else 20.dp
                         )
                     ) {
-                        var runningIndex = 0
                         groupedByDate.forEach { (dateKey, dayRecords) ->
                             val dayIncome = dayRecords.sumOf {
                                 if (it.category == INCOME_CATEGORY) it.amount
@@ -1337,8 +1342,7 @@ fun LedgerContent(
                                 dayRecords,
                                 key = { _, r -> r.id }
                             ) { _, r ->
-                                val idx = runningIndex
-                                runningIndex++
+                                val idx = globalIndexMap[r.id] ?: 0
                                 SwipeableRecordItem(
                                     modifier = Modifier.animateItem(),
                                     backgroundColor = if (idx % 2 == 0)
@@ -2080,7 +2084,7 @@ fun QuickInputSection(
     }
 }
 
-// ===== 頂部統計（位置平滑移動）=====
+// ===== 頂部統計 =====
 @Composable
 fun TopStats(
     hasIncome: Boolean,
@@ -2715,6 +2719,9 @@ fun SwipeableRecordItem(
             color = backgroundColor
         ) {
             ListItem(
+                colors = ListItemDefaults.colors(
+                    containerColor = Color.Transparent
+                ),
                 leadingContent = {
                     IconView(record.iconUrl, record.note)
                 },
