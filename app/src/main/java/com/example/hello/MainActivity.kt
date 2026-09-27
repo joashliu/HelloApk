@@ -538,24 +538,38 @@ fun AnimatedRecordItem(
             appeared = true
         }
     }
+
+    // 進入時：由下 40% 高度滑入
+    val slideY by animateFloatAsState(
+        targetValue = if (appeared) 0f else 60f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "arSlide"
+    )
+    // 縮放：由 0.75 放大到 1
+    val scale by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0.75f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "arScale"
+    )
+    // 透明度：由 0 到 1
     val alpha by animateFloatAsState(
         targetValue = if (appeared) 1f else 0f,
         animationSpec = tween(280, easing = FastOutSlowInEasing),
-        label = "arA"
+        label = "arAlpha"
     )
-    val scale by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0.94f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "arS"
-    )
+
     Box(
         Modifier.graphicsLayer {
-            this.alpha = alpha
+            translationY = slideY
             scaleX = scale
             scaleY = scale
+            this.alpha = alpha
         }
     ) {
         content()
