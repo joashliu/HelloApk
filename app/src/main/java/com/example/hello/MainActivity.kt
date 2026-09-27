@@ -1,5 +1,7 @@
 package com.example.hello
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -61,6 +63,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Flight
@@ -78,6 +81,8 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -161,7 +166,7 @@ val ROW_ALT_COLOR = Color(0xFFE8F6FF)
 
 const val FILTER_ANIM_MS = 250
 
-// ===== 類別樣式（icon + 極淺底色 + 深色文字）=====
+// ===== 類別樣式 =====
 data class CategoryStyle(
     val icon: ImageVector,
     val bgColor: Color,
@@ -215,7 +220,9 @@ data class KeyboardState(
     val noteText: String = "",
     val category: String = "飲食",
     val editingNote: Boolean = false,
-    val editingRecordId: String? = null
+    val editingRecordId: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val selectAmountOnInput: Boolean = false
 )
 
 // ===== 格式化工具 =====
@@ -238,6 +245,20 @@ fun formatRecordTime(timestamp: Long): String {
     val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
     val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
     return "$week．$hh:$mm"
+}
+
+fun formatDateTime(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val y = cal.get(Calendar.YEAR)
+    val mo = cal.get(Calendar.MONTH) + 1
+    val d = cal.get(Calendar.DAY_OF_MONTH)
+    val weekNames = arrayOf(
+        "週日", "週一", "週二", "週三", "週四", "週五", "週六"
+    )
+    val week = weekNames[cal.get(Calendar.DAY_OF_WEEK) - 1]
+    val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
+    val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
+    return "${y}年${mo}月${d}日 $week $hh:$mm"
 }
 
 fun dateKeyFromTimestamp(timestamp: Long): String {
@@ -297,7 +318,8 @@ fun formatDateHeader(dateKey: String): String {
     val daysDiff = ((todayStart - cal.timeInMillis) / 86_400_000L).toInt()
 
     val datePart = when {
-        daysDiff <= 0 -> "今日"
+        daysDiff < 0 -> "未來"
+        daysDiff == 0 -> "今日"
         daysDiff == 1 -> "琴日"
         daysDiff == 2 -> "前日"
         else -> "${month}月${day}日"
@@ -362,6 +384,7 @@ fun MainApp() {
 
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
+    var showFuture by remember { mutableStateOf(false) }
 
     val filtered by remember {
         derivedStateOf {
@@ -379,7 +402,13 @@ fun MainApp() {
         }
     }
     val ledgerRecords by remember {
-        derivedStateOf { if (filterModeOn) filtered else records.toList() }
+        derivedStateOf {
+            val base = if (filterModeOn) filtered else records.toList()
+            if (showFuture) base
+            else base.filter {
+                it.timestamp <= System.currentTimeMillis() + 60_000
+            }
+        }
     }
 
     val hasIncome by remember {
@@ -505,9 +534,10 @@ fun MainApp() {
 
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
-            amountText = "",
+            amountText = r.amount.toString(),
             noteText = r.note,
-            category = r.category
+            category = r.category,
+            selectAmountOnInput = true
         )
         showKeyboard = true
     }
@@ -521,7 +551,9 @@ fun MainApp() {
             amountText = amt,
             noteText = r.note,
             category = r.category,
-            editingRecordId = r.id
+            editingRecordId = r.id,
+            timestamp = r.timestamp,
+            selectAmountOnInput = true
         )
         showKeyboard = true
     }
@@ -541,7 +573,8 @@ fun MainApp() {
                 mapOf(
                     "amount" to amt,
                     "note" to note,
-                    "category" to category
+                    "category" to category,
+                    "timestamp" to keyboardState.timestamp
                 )
             )
         } else {
@@ -554,6 +587,7 @@ fun MainApp() {
                     amount = amt,
                     note = note,
                     category = category,
+                    timestamp = keyboardState.timestamp,
                     iconUrl = inheritedIcon
                 )
             )
@@ -562,13 +596,11 @@ fun MainApp() {
         keyboardState = KeyboardState()
     }
 
-    // ===== 系統返回鍵：鍵盤顯示時先關鍵盤 =====
     BackHandler(enabled = showKeyboard) {
         showKeyboard = false
         keyboardState = KeyboardState()
     }
 
-    // ===== 雙擊篩選後：聚焦搜尋欄 + 全選 =====
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filterModeOn) {
             delay(300)
@@ -629,7 +661,9 @@ fun MainApp() {
                 onKeyboardNext = {
                     keyboardState = keyboardState.copy(editingNote = true)
                 },
-                onKeyboardPickCategory = { }
+                onKeyboardPickCategory = { },
+                showFuture = showFuture,
+                onShowFutureChange = { showFuture = it }
             )
 
             1 -> CompareContent(
@@ -800,7 +834,6 @@ fun MainApp() {
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // ===== 篩選按鈕（雙擊進入 + 聚焦搜尋）=====
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -808,6 +841,9 @@ fun MainApp() {
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .pointerInput(Unit) {
                                     detectTapGestures(
+                                        onTap = {
+                                            filterModeOn = true
+                                        },
                                         onDoubleTap = {
                                             filterModeOn = true
                                             filterSelectAllTrigger++
@@ -818,7 +854,7 @@ fun MainApp() {
                         ) {
                             Icon(
                                 Icons.Default.FilterAlt,
-                                contentDescription = "篩選開關（雙擊）",
+                                contentDescription = "篩選（單擊/雙擊）",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -1207,6 +1243,8 @@ fun LedgerContent(
     onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit,
     onKeyboardPickCategory: () -> Unit,
+    showFuture: Boolean,
+    onShowFutureChange: (Boolean) -> Unit,
 ) {
     val listState = rememberLazyListState()
 
@@ -1306,12 +1344,34 @@ fun LedgerContent(
             }
 
             else -> {
-                TopStats(
-                    hasIncome = hasIncome,
-                    hasExpense = hasExpense,
-                    income = totalIncome,
-                    expense = totalExpense
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        TopStats(
+                            hasIncome = hasIncome,
+                            hasExpense = hasExpense,
+                            income = totalIncome,
+                            expense = totalExpense
+                        )
+                    }
+                    IconButton(
+                        onClick = { onShowFutureChange(!showFuture) }
+                    ) {
+                        Icon(
+                            if (showFuture) Icons.Default.Visibility
+                            else Icons.Default.VisibilityOff,
+                            contentDescription = "顯示未來項目",
+                            tint = if (showFuture)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
@@ -1334,24 +1394,14 @@ fun LedgerContent(
                     }
                 }
 
-                if (showKeyboard) {
-                    LedgerKeyboardPanel(
-                        state = keyboardState,
-                        onStateChange = onKeyboardStateChange,
-                        onDismiss = onKeyboardDismiss,
-                        onConfirm = onKeyboardConfirm,
-                        onNext = onKeyboardNext,
-                        onPickCategory = onKeyboardPickCategory,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    )
-                } else {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING +
                                 if (filterMode) 90.dp else 20.dp
@@ -1397,6 +1447,32 @@ fun LedgerContent(
                                 )
                             }
                         }
+                    }
+
+                    AnimatedVisibility(
+                        visible = showKeyboard,
+                        enter = slideInVertically(
+                            initialOffsetY = { it },
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ) + fadeIn(tween(150)),
+                        exit = slideOutVertically(
+                            targetOffsetY = { it },
+                            animationSpec = tween(280)
+                        ) + fadeOut(tween(180)),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        LedgerKeyboardPanel(
+                            state = keyboardState,
+                            onStateChange = onKeyboardStateChange,
+                            onDismiss = onKeyboardDismiss,
+                            onConfirm = onKeyboardConfirm,
+                            onNext = onKeyboardNext,
+                            onPickCategory = onKeyboardPickCategory,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
             }
@@ -1686,6 +1762,7 @@ fun LedgerKeyboardPanel(
     onPickCategory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val ctx = LocalContext.current
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surface
@@ -1696,6 +1773,76 @@ fun LedgerKeyboardPanel(
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp),
             verticalArrangement = Arrangement.Bottom
         ) {
+            // ===== 日期時間顯示 =====
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        val cal = Calendar.getInstance().apply {
+                            timeInMillis = state.timestamp
+                        }
+                        DatePickerDialog(
+                            ctx,
+                            { _, y, m, d ->
+                                cal.set(Calendar.YEAR, y)
+                                cal.set(Calendar.MONTH, m)
+                                cal.set(Calendar.DAY_OF_MONTH, d)
+                                TimePickerDialog(
+                                    ctx,
+                                    { _, h, mi ->
+                                        cal.set(Calendar.HOUR_OF_DAY, h)
+                                        cal.set(Calendar.MINUTE, mi)
+                                        cal.set(Calendar.SECOND, 0)
+                                        cal.set(Calendar.MILLISECOND, 0)
+                                        onStateChange(
+                                            state.copy(timestamp = cal.timeInMillis)
+                                        )
+                                    },
+                                    cal.get(Calendar.HOUR_OF_DAY),
+                                    cal.get(Calendar.MINUTE),
+                                    true
+                                ).show()
+                            },
+                            cal.get(Calendar.YEAR),
+                            cal.get(Calendar.MONTH),
+                            cal.get(Calendar.DAY_OF_MONTH)
+                        ).show()
+                    },
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Event,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = formatDateTime(state.timestamp),
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "點擊修改",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                            .copy(alpha = 0.6f)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ===== 金額顯示 =====
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1758,7 +1905,8 @@ fun LedgerKeyboardPanel(
                                             onStateChange(
                                                 state.copy(
                                                     amountText = if (t.isEmpty())
-                                                        t else t.dropLast(1)
+                                                        t else t.dropLast(1),
+                                                    selectAmountOnInput = false
                                                 )
                                             )
                                         }
@@ -1768,21 +1916,28 @@ fun LedgerKeyboardPanel(
                                             val newT = if (t.isEmpty()) "0."
                                                        else "$t."
                                             onStateChange(
-                                                state.copy(amountText = newT)
+                                                state.copy(
+                                                    amountText = newT,
+                                                    selectAmountOnInput = false
+                                                )
                                             )
                                         }
                                         else -> {
-                                            val t = state.amountText
-                                            val dotIdx = t.indexOf(".")
+                                            val base = if (state.selectAmountOnInput)
+                                                "" else state.amountText
+                                            val dotIdx = base.indexOf(".")
                                             val newT = if (dotIdx >= 0) {
-                                                if (t.length - dotIdx - 1 >= 2) t
-                                                else "$t$key"
+                                                if (base.length - dotIdx - 1 >= 2) base
+                                                else "$base$key"
                                             } else {
-                                                if (t.length >= 9) t
-                                                else "$t$key"
+                                                if (base.length >= 9) base
+                                                else "$base$key"
                                             }
                                             onStateChange(
-                                                state.copy(amountText = newT)
+                                                state.copy(
+                                                    amountText = newT,
+                                                    selectAmountOnInput = false
+                                                )
                                             )
                                         }
                                     }
@@ -1876,7 +2031,6 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
-                // ===== 類別按鈕 + 下拉選單 =====
                 var showCategoryMenu by remember { mutableStateOf(false) }
                 val currentStyle = CATEGORY_STYLES[state.category]
 
