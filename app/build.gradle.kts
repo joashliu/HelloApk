@@ -1,3 +1,5 @@
+import org.gradle.api.GradleException
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -12,11 +14,32 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 57
-        versionName = "7.1"
+        versionCode = 58
+        versionName = "7.2"
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            val ksFile = if (keystorePath.isNullOrBlank()) file("release.keystore")
+                         else file(keystorePath)
+            if (!ksFile.exists()) {
+                throw GradleException(
+                    "keystore 唔存在: ${ksFile.absolutePath}\n" +
+                    "請確認 workflow 有 decode keystore,同 KEYSTORE_PATH 環境變數正確。"
+                )
+            }
+            storeFile = ksFile
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
         }
