@@ -30,6 +30,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -49,22 +50,30 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Flight
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
@@ -148,6 +157,43 @@ val NAV_BOTTOM_PADDING = 20.dp
 val ROW_ALT_COLOR = Color(0xFFE3F2FD)
 
 const val FILTER_ANIM_MS = 250
+
+// ===== 類別樣式（icon + 低飽和度配色）=====
+data class CategoryStyle(
+    val icon: ImageVector,
+    val bgColor: Color,
+    val fgColor: Color
+)
+
+val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
+    "收入" to CategoryStyle(
+        Icons.Default.TrendingUp, Color(0xFFC8E6C9), Color(0xFF1B5E20)
+    ),
+    "娛樂" to CategoryStyle(
+        Icons.Default.SportsEsports, Color(0xFFE1BEE7), Color(0xFF6A1B9A)
+    ),
+    "家用" to CategoryStyle(
+        Icons.Default.Home, Color(0xFFB2EBF2), Color(0xFF00695C)
+    ),
+    "飲食" to CategoryStyle(
+        Icons.Default.Restaurant, Color(0xFFFFE0B2), Color(0xFFE65100)
+    ),
+    "交通" to CategoryStyle(
+        Icons.Default.DirectionsBus, Color(0xFFBBDEFB), Color(0xFF1565C0)
+    ),
+    "個人" to CategoryStyle(
+        Icons.Default.Person, Color(0xFFF8BBD0), Color(0xFFAD1457)
+    ),
+    "購物" to CategoryStyle(
+        Icons.Default.ShoppingCart, Color(0xFFFFF9C4), Color(0xFF9E7C0C)
+    ),
+    "月費" to CategoryStyle(
+        Icons.Default.Autorenew, Color(0xFFCFD8DC), Color(0xFF37474F)
+    ),
+    "旅遊" to CategoryStyle(
+        Icons.Default.Flight, Color(0xFFB2DFDB), Color(0xFF00695C)
+    )
+)
 
 // ===== 資料模型 =====
 data class Record(
@@ -311,7 +357,6 @@ fun MainApp() {
 
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
-    var showKeyboardCategoryPicker by remember { mutableStateOf(false) }
 
     val filtered by remember {
         derivedStateOf {
@@ -384,7 +429,6 @@ fun MainApp() {
                 .sortedDescending()
         }
     }
-    // ===== 全局交替 index（跨日期分組）=====
     val globalIndexMap by remember {
         derivedStateOf {
             val flat = groupedByDate.flatMap { it.second }
@@ -561,9 +605,7 @@ fun MainApp() {
                 onKeyboardNext = {
                     keyboardState = keyboardState.copy(editingNote = true)
                 },
-                onKeyboardPickCategory = {
-                    showKeyboardCategoryPicker = true
-                }
+                onKeyboardPickCategory = { }
             )
 
             1 -> CompareContent(
@@ -774,52 +816,6 @@ fun MainApp() {
                 }
             }
         }
-    }
-
-    if (showKeyboardCategoryPicker) {
-        AlertDialog(
-            onDismissRequest = { showKeyboardCategoryPicker = false },
-            title = { Text("揀類別") },
-            text = {
-                Column {
-                    CATEGORIES.forEach { cat ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    keyboardState =
-                                        keyboardState.copy(category = cat)
-                                    showKeyboardCategoryPicker = false
-                                }
-                                .padding(
-                                    vertical = 10.dp,
-                                    horizontal = 4.dp
-                                ),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = cat == keyboardState.category,
-                                onClick = {
-                                    keyboardState =
-                                        keyboardState.copy(category = cat)
-                                    showKeyboardCategoryPicker = false
-                                }
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                cat,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showKeyboardCategoryPicker = false
-                }) { Text("取消") }
-            }
-        )
     }
 
     if (showIconSourceDialog) {
@@ -1638,6 +1634,7 @@ fun MonthDropdown(
 }
 
 // ===== 記帳鍵盤 =====
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
     state: KeyboardState,
@@ -1782,7 +1779,7 @@ fun LedgerKeyboardPanel(
                     LaunchedEffect(Unit) {
                         noteFocusRequester.requestFocus()
                     }
-                                        TextField(
+                    TextField(
                         value = tfValue,
                         onValueChange = { newValue ->
                             tfValue = newValue
@@ -1805,7 +1802,6 @@ fun LedgerKeyboardPanel(
                         ),
                         keyboardActions = KeyboardActions(
                             onDone = {
-                                // 直接儲存（會自動關閉鍵盤）
                                 onConfirm()
                             }
                         ),
@@ -1838,14 +1834,98 @@ fun LedgerKeyboardPanel(
                         )
                     }
                 }
-                OutlinedButton(
-                    onClick = onPickCategory,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .width(110.dp)
-                        .fillMaxHeight()
-                ) {
-                    Text(state.category, maxLines = 1, fontSize = 16.sp)
+
+                // ===== 類別按鈕 + 下拉選單 =====
+                var showCategoryMenu by remember { mutableStateOf(false) }
+                val currentStyle = CATEGORY_STYLES[state.category]
+
+                Box {
+                    OutlinedButton(
+                        onClick = { showCategoryMenu = true },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .width(120.dp)
+                            .fillMaxHeight()
+                    ) {
+                        if (currentStyle != null) {
+                            Icon(
+                                currentStyle.icon,
+                                contentDescription = null,
+                                tint = currentStyle.fgColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(state.category, maxLines = 1, fontSize = 15.sp)
+                    }
+                    DropdownMenu(
+                        expanded = showCategoryMenu,
+                        onDismissRequest = { showCategoryMenu = false },
+                        modifier = Modifier.width(300.dp)
+                    ) {
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            maxItemsInEachRow = 3
+                        ) {
+                            CATEGORIES.forEach { cat ->
+                                val s = CATEGORY_STYLES[cat]
+                                val selected = cat == state.category
+                                val chipShape = RoundedCornerShape(10.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .clip(chipShape)
+                                        .background(
+                                            s?.bgColor
+                                                ?: MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        .then(
+                                            if (selected)
+                                                Modifier.border(
+                                                    2.dp,
+                                                    MaterialTheme.colorScheme.primary,
+                                                    chipShape
+                                                )
+                                            else Modifier
+                                        )
+                                        .clickable {
+                                            onStateChange(
+                                                state.copy(category = cat)
+                                            )
+                                            showCategoryMenu = false
+                                        }
+                                        .padding(
+                                            horizontal = 10.dp,
+                                            vertical = 8.dp
+                                        ),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (s != null) {
+                                        Icon(
+                                            s.icon,
+                                            contentDescription = null,
+                                            tint = s.fgColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                    }
+                                    Text(
+                                        cat,
+                                        fontSize = 13.sp,
+                                        color = s?.fgColor
+                                            ?: MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = if (selected)
+                                            FontWeight.SemiBold
+                                        else
+                                            FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2016,7 +2096,6 @@ fun QuickInputSection(
         val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
         val pagerState = rememberPagerState { pageCount }
 
-        // ===== 動態計算顯示行數 =====
         val linesToShow = if (pageCount == 1) {
             (topNotes.size + perRow - 1) / perRow
         } else {
