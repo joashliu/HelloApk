@@ -535,8 +535,26 @@ fun MainApp() {
                 afterSaveHint = afterSaveHint,
                 onAfterSaveHintDismiss = { afterSaveHint = null }
             )
-            1 -> CompareContent(records = records, availableMonths = availableMonths)
-        }
+                        1 -> CompareContent(
+                records = records,
+                availableMonths = availableMonths,
+                onAddClick = {
+                    currentPage = 0
+                    openKeyboardForNew()
+                        }
+    }
+    FloatingActionButton(
+        onClick = onAddClick,
+        containerColor = BRAND_PRIMARY,
+        contentColor = Color.White,
+        modifier = Modifier
+            .align(Alignment.BottomEnd)
+            .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+    ) {
+        Icon(Icons.Default.Add, "新增")
+    }
+    }
+}
 
         @Composable
 fun AnimatedRecordItem(
@@ -1135,12 +1153,17 @@ fun LedgerContent(
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
                             // ===== 日期頭（頂部圓角 + 淡灰底）=====
-                            item(key = "header_$dateKey") {
+                                                        item(key = "header_$dateKey") {
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .animateItem()
                                         .padding(top = 6.dp)
+                                        .shadow(
+                                            elevation = 1.dp,
+                                            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp),
+                                            clip = false
+                                        )
                                         .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                                         .background(SURFACE_ELEVATED)
                                 ) {
@@ -1158,10 +1181,15 @@ fun LedgerContent(
                                     bottomStart = if (isLast) 18.dp else 0.dp,
                                     bottomEnd = if (isLast) 18.dp else 0.dp
                                 )
-                                Box(
+                                                                Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .animateItem()
+                                        .shadow(
+                                            elevation = 1.dp,
+                                            shape = rowShape,
+                                            clip = false
+                                        )
                                         .clip(rowShape)
                                 ) {
                                     Column {
@@ -1303,7 +1331,11 @@ fun CategoryTotalHint(
 }
 
 @Composable
-fun CompareContent(records: List<Record>, availableMonths: List<String>) {
+fun CompareContent(
+    records: List<Record>,
+    availableMonths: List<String>,
+    onAddClick: () -> Unit,
+) {
     var monthA by remember { mutableStateOf<String?>(null) }
     var monthB by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(availableMonths) {
@@ -1317,7 +1349,8 @@ fun CompareContent(records: List<Record>, availableMonths: List<String>) {
         listOf(INCOME_CATEGORY) + expenses
     }
 
-    Column(Modifier.fillMaxSize().background(SURFACE_BG).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text("月份比較", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
             modifier = Modifier.padding(vertical = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2123,23 +2156,59 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     LaunchedEffect(expandedId) { if (expandedId != record.id && targetOffset != 0f) targetOffset = 0f }
     val offsetX by animateFloatAsState(targetOffset,
-        if (isDragging) snap<Float>() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        if (isDragging) snap<Float>() else spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
+    // 滑動進度 0–1
+    val leftProgress = if (maxLeft == 0f) 0f else (-offsetX / maxLeft).coerceIn(0f, 1f)
+    val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
+
     Box(modifier.fillMaxWidth().wrapContentHeight()) {
+        // 右側（左滑）：4 粒掣
         Row(Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
             verticalAlignment = Alignment.CenterVertically) {
-            ActionButton(Icons.Default.ContentCopy, "複制", Color(0xFF64748B), bw, bh) { targetOffset = 0f; onExpand(null); onCopy() }
-            ActionButton(Icons.Default.Edit, "編輯", Color(0xFF3B82F6), bw, bh) { targetOffset = 0f; onExpand(null); onEdit() }
-            ActionButton(Icons.Default.FilterList, "篩選", Color(0xFF8B5CF6), bw, bh) { targetOffset = 0f; onExpand(null); onFilter() }
-            ActionButton(Icons.Default.Delete, "刪除", Color(0xFFEF4444), bw, bh) { targetOffset = 0f; onExpand(null); onDelete() }
+            AnimatedActionButton(
+                icon = Icons.Default.ContentCopy, label = "複制",
+                iconTint = Color(0xFF64748B), bgColor = backgroundColor,
+                width = bw, height = bh,
+                progress = leftProgress, delay = 0f
+            ) { targetOffset = 0f; onExpand(null); onCopy() }
+            AnimatedActionButton(
+                icon = Icons.Default.Edit, label = "編輯",
+                iconTint = Color(0xFF3B82F6), bgColor = backgroundColor,
+                width = bw, height = bh,
+                progress = leftProgress, delay = 0.12f
+            ) { targetOffset = 0f; onExpand(null); onEdit() }
+            AnimatedActionButton(
+                icon = Icons.Default.FilterList, label = "篩選",
+                iconTint = Color(0xFF8B5CF6), bgColor = backgroundColor,
+                width = bw, height = bh,
+                progress = leftProgress, delay = 0.24f
+            ) { targetOffset = 0f; onExpand(null); onFilter() }
+            AnimatedActionButton(
+                icon = Icons.Default.Delete, label = "刪除",
+                iconTint = Color(0xFFEF4444), bgColor = backgroundColor,
+                width = bw, height = bh,
+                progress = leftProgress, delay = 0.36f
+            ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
+
+        // 左側（右滑）：1 粒掣
         Row(Modifier.matchParentSize().padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
             verticalAlignment = Alignment.CenterVertically) {
-            ActionButton(Icons.Default.Image, "改圖標", Color(0xFF10B981), bw, bh) { targetOffset = 0f; onExpand(null); onChangeIcon() }
+            AnimatedActionButton(
+                icon = Icons.Default.Image, label = "改圖標",
+                iconTint = Color(0xFF10B981), bgColor = backgroundColor,
+                width = bw, height = bh,
+                progress = rightProgress, delay = 0f
+            ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
+
+        // 上層：項目
         Surface(
             modifier = Modifier.fillMaxWidth().offset { IntOffset(offsetX.roundToInt(), 0) }
                 .pointerInput(record.id) {
@@ -2176,6 +2245,39 @@ fun SwipeableRecordItem(
                     fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold) }
             )
         }
+    }
+}
+
+@Composable
+private fun AnimatedActionButton(
+    icon: ImageVector, label: String,
+    iconTint: Color, bgColor: Color,
+    width: Dp, height: Dp,
+    progress: Float, delay: Float,
+    onClick: () -> Unit,
+) {
+    // stagger 效果：每粒掣延遲少少出現
+    val p = ((progress - delay) / (1f - delay).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
+    val alpha = p
+    val scale = 0.4f + 0.6f * p
+    val translationX = (1f - p) * 60f
+
+    Box(
+        Modifier
+            .width(width).height(height)
+            .graphicsLayer {
+                this.alpha = alpha
+                scaleX = scale
+                scaleY = scale
+                this.translationX = translationX
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .background(bgColor)
+            .border(1.5.dp, iconTint.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+            .clickable(enabled = progress > 0.5f) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, label, tint = iconTint, modifier = Modifier.size(22.dp))
     }
 }
 
