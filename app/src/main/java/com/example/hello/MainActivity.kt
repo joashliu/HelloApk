@@ -2098,45 +2098,84 @@ fun TopStats(
     income: Double,
     expense: Double
 ) {
-    AnimatedContent(
-        targetState = Pair(hasIncome, hasExpense),
-        transitionSpec = {
-            fadeIn(tween(220)) togetherWith fadeOut(tween(180))
-        },
-        label = "topStats"
-    ) { (inc, exp) ->
-        Row(
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        val density = LocalDensity.current
+        val fullWidthPx = with(density) { maxWidth.toPx() }
+        val halfWidthPx = fullWidthPx / 2f
+        val slotWidth = maxWidth / 2
+
+        // 收入左邊緣的目標 X
+        val incomeTargetX = when {
+            hasIncome && hasExpense -> 0f
+            hasIncome -> halfWidthPx / 2f
+            else -> -halfWidthPx
+        }
+        // 支出左邊緣的目標 X
+        val expenseTargetX = when {
+            hasIncome && hasExpense -> halfWidthPx
+            hasExpense -> halfWidthPx / 2f
+            else -> fullWidthPx
+        }
+
+        // 平滑 X 位移（LowBouncy 有少少彈跳感）
+        val incomeX by animateFloatAsState(
+            targetValue = incomeTargetX,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            ),
+            label = "incomeX"
+        )
+        val expenseX by animateFloatAsState(
+            targetValue = expenseTargetX,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            ),
+            label = "expenseX"
+        )
+        val incomeAlpha by animateFloatAsState(
+            targetValue = if (hasIncome) 1f else 0f,
+            animationSpec = tween(220),
+            label = "incomeAlpha"
+        )
+        val expenseAlpha by animateFloatAsState(
+            targetValue = if (hasExpense) 1f else 0f,
+            animationSpec = tween(220),
+            label = "expenseAlpha"
+        )
+
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.Top
+                .width(slotWidth)
+                .offset { IntOffset(incomeX.roundToInt(), 0) }
+                .graphicsLayer { alpha = incomeAlpha },
+            contentAlignment = Alignment.Center
         ) {
-            if (inc) {
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    StatColumn(
-                        icon = Icons.Default.TrendingUp,
-                        label = "收入",
-                        amountText = formatAmount(income),
-                        color = COLOR_INCOME
-                    )
-                }
-            }
-            if (exp) {
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    StatColumn(
-                        icon = Icons.Default.TrendingDown,
-                        label = "支出",
-                        amountText = formatAmount(expense),
-                        color = COLOR_EXPENSE
-                    )
-                }
-            }
+            StatColumn(
+                icon = Icons.Default.TrendingUp,
+                label = "收入",
+                amountText = formatAmount(income),
+                color = COLOR_INCOME
+            )
+        }
+        Box(
+            modifier = Modifier
+                .width(slotWidth)
+                .offset { IntOffset(expenseX.roundToInt(), 0) }
+                .graphicsLayer { alpha = expenseAlpha },
+            contentAlignment = Alignment.Center
+        ) {
+            StatColumn(
+                icon = Icons.Default.TrendingDown,
+                label = "支出",
+                amountText = formatAmount(expense),
+                color = COLOR_EXPENSE
+            )
         }
     }
 }
