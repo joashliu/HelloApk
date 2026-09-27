@@ -1,5 +1,7 @@
 package com.example.hello
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Schedule
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -184,6 +186,12 @@ data class KeyboardState(
     val selectAmountOnInput: Boolean = false
 )
 
+data class AfterSaveHint(
+    val recordId: String,
+    val category: String,
+    val monthTotal: Double
+)
+
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount) else formatAmount(-record.amount)
@@ -321,6 +329,9 @@ fun MainApp() {
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
+    var nameFlashTrigger by remember { mutableIntStateOf(0) }
+    var justAddedId by remember { mutableStateOf<String?>(null) }
+    var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
 
     val allNoteNames by remember {
@@ -406,8 +417,10 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-    fun openKeyboardForNew(note: String = "") {
-        keyboardState = KeyboardState(noteText = note); showKeyboard = true
+        fun openKeyboardForNew(note: String = "") {
+        keyboardState = KeyboardState(noteText = note)
+        showKeyboard = true
+        if (note.isNotBlank()) nameFlashTrigger++
     }
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
@@ -422,24 +435,39 @@ fun MainApp() {
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
-    fun saveFromKeyboard() {
+        fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
         val note = keyboardState.noteText
         val category = keyboardState.category
         val editId = keyboardState.editingRecordId
+        val ts = keyboardState.timestamp
+        val monthKey = monthKeyFromTimestamp(ts)
         if (editId != null) {
             db.collection("records").document(editId).update(mapOf(
                 "amount" to amt, "note" to note, "category" to category,
-                "timestamp" to keyboardState.timestamp))
+                "timestamp" to ts))
         } else {
             val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
-            db.collection("records").add(Record(
+            val newRef = db.collection("records").add(Record(
                 amount = amt, note = note, category = category,
-                timestamp = keyboardState.timestamp, iconUrl = inherited))
+                timestamp = ts, iconUrl = inherited))
+            newRef.addOnSuccessListener { docRef ->
+                val newId = docRef.id
+                justAddedId = newId
+                val totalThisMonth = records
+                    .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
+                    .sumOf { it.amount } + amt
+                afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
+                scope.launch {
+                    delay(800)
+                    if (justAddedId == newId) justAddedId = null
+                }
+            }
         }
-        showKeyboard = false; keyboardState = KeyboardState()
+        showKeyboard = false
+        keyboardState = KeyboardState()
         scrollToTopTrigger++
     }
 
@@ -490,9 +518,92 @@ fun MainApp() {
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
                 allNoteNames = allNoteNames,
                 scrollToTopTrigger = scrollToTopTrigger
+                nameFlashTrigger = nameFlashTrigger,
+                justAddedId = justAddedId,
+                afterSaveHint = afterSaveHint,
+                onAfterSaveHintDismiss = { afterSaveHint = null }
             )
             1 -> CompareContent(records = records, availableMonths = availableMonths)
         }
+
+        @Composable
+fun AnimatedRecordItem(
+    animateOnMount: Boolean,
+    content: @Composable () -> Unit
+) {
+    var appeared by remember { mutableStateOf(!animateOnMount) }
+    LaunchedEffect(Unit) {
+        if (animateOnMount) {
+            delay(16)
+            appeared = true
+        }
+    }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+        label = "arA"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0.94f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "arS"
+    )
+    Box(
+        Modifier.graphicsLayer {
+            this.alpha = alpha
+            scaleX = scale
+            scaleY = scale
+        }
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun CategoryTotalHint(
+    hint: AfterSaveHint,
+    onDismiss: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        visible = true
+        delay(5000)
+        visible = false
+        delay(320)
+        onDismiss()
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(250)) + expandVertically(tween(250), expandFrom = Alignment.Top),
+        exit = fadeOut(tween(250)) + shrinkVertically(tween(250), shrinkTowards = Alignment.Top)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(BRAND_PRIMARY_LIGHT)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Info, null,
+                tint = BRAND_PRIMARY_DARK,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
+                fontSize = 13.sp,
+                color = BRAND_PRIMARY_DARK,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
 
         // 底部導航欄（鍵盤時淡出）
                 androidx.compose.animation.AnimatedVisibility(
@@ -842,8 +953,12 @@ fun LedgerContent(
     onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
-        allNoteNames: List<String>,
+            allNoteNames: List<String>,
     scrollToTopTrigger: Int,
+    nameFlashTrigger: Int,
+    justAddedId: String?,
+    afterSaveHint: AfterSaveHint?,
+    onAfterSaveHintDismiss: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(scrollToTopTrigger) {
@@ -930,18 +1045,32 @@ fun LedgerContent(
                                 ) {
                                     Column {
                                         DayHeader(dateKey, dayIncome, dayExpense)
-                                        dayRecords.forEachIndexed { idx, r ->
-                                            SwipeableRecordItem(
-                                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                                record = r,
-                                                expandedId = expandedId,
-                                                onExpand = onExpandChange,
-                                                onCopy = { onCopyClick(r) },
-                                                onEdit = { onEditClick(r) },
-                                                onFilter = { onFilterByName(r.note) },
-                                                onDelete = { onDeleteClick(r) },
-                                                onChangeIcon = { onChangeIconClick(r) }
-                                            )
+                                                                                dayRecords.forEachIndexed { idx, r ->
+                                            key(r.id) {
+                                                Column {
+                                                    AnimatedRecordItem(
+                                                        animateOnMount = r.id == justAddedId
+                                                    ) {
+                                                        SwipeableRecordItem(
+                                                            backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                                            record = r,
+                                                            expandedId = expandedId,
+                                                            onExpand = onExpandChange,
+                                                            onCopy = { onCopyClick(r) },
+                                                            onEdit = { onEditClick(r) },
+                                                            onFilter = { onFilterByName(r.note) },
+                                                            onDelete = { onDeleteClick(r) },
+                                                            onChangeIcon = { onChangeIconClick(r) }
+                                                        )
+                                                    }
+                                                    if (afterSaveHint?.recordId == r.id) {
+                                                        CategoryTotalHint(
+                                                            hint = afterSaveHint,
+                                                            onDismiss = onAfterSaveHintDismiss
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -961,11 +1090,12 @@ fun LedgerContent(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                     ) {
-                        LedgerKeyboardPanel(
+                                                LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
                             allNoteNames = allNoteNames,
+                            nameFlashTrigger = nameFlashTrigger,
                             modifier = Modifier.fillMaxWidth())
                     }
                 }
@@ -1182,8 +1312,9 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onNext: () -> Unit,
-    onPickCategory: () -> Unit,
+        onPickCategory: () -> Unit,
     allNoteNames: List<String>,
+    nameFlashTrigger: Int,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -1375,7 +1506,31 @@ fun LedgerKeyboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                                val glowAlpha = remember { Animatable(0f) }
+                LaunchedEffect(nameFlashTrigger) {
+                    if (nameFlashTrigger > 0) {
+                        try {
+                            glowAlpha.snapTo(0f)
+                            glowAlpha.animateTo(1f, tween(120))
+                            glowAlpha.animateTo(0f, tween(380))
+                        } catch (_: Exception) {}
+                    }
+                }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .then(
+                            if (glowAlpha.value > 0.01f) {
+                                Modifier.border(
+                                    width = 2.dp,
+                                    color = BRAND_PRIMARY.copy(alpha = glowAlpha.value),
+                                    shape = RoundedCornerShape(14.dp)
+                                )
+                            } else Modifier
+                        )
+                ) {
                     if (state.editingNote) {
                         var tfValue by remember(state.editingNote) {
                             mutableStateOf(TextFieldValue(text = state.noteText,
@@ -1733,8 +1888,14 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
         val ch = name.trim().take(1).ifBlank { "?" }
-        Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)), contentAlignment = Alignment.Center) {
-            Text(ch, color = Color.White, fontSize = (size.value * 0.42f).sp, fontWeight = FontWeight.Bold)
+                Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)), contentAlignment = Alignment.Center) {
+            Text(
+                ch,
+                color = Color.White,
+                fontSize = (size.value * 0.42f).sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.offset(y = (-size.value * 0.03f).dp)
+            )
         }
     } else {
         AsyncImage(model = iconUrl, contentDescription = null, contentScale = ContentScale.Crop,
