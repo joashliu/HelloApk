@@ -2098,44 +2098,44 @@ fun TopStats(
     income: Double,
     expense: Double
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.Center
+    AnimatedContent(
+        targetState = Pair(hasIncome, hasExpense),
+        transitionSpec = {
+            fadeIn(tween(220)) togetherWith fadeOut(tween(180))
+        },
+        label = "topStats"
+    ) { (inc, exp) ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = hasIncome,
-                enter = fadeIn(tween(220)),
-                exit = fadeOut(tween(180))
-            ) {
-                StatColumn(
-                    icon = Icons.Default.TrendingUp,
-                    label = "收入",
-                    amountText = formatAmount(income),
-                    color = COLOR_INCOME
-                )
+            if (inc) {
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    StatColumn(
+                        icon = Icons.Default.TrendingUp,
+                        label = "收入",
+                        amountText = formatAmount(income),
+                        color = COLOR_INCOME
+                    )
+                }
             }
-        }
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = hasExpense,
-                enter = fadeIn(tween(220)),
-                exit = fadeOut(tween(180))
-            ) {
-                StatColumn(
-                    icon = Icons.Default.TrendingDown,
-                    label = "支出",
-                    amountText = formatAmount(expense),
-                    color = COLOR_EXPENSE
-                )
+            if (exp) {
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    StatColumn(
+                        icon = Icons.Default.TrendingDown,
+                        label = "支出",
+                        amountText = formatAmount(expense),
+                        color = COLOR_EXPENSE
+                    )
+                }
             }
         }
     }
