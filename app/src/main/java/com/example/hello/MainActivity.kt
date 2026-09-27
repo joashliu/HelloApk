@@ -1091,6 +1091,11 @@ fun CategoryTotalHint(
         delay(320)
         onDismiss()
     }
+    val isIncome = hint.category == INCOME_CATEGORY
+    val bgColor = if (isIncome) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)
+    val fgColor = if (isIncome) Color(0xFF065F46) else Color(0xFF991B1B)
+    val icon = if (isIncome) Icons.Default.TrendingUp else Icons.Default.TrendingDown
+
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(tween(250)) + expandVertically(tween(250), expandFrom = Alignment.Top),
@@ -1099,20 +1104,21 @@ fun CategoryTotalHint(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SURFACE_CARD)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(bgColor)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                Icons.Default.Info, null,
-                tint = BRAND_PRIMARY,
-                modifier = Modifier.size(15.dp)
-            )
+            Icon(icon, null, tint = fgColor, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
-                fontSize = 12.sp,
-                color = TEXT_SECONDARY,
+                text = if (isIncome)
+                    "今個月「${hint.category}」共收入 ${formatAmount(hint.monthTotal)}"
+                else
+                    "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
+                fontSize = 13.sp,
+                color = fgColor,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -1962,30 +1968,30 @@ fun SwipeableRecordItem(
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
     Box(modifier.fillMaxWidth().wrapContentHeight()) {
-        Row(Modifier.matchParentSize().padding(end = 8.dp),
+                Row(Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
             verticalAlignment = Alignment.CenterVertically) {
             AnimatedActionButton(
                 icon = Icons.Default.ContentCopy, label = "複制",
-                iconTint = Color(0xFF64748B), bgColor = backgroundColor,
+                iconTint = Color.White, bgColor = Color(0xFF64748B),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0f
             ) { targetOffset = 0f; onExpand(null); onCopy() }
             AnimatedActionButton(
                 icon = Icons.Default.Edit, label = "編輯",
-                iconTint = Color(0xFF3B82F6), bgColor = backgroundColor,
+                iconTint = Color.White, bgColor = Color(0xFF3B82F6),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.12f
             ) { targetOffset = 0f; onExpand(null); onEdit() }
             AnimatedActionButton(
                 icon = Icons.Default.FilterList, label = "篩選",
-                iconTint = Color(0xFF8B5CF6), bgColor = backgroundColor,
+                iconTint = Color.White, bgColor = Color(0xFF8B5CF6),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.24f
             ) { targetOffset = 0f; onExpand(null); onFilter() }
             AnimatedActionButton(
                 icon = Icons.Default.Delete, label = "刪除",
-                iconTint = Color(0xFFEF4444), bgColor = backgroundColor,
+                iconTint = Color.White, bgColor = Color(0xFFEF4444),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.36f
             ) { targetOffset = 0f; onExpand(null); onDelete() }
@@ -1996,7 +2002,7 @@ fun SwipeableRecordItem(
             verticalAlignment = Alignment.CenterVertically) {
             AnimatedActionButton(
                 icon = Icons.Default.Image, label = "改圖標",
-                iconTint = Color(0xFF10B981), bgColor = backgroundColor,
+                iconTint = Color.White, bgColor = Color(0xFF10B981),
                 width = bw, height = bh,
                 progress = rightProgress, delay = 0f
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
@@ -2068,6 +2074,6 @@ private fun AnimatedActionButton(
             .clickable(enabled = progress > 0.5f) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, label, tint = iconTint, modifier = Modifier.size(22.dp))
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp))
     }
 }
