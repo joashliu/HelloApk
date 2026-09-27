@@ -145,7 +145,7 @@ val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 
-val ROW_ALT_COLOR = Color(0xFFBBDEFB)
+val ROW_ALT_COLOR = Color(0xFFE3F2FD)
 
 const val FILTER_ANIM_MS = 250
 
@@ -2023,7 +2023,7 @@ fun QuickInputSection(
         } else {
             4
         }
-        val rowHeight = 40.dp
+        val rowHeight = 48.dp
         val vGap = 6.dp
         val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1)
 
