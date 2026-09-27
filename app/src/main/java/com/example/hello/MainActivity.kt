@@ -154,11 +154,11 @@ val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 
-val ROW_ALT_COLOR = Color(0xFFE3F2FD)
+val ROW_ALT_COLOR = Color(0xFFE8F6FF)
 
 const val FILTER_ANIM_MS = 250
 
-// ===== 類別樣式（icon + 低飽和度配色）=====
+// ===== 類別樣式（icon + 極淺底色 + 深色文字）=====
 data class CategoryStyle(
     val icon: ImageVector,
     val bgColor: Color,
@@ -167,31 +167,31 @@ data class CategoryStyle(
 
 val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
     "收入" to CategoryStyle(
-        Icons.Default.TrendingUp, Color(0xFFC8E6C9), Color(0xFF1B5E20)
+        Icons.Default.TrendingUp, Color(0xFFE8F5E9), Color(0xFF1B5E20)
     ),
     "娛樂" to CategoryStyle(
-        Icons.Default.SportsEsports, Color(0xFFE1BEE7), Color(0xFF6A1B9A)
+        Icons.Default.SportsEsports, Color(0xFFF3E5F5), Color(0xFF6A1B9A)
     ),
     "家用" to CategoryStyle(
-        Icons.Default.Home, Color(0xFFB2EBF2), Color(0xFF00695C)
+        Icons.Default.Home, Color(0xFFE0F7FA), Color(0xFF00695C)
     ),
     "飲食" to CategoryStyle(
-        Icons.Default.Restaurant, Color(0xFFFFE0B2), Color(0xFFE65100)
+        Icons.Default.Restaurant, Color(0xFFFFF3E0), Color(0xFFE65100)
     ),
     "交通" to CategoryStyle(
-        Icons.Default.DirectionsBus, Color(0xFFBBDEFB), Color(0xFF1565C0)
+        Icons.Default.DirectionsBus, Color(0xFFE3F2FD), Color(0xFF1565C0)
     ),
     "個人" to CategoryStyle(
-        Icons.Default.Person, Color(0xFFF8BBD0), Color(0xFFAD1457)
+        Icons.Default.Person, Color(0xFFFCE4EC), Color(0xFFAD1457)
     ),
     "購物" to CategoryStyle(
-        Icons.Default.ShoppingCart, Color(0xFFFFF9C4), Color(0xFF9E7C0C)
+        Icons.Default.ShoppingCart, Color(0xFFFFFDE7), Color(0xFF9E7C0C)
     ),
     "月費" to CategoryStyle(
-        Icons.Default.Autorenew, Color(0xFFCFD8DC), Color(0xFF37474F)
+        Icons.Default.Autorenew, Color(0xFFECEFF1), Color(0xFF37474F)
     ),
     "旅遊" to CategoryStyle(
-        Icons.Default.Flight, Color(0xFFB2DFDB), Color(0xFF00695C)
+        Icons.Default.Flight, Color(0xFFE0F2F1), Color(0xFF00695C)
     )
 )
 
@@ -1844,7 +1844,7 @@ fun LedgerKeyboardPanel(
                         onClick = { showCategoryMenu = true },
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
-                            .width(120.dp)
+                            .width(130.dp)
                             .fillMaxHeight()
                     ) {
                         if (currentStyle != null) {
@@ -1852,31 +1852,35 @@ fun LedgerKeyboardPanel(
                                 currentStyle.icon,
                                 contentDescription = null,
                                 tint = currentStyle.fgColor,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(Modifier.width(4.dp))
+                            Spacer(Modifier.width(6.dp))
                         }
-                        Text(state.category, maxLines = 1, fontSize = 15.sp)
+                        Text(state.category, maxLines = 1, fontSize = 16.sp)
                     }
                     DropdownMenu(
                         expanded = showCategoryMenu,
                         onDismissRequest = { showCategoryMenu = false },
-                        modifier = Modifier.width(300.dp)
+                        modifier = Modifier
+                            .width(296.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surface)
                     ) {
                         FlowRow(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            maxItemsInEachRow = 3
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            maxItemsInEachRow = 2
                         ) {
                             CATEGORIES.forEach { cat ->
                                 val s = CATEGORY_STYLES[cat]
                                 val selected = cat == state.category
-                                val chipShape = RoundedCornerShape(10.dp)
+                                val chipShape = RoundedCornerShape(12.dp)
                                 Row(
                                     modifier = Modifier
+                                        .width(130.dp)
                                         .clip(chipShape)
                                         .background(
                                             s?.bgColor
@@ -1898,8 +1902,8 @@ fun LedgerKeyboardPanel(
                                             showCategoryMenu = false
                                         }
                                         .padding(
-                                            horizontal = 10.dp,
-                                            vertical = 8.dp
+                                            horizontal = 12.dp,
+                                            vertical = 10.dp
                                         ),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -1908,13 +1912,13 @@ fun LedgerKeyboardPanel(
                                             s.icon,
                                             contentDescription = null,
                                             tint = s.fgColor,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
-                                        Spacer(Modifier.width(4.dp))
+                                        Spacer(Modifier.width(6.dp))
                                     }
                                     Text(
                                         cat,
-                                        fontSize = 13.sp,
+                                        fontSize = 14.sp,
                                         color = s?.fgColor
                                             ?: MaterialTheme.colorScheme.onSurface,
                                         fontWeight = if (selected)
