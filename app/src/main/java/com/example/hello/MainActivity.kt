@@ -20,13 +20,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -50,7 +48,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.Check
@@ -150,7 +147,6 @@ val NAV_BOTTOM_PADDING = 20.dp
 
 val ROW_ALT_COLOR = Color(0xFFE3F2FD)
 
-// 篩選模式進出動畫時長（統一用呢個，避免列表跳動）
 const val FILTER_ANIM_MS = 250
 
 // ===== 資料模型 =====
@@ -299,7 +295,7 @@ fun MainApp() {
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
 
-    var currentPage by remember { mutableIntStateOf(0) }
+    var currentPage by remember { mutableIntStateOf(0) }  // 0=記帳,1=比較
 
     var filterModeOn by remember { mutableStateOf(false) }
     var filterCategory by remember { mutableStateOf<String?>(null) }
@@ -386,6 +382,14 @@ fun MainApp() {
             records.map { monthKeyFromTimestamp(it.timestamp) }
                 .distinct()
                 .sortedDescending()
+        }
+    }
+
+    // ===== 全局交替 index（跨日期分組）=====
+    val globalIndexMap by remember {
+        derivedStateOf {
+            val flat = groupedByDate.flatMap { it.second }
+            flat.withIndex().associate { (i, r) -> r.id to i }
         }
     }
 
@@ -516,6 +520,7 @@ fun MainApp() {
                 loading = loading,
                 filtered = ledgerRecords,
                 groupedByDate = groupedByDate,
+                globalIndexMap = globalIndexMap,
                 topNotes = topNotes,
                 noteIconMap = noteIconMap,
                 hasIncome = hasIncome,
@@ -566,26 +571,6 @@ fun MainApp() {
                 records = records,
                 availableMonths = availableMonths
             )
-
-            2 -> FilterContent(
-                records = records,
-                searchQuery = filterSearch,
-                onSearchChange = { filterSearch = it },
-                filterCategory = filterCategory,
-                onFilterCategoryChange = { filterCategory = it },
-                filterMonth = filterMonth,
-                onFilterMonthChange = { filterMonth = it },
-                availableMonths = availableMonths,
-                onCopyClick = { r -> openKeyboardForCopy(r) },
-                onEditClick = { r -> openKeyboardForEdit(r) },
-                onDeleteClick = { r ->
-                    db.collection("records").document(r.id).delete()
-                },
-                onChangeIconClick = { r ->
-                    iconTargetRecord = r
-                    showIconSourceDialog = true
-                }
-            )
         }
 
         if (!showKeyboard) {
@@ -593,8 +578,7 @@ fun MainApp() {
                 FloatingNavBar(
                     items = listOf(
                         NavItem("記帳", Icons.Default.Receipt),
-                        NavItem("比較", Icons.Default.CompareArrows),
-                        NavItem("篩選", Icons.Default.FilterList)
+                        NavItem("比較", Icons.Default.CompareArrows)
                     ),
                     selectedIndex = currentPage,
                     onIndexChange = { currentPage = it },
@@ -604,7 +588,6 @@ fun MainApp() {
                 )
             }
 
-            // ===== 篩選模式底部 =====
             key("filter_bottom") {
                 AnimatedVisibility(
                     visible = filterModeOn && currentPage == 0,
@@ -723,7 +706,6 @@ fun MainApp() {
                 }
             }
 
-            // ===== 一般模式 FAB =====
             key("fab") {
                 AnimatedVisibility(
                     visible = !filterModeOn && currentPage == 0,
@@ -1161,6 +1143,7 @@ fun LedgerContent(
     loading: Boolean,
     filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
+    globalIndexMap: Map<String, Int>,
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     hasIncome: Boolean,
@@ -1192,7 +1175,7 @@ fun LedgerContent(
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // ===== 篩選模式下頂部 chips（時間統一 250ms）=====
+        // ===== 篩選模式頂部 chips =====
         AnimatedVisibility(
             visible = filterMode,
             enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
@@ -1205,6 +1188,7 @@ fun LedgerContent(
             )
         ) {
             Column {
+                // 類別 chips
                 FlowRow(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1229,6 +1213,18 @@ fun LedgerContent(
                         )
                     }
                 }
+
+                // 分隔線
+                HorizontalDivider(
+                    modifier = Modifier.padding(
+                        horizontal = 16.dp,
+                        vertical = 6.dp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        .copy(alpha = 0.15f)
+                )
+
+                // 月份 chips
                 if (availableMonths.isNotEmpty()) {
                     FlowRow(
                         modifier = Modifier
@@ -1285,7 +1281,7 @@ fun LedgerContent(
                     expense = totalExpense
                 )
 
-                // ===== 快速輸入（與頂部 chips 同步動畫,避免列表跳動）=====
+                // 快速輸入
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
                     enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
@@ -1351,10 +1347,11 @@ fun LedgerContent(
                             itemsIndexed(
                                 dayRecords,
                                 key = { _, r -> r.id }
-                            ) { idx, r ->
+                            ) { _, r ->
+                                val globalIdx = globalIndexMap[r.id] ?: 0
                                 SwipeableRecordItem(
                                     modifier = Modifier.animateItem(),
-                                    backgroundColor = if (idx % 2 == 0)
+                                    backgroundColor = if (globalIdx % 2 == 0)
                                         MaterialTheme.colorScheme.surface
                                     else
                                         ROW_ALT_COLOR,
@@ -1642,201 +1639,6 @@ fun MonthDropdown(
                     }
                 )
             }
-        }
-    }
-}
-
-// ===== 篩選頁（保留） =====
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun FilterContent(
-    records: List<Record>,
-    searchQuery: String,
-    onSearchChange: (String) -> Unit,
-    filterCategory: String?,
-    onFilterCategoryChange: (String?) -> Unit,
-    filterMonth: String?,
-    onFilterMonthChange: (String?) -> Unit,
-    availableMonths: List<String>,
-    onCopyClick: (Record) -> Unit,
-    onEditClick: (Record) -> Unit,
-    onDeleteClick: (Record) -> Unit,
-    onChangeIconClick: (Record) -> Unit,
-) {
-    var expandedId by remember { mutableStateOf<String?>(null) }
-
-    val query = searchQuery.trim()
-    val results = records.filter { r ->
-        val catOk = filterCategory == null || r.category == filterCategory
-        val monthOk = filterMonth == null ||
-            monthKeyFromTimestamp(r.timestamp) == filterMonth
-        val searchOk = query.isBlank() ||
-            r.note.contains(query, ignoreCase = true) ||
-            r.category.contains(query, ignoreCase = true)
-        catOk && monthOk && searchOk
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 8.dp)
-        ) {
-            Text(
-                text = if (query.isBlank()) "全部記錄（${results.size}）"
-                       else "搜尋結果（${results.size}）",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                AnimatedFilterChip(
-                    selected = filterCategory == null,
-                    label = "全部",
-                    onClick = { onFilterCategoryChange(null) }
-                )
-                CATEGORIES.forEach { cat ->
-                    AnimatedFilterChip(
-                        selected = filterCategory == cat,
-                        label = cat,
-                        onClick = {
-                            onFilterCategoryChange(
-                                if (filterCategory == cat) null else cat
-                            )
-                        }
-                    )
-                }
-            }
-
-            if (availableMonths.isNotEmpty()) {
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    AnimatedFilterChip(
-                        selected = filterMonth == null,
-                        label = "全年",
-                        onClick = { onFilterMonthChange(null) }
-                    )
-                    availableMonths.forEach { month ->
-                        AnimatedFilterChip(
-                            selected = filterMonth == month,
-                            label = formatMonthLabel(month),
-                            onClick = {
-                                onFilterMonthChange(
-                                    if (filterMonth == month) null else month
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(4.dp))
-            HorizontalDivider()
-
-            if (results.isEmpty()) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        when {
-                            query.isNotBlank() -> "搵唔到「$query」"
-                            filterCategory != null || filterMonth != null ->
-                                "冇符合篩選條件嘅記錄"
-                            else -> "冇記錄"
-                        },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = PaddingValues(
-                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
-                    )
-                ) {
-                    itemsIndexed(results, key = { _, r -> r.id }) { idx, r ->
-                        SwipeableRecordItem(
-                            modifier = Modifier.animateItem(),
-                            backgroundColor = if (idx % 2 == 0)
-                                MaterialTheme.colorScheme.surface
-                            else
-                                ROW_ALT_COLOR,
-                            record = r,
-                            expandedId = expandedId,
-                            onExpand = { expandedId = it },
-                            onCopy = { onCopyClick(r) },
-                            onEdit = { onEditClick(r) },
-                            onFilter = {},
-                            onDelete = { onDeleteClick(r) },
-                            onChangeIcon = { onChangeIconClick(r) }
-                        )
-                    }
-                }
-            }
-        }
-
-        Surface(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(
-                    start = 16.dp,
-                    end = 16.dp,
-                    bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
-                ),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 6.dp,
-            tonalElevation = 3.dp
-        ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchChange,
-                placeholder = { Text("搜尋名稱或類別…") },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { onSearchChange("") }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "清除"
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
         }
     }
 }
@@ -2288,7 +2090,7 @@ fun QuickInputSection(
     }
 }
 
-// ===== 頂部統計 =====
+// ===== 頂部統計（weight 固定位置,只淡入淡出）=====
 @Composable
 fun TopStats(
     hasIncome: Boolean,
@@ -2300,40 +2102,43 @@ fun TopStats(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.Top
     ) {
-        AnimatedVisibility(
-            visible = hasIncome,
-            enter = fadeIn(tween(220)) + expandHorizontally(
-                animationSpec = tween(260)
-            ),
-            exit = fadeOut(tween(180)) + shrinkHorizontally(
-                animationSpec = tween(220)
-            )
+        // 左邊固定佔一半,顯示收入
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center
         ) {
-            StatColumn(
-                icon = Icons.Default.TrendingUp,
-                label = "收入",
-                amountText = formatAmount(income),
-                color = COLOR_INCOME
-            )
+            AnimatedVisibility(
+                visible = hasIncome,
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(180))
+            ) {
+                StatColumn(
+                    icon = Icons.Default.TrendingUp,
+                    label = "收入",
+                    amountText = formatAmount(income),
+                    color = COLOR_INCOME
+                )
+            }
         }
-        AnimatedVisibility(
-            visible = hasExpense,
-            enter = fadeIn(tween(220)) + expandHorizontally(
-                animationSpec = tween(260)
-            ),
-            exit = fadeOut(tween(180)) + shrinkHorizontally(
-                animationSpec = tween(220)
-            )
+        // 右邊固定佔一半,顯示支出
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center
         ) {
-            StatColumn(
-                icon = Icons.Default.TrendingDown,
-                label = "支出",
-                amountText = formatAmount(expense),
-                color = COLOR_EXPENSE
-            )
+            AnimatedVisibility(
+                visible = hasExpense,
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(180))
+            ) {
+                StatColumn(
+                    icon = Icons.Default.TrendingDown,
+                    label = "支出",
+                    amountText = formatAmount(expense),
+                    color = COLOR_EXPENSE
+                )
+            }
         }
     }
 }
