@@ -145,7 +145,7 @@ val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 
-val ROW_ALT_COLOR = Color(0xFF90CAF9)
+val ROW_ALT_COLOR = Color(0xFFBBDEFB)
 
 const val FILTER_ANIM_MS = 250
 
@@ -2017,12 +2017,26 @@ fun QuickInputSection(
         val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
         val pagerState = rememberPagerState { pageCount }
 
-        Column {
+        // ===== 動態計算顯示行數 =====
+        val linesToShow = if (pageCount == 1) {
+            (topNotes.size + perRow - 1) / perRow
+        } else {
+            4
+        }
+        val rowHeight = 40.dp
+        val vGap = 6.dp
+        val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1)
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(150.dp)
+                    .height(pagerHeight)
             ) { page ->
                 val start = page * perPage
                 val end = minOf(start + perPage, topNotes.size)
@@ -2033,7 +2047,7 @@ fun QuickInputSection(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(vGap),
                     maxItemsInEachRow = perRow,
                     maxLines = 4
                 ) {
