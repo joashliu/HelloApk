@@ -341,7 +341,6 @@ fun MainApp() {
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
-        var flyingCard by remember { mutableStateOf<FlyingCard?>(null) }
     val config = LocalConfiguration.current
     val density = LocalDensity.current
     val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
@@ -463,15 +462,6 @@ fun MainApp() {
                 } else {
             val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
-
-            // 觸發飛行卡片（由鍵盤位置飛到列表頂部）
-            flyingCard = FlyingCard(
-                note = note,
-                amount = amt,
-                category = category,
-                iconUrl = inherited
-            )
-
             val newRef = db.collection("records").add(Record(
                 amount = amt, note = note, category = category,
                 timestamp = ts, iconUrl = inherited))
@@ -875,14 +865,6 @@ fun CategoryTotalHint(
                 }
             }
         }
-        // ===== 新增：飛行卡片 overlay =====
-        flyingCard?.let { card ->
-            FlyingRecordCard(
-                card = card,
-                screenHeightPx = screenHeightPx,
-                onFinished = { flyingCard = null }
-            )
-        }
 
         if (uploading) {
             Box(Modifier.fillMaxSize().background(Color(0x80000000)), contentAlignment = Alignment.Center) {
@@ -1167,7 +1149,7 @@ fun LedgerContent(
                             }
 
                             // ===== 每條記錄獨立 item（animateItem 令位置平滑移動）=====
-                            itemsIndexed(
+                                                        itemsIndexed(
                                 items = dayRecords,
                                 key = { _, r -> r.id }
                             ) { idx, r ->
@@ -1181,14 +1163,13 @@ fun LedgerContent(
                                         .fillMaxWidth()
                                         .animateItem()
                                         .clip(rowShape)
-                                        .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
                                 ) {
                                     Column {
                                         AnimatedRecordItem(
                                             animateOnMount = r.id == justAddedId
                                         ) {
                                             SwipeableRecordItem(
-                                                backgroundColor = Color.Transparent,
+                                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
                                                 record = r,
                                                 expandedId = expandedId,
                                                 onExpand = onExpandChange,
