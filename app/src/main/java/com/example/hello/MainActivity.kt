@@ -1099,18 +1099,20 @@ fun CategoryTotalHint(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(BRAND_PRIMARY_LIGHT)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .background(SURFACE_CARD)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Info, null, tint = BRAND_PRIMARY_DARK, modifier = Modifier.size(18.dp))
+            Icon(
+                Icons.Default.Info, null,
+                tint = BRAND_PRIMARY,
+                modifier = Modifier.size(15.dp)
+            )
             Spacer(Modifier.width(8.dp))
             Text(
                 text = "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
-                fontSize = 13.sp,
-                color = BRAND_PRIMARY_DARK,
+                fontSize = 12.sp,
+                color = TEXT_SECONDARY,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -1956,7 +1958,7 @@ fun SwipeableRecordItem(
             dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
-    val leftProgress = if (maxLeft == 0f) 0f else (-offsetX / maxLeft).coerceIn(0f, 1f)
+        val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
     Box(modifier.fillMaxWidth().wrapContentHeight()) {
@@ -2063,7 +2065,6 @@ private fun AnimatedActionButton(
             }
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .border(1.5.dp, iconTint.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
             .clickable(enabled = progress > 0.5f) { onClick() },
         contentAlignment = Alignment.Center
     ) {
