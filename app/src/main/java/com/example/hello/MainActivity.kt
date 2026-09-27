@@ -1140,7 +1140,7 @@ fun LedgerContent(
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyColumn(
+                                        LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -1151,44 +1151,66 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            item(key = "card_$dateKey") {
+                            // ===== 日期頭（頂部圓角 + 淡灰底）=====
+                            item(key = "header_$dateKey") {
                                 Box(
-                                    Modifier.fillMaxWidth()
-                                        .padding(vertical = 5.dp)
-                                        .shadow(2.dp, RoundedCornerShape(18.dp))
-                                        .background(SURFACE_CARD, RoundedCornerShape(18.dp))
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .animateItem()
+                                        .padding(top = 6.dp)
+                                        .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                                        .background(SURFACE_ELEVATED)
+                                ) {
+                                    DayHeader(dateKey, dayIncome, dayExpense)
+                                }
+                            }
+
+                            // ===== 每條記錄獨立 item（animateItem 令位置平滑移動）=====
+                            itemsIndexed(
+                                items = dayRecords,
+                                key = { _, r -> r.id }
+                            ) { idx, r ->
+                                val isLast = idx == dayRecords.lastIndex
+                                val rowShape = RoundedCornerShape(
+                                    bottomStart = if (isLast) 18.dp else 0.dp,
+                                    bottomEnd = if (isLast) 18.dp else 0.dp
+                                )
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .animateItem()
+                                        .clip(rowShape)
+                                        .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
                                 ) {
                                     Column {
-                                        DayHeader(dateKey, dayIncome, dayExpense)
-                                                                                dayRecords.forEachIndexed { idx, r ->
-                                            key(r.id) {
-                                                Column {
-                                                    AnimatedRecordItem(
-                                                        animateOnMount = r.id == justAddedId
-                                                    ) {
-                                                        SwipeableRecordItem(
-                                                            backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                                            record = r,
-                                                            expandedId = expandedId,
-                                                            onExpand = onExpandChange,
-                                                            onCopy = { onCopyClick(r) },
-                                                            onEdit = { onEditClick(r) },
-                                                            onFilter = { onFilterByName(r.note) },
-                                                            onDelete = { onDeleteClick(r) },
-                                                            onChangeIcon = { onChangeIconClick(r) }
-                                                        )
-                                                    }
-                                                    if (afterSaveHint?.recordId == r.id) {
-                                                        CategoryTotalHint(
-                                                            hint = afterSaveHint,
-                                                            onDismiss = onAfterSaveHintDismiss
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                        AnimatedRecordItem(
+                                            animateOnMount = r.id == justAddedId
+                                        ) {
+                                            SwipeableRecordItem(
+                                                backgroundColor = Color.Transparent,
+                                                record = r,
+                                                expandedId = expandedId,
+                                                onExpand = onExpandChange,
+                                                onCopy = { onCopyClick(r) },
+                                                onEdit = { onEditClick(r) },
+                                                onFilter = { onFilterByName(r.note) },
+                                                onDelete = { onDeleteClick(r) },
+                                                onChangeIcon = { onChangeIconClick(r) }
+                                            )
+                                        }
+                                        if (afterSaveHint?.recordId == r.id) {
+                                            CategoryTotalHint(
+                                                hint = afterSaveHint,
+                                                onDismiss = onAfterSaveHintDismiss
+                                            )
                                         }
                                     }
                                 }
+                            }
+
+                            // ===== 分組之間間距 =====
+                            item(key = "gap_$dateKey") {
+                                Spacer(Modifier.height(12.dp))
                             }
                         }
                     }
