@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.material.icons.filled.Schedule
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -223,6 +224,17 @@ fun formatDateTime(timestamp: Long): String {
         String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))}:${String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))}"
 }
 
+fun formatDatePart(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
+    return "${cal.get(Calendar.MONTH)+1}月${cal.get(Calendar.DAY_OF_MONTH)}日 $wk"
+}
+
+fun formatTimePart(timestamp: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    return String.format(Locale.US, "%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+}
+
 fun dateKeyFromTimestamp(timestamp: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
     return String.format(Locale.US, "%04d-%02d-%02d", cal.get(Calendar.YEAR), cal.get(Calendar.MONTH)+1, cal.get(Calendar.DAY_OF_MONTH))
@@ -309,6 +321,7 @@ fun MainApp() {
     var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
+    var scrollToTopTrigger by remember { mutableIntStateOf(0) }
 
     val allNoteNames by remember {
         derivedStateOf {
@@ -427,6 +440,7 @@ fun MainApp() {
                 timestamp = keyboardState.timestamp, iconUrl = inherited))
         }
         showKeyboard = false; keyboardState = KeyboardState()
+        scrollToTopTrigger++
     }
 
     BackHandler(enabled = showKeyboard) {
@@ -475,6 +489,7 @@ fun MainApp() {
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
                 allNoteNames = allNoteNames
+                scrollToTopTrigger = scrollToTopTrigger
             )
             1 -> CompareContent(records = records, availableMonths = availableMonths)
         }
@@ -827,9 +842,15 @@ fun LedgerContent(
     onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
-    allNoteNames: List<String>,
+        allNoteNames: List<String>,
+    scrollToTopTrigger: Int,
 ) {
     val listState = rememberLazyListState()
+    LaunchedEffect(scrollToTopTrigger) {
+        if (scrollToTopTrigger > 0) {
+            try { listState.animateScrollToItem(0) } catch (_: Exception) {}
+        }
+    }
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
             visible = filterMode,
@@ -928,7 +949,7 @@ fun LedgerContent(
                         }
                     }
 
-                    androidx.compose.animation.AnimatedVisibility(
+                                        androidx.compose.animation.AnimatedVisibility(
                         visible = showKeyboard,
                         enter = slideInVertically(initialOffsetY = { it },
                             animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
@@ -936,14 +957,16 @@ fun LedgerContent(
                         exit = slideOutVertically(targetOffsetY = { it },
                             animationSpec = tween(320, easing = FastOutSlowInEasing)
                         ) + fadeOut(tween(220)),
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
                     ) {
                         LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
                             allNoteNames = allNoteNames,
-                            modifier = Modifier.fillMaxSize())
+                            modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -1165,62 +1188,90 @@ fun LedgerKeyboardPanel(
 ) {
     val ctx = LocalContext.current
     Surface(
-        modifier = modifier, color = SURFACE_CARD,
+        modifier = modifier,
+        color = SURFACE_CARD,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         shadowElevation = 16.dp
     ) {
         Column(
-            Modifier.fillMaxSize().padding(start = 14.dp, end = 14.dp, top = 14.dp),
-            verticalArrangement = Arrangement.Bottom
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
         ) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(DIVIDER_COLOR))
-            }
-            Spacer(Modifier.height(12.dp))
-
+            // ===== 日期 / 時間（分開可撳）=====
             Surface(
-                modifier = Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp))
-                    .clickable {
-                        val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
-                        DatePickerDialog(ctx, { _, y, m, d ->
-                            cal.set(Calendar.YEAR, y); cal.set(Calendar.MONTH, m); cal.set(Calendar.DAY_OF_MONTH, d)
-                            TimePickerDialog(ctx, { _, h, mi ->
-                                cal.set(Calendar.HOUR_OF_DAY, h); cal.set(Calendar.MINUTE, mi)
-                                cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
-                                onStateChange(state.copy(timestamp = cal.timeInMillis))
-                            }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
-                        }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
-                    },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = SURFACE_ELEVATED
             ) {
-                Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Event, null, tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(formatDateTime(state.timestamp), fontSize = 14.sp, color = TEXT_PRIMARY)
-                    Spacer(Modifier.weight(1f))
-                    Text("點擊修改", fontSize = 11.sp, color = TEXT_TERTIARY)
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    // 日期
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                            .clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
+                            .clickable {
+                                val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
+                                DatePickerDialog(ctx, { _, y, m, d ->
+                                    cal.set(Calendar.YEAR, y)
+                                    cal.set(Calendar.MONTH, m)
+                                    cal.set(Calendar.DAY_OF_MONTH, d)
+                                    onStateChange(state.copy(timestamp = cal.timeInMillis))
+                                }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+                            }
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Event, null, tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(formatDatePart(state.timestamp), fontSize = 14.sp, color = TEXT_PRIMARY,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    // 分隔
+                    Box(Modifier.width(1.dp).height(24.dp).background(DIVIDER_COLOR))
+                    // 時間
+                    Row(
+                        modifier = Modifier.weight(0.7f).fillMaxHeight()
+                            .clip(RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp))
+                            .clickable {
+                                val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
+                                TimePickerDialog(ctx, { _, h, mi ->
+                                    cal.set(Calendar.HOUR_OF_DAY, h)
+                                    cal.set(Calendar.MINUTE, mi)
+                                    cal.set(Calendar.SECOND, 0)
+                                    cal.set(Calendar.MILLISECOND, 0)
+                                    onStateChange(state.copy(timestamp = cal.timeInMillis))
+                                }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
+                            }
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Schedule, null, tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(formatTimePart(state.timestamp), fontSize = 14.sp, color = TEXT_PRIMARY)
+                    }
                 }
             }
 
             Spacer(Modifier.height(10.dp))
 
-            Surface(Modifier.fillMaxWidth().height(82.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
+            // 金額顯示
+            Surface(Modifier.fillMaxWidth().height(76.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(horizontal = 22.dp),
                     contentAlignment = Alignment.CenterEnd) {
                     val showText = if (state.amountText.isEmpty()) "0" else state.amountText
-                    Text(showText, fontSize = 40.sp, fontWeight = FontWeight.Bold,
+                    Text(showText, fontSize = 38.sp, fontWeight = FontWeight.Bold,
                         color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
                         textAlign = TextAlign.End, maxLines = 1)
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             val rows = listOf(
                 listOf("1", "2", "3"), listOf("4", "5", "6"),
                 listOf("7", "8", "9"), listOf(".", "0", "backspace")
             )
-            Column(Modifier.fillMaxWidth().height(200.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.fillMaxWidth().height(190.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 rows.forEach { row ->
                     Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { key ->
@@ -1256,8 +1307,47 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
+            // ===== 名稱建議（內聯顯示喺輸入框正上方）=====
+            if (state.editingNote) {
+                val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
+                AnimatedVisibility(
+                    visible = suggestions.isNotEmpty(),
+                    enter = fadeIn(tween(150)) + expandVertically(tween(180), expandFrom = Alignment.Bottom),
+                    exit = fadeOut(tween(120)) + shrinkVertically(tween(150), shrinkTowards = Alignment.Bottom)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = SURFACE_CARD,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    ) {
+                        Column(
+                            Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())
+                        ) {
+                            suggestions.forEach { s ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clickable { onStateChange(state.copy(noteText = s)) }
+                                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                        modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (s != suggestions.last())
+                                    HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ===== 名稱輸入 + 類別 =====
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -1271,63 +1361,22 @@ fun LedgerKeyboardPanel(
                         val focusReq = remember { FocusRequester() }
                         LaunchedEffect(Unit) { focusReq.requestFocus() }
 
-                        val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
-
-                        Column {
-                            TextField(
-                                value = tfValue,
-                                onValueChange = { nv -> tfValue = nv; onStateChange(state.copy(noteText = nv.text)) },
-                                placeholder = { Text("名稱") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = SURFACE_ELEVATED,
-                                    unfocusedContainerColor = SURFACE_ELEVATED,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                                modifier = Modifier.fillMaxWidth().fillMaxHeight().focusRequester(focusReq)
-                            )
-                        }
-
-                        if (suggestions.isNotEmpty()) {
-                            androidx.compose.ui.window.Popup(
-                                alignment = Alignment.TopStart,
-                                offset = androidx.compose.ui.unit.IntOffset(0, -260),
-                                onDismissRequest = { },
-                                properties = PopupProperties(focusable = false)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = SURFACE_CARD,
-                                    shadowElevation = 8.dp,
-                                    modifier = Modifier.width(260.dp).heightIn(max = 240.dp)
-                                ) {
-                                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                                        suggestions.forEach { suggestion ->
-                                            Row(
-                                                Modifier.fillMaxWidth()
-                                                    .clickable {
-                                                        tfValue = TextFieldValue(suggestion)
-                                                        onStateChange(state.copy(noteText = suggestion))
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 11.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                                    modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(8.dp))
-                                                Text(suggestion, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                            HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        TextField(
+                            value = tfValue,
+                            onValueChange = { nv -> tfValue = nv; onStateChange(state.copy(noteText = nv.text)) },
+                            placeholder = { Text("名稱") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = SURFACE_ELEVATED,
+                                unfocusedContainerColor = SURFACE_ELEVATED,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+                            modifier = Modifier.fillMaxSize().focusRequester(focusReq)
+                        )
                     } else {
                         OutlinedButton(
                             onClick = { onStateChange(state.copy(editingNote = true)) },
@@ -1358,32 +1407,43 @@ fun LedgerKeyboardPanel(
                         Text(state.category, maxLines = 1, fontSize = 14.sp)
                     }
                     DropdownMenu(
-                        expanded = showCategoryMenu, onDismissRequest = { showCategoryMenu = false },
+                        expanded = showCategoryMenu,
+                        onDismissRequest = { showCategoryMenu = false },
                         modifier = Modifier.width(288.dp),
-                        shape = RoundedCornerShape(18.dp), containerColor = SURFACE_CARD
+                        shape = RoundedCornerShape(18.dp),
+                        containerColor = SURFACE_CARD
                     ) {
-                        FlowRow(Modifier.fillMaxWidth().padding(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            maxItemsInEachRow = 2) {
-                            CATEGORIES.forEach { cat ->
-                                val s = CATEGORY_STYLES[cat]
-                                val sel = cat == state.category
-                                val chipShape = RoundedCornerShape(12.dp)
+                        Column(
+                            Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CATEGORIES.chunked(2).forEach { pair ->
                                 Row(
-                                    Modifier.width(130.dp).clip(chipShape)
-                                        .background(s?.bgColor ?: SURFACE_ELEVATED)
-                                        .then(if (sel) Modifier.border(2.dp, BRAND_PRIMARY, chipShape) else Modifier)
-                                        .clickable { onStateChange(state.copy(category = cat)); showCategoryMenu = false }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    if (s != null) {
-                                        Icon(s.icon, null, tint = s.fgColor, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(6.dp))
+                                    pair.forEach { cat ->
+                                        val s = CATEGORY_STYLES[cat]
+                                        val sel = cat == state.category
+                                        val chipShape = RoundedCornerShape(12.dp)
+                                        Row(
+                                            Modifier.weight(1f).height(44.dp).clip(chipShape)
+                                                .background(s?.bgColor ?: SURFACE_ELEVATED)
+                                                .then(if (sel) Modifier.border(2.dp, BRAND_PRIMARY, chipShape) else Modifier)
+                                                .clickable { onStateChange(state.copy(category = cat)); showCategoryMenu = false },
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (s != null) {
+                                                Icon(s.icon, null, tint = s.fgColor, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(5.dp))
+                                            }
+                                            Text(cat, fontSize = 13.sp, color = s?.fgColor ?: TEXT_PRIMARY,
+                                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                                                maxLines = 1)
+                                        }
                                     }
-                                    Text(cat, fontSize = 14.sp, color = s?.fgColor ?: TEXT_PRIMARY,
-                                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
+                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                                 }
                             }
                         }
@@ -1391,9 +1451,9 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            Row(Modifier.fillMaxWidth().height(64.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().height(58.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = onDismiss, shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -1419,7 +1479,6 @@ fun LedgerKeyboardPanel(
                     }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
