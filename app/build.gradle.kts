@@ -12,33 +12,11 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 55
-        versionName = "6.4"
-    }
-
-    signingConfigs {
-        create("release") {
-            val keystorePath = System.getenv("KEYSTORE_PATH")
-            if (!keystorePath.isNullOrBlank()) {
-                val ksFile = file(keystorePath)
-                if (ksFile.exists()) {
-                    storeFile = ksFile
-                    storePassword = System.getenv("KEYSTORE_PASSWORD")
-                    keyAlias = System.getenv("KEY_ALIAS")
-                    keyPassword = System.getenv("KEY_PASSWORD")
-                }
-            }
-        }
+        versionCode = 56
+        versionName = "7.0"
     }
 
     buildTypes {
-        debug {
-            // 如果有 release keystore 就用，否則 fallback 去 debug 簽名
-            val keystorePath = System.getenv("KEYSTORE_PATH")
-            if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
-                signingConfig = signingConfigs.getByName("release")
-            }
-        }
         release {
             isMinifyEnabled = false
         }
