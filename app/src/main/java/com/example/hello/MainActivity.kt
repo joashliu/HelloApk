@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.core.Animatable
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Schedule
@@ -192,6 +193,13 @@ data class AfterSaveHint(
     val monthTotal: Double
 )
 
+data class FlyingCard(
+    val note: String,
+    val amount: Double,
+    val category: String,
+    val iconUrl: String
+)
+
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount) else formatAmount(-record.amount)
@@ -332,6 +340,10 @@ fun MainApp() {
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
+        var flyingCard by remember { mutableStateOf<FlyingCard?>(null) }
+    val config = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
 
     val allNoteNames by remember {
@@ -447,9 +459,18 @@ fun MainApp() {
             db.collection("records").document(editId).update(mapOf(
                 "amount" to amt, "note" to note, "category" to category,
                 "timestamp" to ts))
-        } else {
+                } else {
             val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
+
+            // 觸發飛行卡片（由鍵盤位置飛到列表頂部）
+            flyingCard = FlyingCard(
+                note = note,
+                amount = amt,
+                category = category,
+                iconUrl = inherited
+            )
+
             val newRef = db.collection("records").add(Record(
                 amount = amt, note = note, category = category,
                 timestamp = ts, iconUrl = inherited))
@@ -573,6 +594,78 @@ fun AnimatedRecordItem(
         }
     ) {
         content()
+    }
+}
+
+@Composable
+fun FlyingRecordCard(
+    card: FlyingCard,
+    screenHeightPx: Float,
+    onFinished: () -> Unit
+) {
+    val startY = screenHeightPx * 0.65f
+    val endY = screenHeightPx * 0.38f
+
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        delay(16)
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(750, easing = FastOutSlowInEasing)
+        )
+        delay(80)
+        onFinished()
+    }
+
+    val p = progress.value
+    val y = startY + (endY - startY) * p
+    val scale = 1f - 0.35f * p
+    val alpha = if (p < 0.80f) 1f else (1f - p) / 0.20f
+
+    Box(Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .offset { IntOffset(0, y.toInt()) }
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    this.alpha = alpha.coerceIn(0f, 1f)
+                },
+            shape = RoundedCornerShape(18.dp),
+            color = SURFACE_CARD,
+            shadowElevation = 16.dp
+        ) {
+            ListItem(
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                leadingContent = { IconView(card.iconUrl, card.note) },
+                headlineContent = {
+                    Text(
+                        card.note.ifBlank { "(無名稱)" },
+                        fontSize = NOTE_FONT_SIZE,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TEXT_PRIMARY
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        card.category,
+                        fontSize = META_FONT_SIZE,
+                        color = TEXT_TERTIARY
+                    )
+                },
+                trailingContent = {
+                    Text(
+                        if (card.category == INCOME_CATEGORY) formatAmount(card.amount)
+                        else formatAmount(-card.amount),
+                        color = if (card.category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE,
+                        fontSize = AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            )
+        }
     }
 }
 
@@ -780,6 +873,14 @@ fun CategoryTotalHint(
                     Icon(Icons.Default.Add, "新增")
                 }
             }
+        }
+        // ===== 新增：飛行卡片 overlay =====
+        flyingCard?.let { card ->
+            FlyingRecordCard(
+                card = card,
+                screenHeightPx = screenHeightPx,
+                onFinished = { flyingCard = null }
+            )
         }
 
         if (uploading) {
