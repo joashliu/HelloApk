@@ -974,11 +974,10 @@ fun LedgerContent(
                                     bottomStart = if (isLast) 18.dp else 0.dp,
                                     bottomEnd = if (isLast) 18.dp else 0.dp
                                 )
-                                Box(
+                                                                Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .animateItem()
-                                        .shadow(1.dp, rowShape, clip = false)
                                         .clip(rowShape)
                                 ) {
                                     Column {
@@ -1980,7 +1979,7 @@ fun SwipeableRecordItem(
             dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
-    val leftProgress = if (maxLeft == 0f) 0f else (-offsetX / maxLeft).coerceIn(0f, 1f)
+        val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
     Box(modifier.fillMaxWidth().wrapContentHeight()) {
@@ -2024,7 +2023,7 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
-                Box(
+                        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
@@ -2049,6 +2048,7 @@ fun SwipeableRecordItem(
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     if (expandedId != null) onExpand(null)
                 }
+                .shadow(1.dp, RoundedCornerShape(0.dp))
                 .background(backgroundColor)
         ) {
             ListItem(
