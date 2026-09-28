@@ -434,9 +434,13 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-    fun openKeyboardForNew(note: String = "") {
-        keyboardState = KeyboardState(noteText = note)
-        showKeyboard = true
+        fun openKeyboardForNew(note: String = "") {
+        if (!showKeyboard) {
+            keyboardState = KeyboardState(noteText = note)
+            showKeyboard = true
+        } else {
+            keyboardState = keyboardState.copy(noteText = note)
+        }
         if (note.isNotBlank()) nameFlashTrigger++
     }
     fun openKeyboardForCopy(r: Record) {
@@ -1544,38 +1548,38 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 名稱建議（內聯顯示喺輸入框正上方）=====
+                        // ===== 名稱建議（Popup 喺輸入框上方,唔會推走底部按鈕）=====
             if (state.editingNote) {
                 val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
-                AnimatedVisibility(
-                    visible = suggestions.isNotEmpty(),
-                    enter = fadeIn(tween(150)) + expandVertically(tween(180), expandFrom = Alignment.Bottom),
-                    exit = fadeOut(tween(120)) + shrinkVertically(tween(150), shrinkTowards = Alignment.Bottom)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = SURFACE_CARD,
-                        shadowElevation = 6.dp,
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                if (suggestions.isNotEmpty()) {
+                    androidx.compose.ui.window.Popup(
+                        popupPositionProvider = AboveAnchorPositionProvider,
+                        onDismissRequest = { },
+                        properties = PopupProperties(focusable = false)
                     ) {
-                        Column(
-                            Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = SURFACE_CARD,
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
                         ) {
-                            suggestions.forEach { s ->
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .clickable { onStateChange(state.copy(noteText = s)) }
-                                        .padding(horizontal = 14.dp, vertical = 11.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                        modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Column(Modifier.verticalScroll(rememberScrollState())) {
+                                suggestions.forEach { s ->
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .clickable { onStateChange(state.copy(noteText = s)) }
+                                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                            modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    if (s != suggestions.last())
+                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                 }
-                                if (s != suggestions.last())
-                                    HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                             }
                         }
                     }
@@ -1587,25 +1591,32 @@ fun LedgerKeyboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
-                val glowAlpha = remember { Animatable(0f) }
+                                val glowAlpha = remember { Animatable(0f) }
                 LaunchedEffect(nameFlashTrigger) {
                     if (nameFlashTrigger > 0) {
                         try {
                             glowAlpha.snapTo(0f)
-                            glowAlpha.animateTo(1f, tween(120))
-                            glowAlpha.animateTo(0f, tween(380))
+                            glowAlpha.animateTo(1f, tween(80))
+                            glowAlpha.animateTo(0f, tween(420))
                         } catch (_: Exception) {}
                     }
                 }
+                val glowShape = RoundedCornerShape(14.dp)
                 Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            if (glowAlpha.value > 0.01f)
-                                BRAND_PRIMARY_LIGHT.copy(alpha = glowAlpha.value * 0.7f)
-                            else Color.Transparent
+                        .clip(glowShape)
+                        .then(
+                            if (glowAlpha.value > 0.01f) {
+                                Modifier
+                                    .border(
+                                        width = 2.5.dp,
+                                        color = BRAND_PRIMARY.copy(alpha = glowAlpha.value),
+                                        shape = glowShape
+                                    )
+                                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = glowAlpha.value * 0.25f))
+                            } else Modifier
                         )
                 ) {
                     if (state.editingNote) {
