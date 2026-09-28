@@ -635,12 +635,9 @@ fun MainApp() {
                     }
                 }
 
-                Box(
+                                Surface(
                     modifier = Modifier
                         .size(44.dp)
-                        .clip(CircleShape)
-                        .background(if (filterModeOn) BRAND_PRIMARY else Color.White)
-                        .shadow(4.dp, CircleShape)
                         .pointerInput(filterModeOn) {
                             detectTapGestures(
                                 onTap = { filterModeOn = !filterModeOn },
@@ -652,12 +649,16 @@ fun MainApp() {
                                 }
                             )
                         },
-                    contentAlignment = Alignment.Center
+                    shape = CircleShape,
+                    color = if (filterModeOn) BRAND_PRIMARY else Color.White,
+                    shadowElevation = 4.dp
                 ) {
-                    Icon(
-                        Icons.Default.FilterAlt, "篩選",
-                        tint = if (filterModeOn) Color.White else BRAND_PRIMARY,
-                        modifier = Modifier.size(22.dp))
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.FilterAlt, "篩選",
+                            tint = if (filterModeOn) Color.White else BRAND_PRIMARY,
+                            modifier = Modifier.size(22.dp))
+                    }
                 }
 
                 FloatingActionButton(
