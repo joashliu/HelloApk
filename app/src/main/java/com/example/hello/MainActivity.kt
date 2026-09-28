@@ -294,12 +294,10 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize
     ): IntOffset {
-        val x = anchorBounds.left.coerceIn(
-            0,
-            (windowSize.width - popupContentSize.width).coerceAtLeast(0)
-        )
-        // 永遠喺輸入框上方,即使超出螢幕都唔緊要
-        val y = anchorBounds.top - popupContentSize.height - 8
+        // 左邊同輸入框完全對齊
+        val x = anchorBounds.left
+        // 底邊完全貼住輸入框頂
+        val y = anchorBounds.top - popupContentSize.height
         return IntOffset(x, y)
     }
 }
@@ -630,23 +628,23 @@ fun MainApp() {
                                             onDismissRequest = { },
                                             properties = PopupProperties(focusable = false)
                                         ) {
-                                            Surface(
-                                                shape = RoundedCornerShape(14.dp),
-                                                color = SURFACE_CARD,
-                                                shadowElevation = 8.dp,
-                                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
-                                            ) {
-                                                Column(Modifier.verticalScroll(rememberScrollState())) {
-                                                    filterSuggestions.forEach { s ->
-                                                        Row(
-                                                            Modifier.fillMaxWidth()
-                                                                .clickable { filterSearch = TextFieldValue(s) }
-                                                                .padding(horizontal = 14.dp, vertical = 11.dp),
+                                                                    Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = SURFACE_CARD,
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
+                        ) {
+                            Column(Modifier.verticalScroll(rememberScrollState())) {
+                                suggestions.forEach { s ->
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .clickable { onStateChange(state.copy(noteText = s)) }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                            Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                                                modifier = Modifier.size(16.dp))
-                                                            Spacer(Modifier.width(8.dp))
+                                                                                                    Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                            modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(10.dp))
                                                             Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
                                                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                         }
@@ -1405,8 +1403,8 @@ fun LedgerKeyboardPanel(
             }
         }
     }
-    Surface(
-        modifier = modifier,
+        Surface(
+        modifier = modifier.imePadding(),
         color = SURFACE_CARD,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         shadowElevation = 16.dp
@@ -1414,6 +1412,7 @@ fun LedgerKeyboardPanel(
         Column(
             Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
         ) {
             // ===== 日期 / 時間 =====
