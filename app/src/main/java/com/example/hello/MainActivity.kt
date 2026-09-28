@@ -1,9 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.window.PopupPositionProvider
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -92,9 +88,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
@@ -193,6 +193,19 @@ data class AfterSaveHint(
     val monthTotal: Double
 )
 
+object AboveAnchorPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize
+    ): IntOffset {
+        val x = anchorBounds.left
+        val y = anchorBounds.top - popupContentSize.height
+        return IntOffset(x, y)
+    }
+}
+
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount) else formatAmount(-record.amount)
@@ -287,21 +300,6 @@ fun avatarColor(name: String): Color {
     return AVATAR_COLORS[(name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size]
 }
 
-object AboveAnchorPositionProvider : PopupPositionProvider {
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowSize: IntSize,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize
-    ): IntOffset {
-        // 左邊同輸入框完全對齊
-        val x = anchorBounds.left
-        // 底邊完全貼住輸入框頂
-        val y = anchorBounds.top - popupContentSize.height
-        return IntOffset(x, y)
-    }
-}
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -345,7 +343,7 @@ fun MainApp() {
     val allNoteNames by remember {
         derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
     }
-        val noteCategoryMap by remember {
+    val noteCategoryMap by remember {
         derivedStateOf {
             records.filter { it.note.isNotBlank() }
                 .groupBy { it.note }
@@ -432,7 +430,7 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-        fun openKeyboardForNew(note: String = "") {
+    fun openKeyboardForNew(note: String = "") {
         if (!showKeyboard) {
             keyboardState = KeyboardState(noteText = note)
             showKeyboard = true
@@ -535,7 +533,7 @@ fun MainApp() {
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                                allNoteNames = allNoteNames,
+                allNoteNames = allNoteNames,
                 noteCategoryMap = noteCategoryMap,
                 scrollToTopTrigger = scrollToTopTrigger,
                 nameFlashTrigger = nameFlashTrigger,
@@ -622,29 +620,29 @@ fun MainApp() {
                                         modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
                                     )
                                     val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                                                                       if (filterSuggestions.isNotEmpty()) {
+                                    if (filterSuggestions.isNotEmpty()) {
                                         androidx.compose.ui.window.Popup(
                                             popupPositionProvider = AboveAnchorPositionProvider,
                                             onDismissRequest = { },
                                             properties = PopupProperties(focusable = false)
                                         ) {
-                                                                    Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = SURFACE_CARD,
-                            shadowElevation = 8.dp,
-                            modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
-                        ) {
-                            Column(Modifier.verticalScroll(rememberScrollState())) {
-                                suggestions.forEach { s ->
-                                    Row(
-                                        Modifier.fillMaxWidth()
-                                            .clickable { onStateChange(state.copy(noteText = s)) }
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            Surface(
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = SURFACE_CARD,
+                                                shadowElevation = 8.dp,
+                                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                                            ) {
+                                                Column(Modifier.verticalScroll(rememberScrollState())) {
+                                                    filterSuggestions.forEach { s ->
+                                                        Row(
+                                                            Modifier.fillMaxWidth()
+                                                                .clickable { filterSearch = TextFieldValue(s) }
+                                                                .padding(horizontal = 14.dp, vertical = 11.dp),
                                                             verticalAlignment = Alignment.CenterVertically
                                                         ) {
-                                                                                                    Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                            modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(10.dp))
+                                                            Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                                                modifier = Modifier.size(16.dp))
+                                                            Spacer(Modifier.width(8.dp))
                                                             Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
                                                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                         }
@@ -667,7 +665,7 @@ fun MainApp() {
                     }
                 }
 
-                                Surface(
+                Surface(
                     modifier = Modifier
                         .size(44.dp)
                         .pointerInput(filterModeOn) {
@@ -901,7 +899,7 @@ fun LedgerContent(
     onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
-        allNoteNames: List<String>,
+    allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
     scrollToTopTrigger: Int,
     nameFlashTrigger: Int,
@@ -991,7 +989,6 @@ fun LedgerContent(
                                         .fillMaxWidth()
                                         .animateItem()
                                         .padding(top = 6.dp)
-                                        .shadow(1.dp, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp), clip = false)
                                         .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                                         .background(SURFACE_ELEVATED)
                                 ) {
@@ -1008,7 +1005,7 @@ fun LedgerContent(
                                     bottomStart = if (isLast) 18.dp else 0.dp,
                                     bottomEnd = if (isLast) 18.dp else 0.dp
                                 )
-                                                                Box(
+                                Box(
                                     Modifier
                                         .fillMaxWidth()
                                         .animateItem()
@@ -1052,17 +1049,16 @@ fun LedgerContent(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
+                            .padding(horizontal = 32.dp)
                     ) {
-                                                                        LedgerKeyboardPanel(
+                        LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
                             allNoteNames = allNoteNames,
                             noteCategoryMap = noteCategoryMap,
                             nameFlashTrigger = nameFlashTrigger,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 32.dp))
+                            modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -1387,14 +1383,15 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onNext: () -> Unit,
-        onPickCategory: () -> Unit,
+    onPickCategory: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
-        // 名稱變更 → 自動用返上次同名項目嘅類別
+
+    // 名稱變更 → 自動用返上次同名項目嘅類別
     LaunchedEffect(state.noteText) {
         if (state.noteText.isNotBlank()) {
             val lastCat = noteCategoryMap[state.noteText]
@@ -1403,7 +1400,8 @@ fun LedgerKeyboardPanel(
             }
         }
     }
-        Surface(
+
+    Surface(
         modifier = modifier.imePadding(),
         color = SURFACE_CARD,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -1547,7 +1545,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-                                    // ===== 名稱建議（Popup 喺輸入框上方）=====
+            // ===== 名稱建議（Popup 喺輸入框上方）=====
             if (state.editingNote) {
                 val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
                 if (suggestions.isNotEmpty()) {
@@ -2037,14 +2035,12 @@ fun SwipeableRecordItem(
     val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
-    // ===== 整行外層：整行都同一隻色 =====
     Box(
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
             .background(backgroundColor)
     ) {
-        // ===== 左滑 4 粒掣（喺同一底色上）=====
         Row(
             Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
@@ -2076,7 +2072,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        // ===== 右滑 1 粒掣 =====
         Row(
             Modifier.matchParentSize().padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
@@ -2090,7 +2085,6 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
-        // ===== 上層：項目本身（用同底色遮住按鈕）=====
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2119,33 +2113,14 @@ fun SwipeableRecordItem(
                 .background(backgroundColor)
         ) {
             ListItem(
-                colors = ListItemDefaults.colors(
-                    containerColor = Color.Transparent,
-                ),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 leadingContent = { IconView(record.iconUrl, record.note) },
-                headlineContent = {
-                    Text(
-                        record.note.ifBlank { "(無名稱)" },
-                        fontSize = NOTE_FONT_SIZE,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TEXT_PRIMARY
-                    )
-                },
-                supportingContent = {
-                    Text(
-                        "${record.category}．${formatRecordTime(record.timestamp)}",
-                        fontSize = META_FONT_SIZE,
-                        color = TEXT_TERTIARY
-                    )
-                },
-                trailingContent = {
-                    Text(
-                        displayAmount(record),
-                        color = amountColor(record.category),
-                        fontSize = AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                headlineContent = { Text(record.note.ifBlank { "(無名稱)" },
+                    fontSize = NOTE_FONT_SIZE, fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY) },
+                supportingContent = { Text("${record.category}．${formatRecordTime(record.timestamp)}",
+                    fontSize = META_FONT_SIZE, color = TEXT_TERTIARY) },
+                trailingContent = { Text(displayAmount(record), color = amountColor(record.category),
+                    fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold) }
             )
         }
     }
@@ -2172,7 +2147,6 @@ private fun AnimatedActionButton(
                 scaleY = scale
             }
             .clip(RoundedCornerShape(14.dp))
-            // 淡色底 = icon 顏色 12% 透明度，同底色融合
             .background(iconTint.copy(alpha = 0.12f))
             .clickable(enabled = progress > 0.2f) { onClick() },
         contentAlignment = Alignment.Center
