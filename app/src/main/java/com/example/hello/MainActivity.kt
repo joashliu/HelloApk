@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import android.app.DatePickerDialog
@@ -961,7 +962,7 @@ fun LedgerContent(
             exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                LazyVerticalGrid(
+                                                LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 72.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -977,19 +978,24 @@ fun LedgerContent(
                     userScrollEnabled = false
                 ) {
                     item(key = "__all__") {
-                        AnimatedFilterChip(filterCategory == null, "全部") { onFilterCategoryChange(null) }
+                        AnimatedFilterChip(
+                            selected = filterCategory == null,
+                            label = "全部",
+                            onClick = { onFilterCategoryChange(null) }
+                        )
                     }
-                    androidx.compose.foundation.lazy.grid.items(
+                    items(
                         items = visibleCategories,
                         key = { it }
                     ) { cat ->
                         AnimatedFilterChip(
                             modifier = Modifier.animateItem(),
                             selected = filterCategory == cat,
-                            label = cat
-                        ) {
-                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                        }
+                            label = cat,
+                            onClick = {
+                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                            }
+                        )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
