@@ -579,7 +579,7 @@ fun MainApp() {
                 modifier = Modifier)
         }
 
-        if (!showKeyboard && currentPage == 0) {
+                if (!showKeyboard && currentPage == 0) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -614,7 +614,7 @@ fun MainApp() {
                             ) {
                                 Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
-                                                                Box(Modifier.weight(1f)) {
+                                Box(Modifier.weight(1f)) {
                                     BasicTextField(
                                         value = filterSearch,
                                         onValueChange = { filterSearch = it },
@@ -641,39 +641,42 @@ fun MainApp() {
                             }
                         }
                     }
-                }
-// ===== Popup 喺最外層 Box 內（anchor = 整個搜尋框 ============
-                    val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                    if (filterModeOn && filterSuggestions.isNotEmpty()) {
-                        androidx.compose.ui.window.Popup(
-                            popupPositionProvider = AboveAnchorPositionProvider,
-                            onDismissRequest = { },
-                            properties = PopupProperties(focusable = false)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = SURFACE_CARD,
-                                shadowElevation = 8.dp,
-                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+
+                    // ===== 篩選搜尋欄下拉建議 Popup（anchor = 整個 Box）=====
+                    if (filterModeOn) {
+                        val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
+                        if (filterSuggestions.isNotEmpty()) {
+                            androidx.compose.ui.window.Popup(
+                                popupPositionProvider = AboveAnchorPositionProvider,
+                                onDismissRequest = { },
+                                properties = PopupProperties(focusable = false)
                             ) {
-                                Column(Modifier.verticalScroll(rememberScrollState())) {
-                                    filterSuggestions.forEach { s ->
-                                        Row(
-                                            Modifier.fillMaxWidth()
-                                                .clickable { filterSearch = TextFieldValue(s) }
-                                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = SURFACE_CARD,
+                                    shadowElevation = 8.dp,
+                                    modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                                ) {
+                                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                                        filterSuggestions.forEach { s ->
+                                            Row(
+                                                Modifier.fillMaxWidth()
+                                                    .clickable { filterSearch = TextFieldValue(s) }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                         }
-                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                     }
                                 }
                             }
                         }
                     }
                 }
+
                 Surface(
                     modifier = Modifier
                         .size(44.dp)
