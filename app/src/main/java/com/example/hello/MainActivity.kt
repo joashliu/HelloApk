@@ -614,7 +614,7 @@ fun MainApp() {
                             ) {
                                 Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Box(Modifier.weight(1f)) {
+                                                                Box(Modifier.weight(1f)) {
                                     BasicTextField(
                                         value = filterSearch,
                                         onValueChange = { filterSearch = it },
@@ -630,39 +630,6 @@ fun MainApp() {
                                         },
                                         modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
                                     )
-                                    val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                                    if (filterSuggestions.isNotEmpty()) {
-                                        androidx.compose.ui.window.Popup(
-                                            popupPositionProvider = AboveAnchorPositionProvider,
-                                            onDismissRequest = { },
-                                            properties = PopupProperties(focusable = false)
-                                        ) {
-                                            Surface(
-                                                shape = RoundedCornerShape(14.dp),
-                                                color = SURFACE_CARD,
-                                                shadowElevation = 8.dp,
-                                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
-                                            ) {
-                                                Column(Modifier.verticalScroll(rememberScrollState())) {
-                                                    filterSuggestions.forEach { s ->
-                                                        Row(
-                                                            Modifier.fillMaxWidth()
-                                                                .clickable { filterSearch = TextFieldValue(s) }
-                                                                .padding(horizontal = 14.dp, vertical = 11.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                                                modifier = Modifier.size(16.dp))
-                                                            Spacer(Modifier.width(8.dp))
-                                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                        }
-                                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
                                 }
                                 if (filterSearch.text.isNotBlank()) {
                                     Spacer(Modifier.width(4.dp))
@@ -675,7 +642,38 @@ fun MainApp() {
                         }
                     }
                 }
-
+// ===== Popup 喺最外層 Box 內（anchor = 整個搜尋框 ============
+                    val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
+                    if (filterModeOn && filterSuggestions.isNotEmpty()) {
+                        androidx.compose.ui.window.Popup(
+                            popupPositionProvider = AboveAnchorPositionProvider,
+                            onDismissRequest = { },
+                            properties = PopupProperties(focusable = false)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = SURFACE_CARD,
+                                shadowElevation = 8.dp,
+                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                            ) {
+                                Column(Modifier.verticalScroll(rememberScrollState())) {
+                                    filterSuggestions.forEach { s ->
+                                        Row(
+                                            Modifier.fillMaxWidth()
+                                                .clickable { filterSearch = TextFieldValue(s) }
+                                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Surface(
                     modifier = Modifier
                         .size(44.dp)
@@ -1629,16 +1627,13 @@ fun LedgerKeyboardPanel(
                                     modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
                                 ) {
                                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                                        suggestions.forEach { s ->
+                                                                                suggestions.forEach { s ->
                                             Row(
                                                 Modifier.fillMaxWidth()
                                                     .clickable { onStateChange(state.copy(noteText = s)) }
                                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                                    modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(10.dp))
                                                 Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
                                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
