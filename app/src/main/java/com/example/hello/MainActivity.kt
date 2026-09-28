@@ -294,16 +294,12 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize
     ): IntOffset {
-        // 水平：同 anchor 左邊對齊
         val x = anchorBounds.left.coerceIn(
             0,
             (windowSize.width - popupContentSize.width).coerceAtLeast(0)
         )
-        // 垂直：貼喺 anchor 上方 8px
-        val yAbove = anchorBounds.top - popupContentSize.height - 8
-        // 如果上方唔夠位，先落下方
-        val y = if (yAbove >= 0) yAbove
-                else anchorBounds.bottom + 8
+        // 永遠喺輸入框上方,即使超出螢幕都唔緊要
+        val y = anchorBounds.top - popupContentSize.height - 8
         return IntOffset(x, y)
     }
 }
@@ -1055,7 +1051,7 @@ fun LedgerContent(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                     ) {
-                                                LedgerKeyboardPanel(
+                                                                        LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
@@ -1063,8 +1059,8 @@ fun LedgerContent(
                             noteCategoryMap = noteCategoryMap,
                             nameFlashTrigger = nameFlashTrigger,
                             modifier = Modifier
-                                .fillMaxWidth(0.92f)
-                                .widthIn(max = 400.dp))
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp))
                     }
                 }
             }
