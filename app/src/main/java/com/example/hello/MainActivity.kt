@@ -2066,7 +2066,6 @@ fun SwipeableRecordItem(
             ListItem(
                 colors = ListItemDefaults.colors(
                     containerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent
                 ),
                 leadingContent = { IconView(record.iconUrl, record.note) },
                 headlineContent = {
