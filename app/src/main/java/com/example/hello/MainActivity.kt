@@ -1547,7 +1547,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-                        // ===== 名稱建議（Popup 喺輸入框上方,唔會推走底部按鈕）=====
+                                    // ===== 名稱建議（Popup 喺輸入框上方）=====
             if (state.editingNote) {
                 val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
                 if (suggestions.isNotEmpty()) {
@@ -1567,12 +1567,12 @@ fun LedgerKeyboardPanel(
                                     Row(
                                         Modifier.fillMaxWidth()
                                             .clickable { onStateChange(state.copy(noteText = s)) }
-                                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
                                             modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(8.dp))
+                                        Spacer(Modifier.width(10.dp))
                                         Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
                                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
@@ -1590,7 +1590,7 @@ fun LedgerKeyboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
-                                val glowAlpha = remember { Animatable(0f) }
+                val glowAlpha = remember { Animatable(0f) }
                 LaunchedEffect(nameFlashTrigger) {
                     if (nameFlashTrigger > 0) {
                         try {
