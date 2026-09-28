@@ -201,8 +201,19 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
         popupContentSize: IntSize
     ): IntOffset {
         val x = anchorBounds.left
-        val y = anchorBounds.top - popupContentSize.height
-        return IntOffset(x, y)
+        // 優先放喺 anchor 上方
+        val yAbove = anchorBounds.top - popupContentSize.height - 4
+        if (yAbove >= 0) return IntOffset(x, yAbove)
+
+        // 上方唔夠位 → 放喺下方
+        val yBelow = anchorBounds.bottom + 4
+        if (yBelow + popupContentSize.height <= windowSize.height) {
+            return IntOffset(x, yBelow)
+        }
+
+        // 兩邊都唔夠 → 夾返去可見範圍
+        val maxY = (windowSize.height - popupContentSize.height).coerceAtLeast(0)
+        return IntOffset(x, yAbove.coerceIn(0, maxY))
     }
 }
 
@@ -1545,45 +1556,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 名稱建議（Popup 喺輸入框上方）=====
-            if (state.editingNote) {
-                val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
-                if (suggestions.isNotEmpty()) {
-                    androidx.compose.ui.window.Popup(
-                        popupPositionProvider = AboveAnchorPositionProvider,
-                        onDismissRequest = { },
-                        properties = PopupProperties(focusable = false)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = SURFACE_CARD,
-                            shadowElevation = 8.dp,
-                            modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
-                        ) {
-                            Column(Modifier.verticalScroll(rememberScrollState())) {
-                                suggestions.forEach { s ->
-                                    Row(
-                                        Modifier.fillMaxWidth()
-                                            .clickable { onStateChange(state.copy(noteText = s)) }
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
-                                            modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(10.dp))
-                                        Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    }
-                                    if (s != suggestions.last())
-                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ===== 名稱輸入 + 類別 =====
+                        // ===== 名稱輸入 + 類別 =====
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -1640,6 +1613,42 @@ fun LedgerKeyboardPanel(
                             keyboardActions = KeyboardActions(onDone = { onConfirm() }),
                             modifier = Modifier.fillMaxSize().focusRequester(focusReq)
                         )
+
+                        // 建議列表 Popup：以呢個 Box 為 anchor
+                        val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
+                        if (suggestions.isNotEmpty()) {
+                            androidx.compose.ui.window.Popup(
+                                popupPositionProvider = AboveAnchorPositionProvider,
+                                onDismissRequest = { },
+                                properties = PopupProperties(focusable = false)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = SURFACE_CARD,
+                                    shadowElevation = 8.dp,
+                                    modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
+                                ) {
+                                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                                        suggestions.forEach { s ->
+                                            Row(
+                                                Modifier.fillMaxWidth()
+                                                    .clickable { onStateChange(state.copy(noteText = s)) }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(Icons.Default.Search, null, tint = TEXT_TERTIARY,
+                                                    modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(10.dp))
+                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            if (s != suggestions.last())
+                                                HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         Button(
                             onClick = { onStateChange(state.copy(editingNote = true)) },
