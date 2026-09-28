@@ -1,5 +1,9 @@
 package com.example.hello
 
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.PopupPositionProvider
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -281,6 +285,27 @@ val AVATAR_COLORS = listOf(
 fun avatarColor(name: String): Color {
     if (name.isBlank()) return AVATAR_COLORS[0]
     return AVATAR_COLORS[(name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size]
+}
+
+object AboveAnchorPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize
+    ): IntOffset {
+        // 水平：同 anchor 左邊對齊
+        val x = anchorBounds.left.coerceIn(
+            0,
+            (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        )
+        // 垂直：貼喺 anchor 上方 8px
+        val yAbove = anchorBounds.top - popupContentSize.height - 8
+        // 如果上方唔夠位，先落下方
+        val y = if (yAbove >= 0) yAbove
+                else anchorBounds.bottom + 8
+        return IntOffset(x, y)
+    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -589,10 +614,9 @@ fun MainApp() {
                                         modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
                                     )
                                     val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                                    if (filterSuggestions.isNotEmpty()) {
+                                                                       if (filterSuggestions.isNotEmpty()) {
                                         androidx.compose.ui.window.Popup(
-                                            alignment = Alignment.TopStart,
-                                            offset = androidx.compose.ui.unit.IntOffset(0, -320),
+                                            popupPositionProvider = AboveAnchorPositionProvider,
                                             onDismissRequest = { },
                                             properties = PopupProperties(focusable = false)
                                         ) {
