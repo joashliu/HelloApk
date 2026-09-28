@@ -917,14 +917,26 @@ fun LedgerContent(
     afterSaveHint: AfterSaveHint?,
     onAfterSaveHintDismiss: () -> Unit,
 ) {
-    val listState = rememberLazyListState()
+        val listState = rememberLazyListState()
+
+    // 新增後：即時跳去頂（唔播動畫,避免 LazyColumn 測量中斷）
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
-            try { listState.animateScrollToItem(0) } catch (_: Exception) {}
+            try {
+                listState.requestScrollToItem(0)
+            } catch (_: Exception) {
+                try { listState.scrollToItem(0) } catch (_: Exception) {}
+            }
         }
     }
-        LaunchedEffect(showFuture) {
-        try { listState.animateScrollToItem(0) } catch (_: Exception) {}
+
+    // 切換「顯示未來」：即時跳去頂
+    LaunchedEffect(showFuture) {
+        try {
+            listState.requestScrollToItem(0)
+        } catch (_: Exception) {
+            try { listState.scrollToItem(0) } catch (_: Exception) {}
+        }
     }
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
