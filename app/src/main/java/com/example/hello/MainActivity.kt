@@ -1979,51 +1979,64 @@ fun SwipeableRecordItem(
             dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
-        val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
+    val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
-    Box(modifier.fillMaxWidth().wrapContentHeight()) {
-        Row(Modifier.matchParentSize().padding(end = 8.dp),
+    // ===== 整行外層：整行都同一隻色 =====
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .wrapContentHeight()
+            .background(backgroundColor)
+    ) {
+        // ===== 左滑 4 粒掣（喺同一底色上）=====
+        Row(
+            Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically) {
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             AnimatedActionButton(
                 icon = Icons.Default.ContentCopy, label = "複制",
-                iconTint = Color.White, bgColor = Color(0xFF64748B),
+                iconTint = Color(0xFF64748B),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0f
             ) { targetOffset = 0f; onExpand(null); onCopy() }
             AnimatedActionButton(
                 icon = Icons.Default.Edit, label = "編輯",
-                iconTint = Color.White, bgColor = Color(0xFF3B82F6),
+                iconTint = Color(0xFF3B82F6),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.12f
             ) { targetOffset = 0f; onExpand(null); onEdit() }
             AnimatedActionButton(
                 icon = Icons.Default.FilterList, label = "篩選",
-                iconTint = Color.White, bgColor = Color(0xFF8B5CF6),
+                iconTint = Color(0xFF8B5CF6),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.24f
             ) { targetOffset = 0f; onExpand(null); onFilter() }
             AnimatedActionButton(
                 icon = Icons.Default.Delete, label = "刪除",
-                iconTint = Color.White, bgColor = Color(0xFFEF4444),
+                iconTint = Color(0xFFEF4444),
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.36f
             ) { targetOffset = 0f; onExpand(null); onDelete() }
         }
 
-        Row(Modifier.matchParentSize().padding(start = 8.dp),
+        // ===== 右滑 1 粒掣 =====
+        Row(
+            Modifier.matchParentSize().padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
-            verticalAlignment = Alignment.CenterVertically) {
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             AnimatedActionButton(
                 icon = Icons.Default.Image, label = "改圖標",
-                iconTint = Color.White, bgColor = Color(0xFF10B981),
+                iconTint = Color(0xFF10B981),
                 width = bw, height = bh,
                 progress = rightProgress, delay = 0f
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
-                        Box(
+        // ===== 上層：項目本身（用同底色遮住按鈕）=====
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
@@ -2048,18 +2061,37 @@ fun SwipeableRecordItem(
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     if (expandedId != null) onExpand(null)
                 }
-                .shadow(1.dp, RoundedCornerShape(0.dp))
                 .background(backgroundColor)
         ) {
             ListItem(
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                colors = ListItemDefaults.colors(
+                    containerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent
+                ),
                 leadingContent = { IconView(record.iconUrl, record.note) },
-                headlineContent = { Text(record.note.ifBlank { "(無名稱)" },
-                    fontSize = NOTE_FONT_SIZE, fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY) },
-                supportingContent = { Text("${record.category}．${formatRecordTime(record.timestamp)}",
-                    fontSize = META_FONT_SIZE, color = TEXT_TERTIARY) },
-                trailingContent = { Text(displayAmount(record), color = amountColor(record.category),
-                    fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold) }
+                headlineContent = {
+                    Text(
+                        record.note.ifBlank { "(無名稱)" },
+                        fontSize = NOTE_FONT_SIZE,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TEXT_PRIMARY
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        "${record.category}．${formatRecordTime(record.timestamp)}",
+                        fontSize = META_FONT_SIZE,
+                        color = TEXT_TERTIARY
+                    )
+                },
+                trailingContent = {
+                    Text(
+                        displayAmount(record),
+                        color = amountColor(record.category),
+                        fontSize = AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             )
         }
     }
@@ -2068,17 +2100,14 @@ fun SwipeableRecordItem(
 @Composable
 private fun AnimatedActionButton(
     icon: ImageVector, label: String,
-    iconTint: Color, bgColor: Color,
+    iconTint: Color,
     width: Dp, height: Dp,
     progress: Float, delay: Float,
     onClick: () -> Unit,
 ) {
     val p = ((progress - delay) / (1f - delay).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
-    // 更快達到完全顯示
     val alpha = (p * 1.4f).coerceIn(0f, 1f)
     val scale = 0.6f + 0.4f * p
-    // 位移由 60f 減到 16f，避免被推出畫面
-    val translationX = (1f - p) * 16f
 
     Box(
         Modifier
@@ -2087,13 +2116,17 @@ private fun AnimatedActionButton(
                 this.alpha = alpha
                 scaleX = scale
                 scaleY = scale
-                this.translationX = translationX
             }
             .clip(RoundedCornerShape(14.dp))
-            .background(bgColor)
+            // 淡色底 = icon 顏色 12% 透明度，同底色融合
+            .background(iconTint.copy(alpha = 0.12f))
             .clickable(enabled = progress > 0.2f) { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp))
+        Icon(
+            icon, label,
+            tint = iconTint,
+            modifier = Modifier.size(24.dp)
+        )
     }
 }
