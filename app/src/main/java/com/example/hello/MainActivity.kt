@@ -18,6 +18,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -201,17 +202,12 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
         popupContentSize: IntSize
     ): IntOffset {
         val x = anchorBounds.left
-        // 優先放喺 anchor 上方
         val yAbove = anchorBounds.top - popupContentSize.height - 4
         if (yAbove >= 0) return IntOffset(x, yAbove)
-
-        // 上方唔夠位 → 放喺下方
         val yBelow = anchorBounds.bottom + 4
         if (yBelow + popupContentSize.height <= windowSize.height) {
             return IntOffset(x, yBelow)
         }
-
-        // 兩邊都唔夠 → 夾返去可見範圍
         val maxY = (windowSize.height - popupContentSize.height).coerceAtLeast(0)
         return IntOffset(x, yAbove.coerceIn(0, maxY))
     }
@@ -408,7 +404,24 @@ fun MainApp() {
         }
     }
     val availableMonths by remember {
-        derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sortedDescending() }
+        derivedStateOf {
+            records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted()
+        }
+    }
+    val visibleCategories by remember {
+        derivedStateOf {
+            val base = if (filterMonth == null) records.toList()
+                       else records.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
+            val hasIncome = base.any { it.category == INCOME_CATEGORY }
+            val expenseCats = base
+                .filter { it.category != INCOME_CATEGORY }
+                .groupBy { it.category }
+                .mapValues { (_, list) -> list.sumOf { it.amount } }
+                .toList()
+                .sortedByDescending { it.second }
+                .map { it.first }
+            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+        }
     }
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -535,6 +548,7 @@ fun MainApp() {
                 onFilterCategoryChange = { filterCategory = it },
                 filterMonth = filterMonth, onFilterMonthChange = { filterMonth = it },
                 availableMonths = availableMonths,
+                visibleCategories = visibleCategories,
                 expandedId = expandedId, onExpandChange = { expandedId = it },
                 onQuickInputClick = { openKeyboardForNew(it) },
                 onCopyClick = { openKeyboardForCopy(it) },
@@ -587,7 +601,7 @@ fun MainApp() {
                 modifier = Modifier)
         }
 
-                if (!showKeyboard && currentPage == 0) {
+        if (!showKeyboard && currentPage == 0) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -616,7 +630,7 @@ fun MainApp() {
                             color = SURFACE_CARD,
                             shadowElevation = 8.dp
                         ) {
-                                                        Row(
+                            Row(
                                 Modifier.fillMaxSize().padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -648,7 +662,6 @@ fun MainApp() {
                         }
                     }
 
-                    // ===== 篩選搜尋欄下拉建議 Popup（anchor = 整個 Box）=====
                     if (filterModeOn) {
                         val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                         if (filterSuggestions.isNotEmpty()) {
@@ -907,6 +920,7 @@ fun LedgerContent(
     onFilterCategoryChange: (String?) -> Unit,
     filterMonth: String?, onFilterMonthChange: (String?) -> Unit,
     availableMonths: List<String>,
+    visibleCategories: List<String>,
     expandedId: String?, onExpandChange: (String?) -> Unit,
     onQuickInputClick: (String) -> Unit,
     onCopyClick: (Record) -> Unit, onEditClick: (Record) -> Unit,
@@ -925,27 +939,19 @@ fun LedgerContent(
     afterSaveHint: AfterSaveHint?,
     onAfterSaveHintDismiss: () -> Unit,
 ) {
-        val listState = rememberLazyListState()
+    val listState = rememberLazyListState()
 
-    // 新增後：即時跳去頂（唔播動畫,避免 LazyColumn 測量中斷）
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
-            try {
-                listState.requestScrollToItem(0)
-            } catch (_: Exception) {
-                try { listState.scrollToItem(0) } catch (_: Exception) {}
-            }
+            try { listState.requestScrollToItem(0) }
+            catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
         }
+    }
+    LaunchedEffect(showFuture) {
+        try { listState.requestScrollToItem(0) }
+        catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
     }
 
-    // 切換「顯示未來」：即時跳去頂
-    LaunchedEffect(showFuture) {
-        try {
-            listState.requestScrollToItem(0)
-        } catch (_: Exception) {
-            try { listState.scrollToItem(0) } catch (_: Exception) {}
-        }
-    }
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
             visible = filterMode,
@@ -953,11 +959,22 @@ fun LedgerContent(
             exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                FlowRow(
+                    modifier = Modifier.animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     AnimatedFilterChip(filterCategory == null, "全部") { onFilterCategoryChange(null) }
-                    CATEGORIES.forEach { cat ->
-                        AnimatedFilterChip(filterCategory == cat, cat) {
-                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                    visibleCategories.forEach { cat ->
+                        key(cat) {
+                            AnimatedFilterChip(filterCategory == cat, cat) {
+                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                            }
                         }
                     }
                 }
@@ -986,6 +1003,18 @@ fun LedgerContent(
             else -> {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) { TopStats(hasIncome, hasExpense, totalIncome, totalExpense) }
+                    if (filterMode) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        ) {
+                            Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY,
+                                fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.height(2.dp))
+                            Text("${filtered.size}", fontSize = 20.sp,
+                                color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                        }
+                    }
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                         Icon(if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             "顯示未來項目",
@@ -1016,7 +1045,7 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                                                        item(key = "header_$dateKey") {
+                            item(key = "header_$dateKey") {
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
@@ -1583,7 +1612,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-                        // ===== 名稱輸入 + 類別 =====
+            // ===== 名稱輸入 + 類別 =====
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -1617,7 +1646,7 @@ fun LedgerKeyboardPanel(
                         )
                 ) {
                     if (state.editingNote) {
-                                                var tfValue by remember {
+                        var tfValue by remember {
                             mutableStateOf(TextFieldValue(text = state.noteText,
                                 selection = TextRange(0, state.noteText.length)))
                         }
@@ -1625,7 +1654,6 @@ fun LedgerKeyboardPanel(
                         LaunchedEffect(state.editingNote) {
                             if (state.editingNote) focusReq.requestFocus()
                         }
-                        // 當 chip 觸發 nameFlashTrigger,重設 tfValue = state.noteText
                         LaunchedEffect(nameFlashTrigger) {
                             if (state.editingNote) {
                                 tfValue = TextFieldValue(
@@ -1652,7 +1680,6 @@ fun LedgerKeyboardPanel(
                             modifier = Modifier.fillMaxSize().focusRequester(focusReq)
                         )
 
-                        // 建議列表 Popup：以呢個 Box 為 anchor
                         val suggestions = filterNoteSuggestions(state.noteText, allNoteNames)
                         if (suggestions.isNotEmpty()) {
                             androidx.compose.ui.window.Popup(
@@ -1667,7 +1694,7 @@ fun LedgerKeyboardPanel(
                                     modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
                                 ) {
                                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                                                                                suggestions.forEach { s ->
+                                        suggestions.forEach { s ->
                                             Row(
                                                 Modifier.fillMaxWidth()
                                                     .clickable { onStateChange(state.copy(noteText = s)) }
