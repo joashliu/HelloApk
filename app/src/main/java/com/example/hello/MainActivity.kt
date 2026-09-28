@@ -75,7 +75,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -220,13 +219,6 @@ fun formatRecordTime(timestamp: Long): String {
     val hh = String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))
     val mm = String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))
     return "$wk．$hh:$mm．${relativeDayLabel(timestamp)}"
-}
-
-fun formatDateTime(timestamp: Long): String {
-    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val wk = arrayOf("週日","週一","週二","週三","週四","週五","週六")[cal.get(Calendar.DAY_OF_WEEK)-1]
-    return "${cal.get(Calendar.YEAR)}年${cal.get(Calendar.MONTH)+1}月${cal.get(Calendar.DAY_OF_MONTH)}日 $wk ${
-        String.format(Locale.US, "%02d", cal.get(Calendar.HOUR_OF_DAY))}:${String.format(Locale.US, "%02d", cal.get(Calendar.MINUTE))}"
 }
 
 fun formatDatePart(timestamp: Long): String {
@@ -742,9 +734,19 @@ fun MainApp() {
                 Column {
                     Text("貼上 PNG / JPG / WebP 圖片連結", style = MaterialTheme.typography.bodySmall, color = TEXT_SECONDARY)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = urlInput, onValueChange = { urlInput = it },
-                        label = { Text("URL") }, placeholder = { Text("https://...") },
-                        singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        label = { Text("URL") },
+                        placeholder = { Text("https://...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = BRAND_PRIMARY,
+                            unfocusedBorderColor = DIVIDER_COLOR
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = {
@@ -766,7 +768,6 @@ fun MainApp() {
         )
     }
 }
-
 @Composable
 fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
@@ -1217,11 +1218,14 @@ fun sumByCategoryAndMonth(records: List<Record>, category: String, month: String
 fun MonthDropdown(value: String?, months: List<String>, onChange: (String?) -> Unit, modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        OutlinedButton(
+        Button(
             onClick = { expanded = true },
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
+            colors = ButtonDefaults.buttonColors(
+                containerColor = SURFACE_ELEVATED,
+                contentColor = TEXT_PRIMARY
+            )
         ) {
             Text(value?.let { formatMonthLabel(it) } ?: "選擇月份",
                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -1339,7 +1343,6 @@ fun QuickInputSection(
         }
     }
 }
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
@@ -1370,7 +1373,6 @@ fun LedgerKeyboardPanel(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 日期卡
                 Surface(
                     modifier = Modifier
                         .weight(1.4f)
@@ -1405,7 +1407,6 @@ fun LedgerKeyboardPanel(
                         )
                     }
                 }
-                // 時間卡
                 Surface(
                     modifier = Modifier
                         .weight(1f)
@@ -1557,14 +1558,10 @@ fun LedgerKeyboardPanel(
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(14.dp))
-                        .then(
-                            if (glowAlpha.value > 0.01f) {
-                                Modifier.border(
-                                    width = 2.dp,
-                                    color = BRAND_PRIMARY.copy(alpha = glowAlpha.value),
-                                    shape = RoundedCornerShape(14.dp)
-                                )
-                            } else Modifier
+                        .background(
+                            if (glowAlpha.value > 0.01f)
+                                BRAND_PRIMARY_LIGHT.copy(alpha = glowAlpha.value * 0.7f)
+                            else Color.Transparent
                         )
                 ) {
                     if (state.editingNote) {
@@ -1592,11 +1589,14 @@ fun LedgerKeyboardPanel(
                             modifier = Modifier.fillMaxSize().focusRequester(focusReq)
                         )
                     } else {
-                        OutlinedButton(
+                        Button(
                             onClick = { onStateChange(state.copy(editingNote = true)) },
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxSize(),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SURFACE_ELEVATED,
+                                contentColor = TEXT_PRIMARY
+                            )
                         ) {
                             Text(if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
                                 maxLines = 1, fontSize = 15.sp,
@@ -1608,11 +1608,14 @@ fun LedgerKeyboardPanel(
                 var showCategoryMenu by remember { mutableStateOf(false) }
                 val currentStyle = CATEGORY_STYLES[state.category]
                 Box {
-                    OutlinedButton(
+                    Button(
                         onClick = { showCategoryMenu = true },
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.width(110.dp).fillMaxHeight(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SURFACE_ELEVATED,
+                            contentColor = TEXT_PRIMARY
+                        )
                     ) {
                         if (currentStyle != null) {
                             Icon(currentStyle.icon, null, tint = currentStyle.fgColor, modifier = Modifier.size(18.dp))
@@ -1642,19 +1645,29 @@ fun LedgerKeyboardPanel(
                                         val chipShape = RoundedCornerShape(12.dp)
                                         Row(
                                             Modifier.weight(1f).height(44.dp).clip(chipShape)
-                                                .background(s?.bgColor ?: SURFACE_ELEVATED)
-                                                .then(if (sel) Modifier.border(2.dp, BRAND_PRIMARY, chipShape) else Modifier)
+                                                .background(
+                                                    if (sel) (s?.fgColor ?: BRAND_PRIMARY)
+                                                    else (s?.bgColor ?: SURFACE_ELEVATED)
+                                                )
                                                 .clickable { onStateChange(state.copy(category = cat)); showCategoryMenu = false },
                                             horizontalArrangement = Arrangement.Center,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             if (s != null) {
-                                                Icon(s.icon, null, tint = s.fgColor, modifier = Modifier.size(16.dp))
+                                                Icon(
+                                                    s.icon, null,
+                                                    tint = if (sel) Color.White else s.fgColor,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
                                                 Spacer(Modifier.width(5.dp))
                                             }
-                                            Text(cat, fontSize = 13.sp, color = s?.fgColor ?: TEXT_PRIMARY,
+                                            Text(
+                                                cat,
+                                                fontSize = 13.sp,
+                                                color = if (sel) Color.White else (s?.fgColor ?: TEXT_PRIMARY),
                                                 fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                                                maxLines = 1)
+                                                maxLines = 1
+                                            )
                                         }
                                     }
                                     if (pair.size == 1) Spacer(Modifier.weight(1f))
@@ -1669,10 +1682,13 @@ fun LedgerKeyboardPanel(
 
             // ===== 底部按鈕 =====
             Row(Modifier.fillMaxWidth().height(58.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
+                Button(
                     onClick = onDismiss, shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.weight(1f).fillMaxHeight(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SURFACE_ELEVATED,
+                        contentColor = TEXT_PRIMARY
+                    )
                 ) {
                     Icon(Icons.Default.KeyboardArrowDown, null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(4.dp))
@@ -1726,9 +1742,10 @@ fun AnimatedFilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
         selected = selected, onClick = onClick,
         label = { Text(label) }, interactionSource = src,
         shape = RoundedCornerShape(12.dp),
+        border = null,
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = BRAND_PRIMARY, selectedLabelColor = Color.White,
-            containerColor = SURFACE_CARD, labelColor = TEXT_SECONDARY),
+            containerColor = SURFACE_ELEVATED, labelColor = TEXT_SECONDARY),
         modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
@@ -1817,7 +1834,6 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
         Text(label, color = tint, style = MaterialTheme.typography.bodyLarge)
     }
 }
-
 fun createTempImageUri(context: Context): Uri {
     val f = File.createTempFile("camera_", ".jpg", context.cacheDir)
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
@@ -1964,11 +1980,11 @@ fun SwipeableRecordItem(
             dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
-        val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
+    val leftProgress = if (maxLeft == 0f) 0f else (-offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
     Box(modifier.fillMaxWidth().wrapContentHeight()) {
-                Row(Modifier.matchParentSize().padding(end = 8.dp),
+        Row(Modifier.matchParentSize().padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
             verticalAlignment = Alignment.CenterVertically) {
             AnimatedActionButton(
