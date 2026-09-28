@@ -1,5 +1,7 @@
 package com.example.hello
 
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -959,22 +961,34 @@ fun LedgerContent(
             exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                FlowRow(
-                    modifier = Modifier.animateContentSize(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ),
+                                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 72.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp)
+                        .animateContentSize(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    userScrollEnabled = false
                 ) {
-                    AnimatedFilterChip(filterCategory == null, "全部") { onFilterCategoryChange(null) }
-                    visibleCategories.forEach { cat ->
-                        key(cat) {
-                            AnimatedFilterChip(filterCategory == cat, cat) {
-                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                            }
+                    item(key = "__all__") {
+                        AnimatedFilterChip(filterCategory == null, "全部") { onFilterCategoryChange(null) }
+                    }
+                    androidx.compose.foundation.lazy.grid.items(
+                        items = visibleCategories,
+                        key = { it }
+                    ) { cat ->
+                        AnimatedFilterChip(
+                            modifier = Modifier.animateItem(),
+                            selected = filterCategory == cat,
+                            label = cat
+                        ) {
+                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
                         }
                     }
                 }
@@ -1001,24 +1015,39 @@ fun LedgerContent(
                 Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
             }
             else -> {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) { TopStats(hasIncome, hasExpense, totalIncome, totalExpense) }
+                                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.weight(if (filterMode) 2f else 1f)) {
+                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
+                    }
                     if (filterMode) {
                         Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(horizontal = 4.dp)
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY,
-                                fontWeight = FontWeight.Medium)
+                            Text(
+                                "筆數",
+                                fontSize = 11.sp,
+                                color = TEXT_SECONDARY,
+                                fontWeight = FontWeight.Medium
+                            )
                             Spacer(Modifier.height(2.dp))
-                            Text("${filtered.size}", fontSize = 20.sp,
-                                color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                            Text(
+                                "${filtered.size}",
+                                fontSize = 22.sp,
+                                color = BRAND_PRIMARY,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                        Icon(if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        Icon(
+                            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             "顯示未來項目",
-                            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY)
+                            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                        )
                     }
                 }
 
@@ -1856,7 +1885,12 @@ fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AnimatedFilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
+fun AnimatedFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.9f else 1f,
@@ -1869,7 +1903,7 @@ fun AnimatedFilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = BRAND_PRIMARY, selectedLabelColor = Color.White,
             containerColor = SURFACE_ELEVATED, labelColor = TEXT_SECONDARY),
-        modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale })
+        modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
 @Composable
