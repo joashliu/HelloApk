@@ -287,7 +287,15 @@ fun formatDateHeader(dateKey: String): String {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
     val diff = ((todayStart - cal.timeInMillis) / 86_400_000L).toInt()
-    val dp = when { diff < 0 -> "未來"; diff == 0 -> "今日"; diff == 1 -> "琴日"; diff == 2 -> "前日"; else -> "${mo}月${d}日" }
+    val dp = when {
+        diff == -1 -> "明日"
+        diff == -2 -> "後日"
+        diff < -2 -> "${mo}月${d}日"
+        diff == 0 -> "今日"
+        diff == 1 -> "琴日"
+        diff == 2 -> "前日"
+        else -> "${mo}月${d}日"
+    }
     return "$dp $wk"
 }
 
@@ -1008,7 +1016,7 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            item(key = "header_$dateKey") {
+                                                        item(key = "header_$dateKey") {
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
@@ -1017,7 +1025,12 @@ fun LedgerContent(
                                         .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                                         .background(SURFACE_ELEVATED)
                                 ) {
-                                    DayHeader(dateKey, dayIncome, dayExpense)
+                                    DayHeader(
+                                        dateKey = dateKey,
+                                        income = dayIncome,
+                                        expense = dayExpense,
+                                        itemCount = if (filterMode) dayRecords.size else 0
+                                    )
                                 }
                             }
 
@@ -1887,7 +1900,7 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
 }
 
 @Composable
-fun DayHeader(dateKey: String, income: Double, expense: Double) {
+fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(formatDateHeader(dateKey), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
@@ -1902,6 +1915,12 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                 Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(2.dp))
                 Text(formatAmount(expense), fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.SemiBold)
+                if (itemCount > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("(${itemCount}筆)", fontSize = 11.sp,
+                        color = COLOR_EXPENSE.copy(alpha = 0.7f),
+                        fontWeight = FontWeight.Normal)
+                }
             }
         }
     }
