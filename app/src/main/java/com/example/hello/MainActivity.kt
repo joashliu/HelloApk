@@ -1,8 +1,5 @@
 package com.example.hello
 
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -50,6 +47,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -962,7 +962,7 @@ fun LedgerContent(
             exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                                LazyVerticalGrid(
+                LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 72.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1001,11 +1001,17 @@ fun LedgerContent(
                 Spacer(Modifier.height(8.dp))
                 if (availableMonths.isNotEmpty()) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        AnimatedFilterChip(filterMonth == null, "全年") { onFilterMonthChange(null) }
+                        AnimatedFilterChip(
+                            selected = filterMonth == null,
+                            label = "全年",
+                            onClick = { onFilterMonthChange(null) }
+                        )
                         availableMonths.forEach { m ->
-                            AnimatedFilterChip(filterMonth == m, formatMonthLabel(m)) {
-                                onFilterMonthChange(if (filterMonth == m) null else m)
-                            }
+                            AnimatedFilterChip(
+                                selected = filterMonth == m,
+                                label = formatMonthLabel(m),
+                                onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                            )
                         }
                     }
                 }
@@ -1021,7 +1027,7 @@ fun LedgerContent(
                 Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
             }
             else -> {
-                                Row(
+                Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
