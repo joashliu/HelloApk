@@ -608,12 +608,10 @@ fun MainApp() {
                             color = SURFACE_CARD,
                             shadowElevation = 8.dp
                         ) {
-                            Row(
+                                                        Row(
                                 Modifier.fillMaxSize().padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY, modifier = Modifier.size(20.dp))
-                                Spacer(Modifier.width(8.dp))
                                 Box(Modifier.weight(1f)) {
                                     BasicTextField(
                                         value = filterSearch,
@@ -1591,12 +1589,23 @@ fun LedgerKeyboardPanel(
                         )
                 ) {
                     if (state.editingNote) {
-                        var tfValue by remember(state.editingNote) {
+                                                var tfValue by remember {
                             mutableStateOf(TextFieldValue(text = state.noteText,
                                 selection = TextRange(0, state.noteText.length)))
                         }
                         val focusReq = remember { FocusRequester() }
-                        LaunchedEffect(Unit) { focusReq.requestFocus() }
+                        LaunchedEffect(state.editingNote) {
+                            if (state.editingNote) focusReq.requestFocus()
+                        }
+                        // 當 chip 觸發 nameFlashTrigger,重設 tfValue = state.noteText
+                        LaunchedEffect(nameFlashTrigger) {
+                            if (state.editingNote) {
+                                tfValue = TextFieldValue(
+                                    text = state.noteText,
+                                    selection = TextRange(0, state.noteText.length)
+                                )
+                            }
+                        }
 
                         TextField(
                             value = tfValue,
