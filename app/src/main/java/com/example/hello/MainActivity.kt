@@ -2024,8 +2024,10 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth().offset { IntOffset(offsetX.roundToInt(), 0) }
+                Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetX.roundToInt(), 0) }
                 .pointerInput(record.id) {
                     detectHorizontalDragGestures(
                         onDragStart = { isDragging = true; onExpand(record.id) },
@@ -2046,8 +2048,8 @@ fun SwipeableRecordItem(
                 }
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     if (expandedId != null) onExpand(null)
-                },
-            color = backgroundColor
+                }
+                .background(backgroundColor)
         ) {
             ListItem(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -2072,9 +2074,11 @@ private fun AnimatedActionButton(
     onClick: () -> Unit,
 ) {
     val p = ((progress - delay) / (1f - delay).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
-    val alpha = p
-    val scale = 0.4f + 0.6f * p
-    val translationX = (1f - p) * 60f
+    // 更快達到完全顯示
+    val alpha = (p * 1.4f).coerceIn(0f, 1f)
+    val scale = 0.6f + 0.4f * p
+    // 位移由 60f 減到 16f，避免被推出畫面
+    val translationX = (1f - p) * 16f
 
     Box(
         Modifier
@@ -2087,7 +2091,7 @@ private fun AnimatedActionButton(
             }
             .clip(RoundedCornerShape(14.dp))
             .background(bgColor)
-            .clickable(enabled = progress > 0.5f) { onClick() },
+            .clickable(enabled = progress > 0.2f) { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(22.dp))
