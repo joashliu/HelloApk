@@ -923,6 +923,9 @@ fun LedgerContent(
             try { listState.animateScrollToItem(0) } catch (_: Exception) {}
         }
     }
+        LaunchedEffect(showFuture) {
+        try { listState.animateScrollToItem(0) } catch (_: Exception) {}
+    }
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
             visible = filterMode,
