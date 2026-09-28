@@ -351,6 +351,15 @@ fun MainApp() {
     val allNoteNames by remember {
         derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
     }
+        val noteCategoryMap by remember {
+        derivedStateOf {
+            records.filter { it.note.isNotBlank() }
+                .groupBy { it.note }
+                .mapValues { (_, list) ->
+                    list.maxByOrNull { it.timestamp }?.category ?: "飲食"
+                }
+        }
+    }
 
     val filtered by remember {
         derivedStateOf {
@@ -893,7 +902,8 @@ fun LedgerContent(
     onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
     showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
-    allNoteNames: List<String>,
+        allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
     scrollToTopTrigger: Int,
     nameFlashTrigger: Int,
     justAddedId: String?,
@@ -1044,13 +1054,16 @@ fun LedgerContent(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                     ) {
-                        LedgerKeyboardPanel(
+                                                LedgerKeyboardPanel(
                             state = keyboardState, onStateChange = onKeyboardStateChange,
                             onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
                             onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
                             allNoteNames = allNoteNames,
+                            noteCategoryMap = noteCategoryMap,
                             nameFlashTrigger = nameFlashTrigger,
-                            modifier = Modifier.fillMaxWidth())
+                            modifier = Modifier
+                                .fillMaxWidth(0.92f)
+                                .widthIn(max = 400.dp))
                     }
                 }
             }
@@ -1375,12 +1388,22 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
     onNext: () -> Unit,
-    onPickCategory: () -> Unit,
+        onPickCategory: () -> Unit,
     allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
+        // 名稱變更 → 自動用返上次同名項目嘅類別
+    LaunchedEffect(state.noteText) {
+        if (state.noteText.isNotBlank()) {
+            val lastCat = noteCategoryMap[state.noteText]
+            if (lastCat != null && lastCat != state.category) {
+                onStateChange(state.copy(category = lastCat))
+            }
+        }
+    }
     Surface(
         modifier = modifier,
         color = SURFACE_CARD,
