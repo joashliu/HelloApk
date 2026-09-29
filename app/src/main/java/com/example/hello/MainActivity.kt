@@ -1091,12 +1091,12 @@ fun LedgerContent(
                                     Modifier
                                         .fillMaxWidth()
                                         .padding(top = 6.dp, bottom = 6.dp)
-                                        .shadow(
-                                            elevation = 2.dp,
+                                                                                .shadow(
+                                            elevation = 6.dp,
                                             shape = RoundedCornerShape(18.dp),
                                             clip = false,
-                                            ambientColor = Color(0x14000000),
-                                            spotColor = Color(0x14000000)
+                                            ambientColor = Color(0x33000000),
+                                            spotColor = Color(0x33000000)
                                         )
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(SURFACE_CARD)
