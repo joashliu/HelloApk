@@ -1104,19 +1104,12 @@ fun LedgerContent(
                                             top = 8.dp,
                                             bottom = 8.dp
                                         )
-                                        .shadow(
-                                            elevation = 8.dp,
+                                                                                .shadow(
+                                            elevation = 6.dp,
                                             shape = RoundedCornerShape(18.dp),
                                             clip = false,
                                             ambientColor = Color(0x40000000),
                                             spotColor = Color(0x40000000)
-                                        )
-                                        .shadow(
-                                            elevation = 2.dp,
-                                            shape = RoundedCornerShape(18.dp),
-                                            clip = false,
-                                            ambientColor = Color(0x30000000),
-                                            spotColor = Color(0x30000000)
                                         )
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(SURFACE_CARD)
@@ -1191,12 +1184,15 @@ fun AnimatedRecordItem(
     animateOnMount: Boolean,
     content: @Composable () -> Unit
 ) {
-    var appeared by remember { mutableStateOf(!animateOnMount) }
+    if (!animateOnMount) {
+        content()
+        return
+    }
+
+    var appeared by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (animateOnMount) {
-            delay(16)
-            appeared = true
-        }
+        delay(16)
+        appeared = true
     }
     val slideY by animateFloatAsState(
         targetValue = if (appeared) 0f else 60f,
@@ -1986,26 +1982,33 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
 
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
+    val headerText = remember(dateKey) { formatDateHeader(dateKey) }
+    val incomeText = remember(income) { formatAmount(income) }
+    val expenseText = remember(expense) { formatAmount(expense) }
+    val countText = remember(itemCount) {
+        if (itemCount > 0) "(${itemCount}筆)" else ""
+    }
+
     Row(Modifier
         .fillMaxWidth()
         .background(SURFACE_ELEVATED)
         .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(formatDateHeader(dateKey), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
+        Text(headerText, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (income > 0) {
                 Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(formatAmount(income), fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.SemiBold)
+                Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.SemiBold)
             }
             if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
             if (expense > 0) {
                 Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(formatAmount(expense), fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.SemiBold)
-                if (itemCount > 0) {
+                Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.SemiBold)
+                if (countText.isNotEmpty()) {
                     Spacer(Modifier.width(6.dp))
-                    Text("(${itemCount}筆)", fontSize = 11.sp,
+                    Text(countText, fontSize = 11.sp,
                         color = COLOR_EXPENSE.copy(alpha = 0.7f),
                         fontWeight = FontWeight.Normal)
                 }
@@ -2250,14 +2253,23 @@ fun SwipeableRecordItem(
                 }
                 .background(backgroundColor)
         ) {
+                        val metaText = remember(record.category, record.timestamp) {
+                "${record.category}．${formatRecordTime(record.timestamp)}"
+            }
+            val amtText = remember(record.amount, record.category) {
+                displayAmount(record)
+            }
+            val amtColor = remember(record.category) { amountColor(record.category) }
+            val headlineText = remember(record.note) { record.note.ifBlank { "(無名稱)" } }
+
             ListItem(
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 leadingContent = { IconView(record.iconUrl, record.note) },
-                headlineContent = { Text(record.note.ifBlank { "(無名稱)" },
+                headlineContent = { Text(headlineText,
                     fontSize = NOTE_FONT_SIZE, fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY) },
-                supportingContent = { Text("${record.category}．${formatRecordTime(record.timestamp)}",
+                supportingContent = { Text(metaText,
                     fontSize = META_FONT_SIZE, color = TEXT_TERTIARY) },
-                trailingContent = { Text(displayAmount(record), color = amountColor(record.category),
+                trailingContent = { Text(amtText, color = amtColor,
                     fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold) }
             )
         }
