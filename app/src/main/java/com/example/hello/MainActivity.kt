@@ -1086,14 +1086,20 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            item(key = "header_$dateKey") {
-                                Box(
+                                                        item(key = "group_$dateKey") {
+                                Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .animateItem()
-                                        .padding(top = 6.dp)
-                                        .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-                                        .background(SURFACE_ELEVATED)
+                                        .padding(top = 6.dp, bottom = 6.dp)
+                                        .shadow(
+                                            elevation = 2.dp,
+                                            shape = RoundedCornerShape(18.dp),
+                                            clip = false,
+                                            ambientColor = Color(0x14000000),
+                                            spotColor = Color(0x14000000)
+                                        )
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(SURFACE_CARD)
                                 ) {
                                     DayHeader(
                                         dateKey = dateKey,
@@ -1101,25 +1107,7 @@ fun LedgerContent(
                                         expense = dayExpense,
                                         itemCount = if (filterMode) dayRecords.size else 0
                                     )
-                                }
-                            }
-
-                            itemsIndexed(
-                                items = dayRecords,
-                                key = { _, r -> r.id }
-                            ) { idx, r ->
-                                val isLast = idx == dayRecords.lastIndex
-                                val rowShape = RoundedCornerShape(
-                                    bottomStart = if (isLast) 18.dp else 0.dp,
-                                    bottomEnd = if (isLast) 18.dp else 0.dp
-                                )
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .animateItem()
-                                        .clip(rowShape)
-                                ) {
-                                    Column {
+                                    dayRecords.forEachIndexed { idx, r ->
                                         AnimatedRecordItem(
                                             animateOnMount = r.id == justAddedId
                                         ) {
@@ -1141,8 +1129,6 @@ fun LedgerContent(
                                     }
                                 }
                             }
-
-                            item(key = "gap_$dateKey") { Spacer(Modifier.height(12.dp)) }
                         }
                     }
 
@@ -1974,7 +1960,10 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
 
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+    Row(Modifier
+        .fillMaxWidth()
+        .background(SURFACE_ELEVATED)
+        .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(formatDateHeader(dateKey), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
         Row(verticalAlignment = Alignment.CenterVertically) {
