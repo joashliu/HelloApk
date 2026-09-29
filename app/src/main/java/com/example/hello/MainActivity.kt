@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.runtime.Immutable
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -170,13 +171,14 @@ val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
     "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59))
 )
 
+@Immutable
 data class Record(
     val amount: Double = 0.0,
     val note: String = "",
     val category: String = "飲食",
     val timestamp: Long = System.currentTimeMillis(),
     val iconUrl: String = "",
-    var id: String = ""
+    val id: String = ""
 )
 
 data class NavItem(val label: String, val icon: ImageVector)
@@ -2130,8 +2132,9 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
-        val ch = name.trim().take(1).ifBlank { "?" }
-        Box(Modifier.size(size).clip(CircleShape).background(avatarColor(name)), contentAlignment = Alignment.Center) {
+        val ch = remember(name) { name.trim().take(1).ifBlank { "?" } }
+        val bgColor = remember(name) { avatarColor(name) }
+        Box(Modifier.size(size).clip(CircleShape).background(bgColor), contentAlignment = Alignment.Center) {
             Text(
                 ch,
                 color = Color.White,
@@ -2262,16 +2265,41 @@ fun SwipeableRecordItem(
             val amtColor = remember(record.category) { amountColor(record.category) }
             val headlineText = remember(record.note) { record.note.ifBlank { "(無名稱)" } }
 
-            ListItem(
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                leadingContent = { IconView(record.iconUrl, record.note) },
-                headlineContent = { Text(headlineText,
-                    fontSize = NOTE_FONT_SIZE, fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY) },
-                supportingContent = { Text(metaText,
-                    fontSize = META_FONT_SIZE, color = TEXT_TERTIARY) },
-                trailingContent = { Text(amtText, color = amtColor,
-                    fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold) }
-            )
+                        Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconView(record.iconUrl, record.note)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        headlineText,
+                        fontSize = NOTE_FONT_SIZE,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TEXT_PRIMARY,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        metaText,
+                        fontSize = META_FONT_SIZE,
+                        color = TEXT_TERTIARY,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    amtText,
+                    color = amtColor,
+                    fontSize = AMOUNT_FONT_SIZE,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -2284,6 +2312,11 @@ private fun AnimatedActionButton(
     progress: Float, delay: Float,
     onClick: () -> Unit,
 ) {
+    if (progress < 0.01f) {
+        // 完全收起時只佔位，唔 render 內容
+        Spacer(Modifier.width(width).height(height))
+        return
+    }
     val p = ((progress - delay) / (1f - delay).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
     val alpha = (p * 1.4f).coerceIn(0f, 1f)
     val scale = 0.6f + 0.4f * p
