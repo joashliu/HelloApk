@@ -1002,19 +1002,20 @@ fun LedgerContent(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     userScrollEnabled = false
                 ) {
-                    item(key = "__all__") {
+                                        item(key = "__all__") {
                         AnimatedFilterChip(
+                            modifier = Modifier.fillMaxWidth(),
                             selected = filterCategory == null,
                             label = "全部",
                             onClick = { onFilterCategoryChange(null) }
                         )
                     }
-                    items(
+                                        items(
                         items = visibleCategories,
                         key = { it }
                     ) { cat ->
                         AnimatedFilterChip(
-                            modifier = Modifier.animateItem(),
+                            modifier = Modifier.animateItem().fillMaxWidth(),
                             selected = filterCategory == cat,
                             label = cat,
                             onClick = {
@@ -1137,13 +1138,14 @@ fun LedgerContent(
                                 if (it.category != INCOME_CATEGORY) it.amount else 0.0
                             }
 
-                            item(
+                                                        item(
                                 key = "group_$dateKey",
                                 contentType = "day_group"
                             ) {
                                 Column(
                                     Modifier
                                         .fillMaxWidth()
+                                        .animateItem()
                                         .padding(
                                             start = 10.dp,
                                             end = 10.dp,
@@ -1972,7 +1974,19 @@ fun AnimatedFilterChip(
         spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "cs")
     FilterChip(
         selected = selected, onClick = onClick,
-        label = { Text(label) }, interactionSource = src,
+        label = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    label,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        interactionSource = src,
         shape = RoundedCornerShape(12.dp),
         border = null,
         colors = FilterChipDefaults.filterChipColors(
