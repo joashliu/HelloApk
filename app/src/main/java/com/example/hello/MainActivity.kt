@@ -1,10 +1,5 @@
 package com.example.hello
 
-import android.graphics.BlurMaskFilter
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -1080,46 +1075,49 @@ fun LedgerContent(
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    LazyColumn(
+                                        LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 12.dp, end = 12.dp, top = 4.dp,
-                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
+                        )
                     ) {
                         groupedByDate.forEach { (dateKey, dayRecords) ->
-                            val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
-                            val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
+                            val dayIncome = dayRecords.sumOf {
+                                if (it.category == INCOME_CATEGORY) it.amount else 0.0
+                            }
+                            val dayExpense = dayRecords.sumOf {
+                                if (it.category != INCOME_CATEGORY) it.amount else 0.0
+                            }
 
-                                                        item(key = "group_$dateKey") {
-                                                                                                Column(
+                            item(
+                                key = "group_$dateKey",
+                                contentType = "day_group"
+                            ) {
+                                Column(
                                     Modifier
                                         .fillMaxWidth()
                                         .padding(
-                                            start = 14.dp,
-                                            end = 14.dp,
-                                            top = 12.dp,
-                                            bottom = 12.dp
+                                            start = 10.dp,
+                                            end = 10.dp,
+                                            top = 8.dp,
+                                            bottom = 8.dp
                                         )
-                                        .drawBehind {
-                                            val cornerPx = 18.dp.toPx()
-                                            val blurPx = 14.dp.toPx()
-                                            drawIntoCanvas { canvas ->
-                                                val paint = android.graphics.Paint().apply {
-                                                    color = Color(0x80000000).toArgb()
-                                                    maskFilter = BlurMaskFilter(
-                                                        blurPx,
-                                                        BlurMaskFilter.Blur.NORMAL
-                                                    )
-                                                }
-                                                canvas.nativeCanvas.drawRoundRect(
-                                                    0f, 0f,
-                                                    size.width, size.height,
-                                                    cornerPx, cornerPx,
-                                                    paint
-                                                )
-                                            }
-                                        }
+                                        .shadow(
+                                            elevation = 8.dp,
+                                            shape = RoundedCornerShape(18.dp),
+                                            clip = false,
+                                            ambientColor = Color(0x40000000),
+                                            spotColor = Color(0x40000000)
+                                        )
+                                        .shadow(
+                                            elevation = 2.dp,
+                                            shape = RoundedCornerShape(18.dp),
+                                            clip = false,
+                                            ambientColor = Color(0x30000000),
+                                            spotColor = Color(0x30000000)
+                                        )
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(SURFACE_CARD)
                                 ) {
@@ -1129,12 +1127,14 @@ fun LedgerContent(
                                         expense = dayExpense,
                                         itemCount = if (filterMode) dayRecords.size else 0
                                     )
+
                                     dayRecords.forEachIndexed { idx, r ->
                                         AnimatedRecordItem(
                                             animateOnMount = r.id == justAddedId
                                         ) {
                                             SwipeableRecordItem(
-                                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                                backgroundColor = if (idx % 2 == 0)
+                                                    SURFACE_CARD else ROW_ALT_COLOR,
                                                 record = r,
                                                 expandedId = expandedId,
                                                 onExpand = onExpandChange,
@@ -1145,8 +1145,12 @@ fun LedgerContent(
                                                 onChangeIcon = { onChangeIconClick(r) }
                                             )
                                         }
+
                                         if (afterSaveHint?.recordId == r.id) {
-                                            CategoryTotalHint(hint = afterSaveHint, onDismiss = onAfterSaveHintDismiss)
+                                            CategoryTotalHint(
+                                                hint = afterSaveHint,
+                                                onDismiss = onAfterSaveHintDismiss
+                                            )
                                         }
                                     }
                                 }
