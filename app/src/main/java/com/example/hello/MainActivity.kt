@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.runtime.Immutable
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -345,6 +346,7 @@ fun MainApp() {
     var filterMonth by remember { mutableStateOf<String?>(null) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
+    var filterSearchHasFocus by remember { mutableStateOf(false) }
     val filterSearchFocusRequester = remember { FocusRequester() }
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
@@ -643,7 +645,7 @@ fun MainApp() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(Modifier.weight(1f)) {
-                                    BasicTextField(
+                                                                        BasicTextField(
                                         value = filterSearch,
                                         onValueChange = { filterSearch = it },
                                         singleLine = true,
@@ -656,7 +658,10 @@ fun MainApp() {
                                                 inner()
                                             }
                                         },
-                                        modifier = Modifier.fillMaxWidth().focusRequester(filterSearchFocusRequester)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusRequester(filterSearchFocusRequester)
+                                            .onFocusChanged { filterSearchHasFocus = it.isFocused }
                                     )
                                 }
                                 if (filterSearch.text.isNotBlank()) {
@@ -670,7 +675,7 @@ fun MainApp() {
                         }
                     }
 
-                    if (filterModeOn) {
+                                        if (filterModeOn && filterSearchHasFocus) {
                         val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                         if (filterSuggestions.isNotEmpty()) {
                             androidx.compose.ui.window.Popup(
@@ -967,17 +972,11 @@ fun LedgerContent(
             exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                LazyVerticalGrid(
+                                LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 72.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 200.dp)
-                        .animateContentSize(
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ),
+                        .heightIn(max = 200.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     userScrollEnabled = false
@@ -1068,12 +1067,12 @@ fun LedgerContent(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = !filterMode && topNotes.isNotEmpty(),
-                    enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
-                    exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
-                ) {
-                    Column {
+                        AnimatedVisibility(
+            visible = filterMode,
+            enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
+            exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         QuickInputSection(topNotes, noteIconMap, onQuickInputClick)
                         Spacer(Modifier.height(4.dp))
                     }
