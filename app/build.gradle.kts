@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 107
-        versionName = "12.1"
+        versionCode = 109
+        versionName = "12.3"
     }
 
     signingConfigs {
