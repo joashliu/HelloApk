@@ -452,7 +452,7 @@ fun MainApp() {
         pendingCameraUri = null; iconTargetRecord = null
     }
 
-    DisposableEffect(Unit) {
+        DisposableEffect(Unit) {
         val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
                 loading = false
@@ -460,7 +460,10 @@ fun MainApp() {
                 if (snap != null) {
                     records.clear()
                     snap.documents.forEach { doc ->
-                        doc.toObject(Record::class.java)?.let { it.id = doc.id; records.add(it) }
+                        val r = doc.toObject(Record::class.java)
+                        if (r != null) {
+                            records.add(r.copy(id = doc.id))
+                        }
                     }
                 }
             }
