@@ -1,5 +1,10 @@
 package com.example.hello
 
+import android.graphics.BlurMaskFilter
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -1087,22 +1092,34 @@ fun LedgerContent(
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
                                                         item(key = "group_$dateKey") {
-                                                                Column(
+                                                                                                Column(
                                     Modifier
                                         .fillMaxWidth()
                                         .padding(
-                                            start = 10.dp,
-                                            end = 10.dp,
-                                            top = 8.dp,
-                                            bottom = 8.dp
+                                            start = 14.dp,
+                                            end = 14.dp,
+                                            top = 12.dp,
+                                            bottom = 12.dp
                                         )
-                                        .shadow(
-                                            elevation = 10.dp,
-                                            shape = RoundedCornerShape(18.dp),
-                                            clip = false,
-                                            ambientColor = Color(0x40000000),
-                                            spotColor = Color(0x40000000)
-                                        )
+                                        .drawBehind {
+                                            val cornerPx = 18.dp.toPx()
+                                            val blurPx = 14.dp.toPx()
+                                            drawIntoCanvas { canvas ->
+                                                val paint = android.graphics.Paint().apply {
+                                                    color = Color(0x80000000).toArgb()
+                                                    maskFilter = BlurMaskFilter(
+                                                        blurPx,
+                                                        BlurMaskFilter.Blur.NORMAL
+                                                    )
+                                                }
+                                                canvas.nativeCanvas.drawRoundRect(
+                                                    0f, 0f,
+                                                    size.width, size.height,
+                                                    cornerPx, cornerPx,
+                                                    paint
+                                                )
+                                            }
+                                        }
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(SURFACE_CARD)
                                 ) {
