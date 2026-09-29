@@ -966,17 +966,38 @@ fun LedgerContent(
     }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        // ===== 篩選 chips 區（進出有流暢動畫）=====
         AnimatedVisibility(
             visible = filterMode,
-            enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
-            exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
+            enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
+                animationSpec = tween(FILTER_ANIM_MS),
+                expandFrom = Alignment.Top
+            ),
+            exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(
+                animationSpec = tween(FILTER_ANIM_MS),
+                shrinkTowards = Alignment.Top
+            )
         ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                                LazyVerticalGrid(
+            Column(
+                Modifier
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+            ) {
+                LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 72.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 200.dp),
+                        .animateContentSize(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     userScrollEnabled = false
@@ -1004,7 +1025,10 @@ fun LedgerContent(
                 }
                 Spacer(Modifier.height(8.dp))
                 if (availableMonths.isNotEmpty()) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         AnimatedFilterChip(
                             selected = filterMonth == null,
                             label = "全年",
@@ -1014,7 +1038,9 @@ fun LedgerContent(
                             AnimatedFilterChip(
                                 selected = filterMonth == m,
                                 label = formatMonthLabel(m),
-                                onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                onClick = {
+                                    onFilterMonthChange(if (filterMonth == m) null else m)
+                                }
                             )
                         }
                     }
@@ -1027,10 +1053,17 @@ fun LedgerContent(
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = BRAND_PRIMARY)
             }
-            filtered.isEmpty() && !showKeyboard -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
+            filtered.isEmpty() && !showKeyboard -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
+                    color = TEXT_SECONDARY
+                )
             }
             else -> {
+                // ===== 統計 + 筆數 + 顯示未來開關 =====
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1060,26 +1093,35 @@ fun LedgerContent(
                     }
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                         Icon(
-                            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            if (showFuture) Icons.Default.Visibility
+                            else Icons.Default.VisibilityOff,
                             "顯示未來項目",
                             tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
                         )
                     }
                 }
 
-                        AnimatedVisibility(
-            visible = filterMode,
-            enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
-            exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(tween(FILTER_ANIM_MS), shrinkTowards = Alignment.Top)
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                // ===== 快速輸入區（只有非篩選模式先顯示）=====
+                AnimatedVisibility(
+                    visible = !filterMode && topNotes.isNotEmpty(),
+                    enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
+                        animationSpec = tween(FILTER_ANIM_MS),
+                        expandFrom = Alignment.Top
+                    ),
+                    exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(
+                        animationSpec = tween(FILTER_ANIM_MS),
+                        shrinkTowards = Alignment.Top
+                    )
+                ) {
+                    Column {
                         QuickInputSection(topNotes, noteIconMap, onQuickInputClick)
                         Spacer(Modifier.height(4.dp))
                     }
                 }
 
+                // ===== 列表 + 鍵盤 =====
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                                        LazyColumn(
+                    LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -1108,7 +1150,7 @@ fun LedgerContent(
                                             top = 8.dp,
                                             bottom = 8.dp
                                         )
-                                                                                .shadow(
+                                        .shadow(
                                             elevation = 6.dp,
                                             shape = RoundedCornerShape(18.dp),
                                             clip = false,
@@ -1157,10 +1199,15 @@ fun LedgerContent(
 
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showKeyboard,
-                        enter = slideInVertically(initialOffsetY = { it },
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                        enter = slideInVertically(
+                            initialOffsetY = { it },
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
                         ) + fadeIn(tween(150)),
-                        exit = slideOutVertically(targetOffsetY = { it },
+                        exit = slideOutVertically(
+                            targetOffsetY = { it },
                             animationSpec = tween(320, easing = FastOutSlowInEasing)
                         ) + fadeOut(tween(220)),
                         modifier = Modifier
@@ -1169,13 +1216,17 @@ fun LedgerContent(
                             .padding(horizontal = 32.dp)
                     ) {
                         LedgerKeyboardPanel(
-                            state = keyboardState, onStateChange = onKeyboardStateChange,
-                            onDismiss = onKeyboardDismiss, onConfirm = onKeyboardConfirm,
-                            onNext = onKeyboardNext, onPickCategory = onKeyboardPickCategory,
+                            state = keyboardState,
+                            onStateChange = onKeyboardStateChange,
+                            onDismiss = onKeyboardDismiss,
+                            onConfirm = onKeyboardConfirm,
+                            onNext = onKeyboardNext,
+                            onPickCategory = onKeyboardPickCategory,
                             allNoteNames = allNoteNames,
                             noteCategoryMap = noteCategoryMap,
                             nameFlashTrigger = nameFlashTrigger,
-                            modifier = Modifier.fillMaxWidth())
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
