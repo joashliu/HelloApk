@@ -497,7 +497,7 @@ fun MainApp() {
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
-    fun saveFromKeyboard() {
+        fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
         val note = keyboardState.noteText
@@ -512,20 +512,27 @@ fun MainApp() {
         } else {
             val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
-            val newRef = db.collection("records").add(Record(
+
+            // 先攞新 ID（同步）
+            val newId = db.collection("records").document().id
+            // 即刻 set justAddedId,snapshot fire 之前已經準備好
+            justAddedId = newId
+
+            val totalThisMonth = records
+                .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
+                .sumOf { it.amount } + amt
+            afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
+
+            // 用 set() 寫入,id 由自己控制
+            db.collection("records").document(newId).set(Record(
                 amount = amt, note = note, category = category,
-                timestamp = ts, iconUrl = inherited))
-            newRef.addOnSuccessListener { docRef ->
-                val newId = docRef.id
-                justAddedId = newId
-                val totalThisMonth = records
-                    .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
-                    .sumOf { it.amount } + amt
-                afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
-                scope.launch {
-                    delay(800)
-                    if (justAddedId == newId) justAddedId = null
-                }
+                timestamp = ts, iconUrl = inherited
+            ))
+
+            // 800ms 後清 justAddedId（動畫已播完）
+            scope.launch {
+                delay(800)
+                if (justAddedId == newId) justAddedId = null
             }
         }
         showKeyboard = false
