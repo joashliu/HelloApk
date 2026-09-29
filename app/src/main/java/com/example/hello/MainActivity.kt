@@ -375,14 +375,23 @@ fun MainApp() {
         }
     }
 
-    val filtered by remember {
+        val filtered by remember {
         derivedStateOf {
+            val q = filterSearch.text
             records.toList().filter { r ->
                 val catOk = filterCategory == null || r.category == filterCategory
                 val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
-                val searchOk = filterSearch.text.isBlank() ||
-                    r.note.contains(filterSearch.text, true) ||
-                    r.category.contains(filterSearch.text, true)
+                val searchOk = if (q.isBlank()) {
+                    true
+                } else {
+                    val hasExactNoteMatch = records.any { it.note == q }
+                    val hasExactCategoryMatch = CATEGORIES.any { it == q }
+                    when {
+                        hasExactNoteMatch -> r.note == q
+                        hasExactCategoryMatch -> r.category == q
+                        else -> r.note.contains(q, true) || r.category.contains(q, true)
+                    }
+                }
                 catOk && monthOk && searchOk
             }
         }
@@ -1002,7 +1011,7 @@ fun LedgerContent(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     userScrollEnabled = false
                 ) {
-                                        item(key = "__all__") {
+                                                            item(key = "__all__") {
                         AnimatedFilterChip(
                             modifier = Modifier.fillMaxWidth(),
                             selected = filterCategory == null,
@@ -1010,7 +1019,7 @@ fun LedgerContent(
                             onClick = { onFilterCategoryChange(null) }
                         )
                     }
-                                        items(
+                    items(
                         items = visibleCategories,
                         key = { it }
                     ) { cat ->
@@ -1974,18 +1983,7 @@ fun AnimatedFilterChip(
         spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "cs")
     FilterChip(
         selected = selected, onClick = onClick,
-        label = {
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    label,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
+                label = { Text(label) },
         interactionSource = src,
         shape = RoundedCornerShape(12.dp),
         border = null,
