@@ -1,7 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.runtime.Immutable
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -74,6 +72,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -172,14 +171,13 @@ val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
     "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59))
 )
 
-@Immutable
 data class Record(
     val amount: Double = 0.0,
     val note: String = "",
     val category: String = "飲食",
     val timestamp: Long = System.currentTimeMillis(),
     val iconUrl: String = "",
-    val id: String = ""
+    var id: String = ""
 )
 
 data class NavItem(val label: String, val icon: ImageVector)
@@ -345,8 +343,8 @@ fun MainApp() {
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var filterMonth by remember { mutableStateOf<String?>(null) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
-    var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     var filterSearchHasFocus by remember { mutableStateOf(false) }
+    var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
@@ -375,22 +373,20 @@ fun MainApp() {
         }
     }
 
-        val filtered by remember {
+    val filtered by remember {
         derivedStateOf {
             val q = filterSearch.text
+            val hasExactNoteMatch = q.isNotBlank() && records.any { it.note == q }
+            val hasExactCategoryMatch = q.isNotBlank() && CATEGORIES.any { it == q }
             records.toList().filter { r ->
                 val catOk = filterCategory == null || r.category == filterCategory
                 val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
                 val searchOk = if (q.isBlank()) {
                     true
-                } else {
-                    val hasExactNoteMatch = records.any { it.note == q }
-                    val hasExactCategoryMatch = CATEGORIES.any { it == q }
-                    when {
-                        hasExactNoteMatch -> r.note == q
-                        hasExactCategoryMatch -> r.category == q
-                        else -> r.note.contains(q, true) || r.category.contains(q, true)
-                    }
+                } else when {
+                    hasExactNoteMatch -> r.note == q
+                    hasExactCategoryMatch -> r.category == q
+                    else -> r.note.contains(q, true) || r.category.contains(q, true)
                 }
                 catOk && monthOk && searchOk
             }
@@ -463,7 +459,7 @@ fun MainApp() {
         pendingCameraUri = null; iconTargetRecord = null
     }
 
-        DisposableEffect(Unit) {
+    DisposableEffect(Unit) {
         val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
                 loading = false
@@ -472,9 +468,7 @@ fun MainApp() {
                     records.clear()
                     snap.documents.forEach { doc ->
                         val r = doc.toObject(Record::class.java)
-                        if (r != null) {
-                            records.add(r.copy(id = doc.id))
-                        }
+                        if (r != null) records.add(r.copy(id = doc.id))
                     }
                 }
             }
@@ -654,7 +648,7 @@ fun MainApp() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(Modifier.weight(1f)) {
-                                                                        BasicTextField(
+                                    BasicTextField(
                                         value = filterSearch,
                                         onValueChange = { filterSearch = it },
                                         singleLine = true,
@@ -684,7 +678,7 @@ fun MainApp() {
                         }
                     }
 
-                                        if (filterModeOn && filterSearchHasFocus) {
+                    if (filterModeOn && filterSearchHasFocus) {
                         val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                         if (filterSuggestions.isNotEmpty()) {
                             androidx.compose.ui.window.Popup(
@@ -973,6 +967,11 @@ fun LedgerContent(
         try { listState.requestScrollToItem(0) }
         catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
     }
+    // 進入 / 離開篩選模式時跳去頂
+    LaunchedEffect(filterMode) {
+        try { listState.requestScrollToItem(0) }
+        catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
+    }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         // ===== 篩選 chips 區（進出有流暢動畫）=====
@@ -1011,7 +1010,7 @@ fun LedgerContent(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     userScrollEnabled = false
                 ) {
-                                                            item(key = "__all__") {
+                    item(key = "__all__") {
                         AnimatedFilterChip(
                             modifier = Modifier.fillMaxWidth(),
                             selected = filterCategory == null,
@@ -1147,7 +1146,7 @@ fun LedgerContent(
                                 if (it.category != INCOME_CATEGORY) it.amount else 0.0
                             }
 
-                                                        item(
+                            item(
                                 key = "group_$dateKey",
                                 contentType = "day_group"
                             ) {
@@ -1254,7 +1253,6 @@ fun AnimatedRecordItem(
         content()
         return
     }
-
     var appeared by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(16)
@@ -1573,7 +1571,6 @@ fun LedgerKeyboardPanel(
 ) {
     val ctx = LocalContext.current
 
-    // 名稱變更 → 自動用返上次同名項目嘅類別
     LaunchedEffect(state.noteText) {
         if (state.noteText.isNotBlank()) {
             val lastCat = noteCategoryMap[state.noteText]
@@ -1595,7 +1592,6 @@ fun LedgerKeyboardPanel(
                 .verticalScroll(rememberScrollState())
                 .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
         ) {
-            // ===== 日期 / 時間 =====
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1671,7 +1667,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 金額顯示 =====
             Surface(Modifier.fillMaxWidth().height(76.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(horizontal = 22.dp),
                     contentAlignment = Alignment.CenterEnd) {
@@ -1684,7 +1679,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 數字鍵盤 =====
             val rows = listOf(
                 listOf("1", "2", "3"), listOf("4", "5", "6"),
                 listOf("7", "8", "9"), listOf(".", "0", "backspace")
@@ -1727,7 +1721,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 名稱輸入 + 類別 =====
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -1918,7 +1911,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 底部按鈕 =====
             Row(Modifier.fillMaxWidth().height(58.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onDismiss, shape = RoundedCornerShape(14.dp),
@@ -1983,7 +1975,7 @@ fun AnimatedFilterChip(
         spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "cs")
     FilterChip(
         selected = selected, onClick = onClick,
-                label = { Text(label) },
+        label = { Text(label) },
         interactionSource = src,
         shape = RoundedCornerShape(12.dp),
         border = null,
@@ -2244,6 +2236,13 @@ fun SwipeableRecordItem(
     val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
+    val metaText = remember(record.category, record.timestamp) {
+        "${record.category}．${formatRecordTime(record.timestamp)}"
+    }
+    val amtText = remember(record.amount, record.category) { displayAmount(record) }
+    val amtColor = remember(record.category) { amountColor(record.category) }
+    val headlineText = remember(record.note) { record.note.ifBlank { "(無名稱)" } }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -2294,9 +2293,10 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
         }
 
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(72.dp)
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
                 .pointerInput(record.id) {
                     detectHorizontalDragGestures(
@@ -2320,51 +2320,36 @@ fun SwipeableRecordItem(
                     if (expandedId != null) onExpand(null)
                 }
                 .background(backgroundColor)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-                        val metaText = remember(record.category, record.timestamp) {
-                "${record.category}．${formatRecordTime(record.timestamp)}"
-            }
-            val amtText = remember(record.amount, record.category) {
-                displayAmount(record)
-            }
-            val amtColor = remember(record.category) { amountColor(record.category) }
-            val headlineText = remember(record.note) { record.note.ifBlank { "(無名稱)" } }
-
-                        Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(72.dp)
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconView(record.iconUrl, record.note)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        headlineText,
-                        fontSize = NOTE_FONT_SIZE,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TEXT_PRIMARY,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        metaText,
-                        fontSize = META_FONT_SIZE,
-                        color = TEXT_TERTIARY,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
+            IconView(record.iconUrl, record.note)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    amtText,
-                    color = amtColor,
-                    fontSize = AMOUNT_FONT_SIZE,
-                    fontWeight = FontWeight.Bold
+                    headlineText,
+                    fontSize = NOTE_FONT_SIZE,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TEXT_PRIMARY,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    metaText,
+                    fontSize = META_FONT_SIZE,
+                    color = TEXT_TERTIARY,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                amtText,
+                color = amtColor,
+                fontSize = AMOUNT_FONT_SIZE,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -2378,7 +2363,6 @@ private fun AnimatedActionButton(
     onClick: () -> Unit,
 ) {
     if (progress < 0.01f) {
-        // 完全收起時只佔位，唔 render 內容
         Spacer(Modifier.width(width).height(height))
         return
     }
