@@ -1624,28 +1624,39 @@ fun CalendarDayCell(
     records: List<Record>,
     displayMode: Int,
 ) {
+    val shape = RoundedCornerShape(12.dp)
+    val hasRecords = records.isNotEmpty()
+    val bgColor = when {
+        isToday -> BRAND_PRIMARY_LIGHT
+        hasRecords -> SURFACE_CARD
+        else -> Color.Transparent
+    }
+    val elevation = if (hasRecords || isToday) 1.dp else 0.dp
+
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (isToday) BRAND_PRIMARY_LIGHT else SURFACE_CARD)
-            .border(
-                width = if (isToday) 1.5.dp else 0.5.dp,
-                color = if (isToday) BRAND_PRIMARY else DIVIDER_COLOR,
-                shape = RoundedCornerShape(10.dp)
+            .shadow(
+                elevation = elevation,
+                shape = shape,
+                clip = false,
+                ambientColor = Color(0x1A000000),
+                spotColor = Color(0x1A000000)
             )
+            .clip(shape)
+            .background(bgColor)
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
                     stiffness = Spring.StiffnessMediumLow
                 )
             )
-            .padding(6.dp)
+            .padding(8.dp)
     ) {
         Text(
             "$day",
             fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = if (isToday) FontWeight.Bold else FontWeight.SemiBold,
             color = if (isToday) BRAND_PRIMARY_DARK else TEXT_PRIMARY
         )
         Spacer(Modifier.height(4.dp))
