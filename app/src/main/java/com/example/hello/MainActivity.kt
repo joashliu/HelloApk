@@ -23,6 +23,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -86,13 +87,16 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -141,6 +145,12 @@ val TEXT_TERTIARY = Color(0xFF94A3B8)
 val DIVIDER_COLOR = Color(0xFFE2E8F0)
 val COLOR_INCOME = Color(0xFF059669)
 val COLOR_EXPENSE = Color(0xFFDC2626)
+
+// 月曆格子配色
+val CELL_BG_POS = Color(0xFFDCFCE7)
+val CELL_BAR_POS = Color(0xFF86EFAC)
+val CELL_BG_NEG = Color(0xFFFEE2E2)
+val CELL_BAR_NEG = Color(0xFFFCA5A5)
 
 const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
@@ -1437,6 +1447,23 @@ fun CalendarContent(
         }
     }
 
+    // 該月最大絕對淨值——用來做直方條 base
+    val maxAbsNet = remember(recordsByDay) {
+        recordsByDay.values.maxOfOrNull { dayRecords ->
+            val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+            val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+            abs(inc - exp)
+        } ?: 0.0
+    }
+    // 該月最大絕對淨值——用來做直方條 base
+    val maxAbsNet = remember(recordsByDay) {
+        recordsByDay.values.maxOfOrNull { dayRecords ->
+            val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+            val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+            abs(inc - exp)
+        } ?: 0.0
+    }
+
     val totalAmount = monthRecords.sumOf { it.amount }
     val itemCount = monthRecords.size
     val avgPerItem = if (itemCount > 0) totalAmount / itemCount else 0.0
@@ -1592,7 +1619,8 @@ fun CalendarContent(
                                                     day = dayOfMonth,
                                                     isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
                                                     records = recordsByDay[dayOfMonth] ?: emptyList(),
-                                                    displayMode = displayMode
+                                                    displayMode = displayMode,
+                                                    maxAbsNet = maxAbsNet
                                                 )
                                             }
                                         }
@@ -1619,35 +1647,58 @@ fun CalendarContent(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-
 @Composable
 fun SegmentedModeControl(
     displayMode: Int,
     onModeChange: (Int) -> Unit
 ) {
+    val modes = remember {
+        listOf(
+            Triple("金額", Icons.Default.AttachMoney, 0),
+            Triple("項目", Icons.Default.List, 1),
+            Triple("圖標", Icons.Default.Apps, 2)
+        )
+    }
+    val itemWidth = 58.dp
+    val itemHeight = 26.dp
+
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = SURFACE_ELEVATED
     ) {
-        Row(Modifier.padding(3.dp)) {
-            val modes = listOf(
-                Triple("金額", Icons.Default.AttachMoney, 0),
-                Triple("項目", Icons.Default.List, 1),
-                Triple("圖標", Icons.Default.Apps, 2)
+        Box(Modifier.padding(3.dp)) {
+            val indicatorOffset by animateDpAsState(
+                targetValue = itemWidth * displayMode,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "segIndicator"
             )
-            modes.forEach { (label, icon, mode) ->
-                val selected = displayMode == mode
-                Surface(
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onModeChange(mode) },
-                    shape = RoundedCornerShape(9.dp),
-                    color = if (selected) SURFACE_CARD else Color.Transparent,
-                    shadowElevation = if (selected) 2.dp else 0.dp
-                ) {
+
+            // 白色滑動指示器
+            Box(
+                Modifier
+                    .offset(x = indicatorOffset)
+                    .width(itemWidth)
+                    .height(itemHeight)
+                    .shadow(2.dp, RoundedCornerShape(9.dp), clip = false)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(SURFACE_CARD)
+            )
+
+            Row {
+                modes.forEach { (label, icon, mode) ->
+                    val selected = displayMode == mode
                     Row(
-                        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .height(itemHeight)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onModeChange(mode) }
+                            .padding(horizontal = 8.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1661,7 +1712,8 @@ fun SegmentedModeControl(
                             label,
                             fontSize = 11.sp,
                             color = if (selected) TEXT_PRIMARY else TEXT_SECONDARY,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1
                         )
                     }
                 }
@@ -1699,7 +1751,7 @@ fun FadedText(
     fontSize: TextUnit,
     fontWeight: FontWeight = FontWeight.Normal,
     modifier: Modifier = Modifier,
-    fadeWidth: Dp = 8.dp
+    fadeWidth: Dp = 6.dp
 ) {
     val density = LocalDensity.current
     val fadePx = with(density) { fadeWidth.toPx() }
@@ -1714,7 +1766,9 @@ fun FadedText(
         modifier = modifier.drawWithContent {
             drawContent()
             if (size.width > 1f && fadePx > 0f) {
-                val stop = ((size.width - fadePx) / size.width).coerceIn(0f, 1f)
+                // 保證至少 55% 寬度係實色，避免太短文字變成一條漸變粗條
+                val effectiveFade = fadePx.coerceAtMost(size.width * 0.45f)
+                val stop = ((size.width - effectiveFade) / size.width).coerceIn(0.55f, 1f)
                 drawRect(
                     brush = Brush.horizontalGradient(
                         colorStops = arrayOf(
@@ -1739,13 +1793,31 @@ fun CalendarDayCell(
     isToday: Boolean,
     records: List<Record>,
     displayMode: Int,
+    maxAbsNet: Double,
 ) {
     val shape = RoundedCornerShape(12.dp)
     val hasRecords = records.isNotEmpty()
-    val bgColor = if (isToday) BRAND_PRIMARY_LIGHT else SURFACE_CARD
+
+    val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+    val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+    val net = income - expense
+    val absNet = abs(net)
+
+    val bgColor = when {
+        isToday -> BRAND_PRIMARY_LIGHT
+        hasRecords && net > 0 -> CELL_BG_POS
+        hasRecords && net < 0 -> CELL_BG_NEG
+        else -> SURFACE_CARD
+    }
     val elevation = if (hasRecords || isToday) 1.dp else 0.dp
 
-    Column(
+    // 直方條比例：以該月最大絕對淨值為 base
+    val barRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
+        (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
+    else 0f
+    val barColor = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG
+
+    Box(
         Modifier
             .fillMaxSize()
             .shadow(
@@ -1758,75 +1830,91 @@ fun CalendarDayCell(
             .clip(shape)
             .background(bgColor)
             .border(0.5.dp, DIVIDER_COLOR, shape)
-            .padding(horizontal = 2.dp, vertical = 3.dp)
     ) {
-        Text(
-            "$day",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (isToday) BRAND_PRIMARY_DARK else Color(0xFF1E293B),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(1.dp))
+        // 直方條（從底向上，闊度 = 整個格仔闊度）
+        if (barRatio > 0.001f) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(barRatio)
+                    .background(barColor.copy(alpha = 0.85f))
+            )
+        }
 
-        when (displayMode) {
-            0 -> {
-                val total = records.sumOf { it.amount }
-                if (total > 0) {
-                    val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-                    val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-                    val net = income - expense
-                    Text(
-                        text = compactAmount(net),
-                        fontSize = 11.sp,
-                        color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-            1 -> {
-                records.sortedBy { it.timestamp }.forEach { r ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FadedText(
-                            text = r.note.ifBlank { "(無)" },
-                            color = TEXT_PRIMARY,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Normal,
-                            fadeWidth = 6.dp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(4.dp))
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 2.dp, vertical = 3.dp)
+        ) {
+            // 日子：更粗、更深色、貼近格仔頂
+            Text(
+                "$day",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Black,
+                color = if (isToday) BRAND_PRIMARY_DARK else Color(0xFF0F172A),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            when (displayMode) {
+                0 -> {
+                    if (absNet > 0) {
                         Text(
-                            if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
-                            else compactAmount(-r.amount),
-                            fontSize = 9.sp,
-                            color = amountColor(r.category),
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
+                            text = compactAmount(net),
+                            fontSize = 11.sp,
+                            color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 1.dp)
                         )
                     }
-                    Spacer(Modifier.height(1.dp))
                 }
-            }
-            2 -> {
-                records.chunked(3).forEach { row ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        row.forEach { r ->
-                            IconView(r.iconUrl, r.note, size = 18.dp)
+                1 -> {
+                    records.sortedBy { it.timestamp }.take(3).forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FadedText(
+                                text = r.note.ifBlank { "(無)" },
+                                color = TEXT_PRIMARY,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Medium,
+                                fadeWidth = 5.dp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
+                                else compactAmount(-r.amount),
+                                fontSize = 9.sp,
+                                color = amountColor(r.category),
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
                         }
+                        Spacer(Modifier.height(1.dp))
                     }
-                    Spacer(Modifier.height(2.dp))
+                }
+                2 -> {
+                    records.chunked(3).take(2).forEach { row ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            row.forEach { r ->
+                                IconView(r.iconUrl, r.note, size = 18.dp)
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                    }
                 }
             }
         }
@@ -1839,15 +1927,24 @@ fun CompareContent(
     availableMonths: List<String>,
     onAddClick: () -> Unit,
 ) {
-    var monthA by remember { mutableStateOf<String?>(null) }
-    var monthB by remember { mutableStateOf<String?>(null) }
+    val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+
+    // 用當前月份做 fallback，避免一開始顯示「選擇月份」
+    var monthA by remember { mutableStateOf(currentMonthKey) }
+    var monthB by remember { mutableStateOf(currentMonthKey) }
+
     LaunchedEffect(availableMonths) {
-        if (monthA == null || monthA !in availableMonths) monthA = availableMonths.getOrNull(0)
-        if (monthB == null || monthB !in availableMonths) monthB = availableMonths.getOrNull(1) ?: availableMonths.getOrNull(0)
+        if (availableMonths.isNotEmpty()) {
+            val last = availableMonths.last()
+            val prev = availableMonths.dropLast(1).lastOrNull() ?: last
+            if (monthA !in availableMonths) monthA = last
+            if (monthB !in availableMonths) monthB = prev
+        }
     }
+
     val sortedCategories = remember(records, monthB) {
         val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
-            if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
+            sumByCategoryAndMonth(records, cat, monthB)
         }
         listOf(INCOME_CATEGORY) + expenses
     }
@@ -1857,16 +1954,18 @@ fun CompareContent(
             Text("月份比較", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
                 modifier = Modifier.padding(vertical = 8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MonthDropdown(monthA, availableMonths, { monthA = it }, Modifier.weight(1f))
-                MonthDropdown(monthB, availableMonths, { monthB = it }, Modifier.weight(1f))
+                MonthDropdown(monthA, availableMonths.ifEmpty { listOf(currentMonthKey) },
+                    { monthA = it }, Modifier.weight(1f))
+                MonthDropdown(monthB, availableMonths.ifEmpty { listOf(currentMonthKey) },
+                    { monthB = it }, Modifier.weight(1f))
             }
             Spacer(Modifier.height(16.dp))
 
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("類別", Modifier.weight(1.4f), fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY)
-                Text(monthA?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
+                Text(formatMonthLabel(monthA), Modifier.weight(1f),
                     fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
-                Text(monthB?.let { formatMonthLabel(it) } ?: "-", Modifier.weight(1f),
+                Text(formatMonthLabel(monthB), Modifier.weight(1f),
                     fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TEXT_SECONDARY, textAlign = TextAlign.End)
             }
             HorizontalDivider(color = DIVIDER_COLOR)
@@ -1874,8 +1973,8 @@ fun CompareContent(
             LazyColumn(Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)) {
                 items(sortedCategories) { cat ->
-                    val amtA = if (monthA != null) sumByCategoryAndMonth(records, cat, monthA!!) else 0.0
-                    val amtB = if (monthB != null) sumByCategoryAndMonth(records, cat, monthB!!) else 0.0
+                    val amtA = sumByCategoryAndMonth(records, cat, monthA)
+                    val amtB = sumByCategoryAndMonth(records, cat, monthB)
                     val style = CATEGORY_STYLES[cat]
                     val isIncome = cat == INCOME_CATEGORY
 
@@ -1922,7 +2021,7 @@ fun sumByCategoryAndMonth(records: List<Record>, category: String, month: String
     records.filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == month }.sumOf { it.amount }
 
 @Composable
-fun MonthDropdown(value: String?, months: List<String>, onChange: (String?) -> Unit, modifier: Modifier = Modifier) {
+fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
         Button(
@@ -1934,7 +2033,7 @@ fun MonthDropdown(value: String?, months: List<String>, onChange: (String?) -> U
                 contentColor = TEXT_PRIMARY
             )
         ) {
-            Text(value?.let { formatMonthLabel(it) } ?: "選擇月份",
+            Text(formatMonthLabel(value),
                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
@@ -2050,6 +2149,7 @@ fun QuickInputSection(
         }
     }
 }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
