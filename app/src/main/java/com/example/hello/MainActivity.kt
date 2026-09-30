@@ -39,6 +39,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -79,6 +80,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -87,16 +89,13 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -899,6 +898,7 @@ fun MainApp() {
         )
     }
 }
+
 @Composable
 fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
@@ -1390,6 +1390,179 @@ fun CategoryTotalHint(
     }
 }
 
+@Composable
+fun TrianglePointer(
+    colIndex: Int,
+    cellWidth: Dp,
+    color: Color = SURFACE_CARD,
+    triangleWidth: Dp = 22.dp,
+    triangleHeight: Dp = 11.dp,
+) {
+    val targetX = cellWidth * colIndex + cellWidth / 2 - triangleWidth / 2
+    val animatedX by animateDpAsState(
+        targetValue = targetX,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "triangleX"
+    )
+    Box(Modifier.fillMaxWidth().height(triangleHeight)) {
+        Canvas(
+            Modifier
+                .offset(x = animatedX)
+                .size(triangleWidth, triangleHeight)
+        ) {
+            val path = Path().apply {
+                moveTo(0f, size.height)
+                lineTo(size.width / 2f, 0f)
+                lineTo(size.width, size.height)
+                close()
+            }
+            drawPath(path, color)
+        }
+    }
+}
+
+@Composable
+fun DayDetailPanel(
+    dateKey: String,
+    records: List<Record>,
+    onDismiss: () -> Unit,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .shadow(4.dp, shape, clip = false)
+            .clip(shape)
+            .background(SURFACE_CARD)
+    ) {
+        val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+        val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    formatDateHeader(dateKey),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TEXT_PRIMARY
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (income > 0) {
+                        Text(
+                            "收 ${formatAmountNoDecimal(income)}",
+                            fontSize = 12.sp, color = COLOR_INCOME,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+                    if (expense > 0) {
+                        Text(
+                            "支 ${formatAmountNoDecimal(expense)}",
+                            fontSize = 12.sp, color = COLOR_EXPENSE,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
+            }
+        }
+        HorizontalDivider(color = DIVIDER_COLOR)
+
+        records.sortedByDescending { it.timestamp }.forEach { r ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconView(r.iconUrl, r.note, size = 36.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        r.note.ifBlank { "(無名稱)" },
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        color = TEXT_PRIMARY, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${r.category}．${formatRecordTime(r.timestamp)}",
+                        fontSize = 11.sp, color = TEXT_TERTIARY,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    displayAmount(r),
+                    color = amountColor(r.category),
+                    fontSize = 15.sp, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+@Composable
+fun CalendarRow(
+    rowIdx: Int,
+    firstDayOffset: Int,
+    daysInMonth: Int,
+    today: Calendar,
+    isCurrentMonth: Boolean,
+    recordsByDay: Map<Int, List<Record>>,
+    displayMode: Int,
+    maxAbsNet: Double,
+    selectedDay: Int?,
+    onCellClick: (day: Int, col: Int) -> Unit,
+) {
+    val spacing = 6.dp
+    val maxItemsInRow = remember(rowIdx, recordsByDay, displayMode) {
+        (0 until 7).maxOfOrNull { col ->
+            val day = rowIdx * 7 + col - firstDayOffset + 1
+            if (day in 1..daysInMonth) recordsByDay[day]?.size ?: 0 else 0
+        } ?: 0
+    }
+    val rowHeight = if (displayMode == 1) {
+        (24 + maxItemsInRow * 15).dp.coerceAtLeast(52.dp)
+    } else {
+        52.dp
+    }
+
+    Row(
+        Modifier.fillMaxWidth().height(rowHeight),
+        horizontalArrangement = Arrangement.spacedBy(spacing)
+    ) {
+        for (col in 0 until 7) {
+            val cellIdx = rowIdx * 7 + col
+            val dayOfMonth = cellIdx - firstDayOffset + 1
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                if (dayOfMonth in 1..daysInMonth) {
+                    CalendarDayCell(
+                        day = dayOfMonth,
+                        isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
+                        isSelected = selectedDay == dayOfMonth,
+                        records = recordsByDay[dayOfMonth] ?: emptyList(),
+                        displayMode = displayMode,
+                        maxAbsNet = maxAbsNet,
+                        onClick = { onCellClick(dayOfMonth, col) }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CalendarContent(
@@ -1406,6 +1579,12 @@ fun CalendarContent(
     var currentMonthKey by remember { mutableStateOf(todayKey) }
     var filterCategory by remember { mutableStateOf<String?>(null) }
     var displayMode by remember { mutableIntStateOf(0) }
+
+    var selectedDay by remember { mutableStateOf<Int?>(null) }
+    var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
+    var selectedColIdx by remember { mutableStateOf<Int?>(null) }
+
+    val scrollState = rememberScrollState()
 
     val curCal = remember(currentMonthKey) {
         val parts = currentMonthKey.split("-")
@@ -1447,7 +1626,6 @@ fun CalendarContent(
         }
     }
 
-    // 該月最大絕對淨值——用來做直方條 base
     val maxAbsNet = remember(recordsByDay) {
         recordsByDay.values.maxOfOrNull { dayRecords ->
             val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
@@ -1471,152 +1649,211 @@ fun CalendarContent(
     val totalCells = firstDayOffset + daysInMonth
     val totalRows = (totalCells + 6) / 7
 
+    LaunchedEffect(currentMonthKey) {
+        selectedDay = null
+        selectedRowIdx = null
+        selectedColIdx = null
+    }
+    LaunchedEffect(selectedDay) {
+        if (selectedDay != null) {
+            try { scrollState.animateScrollTo(0) } catch (_: Exception) {}
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 10.dp)
-        ) {
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                "${year}年",
-                fontSize = 13.sp,
-                color = TEXT_TERTIARY,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-            Spacer(Modifier.height(4.dp))
-
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    modifier = Modifier.size(36.dp).clickable {
-                        currentMonthKey = shiftMonthKey(currentMonthKey, -1)
-                    },
-                    shape = CircleShape,
-                    color = SURFACE_ELEVATED
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.ChevronLeft, "上個月",
-                            tint = TEXT_SECONDARY,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                Text("${month}月", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                Spacer(Modifier.width(10.dp))
-                Surface(
-                    modifier = Modifier.size(36.dp).clickable {
-                        currentMonthKey = shiftMonthKey(currentMonthKey, 1)
-                    },
-                    shape = CircleShape,
-                    color = SURFACE_ELEVATED
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.ChevronRight, "下個月",
-                            tint = TEXT_SECONDARY,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-
-                Spacer(Modifier.weight(1f))
-
-                SegmentedModeControl(
-                    displayMode = displayMode,
-                    onModeChange = { displayMode = it }
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.padding(horizontal = 10.dp)) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "${year}年",
+                    fontSize = 13.sp,
+                    color = TEXT_TERTIARY,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
-            }
+                Spacer(Modifier.height(4.dp))
 
-            Spacer(Modifier.height(10.dp))
-
-            FlowRow(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                AnimatedFilterChip(
-                    selected = filterCategory == null,
-                    label = "全部",
-                    onClick = { filterCategory = null }
-                )
-                visibleCategories.forEach { cat ->
-                    key(cat) {
-                        AnimatedFilterChip(
-                            selected = filterCategory == cat,
-                            label = cat,
-                            onClick = {
-                                filterCategory = if (filterCategory == cat) null else cat
-                            }
-                        )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(36.dp).clickable {
+                            currentMonthKey = shiftMonthKey(currentMonthKey, -1)
+                        },
+                        shape = CircleShape,
+                        color = SURFACE_ELEVATED
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.ChevronLeft, "上個月",
+                                tint = TEXT_SECONDARY,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                InfoChip("總計", formatAmountNoDecimal(totalAmount), Modifier.weight(1f))
-                InfoChip("平均每項", formatAmountNoDecimal(avgPerItem), Modifier.weight(1f))
-                InfoChip("日均支出", formatAmountNoDecimal(avgPerDay), Modifier.weight(1f))
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            Row(Modifier.fillMaxWidth()) {
-                listOf("一", "二", "三", "四", "五", "六", "日").forEach { w ->
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        Text(w, fontSize = 12.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "${month}月",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Surface(
+                        modifier = Modifier.size(36.dp).clickable {
+                            currentMonthKey = shiftMonthKey(currentMonthKey, 1)
+                        },
+                        shape = CircleShape,
+                        color = SURFACE_ELEVATED
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.ChevronRight, "下個月",
+                                tint = TEXT_SECONDARY,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
+
+                    Spacer(Modifier.weight(1f))
+
+                    SegmentedModeControl(
+                        displayMode = displayMode,
+                        onModeChange = { displayMode = it }
+                    )
                 }
-            }
 
-            Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
 
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 8.dp)
-            ) {
-                if (totalRows > 0) {
-                    BoxWithConstraints(Modifier.fillMaxSize()) {
-                        val spacing = 6.dp
-                        val rawRowHeight = (maxHeight - spacing * (totalRows - 1)) / totalRows
-                        val rowHeight = rawRowHeight.coerceAtLeast(46.dp)
-                        Column(
-                            Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(spacing)
+                AnimatedVisibility(
+                    visible = selectedDay == null,
+                    enter = fadeIn(tween(250)) + expandVertically(tween(300, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
+                ) {
+                    Column {
+                        FlowRow(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            for (rowIdx in 0 until totalRows) {
-                                Row(
-                                    Modifier.fillMaxWidth().height(rowHeight),
-                                    horizontalArrangement = Arrangement.spacedBy(spacing)
-                                ) {
-                                    for (col in 0 until 7) {
-                                        val cellIdx = rowIdx * 7 + col
-                                        val dayOfMonth = cellIdx - firstDayOffset + 1
-                                        Box(Modifier.weight(1f).fillMaxHeight()) {
-                                            if (dayOfMonth in 1..daysInMonth) {
-                                                CalendarDayCell(
-                                                    day = dayOfMonth,
-                                                    isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
-                                                    records = recordsByDay[dayOfMonth] ?: emptyList(),
-                                                    displayMode = displayMode,
-                                                    maxAbsNet = maxAbsNet
-                                                )
-                                            }
+                            AnimatedFilterChip(
+                                selected = filterCategory == null,
+                                label = "全部",
+                                onClick = { filterCategory = null }
+                            )
+                            visibleCategories.forEach { cat ->
+                                key(cat) {
+                                    AnimatedFilterChip(
+                                        selected = filterCategory == cat,
+                                        label = cat,
+                                        onClick = {
+                                            filterCategory = if (filterCategory == cat) null else cat
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            InfoChip("總計", formatAmountNoDecimal(totalAmount), Modifier.weight(1f))
+                            InfoChip("平均每項", formatAmountNoDecimal(avgPerItem), Modifier.weight(1f))
+                            InfoChip("日均支出", formatAmountNoDecimal(avgPerDay), Modifier.weight(1f))
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Row(Modifier.fillMaxWidth()) {
+                    listOf("一", "二", "三", "四", "五", "六", "日").forEach { w ->
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            Text(
+                                w, fontSize = 12.sp,
+                                color = TEXT_TERTIARY,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
+                ) {
+                    for (rowIdx in 0 until totalRows) {
+                        val isThisRowSelected = selectedRowIdx == rowIdx
+                        val isHidden = selectedDay != null && !isThisRowSelected
+
+                        AnimatedVisibility(
+                            visible = !isHidden,
+                            enter = fadeIn(tween(300)) + expandVertically(
+                                tween(320, easing = FastOutSlowInEasing),
+                                expandFrom = Alignment.Top
+                            ),
+                            exit = fadeOut(tween(200)) + shrinkVertically(
+                                tween(300, easing = FastOutSlowInEasing),
+                                shrinkTowards = Alignment.Top
+                            )
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                CalendarRow(
+                                    rowIdx = rowIdx,
+                                    firstDayOffset = firstDayOffset,
+                                    daysInMonth = daysInMonth,
+                                    today = today,
+                                    isCurrentMonth = isCurrentMonth,
+                                    recordsByDay = recordsByDay,
+                                    displayMode = displayMode,
+                                    maxAbsNet = maxAbsNet,
+                                    selectedDay = if (isThisRowSelected) selectedDay else null,
+                                    onCellClick = { day, col ->
+                                        if (selectedDay == day) {
+                                            selectedDay = null
+                                            selectedRowIdx = null
+                                            selectedColIdx = null
+                                        } else {
+                                            selectedDay = day
+                                            selectedRowIdx = rowIdx
+                                            selectedColIdx = col
                                         }
                                     }
+                                )
+
+                                if (isThisRowSelected && selectedDay != null && selectedColIdx != null) {
+                                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                        val cellWidth = maxWidth / 7
+                                        TrianglePointer(
+                                            colIndex = selectedColIdx!!,
+                                            cellWidth = cellWidth,
+                                            color = SURFACE_CARD
+                                        )
+                                    }
+                                    val dateKey = String.format(
+                                        Locale.US, "%04d-%02d-%02d",
+                                        year, month, selectedDay
+                                    )
+                                    DayDetailPanel(
+                                        dateKey = dateKey,
+                                        records = recordsByDay[selectedDay] ?: emptyList(),
+                                        onDismiss = {
+                                            selectedDay = null
+                                            selectedRowIdx = null
+                                            selectedColIdx = null
+                                        }
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                } else {
+                                    Spacer(Modifier.height(6.dp))
                                 }
                             }
                         }
@@ -1668,7 +1905,6 @@ fun SegmentedModeControl(
                 label = "segIndicator"
             )
 
-            // 白色滑動指示器
             Box(
                 Modifier
                     .offset(x = indicatorOffset)
@@ -1758,7 +1994,6 @@ fun FadedText(
         modifier = modifier.drawWithContent {
             drawContent()
             if (size.width > 1f && fadePx > 0f) {
-                // 保證至少 55% 寬度係實色，避免太短文字變成一條漸變粗條
                 val effectiveFade = fadePx.coerceAtMost(size.width * 0.45f)
                 val stop = ((size.width - effectiveFade) / size.width).coerceIn(0.55f, 1f)
                 drawRect(
@@ -1783,9 +2018,11 @@ fun FadedText(
 fun CalendarDayCell(
     day: Int,
     isToday: Boolean,
+    isSelected: Boolean,
     records: List<Record>,
     displayMode: Int,
     maxAbsNet: Double,
+    onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
     val hasRecords = records.isNotEmpty()
@@ -1796,14 +2033,14 @@ fun CalendarDayCell(
     val absNet = abs(net)
 
     val bgColor = when {
+        isSelected -> BRAND_PRIMARY_LIGHT
         isToday -> BRAND_PRIMARY_LIGHT
         hasRecords && net > 0 -> CELL_BG_POS
         hasRecords && net < 0 -> CELL_BG_NEG
         else -> SURFACE_CARD
     }
-    val elevation = if (hasRecords || isToday) 1.dp else 0.dp
+    val elevation = if (hasRecords || isToday || isSelected) 1.dp else 0.dp
 
-    // 直方條比例：以該月最大絕對淨值為 base
     val barRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
         (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
     else 0f
@@ -1821,9 +2058,16 @@ fun CalendarDayCell(
             )
             .clip(shape)
             .background(bgColor)
-            .border(0.5.dp, DIVIDER_COLOR, shape)
+            .border(
+                width = if (isSelected) 2.dp else 0.5.dp,
+                color = if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR,
+                shape = shape
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() }
     ) {
-        // 直方條（從底向上，闊度 = 整個格仔闊度）
         if (barRatio > 0.001f) {
             Box(
                 Modifier
@@ -1839,12 +2083,11 @@ fun CalendarDayCell(
                 .fillMaxSize()
                 .padding(horizontal = 2.dp, vertical = 3.dp)
         ) {
-            // 日子：更粗、更深色、貼近格仔頂
             Text(
                 "$day",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Black,
-                color = if (isToday) BRAND_PRIMARY_DARK else Color(0xFF0F172A),
+                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else Color(0xFF0F172A),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1869,7 +2112,7 @@ fun CalendarDayCell(
                     }
                 }
                 1 -> {
-                    records.sortedBy { it.timestamp }.take(3).forEach { r ->
+                    records.sortedBy { it.timestamp }.forEach { r ->
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -1896,13 +2139,21 @@ fun CalendarDayCell(
                     }
                 }
                 2 -> {
-                    records.chunked(3).take(2).forEach { row ->
+                    val rows = records.chunked(3)
+                    rows.forEach { row ->
                         Row(
-                            Modifier.fillMaxWidth(),
+                            Modifier.fillMaxWidth().padding(horizontal = 1.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             row.forEach { r ->
-                                IconView(r.iconUrl, r.note, size = 18.dp)
+                                IconViewAdaptive(
+                                    iconUrl = r.iconUrl,
+                                    name = r.note,
+                                    modifier = Modifier.weight(1f).aspectRatio(1f)
+                                )
+                            }
+                            repeat(3 - row.size) {
+                                Spacer(Modifier.weight(1f))
                             }
                         }
                         Spacer(Modifier.height(2.dp))
@@ -1921,7 +2172,6 @@ fun CompareContent(
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
-    // 用當前月份做 fallback，避免一開始顯示「選擇月份」
     var monthA by remember { mutableStateOf(currentMonthKey) }
     var monthB by remember { mutableStateOf(currentMonthKey) }
 
@@ -2673,6 +2923,7 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
         Text(label, color = tint, style = MaterialTheme.typography.bodyLarge)
     }
 }
+
 fun createTempImageUri(context: Context): Uri {
     val f = File.createTempFile("camera_", ".jpg", context.cacheDir)
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f)
@@ -2790,6 +3041,37 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     } else {
         AsyncImage(model = iconUrl, contentDescription = null, contentScale = ContentScale.Crop,
             modifier = Modifier.size(size).clip(CircleShape))
+    }
+}
+
+@Composable
+fun IconViewAdaptive(
+    iconUrl: String,
+    name: String,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier.clip(CircleShape)) {
+        val sizeDp = maxWidth
+        if (iconUrl.isBlank()) {
+            val ch = name.trim().take(1).ifBlank { "?" }
+            Box(
+                Modifier.fillMaxSize().background(avatarColor(name)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    ch,
+                    color = Color.White,
+                    fontSize = (sizeDp.value * 0.5f).sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        } else {
+            AsyncImage(
+                model = iconUrl, contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
 
