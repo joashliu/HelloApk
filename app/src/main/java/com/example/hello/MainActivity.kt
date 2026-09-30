@@ -1455,14 +1455,6 @@ fun CalendarContent(
             abs(inc - exp)
         } ?: 0.0
     }
-    // 該月最大絕對淨值——用來做直方條 base
-    val maxAbsNet = remember(recordsByDay) {
-        recordsByDay.values.maxOfOrNull { dayRecords ->
-            val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-            val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-            abs(inc - exp)
-        } ?: 0.0
-    }
 
     val totalAmount = monthRecords.sumOf { it.amount }
     val itemCount = monthRecords.size
