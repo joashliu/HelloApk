@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.unit.IntOffset
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -982,14 +983,14 @@ fun LedgerContent(
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         // ===== 篩選 chips 區（進出有流暢動畫）=====
-        AnimatedVisibility(
+                AnimatedVisibility(
             visible = filterMode,
             enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
                 animationSpec = tween(FILTER_ANIM_MS),
                 expandFrom = Alignment.Top
             ),
-            exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(
-                animationSpec = tween(FILTER_ANIM_MS),
+            exit = fadeOut(tween(280)) + shrinkVertically(
+                animationSpec = tween(380, easing = FastOutSlowInEasing),
                 shrinkTowards = Alignment.Top
             )
         ) {
@@ -1118,14 +1119,14 @@ fun LedgerContent(
                 }
 
                 // ===== 快速輸入區（只有非篩選模式先顯示）=====
-                AnimatedVisibility(
+                                AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
                     enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
                         animationSpec = tween(FILTER_ANIM_MS),
                         expandFrom = Alignment.Top
                     ),
-                    exit = fadeOut(tween(FILTER_ANIM_MS)) + shrinkVertically(
-                        animationSpec = tween(FILTER_ANIM_MS),
+                    exit = fadeOut(tween(280)) + shrinkVertically(
+                        animationSpec = tween(380, easing = FastOutSlowInEasing),
                         shrinkTowards = Alignment.Top
                     )
                 ) {
@@ -1157,10 +1158,18 @@ fun LedgerContent(
                                 key = "group_$dateKey",
                                 contentType = "day_group"
                             ) {
-                                Column(
+                                                                Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .animateItem()
+                                        .animateItem(
+                                            fadeInSpec = tween(280, easing = FastOutSlowInEasing),
+                                            fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
+                                            placementSpec = spring(
+                                                stiffness = Spring.StiffnessLow,
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                visibilityThreshold = IntOffset.VisibilityThreshold
+                                            )
+                                        )
                                         .padding(
                                             start = 10.dp,
                                             end = 10.dp,
