@@ -219,6 +219,25 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
 }
 
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
+fun compactAmount(value: Double): String {
+    val absV = abs(value)
+    val sign = if (value < 0) "-" else ""
+    return when {
+        absV < 1000 -> "${sign}${absV.roundToInt()}"
+        absV < 10000 -> {
+            val k = absV / 1000.0
+            val s = String.format(Locale.US, "%.1f", k).removeSuffix(".0")
+            "${sign}${s}K"
+        }
+        absV < 1000000 -> "${sign}${(absV / 1000.0).roundToInt()}K"
+        absV < 10000000 -> {
+            val m = absV / 1000000.0
+            val s = String.format(Locale.US, "%.1f", m).removeSuffix(".0")
+            "${sign}${s}M"
+        }
+        else -> "${sign}${(absV / 1000000.0).roundToInt()}M"
+    }
+}
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount) else formatAmount(-record.amount)
 fun amountColor(category: String): Color =
@@ -1478,11 +1497,10 @@ fun CalendarContent(
 
             Spacer(Modifier.weight(1f))
 
-            DisplayModeButton("金額", displayMode == 0, Icons.Default.AttachMoney) { displayMode = 0 }
-            Spacer(Modifier.width(6.dp))
-            DisplayModeButton("項目", displayMode == 1, Icons.Default.List) { displayMode = 1 }
-            Spacer(Modifier.width(6.dp))
-            DisplayModeButton("圖標", displayMode == 2, Icons.Default.Apps) { displayMode = 2 }
+                        SegmentedModeControl(
+                displayMode = displayMode,
+                onModeChange = { displayMode = it }
+            )
         }
 
         Spacer(Modifier.height(10.dp))
@@ -1516,9 +1534,9 @@ fun CalendarContent(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            InfoChip("總計", formatAmount(totalAmount), Modifier.weight(1f))
-            InfoChip("平均每項", formatAmount(avgPerItem), Modifier.weight(1f))
-            InfoChip("日均支出", formatAmount(avgPerDay), Modifier.weight(1f))
+                        InfoChip("總計", compactAmount(totalAmount), Modifier.weight(1f))
+            InfoChip("平均每項", compactAmount(avgPerItem), Modifier.weight(1f))
+            InfoChip("日均支出", compactAmount(avgPerDay), Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(10.dp))
@@ -1567,31 +1585,53 @@ fun CalendarContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DisplayModeButton(
-    label: String,
-    selected: Boolean,
-    icon: ImageVector,
-    onClick: () -> Unit
+@Composable
+fun SegmentedModeControl(
+    displayMode: Int,
+    onModeChange: (Int) -> Unit
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) BRAND_PRIMARY else SURFACE_ELEVATED)
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = SURFACE_ELEVATED
     ) {
-        Icon(
-            icon, contentDescription = label,
-            tint = if (selected) Color.White else TEXT_SECONDARY,
-            modifier = Modifier.size(14.dp)
-        )
-        Spacer(Modifier.height(1.dp))
-        Text(
-            label, fontSize = 9.sp,
-            color = if (selected) Color.White else TEXT_SECONDARY,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-        )
+        Row(Modifier.padding(3.dp)) {
+            val modes = listOf(
+                Triple("金額", Icons.Default.AttachMoney, 0),
+                Triple("項目", Icons.Default.List, 1),
+                Triple("圖標", Icons.Default.Apps, 2)
+            )
+            modes.forEach { (label, icon, mode) ->
+                val selected = displayMode == mode
+                Surface(
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onModeChange(mode) },
+                    shape = RoundedCornerShape(9.dp),
+                    color = if (selected) SURFACE_CARD else Color.Transparent,
+                    shadowElevation = if (selected) 2.dp else 0.dp
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            icon, label,
+                            tint = if (selected) BRAND_PRIMARY else TEXT_SECONDARY,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            label,
+                            fontSize = 11.sp,
+                            color = if (selected) TEXT_PRIMARY else TEXT_SECONDARY,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1628,8 +1668,7 @@ fun CalendarDayCell(
     val hasRecords = records.isNotEmpty()
     val bgColor = when {
         isToday -> BRAND_PRIMARY_LIGHT
-        hasRecords -> SURFACE_CARD
-        else -> Color.Transparent
+        else -> SURFACE_CARD
     }
     val elevation = if (hasRecords || isToday) 1.dp else 0.dp
 
@@ -1645,6 +1684,7 @@ fun CalendarDayCell(
             )
             .clip(shape)
             .background(bgColor)
+            .border(0.5.dp, DIVIDER_COLOR, shape)
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioNoBouncy,
@@ -1657,7 +1697,9 @@ fun CalendarDayCell(
             "$day",
             fontSize = 12.sp,
             fontWeight = if (isToday) FontWeight.Bold else FontWeight.SemiBold,
-            color = if (isToday) BRAND_PRIMARY_DARK else TEXT_PRIMARY
+            color = if (isToday) BRAND_PRIMARY_DARK else TEXT_PRIMARY,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(4.dp))
 
@@ -1669,12 +1711,14 @@ fun CalendarDayCell(
                     val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
                     val net = income - expense
                     Text(
-                        text = if (net >= 0) formatAmount(net) else "-${formatAmount(-net)}",
+                        text = compactAmount(net),
                         fontSize = 11.sp,
                         color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -1694,8 +1738,8 @@ fun CalendarDayCell(
                         )
                         Spacer(Modifier.width(2.dp))
                         Text(
-                            if (r.category == INCOME_CATEGORY) formatAmount(r.amount)
-                            else "-${formatAmount(r.amount)}",
+                            if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
+                            else compactAmount(-r.amount),
                             fontSize = 9.sp,
                             color = amountColor(r.category),
                             fontWeight = FontWeight.SemiBold,
