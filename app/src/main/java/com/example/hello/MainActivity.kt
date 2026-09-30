@@ -975,11 +975,6 @@ fun LedgerContent(
         try { listState.requestScrollToItem(0) }
         catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
     }
-    // 進入 / 離開篩選模式時跳去頂
-    LaunchedEffect(filterMode) {
-        try { listState.requestScrollToItem(0) }
-        catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
-    }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         // ===== 篩選 chips 區（進出有流暢動畫）=====
