@@ -164,7 +164,7 @@ val STAT_LABEL_FONT_SIZE = 11.sp
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
-val ROW_ALT_COLOR = Color(0xFFF1F5F9)
+val ROW_ALT_COLOR = Color(0xFFE6ECFA)
 const val FILTER_ANIM_MS = 250
 
 data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
