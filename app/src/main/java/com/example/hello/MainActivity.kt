@@ -1584,7 +1584,7 @@ fun CalendarContent(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
+
 @Composable
 fun SegmentedModeControl(
     displayMode: Int,
