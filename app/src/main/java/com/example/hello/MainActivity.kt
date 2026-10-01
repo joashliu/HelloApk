@@ -1857,14 +1857,14 @@ fun CalendarRow(
     }
 
     val rowHeight: Dp = when (displayMode) {
-        0 -> 52.dp
-        1 -> (30 + maxItemsInRow * 16).dp.coerceAtLeast(52.dp)
-        2 -> {
-            val iconRows = (maxItemsInRow + 2) / 3
-            (30 + iconRows * 21).dp.coerceAtLeast(52.dp)
-        }
-        else -> 52.dp
+    0 -> 52.dp
+    1 -> (34 + maxItemsInRow * 16).dp.coerceAtLeast(56.dp)   // 加 4dp
+    2 -> {
+        val iconRows = (maxItemsInRow + 2) / 3
+        (30 + iconRows * 21).dp.coerceAtLeast(52.dp)
     }
+    else -> 52.dp
+}
 
     Row(
         Modifier.fillMaxWidth().height(rowHeight),
