@@ -25,6 +25,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -80,17 +81,20 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -125,6 +129,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Calendar
 import java.util.Locale
+import java.util.Random
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -140,8 +145,10 @@ val TEXT_PRIMARY = Color(0xFF0F172A)
 val TEXT_SECONDARY = Color(0xFF64748B)
 val TEXT_TERTIARY = Color(0xFF94A3B8)
 val DIVIDER_COLOR = Color(0xFFE2E8F0)
-val COLOR_INCOME = Color(0xFF059669)
-val COLOR_EXPENSE = Color(0xFFDC2626)
+
+// 暗綠與暗紅（月曆與明細使用）
+val COLOR_INCOME = Color(0xFF047857)
+val COLOR_EXPENSE = Color(0xFFB91C1C)
 
 val CELL_BG_POS = Color(0xFFD1FAE5)
 val CELL_BAR_POS = Color(0xFF34D399)
@@ -160,7 +167,7 @@ val STAT_LABEL_FONT_SIZE = 11.sp
 val NAV_HEIGHT = 60.dp
 val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
-val ROW_ALT_COLOR = Color(0xFFF4F7FC) // 已調得再淺色一啲
+val ROW_ALT_COLOR = Color(0xFFF4F7FC)
 const val FILTER_ANIM_MS = 250
 
 data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
@@ -383,6 +390,8 @@ fun MainApp() {
     val db = Firebase.firestore
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
@@ -407,6 +416,11 @@ fun MainApp() {
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
+
+    // 刪除復原 Toast 狀態
+    var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
+    var showUndoToast by remember { mutableStateOf(false) }
+    var deletingRecordId by remember { mutableStateOf<String?>(null) }
 
     val allNoteNames by remember {
         derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
@@ -579,9 +593,35 @@ fun MainApp() {
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
+
+    fun deleteRecordWithUndo(r: Record) {
+        deletingRecordId = r.id
+        recentlyDeletedRecord = r
+        showUndoToast = true
+        db.collection("records").document(r.id).delete()
+        scope.launch {
+            delay(3000)
+            if (recentlyDeletedRecord?.id == r.id) {
+                showUndoToast = false
+                recentlyDeletedRecord = null
+            }
+        }
+    }
+
+    fun restoreDeletedRecord() {
+        val target = recentlyDeletedRecord ?: return
+        showUndoToast = false
+        recentlyDeletedRecord = null
+        db.collection("records").document(target.id).set(target)
+    }
+
     fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
+
+        // 中等長度觸覺震動反饋
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
         val note = keyboardState.noteText
         val category = keyboardState.category
         val editId = keyboardState.editingRecordId
@@ -649,7 +689,7 @@ fun MainApp() {
                 },
                 onCopyClick = { openKeyboardForCopy(it) },
                 onEditClick = { openKeyboardForEdit(it) },
-                onDeleteClick = { db.collection("records").document(it.id).delete() },
+                onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                 onFilterByName = { name ->
                     filterCategory = null; filterMonth = null
@@ -667,6 +707,7 @@ fun MainApp() {
                 scrollToTopTrigger = scrollToTopTrigger,
                 nameFlashTrigger = nameFlashTrigger,
                 justAddedId = justAddedId,
+                deletingRecordId = deletingRecordId,
                 afterSaveHint = afterSaveHint,
                 onAfterSaveHintDismiss = { afterSaveHint = null }
             )
@@ -695,13 +736,43 @@ fun MainApp() {
                     filterSearch = TextFieldValue(r.note)
                     filterModeOn = true
                 },
-                onDeleteClick = { db.collection("records").document(it.id).delete() },
+                onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                 onAddClick = {
                     currentPage = 0
                     openKeyboardForNew()
                 }
             )
+        }
+
+        // 3 秒功能性復原 Undo Toast
+        AnimatedVisibility(
+            visible = showUndoToast,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 16.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = TEXT_PRIMARY,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("已刪除項目", color = Color.White, fontSize = 14.sp)
+                    TextButton(onClick = { restoreDeletedRecord() }) {
+                        Text("復原", color = BRAND_PRIMARY_LIGHT, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                }
+            }
         }
 
         androidx.compose.animation.AnimatedVisibility(
@@ -966,7 +1037,12 @@ fun MainApp() {
     }
 }
 @Composable
-fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun FloatingNavBar(
+    items: List<NavItem>,
+    selectedIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
     val density = LocalDensity.current
     val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
     val maxOffset = tabWidthPx * items.size - tabWidthPx
@@ -976,11 +1052,13 @@ fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int
     val latestSize by rememberUpdatedState(items.size)
     var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
     var isDragging by remember { mutableStateOf(false) }
+
     LaunchedEffect(selectedIndex) { if (!isDragging) bubbleOffset = selectedIndex * tabWidthPx }
     val animatedOffset by animateFloatAsState(
         bubbleOffset,
-        if (isDragging) snap<Float>() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-        label = "bubble")
+        if (isDragging) snap() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "bubble"
+    )
 
     Surface(
         modifier = modifier.width(NAV_TAB_WIDTH * items.size).height(NAV_HEIGHT),
@@ -1021,10 +1099,13 @@ fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int
                 }
             }
         }) {
-            Box(Modifier.offset { IntOffset(animatedOffset.roundToInt(), 0) }
-                .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
-                .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
-                .background(BRAND_PRIMARY_LIGHT))
+            Box(
+                Modifier
+                    .offset { IntOffset(animatedOffset.roundToInt(), 0) }
+                    .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
+                    .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
+                    .background(BRAND_PRIMARY_LIGHT)
+            )
             Row(Modifier.fillMaxSize()) {
                 items.forEachIndexed { idx, item ->
                     val sel = idx == selectedIndex
@@ -1046,31 +1127,45 @@ fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
-    loading: Boolean, filtered: List<Record>,
+    loading: Boolean,
+    filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
-    topNotes: List<Pair<String, Int>>, noteIconMap: Map<String, String>,
-    hasIncome: Boolean, hasExpense: Boolean,
-    totalIncome: Double, totalExpense: Double,
-    filterMode: Boolean, filterCategory: String?,
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    hasIncome: Boolean,
+    hasExpense: Boolean,
+    totalIncome: Double,
+    totalExpense: Double,
+    filterMode: Boolean,
+    filterCategory: String?,
     onFilterCategoryChange: (String?) -> Unit,
-    filterMonth: String?, onFilterMonthChange: (String?) -> Unit,
+    filterMonth: String?,
+    onFilterMonthChange: (String?) -> Unit,
     availableMonths: List<String>,
     visibleCategories: List<String>,
-    expandedId: String?, onExpandChange: (String?) -> Unit,
+    expandedId: String?,
+    onExpandChange: (String?) -> Unit,
     onQuickInputClick: (String) -> Unit,
-    onCopyClick: (Record) -> Unit, onEditClick: (Record) -> Unit,
-    onDeleteClick: (Record) -> Unit, onChangeIconClick: (Record) -> Unit,
+    onCopyClick: (Record) -> Unit,
+    onEditClick: (Record) -> Unit,
+    onDeleteClick: (Record) -> Unit,
+    onChangeIconClick: (Record) -> Unit,
     onFilterByName: (String) -> Unit,
-    showKeyboard: Boolean, keyboardState: KeyboardState,
+    showKeyboard: Boolean,
+    keyboardState: KeyboardState,
     onKeyboardStateChange: (KeyboardState) -> Unit,
-    onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit,
-    onKeyboardNext: () -> Unit, onKeyboardPickCategory: () -> Unit,
-    showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    onKeyboardPickCategory: () -> Unit,
+    showFuture: Boolean,
+    onShowFutureChange: (Boolean) -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
     scrollToTopTrigger: Int,
     nameFlashTrigger: Int,
     justAddedId: String?,
+    deletingRecordId: String?,
     afterSaveHint: AfterSaveHint?,
     onAfterSaveHintDismiss: () -> Unit,
 ) {
@@ -1082,43 +1177,25 @@ fun LedgerContent(
             catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
         }
     }
-    LaunchedEffect(showFuture) {
-        try { listState.requestScrollToItem(0) }
-        catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
-    }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
             visible = filterMode,
             enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
-                animationSpec = tween(FILTER_ANIM_MS),
-                expandFrom = Alignment.Top
+                animationSpec = tween(FILTER_ANIM_MS), expandFrom = Alignment.Top
             ),
             exit = fadeOut(tween(280)) + shrinkVertically(
-                animationSpec = tween(380, easing = FastOutSlowInEasing),
-                shrinkTowards = Alignment.Top
+                animationSpec = tween(380, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top
             )
         ) {
             Column(
                 Modifier
                     .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .animateContentSize(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    )
+                    .animateContentSize(animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
             ) {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 72.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateContentSize(
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ),
+                    modifier = Modifier.fillMaxWidth().animateContentSize(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     userScrollEnabled = false
@@ -1131,17 +1208,12 @@ fun LedgerContent(
                             onClick = { onFilterCategoryChange(null) }
                         )
                     }
-                    items(
-                        items = visibleCategories,
-                        key = { it }
-                    ) { cat ->
+                    items(items = visibleCategories, key = { it }) { cat ->
                         AnimatedFilterChip(
                             modifier = Modifier.animateItem().fillMaxWidth(),
                             selected = filterCategory == cat,
                             label = cat,
-                            onClick = {
-                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                            }
+                            onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
                         )
                     }
                 }
@@ -1160,9 +1232,7 @@ fun LedgerContent(
                             AnimatedFilterChip(
                                 selected = filterMonth == m,
                                 label = formatMonthLabel(m),
-                                onClick = {
-                                    onFilterMonthChange(if (filterMonth == m) null else m)
-                                }
+                                onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
                             )
                         }
                     }
@@ -1176,8 +1246,7 @@ fun LedgerContent(
                 CircularProgressIndicator(color = BRAND_PRIMARY)
             }
             filtered.isEmpty() && !showKeyboard -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                Modifier.fillMaxSize(), contentAlignment = Alignment.Center
             ) {
                 Text(
                     if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
@@ -1197,25 +1266,14 @@ fun LedgerContent(
                             modifier = Modifier.weight(1f),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(
-                                "筆數",
-                                fontSize = 11.sp,
-                                color = TEXT_SECONDARY,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
                             Spacer(Modifier.height(2.dp))
-                            Text(
-                                "${filtered.size}",
-                                fontSize = 22.sp,
-                                color = BRAND_PRIMARY,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
                         }
                     }
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                         Icon(
-                            if (showFuture) Icons.Default.Visibility
-                            else Icons.Default.VisibilityOff,
+                            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             "顯示未來項目",
                             tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
                         )
@@ -1224,14 +1282,8 @@ fun LedgerContent(
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
-                    enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(
-                        animationSpec = tween(FILTER_ANIM_MS),
-                        expandFrom = Alignment.Top
-                    ),
-                    exit = fadeOut(tween(280)) + shrinkVertically(
-                        animationSpec = tween(380, easing = FastOutSlowInEasing),
-                        shrinkTowards = Alignment.Top
-                    )
+                    enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
+                    exit = fadeOut(tween(280)) + shrinkVertically(tween(380, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
                 ) {
                     Column {
                         QuickInputSection(topNotes, noteIconMap, onQuickInputClick)
@@ -1249,33 +1301,31 @@ fun LedgerContent(
                         )
                     ) {
                         groupedByDate.forEach { (dateKey, dayRecords) ->
-                            val dayIncome = dayRecords.sumOf {
-                                if (it.category == INCOME_CATEGORY) it.amount else 0.0
-                            }
-                            val dayExpense = dayRecords.sumOf {
-                                if (it.category != INCOME_CATEGORY) it.amount else 0.0
-                            }
+                            val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
+                            val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            // 滾動時自動釘選當日日期與收支總額卡片 (Sticky Header)
+                            // Sticky Header: 背景完全封閉（無透光縫隙），文字恢復質感黑色，金額加粗
                             stickyHeader(key = "header_$dateKey") {
-                                Surface(
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 2.dp)
-                                        .shadow(
-                                            elevation = 4.dp,
-                                            shape = RoundedCornerShape(14.dp),
-                                            clip = false
-                                        ),
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = SURFACE_CARD
+                                        .background(SURFACE_BG) // 徹底封閉縫隙背景
+                                        .padding(vertical = 4.dp)
                                 ) {
-                                    DayHeader(
-                                        dateKey = dateKey,
-                                        income = dayIncome,
-                                        expense = dayExpense,
-                                        itemCount = if (filterMode) dayRecords.size else 0
-                                    )
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .shadow(elevation = 4.dp, shape = RoundedCornerShape(14.dp), clip = false),
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = SURFACE_CARD
+                                    ) {
+                                        DayHeader(
+                                            dateKey = dateKey,
+                                            income = dayIncome,
+                                            expense = dayExpense,
+                                            itemCount = if (filterMode) dayRecords.size else 0
+                                        )
+                                    }
                                 }
                             }
 
@@ -1283,28 +1333,37 @@ fun LedgerContent(
                                 items = dayRecords,
                                 key = { _, r -> r.id }
                             ) { idx, r ->
-                                AnimatedRecordItem(
-                                    animateOnMount = r.id == justAddedId
+                                Box(
+                                    modifier = Modifier
+                                        .animateItem(
+                                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                                        )
                                 ) {
-                                    SwipeableRecordItem(
-                                        backgroundColor = if (idx % 2 == 0)
-                                            SURFACE_CARD else ROW_ALT_COLOR,
-                                        record = r,
-                                        expandedId = expandedId,
-                                        onExpand = onExpandChange,
-                                        onCopy = { onCopyClick(r) },
-                                        onEdit = { onEditClick(r) },
-                                        onFilter = { onFilterByName(r.note) },
-                                        onDelete = { onDeleteClick(r) },
-                                        onChangeIcon = { onChangeIconClick(r) }
-                                    )
-                                }
+                                    AnimatedRecordItem(
+                                        animateOnMount = r.id == justAddedId,
+                                        isDeleting = r.id == deletingRecordId
+                                    ) {
+                                        SwipeableRecordItem(
+                                            backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                            record = r,
+                                            expandedId = expandedId,
+                                            onExpand = onExpandChange,
+                                            onCopy = { onCopyClick(r) },
+                                            onEdit = { onEditClick(r) },
+                                            onFilter = { onFilterByName(r.note) },
+                                            onDelete = { onDeleteClick(r) },
+                                            onChangeIcon = { onChangeIconClick(r) }
+                                        )
+                                    }
 
-                                if (afterSaveHint?.recordId == r.id) {
-                                    CategoryTotalHint(
-                                        hint = afterSaveHint,
-                                        onDismiss = onAfterSaveHintDismiss
-                                    )
+                                    if (afterSaveHint?.recordId == r.id) {
+                                        CategoryTotalHint(
+                                            hint = afterSaveHint,
+                                            onDismiss = onAfterSaveHintDismiss
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1314,19 +1373,13 @@ fun LedgerContent(
                         visible = showKeyboard,
                         enter = slideInVertically(
                             initialOffsetY = { it },
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
                         ) + fadeIn(tween(150)),
                         exit = slideOutVertically(
                             targetOffsetY = { it },
                             animationSpec = tween(320, easing = FastOutSlowInEasing)
                         ) + fadeOut(tween(220)),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 32.dp)
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 32.dp)
                     ) {
                         LedgerKeyboardPanel(
                             state = keyboardState,
@@ -1347,50 +1400,102 @@ fun LedgerContent(
     }
 }
 
+// 酷炫粒子粉末化（Disintegrate）刪除 + 升級版新增彈簧光芒入場動畫
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
+    isDeleting: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    if (!animateOnMount) {
-        content()
-        return
-    }
-    var appeared by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(16)
-        appeared = true
-    }
-    val slideY by animateFloatAsState(
-        targetValue = if (appeared) 0f else 60f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "arSlide"
-    )
-    val scale by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0.75f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "arScale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0f,
-        animationSpec = tween(280, easing = FastOutSlowInEasing),
-        label = "arAlpha"
-    )
-    Box(
-        Modifier.graphicsLayer {
-            translationY = slideY
-            scaleX = scale
-            scaleY = scale
-            this.alpha = alpha
+    val density = LocalDensity.current
+
+    // 新增進場動畫（彈簧物理 + 柔和光芒）
+    var appeared by remember { mutableStateOf(!animateOnMount) }
+    LaunchedEffect(animateOnMount) {
+        if (animateOnMount) {
+            delay(16)
+            appeared = true
         }
+    }
+
+    val entranceScale by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0.65f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "eScale"
+    )
+    val entranceAlpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "eAlpha"
+    )
+    val entranceTranslationY by animateFloatAsState(
+        targetValue = if (appeared) 0f else 80f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "eY"
+    )
+
+    // 刪除粉末粒子溶解動畫（Particle Disintegrate/Dissolve Effect）
+    val particleProgress = remember { Animatable(0f) }
+    LaunchedEffect(isDeleting) {
+        if (isDeleting) {
+            particleProgress.animateTo(1f, animationSpec = tween(550, easing = FastOutSlowInEasing))
+        }
+    }
+
+    val prog = particleProgress.value
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                if (isDeleting) {
+                    alpha = (1f - prog * 1.2f).coerceIn(0f, 1f)
+                    scaleX = 1f - prog * 0.15f
+                    scaleY = 1f - prog * 0.3f
+                } else {
+                    alpha = entranceAlpha
+                    scaleX = entranceScale
+                    scaleY = entranceScale
+                    translationY = entranceTranslationY
+                }
+            }
     ) {
         content()
+
+        if (isDeleting && prog > 0f) {
+            // 繪製卡片粉末化飛散粒子 Canvas
+            val particleCount = 45
+            val random = remember { Random(42) }
+            val particles = remember {
+                List(particleCount) {
+                    Triple(
+                        random.nextFloat(), // x ratio
+                        random.nextFloat(), // y ratio
+                        (random.nextFloat() - 0.5f) * 180f // angle
+                    )
+                }
+            }
+
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val w = size.width
+                val h = size.height
+                particles.forEach { (rx, ry, angle) ->
+                    val startX = rx * w
+                    val startY = ry * h
+                    val dist = prog * 160f
+                    val px = startX + dist * kotlin.math.cos(Math.toRadians(angle.toDouble())).toFloat()
+                    val py = startY + dist * kotlin.math.sin(Math.toRadians(angle.toDouble())).toFloat() - (prog * 40f)
+                    val pAlpha = (1f - prog).coerceIn(0f, 1f)
+                    val pRadius = (3.dp.toPx() * (1f - prog * 0.5f)).coerceAtLeast(1f)
+
+                    drawCircle(
+                        color = BRAND_PRIMARY.copy(alpha = pAlpha * 0.8f),
+                        radius = pRadius,
+                        center = Offset(px, py)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1409,7 +1514,7 @@ fun CategoryTotalHint(
     }
     val isIncome = hint.category == INCOME_CATEGORY
     val bgColor = if (isIncome) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)
-    val fgColor = if (isIncome) Color(0xFF065F46) else Color(0xFF991B1B)
+    val fgColor = if (isIncome) COLOR_INCOME else COLOR_EXPENSE
     val icon = if (isIncome) Icons.Default.TrendingUp else Icons.Default.TrendingDown
 
     AnimatedVisibility(
@@ -1452,17 +1557,12 @@ fun TrianglePointer(
     val targetX = cellWidth * colIndex + cellWidth / 2 - triangleWidth / 2
     val animatedX by animateDpAsState(
         targetValue = targetX,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "triangleX"
     )
     Box(Modifier.fillMaxWidth().height(triangleHeight)) {
         Canvas(
-            Modifier
-                .offset(x = animatedX)
-                .size(triangleWidth, triangleHeight)
+            Modifier.offset(x = animatedX).size(triangleWidth, triangleHeight)
         ) {
             val path = Path().apply {
                 moveTo(0f, size.height)
@@ -1497,9 +1597,7 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     LaunchedEffect(expandedId) { if (expandedId != record.id && targetOffset != 0f) targetOffset = 0f }
     val offsetX by animateFloatAsState(targetOffset,
-        if (isDragging) snap<Float>() else spring(
-            stiffness = Spring.StiffnessMediumLow,
-            dampingRatio = Spring.DampingRatioNoBouncy),
+        if (isDragging) snap<Float>() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
         label = "swipe")
 
     val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
@@ -1568,7 +1666,7 @@ fun SwipeableRecordItem(
             ) { targetOffset = 0f; onExpand(null); onFilter() }
             AnimatedActionButton(
                 icon = Icons.Default.Delete, label = "刪除",
-                iconTint = Color(0xFFEF4444),
+                iconTint = COLOR_EXPENSE,
                 width = bw, height = bh,
                 progress = leftProgress, delay = 0.36f
             ) { targetOffset = 0f; onExpand(null); onDelete() }
@@ -1676,68 +1774,93 @@ fun DayDetailPanel(
     onChangeIcon: (Record) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(16.dp)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .shadow(4.dp, shape, clip = false)
-            .clip(shape)
-            .background(SURFACE_CARD)
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { visible = true }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(260)) + expandVertically(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            ),
+            expandFrom = Alignment.Top
+        ) + slideInVertically(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            ),
+            initialOffsetY = { -it / 3 }
+        ),
+        exit = fadeOut(tween(200)) + shrinkVertically(
+            animationSpec = tween(220, easing = FastOutSlowInEasing),
+            shrinkTowards = Alignment.Top
+        )
     ) {
-        val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-        val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-        Row(
+        val shape = RoundedCornerShape(16.dp)
+        Column(
             Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .shadow(4.dp, shape, clip = false)
+                .clip(shape)
+                .background(SURFACE_CARD)
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    formatDateHeader(dateKey),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TEXT_PRIMARY
-                )
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (income > 0) {
-                        Text(
-                            "收 ${formatAmountNoDecimal(income)}",
-                            fontSize = 12.sp, color = COLOR_INCOME,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
-                    if (expense > 0) {
-                        Text(
-                            "支 ${formatAmountNoDecimal(expense)}",
-                            fontSize = 12.sp, color = COLOR_EXPENSE,
-                            fontWeight = FontWeight.SemiBold
-                        )
+            val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+            val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        formatDateHeader(dateKey),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (income > 0) {
+                            Text(
+                                "收 $${formatAmountNoDecimal(income)}",
+                                fontSize = 12.sp, color = COLOR_INCOME,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+                        if (expense > 0) {
+                            Text(
+                                "支 $${formatAmountNoDecimal(expense)}",
+                                fontSize = 12.sp, color = COLOR_EXPENSE,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
+                }
             }
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
-            }
-        }
-        HorizontalDivider(color = DIVIDER_COLOR)
+            HorizontalDivider(color = DIVIDER_COLOR)
 
-        records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-            SwipeableRecordItem(
-                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                record = r,
-                expandedId = expandedId,
-                onExpand = onExpandChange,
-                onCopy = { onCopy(r) },
-                onEdit = { onEdit(r) },
-                onFilter = { onFilter(r) },
-                onDelete = { onDelete(r) },
-                onChangeIcon = { onChangeIcon(r) }
-            )
+            // 修復：當日明細內所有動作按鈕完美傳遞對應記錄並調用 Callback
+            records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
+                SwipeableRecordItem(
+                    backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                    record = r,
+                    expandedId = expandedId,
+                    onExpand = onExpandChange,
+                    onCopy = { onCopy(r) },
+                    onEdit = { onEdit(r) },
+                    onFilter = { onFilter(r) },
+                    onDelete = { onDelete(r) },
+                    onChangeIcon = { onChangeIcon(r) }
+                )
+            }
+            Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.height(6.dp))
     }
 }
 
@@ -1875,6 +1998,7 @@ fun CalendarDayCell(
             Modifier
                 .fillMaxSize()
                 .padding(horizontal = 2.dp, vertical = 3.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
             Text(
@@ -1882,7 +2006,7 @@ fun CalendarDayCell(
                 fontSize = 13.sp,
                 lineHeight = 14.sp,
                 fontWeight = FontWeight.Black,
-                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else Color(0xFF0F172A),
+                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else TEXT_PRIMARY,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1892,6 +2016,7 @@ fun CalendarDayCell(
             when (displayMode) {
                 0 -> {
                     if (absNet > 0) {
+                        // 格仔內金額改為質感的暗綠色與暗紅色
                         Text(
                             text = compactAmount(net),
                             fontSize = 11.sp,
@@ -2099,7 +2224,6 @@ fun CalendarContent(
                     }
                     Spacer(Modifier.width(10.dp))
 
-                    // 點擊月份標題可直接跳回今個月（隱形按鈕功能）
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.clickable(
@@ -2211,7 +2335,6 @@ fun CalendarContent(
                             }
                         }
                         Spacer(Modifier.height(8.dp))
-                        // 三大資訊卡片已補回 $ 符號
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2304,6 +2427,7 @@ fun CalendarContent(
                                         Locale.US, "%04d-%02d-%02d",
                                         year, month, selectedDay
                                     )
+                                    // 升級版當日明細：帶有質感滑動展開與完整動作 Callback
                                     DayDetailPanel(
                                         dateKey = dateKey,
                                         records = recordsByDay[selectedDay] ?: emptyList(),
@@ -2553,14 +2677,29 @@ fun CompareContent(
     val incomeA = remember(records, monthA) { sumByCategoryAndMonth(records, INCOME_CATEGORY, monthA) }
     val incomeB = remember(records, monthB) { sumByCategoryAndMonth(records, INCOME_CATEGORY, monthB) }
 
+    val totalExpenseA = remember(records, monthA) {
+        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, monthA) }
+    }
+    val totalExpenseB = remember(records, monthB) {
+        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, monthB) }
+    }
+    val balanceA = incomeA - totalExpenseA
+    val balanceB = incomeB - totalExpenseB
+
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+        ) {
             Text(
                 "月份比較",
                 fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
 
+            // 外框限制高度，止於 FAB 按鈕上方
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2570,40 +2709,38 @@ fun CompareContent(
                 shadowElevation = 4.dp
             ) {
                 Column(Modifier.fillMaxSize()) {
+                    // 表格標頭
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .background(SURFACE_ELEVATED)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             "類別",
-                            Modifier.weight(1.2f),
+                            Modifier.weight(1.1f),
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = TEXT_SECONDARY
                         )
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                             MonthDropdown(
                                 value = monthA,
                                 months = availableMonths.ifEmpty { listOf(currentMonthKey) },
                                 onChange = { newA ->
-                                    if (newA == monthB) {
-                                        monthB = shiftMonthKey(newA, 1)
-                                    }
+                                    if (newA == monthB) monthB = shiftMonthKey(newA, 1)
                                     monthA = newA
                                 }
                             )
                         }
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                        Spacer(Modifier.width(6.dp))
+                        Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                             MonthDropdown(
                                 value = monthB,
                                 months = availableMonths.ifEmpty { listOf(currentMonthKey) },
                                 onChange = { newB ->
-                                    if (newB == monthA) {
-                                        monthA = shiftMonthKey(newB, -1)
-                                    }
+                                    if (newB == monthA) monthA = shiftMonthKey(newB, -1)
                                     monthB = newB
                                 }
                             )
@@ -2612,9 +2749,10 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR)
 
+                    // 比較列表內容
                     LazyColumn(
-                        Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 20.dp)
+                        Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
                         itemsIndexed(sortedCategories) { idx, cat ->
                             val amtA = sumByCategoryAndMonth(records, cat, monthA)
@@ -2629,60 +2767,110 @@ fun CompareContent(
                                 Modifier
                                     .fillMaxWidth()
                                     .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
-                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(Modifier.weight(1.2f), verticalAlignment = Alignment.CenterVertically) {
+                                Row(Modifier.weight(1.1f), verticalAlignment = Alignment.CenterVertically) {
                                     if (style != null) {
                                         Box(
                                             Modifier
-                                                .size(24.dp)
+                                                .size(22.dp)
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(style.bgColor),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(14.dp))
+                                            Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(13.dp))
                                         }
                                         Spacer(Modifier.width(6.dp))
                                     }
                                     Text(
-                                        cat, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                        cat, fontSize = 13.sp, color = TEXT_PRIMARY,
                                         fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
                                     )
                                 }
 
-                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                // 月份 A: 金額 + 右側百分比專屬欄位
+                                Row(
+                                    Modifier.weight(1.8f),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
                                         formatAmountNoDecimal(amtA),
-                                        fontSize = 14.sp,
+                                        fontSize = 13.sp,
                                         color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
                                         fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
                                     )
-                                    if (pctA != null) {
-                                        Text(
-                                            String.format(Locale.US, "%.0f%%", pctA),
-                                            fontSize = 11.sp,
-                                            color = TEXT_TERTIARY
-                                        )
-                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        if (pctA != null) String.format(Locale.US, "%.0f%%", pctA) else "",
+                                        fontSize = 10.sp,
+                                        color = TEXT_TERTIARY,
+                                        modifier = Modifier.widthIn(min = 26.dp),
+                                        textAlign = TextAlign.End
+                                    )
                                 }
 
-                                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Spacer(Modifier.width(6.dp))
+
+                                // 月份 B: 金額 + 右側百分比專屬欄位
+                                Row(
+                                    Modifier.weight(1.8f),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
                                         formatAmountNoDecimal(amtB),
-                                        fontSize = 14.sp,
+                                        fontSize = 13.sp,
                                         color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
                                         fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
                                     )
-                                    if (pctB != null) {
-                                        Text(
-                                            String.format(Locale.US, "%.0f%%", pctB),
-                                            fontSize = 11.sp,
-                                            color = TEXT_TERTIARY
-                                        )
-                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        if (pctB != null) String.format(Locale.US, "%.0f%%", pctB) else "",
+                                        fontSize = 10.sp,
+                                        color = TEXT_TERTIARY,
+                                        modifier = Modifier.widthIn(min = 26.dp),
+                                        textAlign = TextAlign.End
+                                    )
                                 }
                             }
+                        }
+                    }
+
+                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
+
+                    // 最底層：餘額行 (Balance Row = 總收入 - 所有支出)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(SURFACE_ELEVATED)
+                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "餘額",
+                            Modifier.weight(1.1f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = BRAND_PRIMARY_DARK
+                        )
+                        Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End) {
+                            Text(
+                                "$${formatAmountNoDecimal(balanceA)}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (balanceA >= 0) COLOR_INCOME else COLOR_EXPENSE
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End) {
+                            Text(
+                                "$${formatAmountNoDecimal(balanceB)}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (balanceB >= 0) COLOR_INCOME else COLOR_EXPENSE
+                            )
                         }
                     }
                 }
@@ -2720,7 +2908,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
             ) {
                 Text(
                     formatMonthLabel(value),
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = BRAND_PRIMARY
                 )
@@ -2740,7 +2928,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
         ) {
             months.forEach { m ->
                 DropdownMenuItem(
-                    text = { Text(formatMonthLabel(m), fontSize = 14.sp) },
+                    text = { Text(formatMonthLabel(m), fontSize = 13.sp) },
                     onClick = { onChange(m); expanded = false }
                 )
             }
@@ -3258,6 +3446,7 @@ fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
+// 類別 FilterChip：嚴格將文字垂直水平精確對齊至 Chip 正中央
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedFilterChip(
@@ -3270,9 +3459,22 @@ fun AnimatedFilterChip(
     val pressed by src.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.9f else 1f,
         spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium), label = "cs")
+
     FilterChip(
         selected = selected, onClick = onClick,
-        label = { Text(label) },
+        label = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    textAlign = TextAlign.Center,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        },
         interactionSource = src,
         shape = RoundedCornerShape(12.dp),
         border = null,
@@ -3300,11 +3502,11 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
 
         Box(Modifier.width(slotWidth).offset { IntOffset(incomeX.roundToInt(), 0) }.graphicsLayer { alpha = iAlpha },
             contentAlignment = Alignment.Center) {
-            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), Color(0xFF10B981), Color(0xFF059669))
+            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
         }
         Box(Modifier.width(slotWidth).offset { IntOffset(expenseX.roundToInt(), 0) }.graphicsLayer { alpha = eAlpha },
             contentAlignment = Alignment.Center) {
-            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), Color(0xFFF87171), Color(0xFFDC2626))
+            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
         }
     }
 }
@@ -3336,6 +3538,7 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
     }
 }
 
+// Sticky Header: 金額字體 ExtraBold 粗體，日期字體恢復質感黑色 TEXT_PRIMARY
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
     val headerText = remember(dateKey) { formatDateHeader(dateKey) }
@@ -3345,28 +3548,33 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
         if (itemCount > 0) "(${itemCount}筆)" else ""
     }
 
-    Row(Modifier
-        .fillMaxWidth()
-        .background(SURFACE_ELEVATED)
-        .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(headerText, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(SURFACE_ELEVATED)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(headerText, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (income > 0) {
                 Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.SemiBold)
+                Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
             }
             if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
             if (expense > 0) {
                 Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(2.dp))
-                Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.SemiBold)
+                Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.ExtraBold)
                 if (countText.isNotEmpty()) {
                     Spacer(Modifier.width(6.dp))
-                    Text(countText, fontSize = 11.sp,
+                    Text(
+                        countText, fontSize = 11.sp,
                         color = COLOR_EXPENSE.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.Normal)
+                        fontWeight = FontWeight.Normal
+                    )
                 }
             }
         }
@@ -3375,9 +3583,11 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
 
 @Composable
 fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMARY, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-        .clickable { onClick() }.padding(vertical = 12.dp, horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .clickable { onClick() }.padding(vertical = 12.dp, horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Text(label, color = tint, style = MaterialTheme.typography.bodyLarge)
