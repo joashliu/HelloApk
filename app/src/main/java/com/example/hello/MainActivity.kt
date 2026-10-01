@@ -2359,12 +2359,15 @@ fun FadedText(
 
     Text(
         text = text,
-        fontSize = fontSize,
-        fontWeight = fontWeight,
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Clip,
-        style = LocalTextStyle.current.copy(brush = brush),
+        style = TextStyle(
+            brush = brush,
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            lineHeight = 11.sp
+        ),
         onTextLayout = { result ->
             if (result.lineCount > 0) {
                 textWidthPx = result.getLineRight(0) - result.getLineLeft(0)
@@ -2428,7 +2431,8 @@ fun CalendarDayCell(
                 indication = null
             ) { onClick() }
     ) {
-        if (barRatio > 0.001f) {
+        // 直方條只喺金額模式（displayMode == 0）顯示
+        if (displayMode == 0 && barRatio > 0.001f) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -2441,44 +2445,44 @@ fun CalendarDayCell(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(horizontal = 2.dp, vertical = 3.dp)
+                .padding(horizontal = 2.dp, vertical = 3.dp),
+            verticalArrangement = Arrangement.Top
         ) {
             Text(
                 "$day",
                 fontSize = 13.sp,
+                lineHeight = 14.sp,
                 fontWeight = FontWeight.Black,
                 color = if (isToday || isSelected) BRAND_PRIMARY_DARK else Color(0xFF0F172A),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(3.dp))
 
             when (displayMode) {
                 0 -> {
-                    // 金額模式：金額貼近日期（Spacer 已加大至 4dp，比原本高）
+                    // 金額模式：金額緊貼日期下方，用顯式 lineHeight 避免被裁切
                     if (absNet > 0) {
                         Text(
                             text = compactAmount(net),
                             fontSize = 11.sp,
+                            lineHeight = 13.sp,
                             color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
                             fontWeight = FontWeight.Black,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Clip,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    Spacer(Modifier.weight(1f))
                 }
                 1 -> {
-                    // 項目模式：每行固定 16dp 高，FadedText 同金額用相同 lineHeight
-                    // 確保 baseline 一致、同一行對齊
-                    val sorted = records.sortedBy { it.timestamp }
-                    sorted.forEach { r ->
+                    // 項目模式：每行固定高度，項目同金額 baseline 對齊（同一條水平線）
+                    records.sortedBy { it.timestamp }.forEach { r ->
                         Row(
-                            Modifier.fillMaxWidth().height(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            Modifier.fillMaxWidth().height(16.dp)
                         ) {
                             FadedText(
                                 text = r.note.ifBlank { "(無)" },
@@ -2486,24 +2490,26 @@ fun CalendarDayCell(
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Medium,
                                 fadeWidth = 6.dp,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .alignByBaseline()
                             )
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 text = if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
                                        else compactAmount(-r.amount),
                                 fontSize = 9.sp,
+                                lineHeight = 11.sp,
                                 color = amountColor(r.category),
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 softWrap = false,
-                                lineHeight = 11.sp
+                                modifier = Modifier.alignByBaseline()
                             )
                         }
                     }
-                    // 最底項目同格仔底邊之間留少少 padding
+                    // 最底項目同格仔底之間留少少 padding
                     Spacer(Modifier.height(4.dp))
-                    Spacer(Modifier.weight(1f))
                 }
                 2 -> {
                     val rows = records.chunked(3)
@@ -2525,7 +2531,6 @@ fun CalendarDayCell(
                         }
                         Spacer(Modifier.height(2.dp))
                     }
-                    Spacer(Modifier.weight(1f))
                 }
             }
         }
