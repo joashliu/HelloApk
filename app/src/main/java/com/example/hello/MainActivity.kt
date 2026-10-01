@@ -2716,45 +2716,27 @@ fun CompareValueCell(
         else -> String.format(Locale.US, "%.0f%%", pct)
     }
 
+    // 收入冇括號，支出有括號；用單一 Text 顯示，靠右對齊
+    val amtDisplay = if (isIncome) formattedAmt else "($formattedAmt)"
+
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End
-        ) {
-            if (!isIncome) {
-                Text(
-                    text = "(",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = amtColor
-                )
-            }
-
-            Text(
-                text = formattedAmt,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = amtColor,
-                textAlign = TextAlign.End
-            )
-
-            Text(
-                text = ")",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = amtColor,
-                modifier = Modifier.graphicsLayer {
-                    alpha = if (!isIncome) 1f else 0f
-                }
-            )
-        }
-
+        // 金額：撐滿剩餘空間，永遠靠右貼齊
+        Text(
+            text = amtDisplay,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = amtColor,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.weight(1f)
+        )
         Spacer(Modifier.width(6.dp))
-
+        // 百分比：固定寬度，靠右貼齊
         Box(
             modifier = Modifier.width(42.dp),
             contentAlignment = Alignment.CenterEnd
@@ -2786,7 +2768,6 @@ fun CompareContent(
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
-    // 排序基準：以 monthB 支出由高至低，收入永遠排第一
     val sortedCategories = remember(records, selectedMonthB) {
         val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
             sumByCategoryAndMonth(records, cat, selectedMonthB)
@@ -2814,7 +2795,6 @@ fun CompareContent(
     val balanceA = incomeA - totalExpenseA
     val balanceB = incomeB - totalExpenseB
 
-    // ===== 迷你直方圖：當前年份 1 月至當前月份 =====
     val nowCal = remember { Calendar.getInstance() }
     val currentYear = remember { nowCal.get(Calendar.YEAR) }
     val currentMonthNum = remember { nowCal.get(Calendar.MONTH) + 1 }
@@ -2870,7 +2850,6 @@ fun CompareContent(
                             fontSize = 15.sp,
                             color = TEXT_SECONDARY
                         )
-                        // 直方圖欄（空標題）
                         Spacer(Modifier.weight(0.75f))
 
                         Row(
@@ -2910,101 +2889,112 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR)
 
-                    if (displayCategories.isEmpty()) {
-                        Box(
-                            Modifier.weight(1f).fillMaxWidth(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
-                        }
-                    } else {
-                        // 用 LazyColumn + animateItem 令行有流暢位置移動動畫
-                        LazyColumn(
-                            Modifier.weight(1f).fillMaxWidth()
-                        ) {
-                            itemsIndexed(
-                                items = displayCategories,
-                                key = { _, cat -> cat }
-                            ) { idx, cat ->
-                                val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
-                                val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
-                                val style = CATEGORY_STYLES[cat]
-                                val isIncome = cat == INCOME_CATEGORY
+                    // ===== 表格主體：每行均分剩餘頁高 =====
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (displayCategories.isEmpty()) {
+                            Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
+                            }
+                        } else {
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
+                                val rowCount = displayCategories.size
+                                val calculatedHeight = maxHeight / rowCount
+                                // 最低 44dp，避免太多類別時擠爆
+                                val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
 
-                                val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) (amtA / incomeA * 100.0) else null
-                                val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) (amtB / incomeB * 100.0) else null
-
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .animateItem(
-                                            fadeInSpec = tween(220, easing = FastOutSlowInEasing),
-                                            fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
-                                            placementSpec = spring(
-                                                stiffness = Spring.StiffnessMediumLow,
-                                                dampingRatio = Spring.DampingRatioLowBouncy
-                                            )
-                                        )
-                                        .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                LazyColumn(
+                                    Modifier.fillMaxSize(),
+                                    userScrollEnabled = false
                                 ) {
-                                    // 類別名稱
-                                    Row(Modifier.weight(1.0f), verticalAlignment = Alignment.CenterVertically) {
-                                        if (style != null) {
+                                    itemsIndexed(
+                                        items = displayCategories,
+                                        key = { _, cat -> cat }
+                                    ) { idx, cat ->
+                                        val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
+                                        val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+                                        val style = CATEGORY_STYLES[cat]
+                                        val isIncome = cat == INCOME_CATEGORY
+
+                                        val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) (amtA / incomeA * 100.0) else null
+                                        val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) (amtB / incomeB * 100.0) else null
+
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .height(rowHeight)
+                                                .animateItem(
+                                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                                    fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
+                                                    placementSpec = spring(
+                                                        stiffness = Spring.StiffnessMediumLow,
+                                                        dampingRatio = Spring.DampingRatioLowBouncy
+                                                    )
+                                                )
+                                                .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
+                                                .padding(horizontal = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // 類別名稱
+                                            Row(Modifier.weight(1.0f), verticalAlignment = Alignment.CenterVertically) {
+                                                if (style != null) {
+                                                    Box(
+                                                        Modifier
+                                                            .size(26.dp)
+                                                            .clip(RoundedCornerShape(7.dp))
+                                                            .background(style.bgColor),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
+                                                    }
+                                                    Spacer(Modifier.width(7.dp))
+                                                }
+                                                Text(
+                                                    cat, fontSize = 15.sp, color = TEXT_PRIMARY,
+                                                    fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
+                                                )
+                                            }
+
+                                            // 迷你直方圖
                                             Box(
                                                 Modifier
-                                                    .size(26.dp)
-                                                    .clip(RoundedCornerShape(7.dp))
-                                                    .background(style.bgColor),
+                                                    .weight(0.75f)
+                                                    .fillMaxHeight()
+                                                    .padding(start = 6.dp, end = 12.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
+                                                if (!isIncome) {
+                                                    val values = histogramData[cat].orEmpty()
+                                                    val histHeight = (rowHeight - 16.dp).coerceAtLeast(20.dp)
+                                                    MiniHistogram(
+                                                        values = values,
+                                                        color = style?.fgColor ?: TEXT_TERTIARY,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(histHeight)
+                                                    )
+                                                }
                                             }
-                                            Spacer(Modifier.width(7.dp))
-                                        }
-                                        Text(
-                                            cat, fontSize = 15.sp, color = TEXT_PRIMARY,
-                                            fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
-                                        )
-                                    }
 
-                                    // 迷你直方圖（只喺支出類別顯示；由 1 月到當前月份）
-                                    Box(
-                                        Modifier
-                                            .weight(0.75f)
-                                            .padding(start = 6.dp, end = 12.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (!isIncome) {
-                                            val values = histogramData[cat].orEmpty()
-                                            MiniHistogram(
-                                                values = values,
-                                                color = style?.fgColor ?: TEXT_TERTIARY,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(30.dp)
+                                            CompareValueCell(
+                                                amount = amtA,
+                                                isIncome = isIncome,
+                                                pct = pctA,
+                                                modifier = Modifier.weight(1.55f)
+                                            )
+
+                                            Spacer(Modifier.width(6.dp))
+
+                                            CompareValueCell(
+                                                amount = amtB,
+                                                isIncome = isIncome,
+                                                pct = pctB,
+                                                modifier = Modifier.weight(1.55f)
                                             )
                                         }
                                     }
-
-                                    // 月份 A 值
-                                    CompareValueCell(
-                                        amount = amtA,
-                                        isIncome = isIncome,
-                                        pct = pctA,
-                                        modifier = Modifier.weight(1.55f)
-                                    )
-
-                                    Spacer(Modifier.width(6.dp))
-
-                                    // 月份 B 值
-                                    CompareValueCell(
-                                        amount = amtB,
-                                        isIncome = isIncome,
-                                        pct = pctB,
-                                        modifier = Modifier.weight(1.55f)
-                                    )
                                 }
                             }
                         }
@@ -3012,7 +3002,7 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
 
-                    // 餘額行
+                    // ===== 餘額行 =====
                     Row(
                         Modifier
                             .fillMaxWidth()
