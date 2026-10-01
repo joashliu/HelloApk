@@ -144,7 +144,6 @@ val TEXT_SECONDARY = Color(0xFF64748B)
 val TEXT_TERTIARY = Color(0xFF94A3B8)
 val DIVIDER_COLOR = Color(0xFFE2E8F0)
 
-// 暗綠與暗紅
 val COLOR_INCOME = Color(0xFF047857)
 val COLOR_EXPENSE = Color(0xFFB91C1C)
 
@@ -390,6 +389,9 @@ fun MainApp() {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    // 持久化月份選擇（SharedPreferences）
+    val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
+
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
@@ -415,9 +417,25 @@ fun MainApp() {
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
 
-    val initialMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
-    var compareMonthA by rememberSaveable { mutableStateOf(initialMonthKey) }
-    var compareMonthB by rememberSaveable { mutableStateOf(shiftMonthKey(initialMonthKey, -1)) }
+    // ===== 比較頁月份：從 prefs 讀取，並持久化 =====
+    val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+    val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
+
+    var compareMonthA by remember {
+        mutableStateOf(prefs.getString("compare_month_a", defaultMonthA) ?: defaultMonthA)
+    }
+    var compareMonthB by remember {
+        mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB)
+    }
+
+    fun setCompareMonthA(v: String) {
+        compareMonthA = v
+        prefs.edit().putString("compare_month_a", v).apply()
+    }
+    fun setCompareMonthB(v: String) {
+        compareMonthB = v
+        prefs.edit().putString("compare_month_b", v).apply()
+    }
 
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
@@ -715,9 +733,9 @@ fun MainApp() {
                 records = records,
                 availableMonths = availableMonths,
                 selectedMonthA = compareMonthA,
-                onMonthAChange = { compareMonthA = it },
+                onMonthAChange = { setCompareMonthA(it) },
                 selectedMonthB = compareMonthB,
-                onMonthBChange = { compareMonthB = it },
+                onMonthBChange = { setCompareMonthB(it) },
                 onAddClick = {
                     currentPage = 0
                     openKeyboardForNew()
@@ -2755,6 +2773,7 @@ fun CompareValueCell(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CompareContent(
     records: List<Record>,
@@ -2767,6 +2786,7 @@ fun CompareContent(
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
+    // 排序基準：以 monthB 支出由高至低，收入永遠排第一
     val sortedCategories = remember(records, selectedMonthB) {
         val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
             sumByCategoryAndMonth(records, cat, selectedMonthB)
@@ -2794,6 +2814,7 @@ fun CompareContent(
     val balanceA = incomeA - totalExpenseA
     val balanceB = incomeB - totalExpenseB
 
+    // ===== 迷你直方圖：當前年份 1 月至當前月份 =====
     val nowCal = remember { Calendar.getInstance() }
     val currentYear = remember { nowCal.get(Calendar.YEAR) }
     val currentMonthNum = remember { nowCal.get(Calendar.MONTH) + 1 }
@@ -2849,10 +2870,11 @@ fun CompareContent(
                             fontSize = 15.sp,
                             color = TEXT_SECONDARY
                         )
-                        Spacer(Modifier.weight(0.7f))
+                        // 直方圖欄（空標題）
+                        Spacer(Modifier.weight(0.75f))
 
                         Row(
-                            Modifier.weight(1.6f),
+                            Modifier.weight(1.55f),
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -2869,7 +2891,7 @@ fun CompareContent(
                         }
                         Spacer(Modifier.width(6.dp))
                         Row(
-                            Modifier.weight(1.6f),
+                            Modifier.weight(1.55f),
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -2896,10 +2918,14 @@ fun CompareContent(
                             Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
                         }
                     } else {
-                        Column(
+                        // 用 LazyColumn + animateItem 令行有流暢位置移動動畫
+                        LazyColumn(
                             Modifier.weight(1f).fillMaxWidth()
                         ) {
-                            displayCategories.forEachIndexed { idx, cat ->
+                            itemsIndexed(
+                                items = displayCategories,
+                                key = { _, cat -> cat }
+                            ) { idx, cat ->
                                 val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
                                 val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
                                 val style = CATEGORY_STYLES[cat]
@@ -2910,13 +2936,20 @@ fun CompareContent(
 
                                 Row(
                                     Modifier
-                                        .weight(1f)
                                         .fillMaxWidth()
+                                        .animateItem(
+                                            fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                            fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
+                                            placementSpec = spring(
+                                                stiffness = Spring.StiffnessMediumLow,
+                                                dampingRatio = Spring.DampingRatioLowBouncy
+                                            )
+                                        )
                                         .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
-                                        .padding(horizontal = 10.dp),
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // 類別名稱（加大）
+                                    // 類別名稱
                                     Row(Modifier.weight(1.0f), verticalAlignment = Alignment.CenterVertically) {
                                         if (style != null) {
                                             Box(
@@ -2936,12 +2969,11 @@ fun CompareContent(
                                         )
                                     }
 
-                                    // 迷你直方圖
+                                    // 迷你直方圖（只喺支出類別顯示；由 1 月到當前月份）
                                     Box(
                                         Modifier
-                                            .weight(0.7f)
-                                            .fillMaxHeight()
-                                            .padding(horizontal = 4.dp),
+                                            .weight(0.75f)
+                                            .padding(start = 6.dp, end = 12.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (!isIncome) {
@@ -2956,20 +2988,22 @@ fun CompareContent(
                                         }
                                     }
 
+                                    // 月份 A 值
                                     CompareValueCell(
                                         amount = amtA,
                                         isIncome = isIncome,
                                         pct = pctA,
-                                        modifier = Modifier.weight(1.6f)
+                                        modifier = Modifier.weight(1.55f)
                                     )
 
                                     Spacer(Modifier.width(6.dp))
 
+                                    // 月份 B 值
                                     CompareValueCell(
                                         amount = amtB,
                                         isIncome = isIncome,
                                         pct = pctB,
-                                        modifier = Modifier.weight(1.6f)
+                                        modifier = Modifier.weight(1.55f)
                                     )
                                 }
                             }
@@ -2978,7 +3012,7 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
 
-                    // 餘額行（加大）
+                    // 餘額行
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -2993,13 +3027,13 @@ fun CompareContent(
                             fontSize = 16.sp,
                             color = BRAND_PRIMARY_DARK
                         )
-                        Spacer(Modifier.weight(0.7f))
+                        Spacer(Modifier.weight(0.75f))
 
                         CompareValueCell(
                             amount = balanceA,
                             isIncome = balanceA >= 0,
                             pct = null,
-                            modifier = Modifier.weight(1.6f)
+                            modifier = Modifier.weight(1.55f)
                         )
 
                         Spacer(Modifier.width(6.dp))
@@ -3008,7 +3042,7 @@ fun CompareContent(
                             amount = balanceB,
                             isIncome = balanceB >= 0,
                             pct = null,
-                            modifier = Modifier.weight(1.6f)
+                            modifier = Modifier.weight(1.55f)
                         )
                     }
                 }
@@ -3073,6 +3107,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
         }
     }
 }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
