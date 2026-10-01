@@ -2453,10 +2453,11 @@ fun CalendarDayCell(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(4.dp))
 
             when (displayMode) {
                 0 -> {
+                    // 金額模式：金額貼近日期（Spacer 已加大至 4dp，比原本高）
                     if (absNet > 0) {
                         Text(
                             text = compactAmount(net),
@@ -2472,7 +2473,10 @@ fun CalendarDayCell(
                     Spacer(Modifier.weight(1f))
                 }
                 1 -> {
-                    records.sortedBy { it.timestamp }.forEach { r ->
+                    // 項目模式：每行固定 16dp 高，FadedText 同金額用相同 lineHeight
+                    // 確保 baseline 一致、同一行對齊
+                    val sorted = records.sortedBy { it.timestamp }
+                    sorted.forEach { r ->
                         Row(
                             Modifier.fillMaxWidth().height(16.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -2485,17 +2489,21 @@ fun CalendarDayCell(
                                 fadeWidth = 6.dp,
                                 modifier = Modifier.weight(1f)
                             )
-                            Spacer(Modifier.width(3.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text(
-                                if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
-                                else compactAmount(-r.amount),
+                                text = if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
+                                       else compactAmount(-r.amount),
                                 fontSize = 9.sp,
                                 color = amountColor(r.category),
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false,
+                                lineHeight = 11.sp
                             )
                         }
                     }
+                    // 最底項目同格仔底邊之間留少少 padding
+                    Spacer(Modifier.height(4.dp))
                     Spacer(Modifier.weight(1f))
                 }
                 2 -> {
