@@ -2358,14 +2358,12 @@ fun FadedText(
 
     Text(
         text = text,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Clip,
-        style = TextStyle(
-            brush = brush,
-            fontSize = fontSize,
-            fontWeight = fontWeight
-        ),
+        style = LocalTextStyle.current.copy(brush = brush),
         onTextLayout = { result ->
             if (result.lineCount > 0) {
                 textWidthPx = result.getLineRight(0) - result.getLineLeft(0)
