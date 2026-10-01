@@ -24,8 +24,8 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -2648,6 +2648,77 @@ fun FadedText(
     )
 }
 
+// 比較頁面專用單元格：實現金額數字與百分比的精確對齊（括弧不干擾數字靠右對齊）
+@Composable
+fun CompareValueCell(
+    amount: Double,
+    isIncome: Boolean,
+    pct: Double?,
+    modifier: Modifier = Modifier
+) {
+    val formattedAmt = formatAmountNoDecimal(abs(amount))
+    val amtColor = if (isIncome) COLOR_INCOME else COLOR_EXPENSE
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // 金額區塊（左括弧 + 數字 + 右括弧佔位）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End
+        ) {
+            if (!isIncome) {
+                Text(
+                    text = "(",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = amtColor
+                )
+            }
+
+            Text(
+                text = formattedAmt,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = amtColor,
+                textAlign = TextAlign.End
+            )
+
+            // 右括弧：支出時顯示，收入時改為透明佔位，確保數字與右邊界的距離百分之百一致
+            Text(
+                text = ")",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = amtColor,
+                modifier = Modifier.graphicsLayer {
+                    alpha = if (!isIncome) 1f else 0f
+                }
+            )
+        }
+
+        Spacer(Modifier.width(4.dp))
+
+        // 百分比固定寬度欄位（固定 34.dp，無百分比時依然佔用空間，確保前方的數字完全對齊）
+        Box(
+            modifier = Modifier.width(34.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            if (pct != null) {
+                Text(
+                    text = String.format(Locale.US, "%.0f%%", pct),
+                    fontSize = 10.sp,
+                    color = TEXT_TERTIARY,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.End,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun CompareContent(
     records: List<Record>,
@@ -2667,7 +2738,6 @@ fun CompareContent(
         listOf(INCOME_CATEGORY) + expenses
     }
 
-    // 當兩個選取月份在該類別的金額皆為 0 時，自動隱藏該行
     val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB) {
         sortedCategories.filter { cat ->
             val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
@@ -2754,7 +2824,6 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR)
 
-                    // 比較列表內容：動態權重 (weight = 1f) 均分整體剩餘高度，剛好填滿整個頁面
                     if (displayCategories.isEmpty()) {
                         Box(
                             Modifier.weight(1f).fillMaxWidth(),
@@ -2777,7 +2846,7 @@ fun CompareContent(
 
                                 Row(
                                     Modifier
-                                        .weight(1f) // 動態均分垂直空間
+                                        .weight(1f)
                                         .fillMaxWidth()
                                         .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
                                         .padding(horizontal = 10.dp),
@@ -2802,49 +2871,23 @@ fun CompareContent(
                                         )
                                     }
 
-                                    Row(
-                                        Modifier.weight(1.8f),
-                                        horizontalArrangement = Arrangement.End,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            formatAmountNoDecimal(amtA),
-                                            fontSize = 13.sp,
-                                            color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
-                                            fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(
-                                            if (pctA != null) String.format(Locale.US, "%.0f%%", pctA) else "",
-                                            fontSize = 10.sp,
-                                            color = TEXT_TERTIARY,
-                                            modifier = Modifier.widthIn(min = 26.dp),
-                                            textAlign = TextAlign.End
-                                        )
-                                    }
+                                    // 月份 A 數值與對齊單元格
+                                    CompareValueCell(
+                                        amount = amtA,
+                                        isIncome = isIncome,
+                                        pct = pctA,
+                                        modifier = Modifier.weight(1.8f)
+                                    )
 
                                     Spacer(Modifier.width(6.dp))
 
-                                    Row(
-                                        Modifier.weight(1.8f),
-                                        horizontalArrangement = Arrangement.End,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            formatAmountNoDecimal(amtB),
-                                            fontSize = 13.sp,
-                                            color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
-                                            fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(
-                                            if (pctB != null) String.format(Locale.US, "%.0f%%", pctB) else "",
-                                            fontSize = 10.sp,
-                                            color = TEXT_TERTIARY,
-                                            modifier = Modifier.widthIn(min = 26.dp),
-                                            textAlign = TextAlign.End
-                                        )
-                                    }
+                                    // 月份 B 數值與對齊單元格
+                                    CompareValueCell(
+                                        amount = amtB,
+                                        isIncome = isIncome,
+                                        pct = pctB,
+                                        modifier = Modifier.weight(1.8f)
+                                    )
                                 }
                             }
                         }
@@ -2852,7 +2895,7 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
 
-                    // 餘額欄位：已移除 $ 符號
+                    // 底層餘額行：同樣套用 CompareValueCell 保持與上方金額百分之百精確對齊
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -2867,23 +2910,22 @@ fun CompareContent(
                             fontSize = 14.sp,
                             color = BRAND_PRIMARY_DARK
                         )
-                        Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End) {
-                            Text(
-                                formatAmountNoDecimal(balanceA),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (balanceA >= 0) COLOR_INCOME else COLOR_EXPENSE
-                            )
-                        }
+
+                        CompareValueCell(
+                            amount = balanceA,
+                            isIncome = balanceA >= 0,
+                            pct = null,
+                            modifier = Modifier.weight(1.8f)
+                        )
+
                         Spacer(Modifier.width(6.dp))
-                        Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End) {
-                            Text(
-                                formatAmountNoDecimal(balanceB),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (balanceB >= 0) COLOR_INCOME else COLOR_EXPENSE
-                            )
-                        }
+
+                        CompareValueCell(
+                            amount = balanceB,
+                            isIncome = balanceB >= 0,
+                            pct = null,
+                            modifier = Modifier.weight(1.8f)
+                        )
                     }
                 }
             }
