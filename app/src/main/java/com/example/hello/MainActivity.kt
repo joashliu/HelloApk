@@ -24,9 +24,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.VisibilityThreshold
-import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -58,7 +55,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -74,6 +70,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -146,7 +143,7 @@ val TEXT_SECONDARY = Color(0xFF64748B)
 val TEXT_TERTIARY = Color(0xFF94A3B8)
 val DIVIDER_COLOR = Color(0xFFE2E8F0)
 
-// 暗綠與暗紅（月曆與明細使用）
+// 暗綠與暗紅
 val COLOR_INCOME = Color(0xFF047857)
 val COLOR_EXPENSE = Color(0xFFB91C1C)
 
@@ -417,6 +414,11 @@ fun MainApp() {
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
 
+    // 持久化比較頁面所選取的兩個月份
+    val initialMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+    var compareMonthA by rememberSaveable { mutableStateOf(initialMonthKey) }
+    var compareMonthB by rememberSaveable { mutableStateOf(shiftMonthKey(initialMonthKey, -1)) }
+
     // 刪除復原 Toast 狀態
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
@@ -619,7 +621,6 @@ fun MainApp() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
 
-        // 中等長度觸覺震動反饋
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
         val note = keyboardState.noteText
@@ -714,6 +715,10 @@ fun MainApp() {
             1 -> CompareContent(
                 records = records,
                 availableMonths = availableMonths,
+                selectedMonthA = compareMonthA,
+                onMonthAChange = { compareMonthA = it },
+                selectedMonthB = compareMonthB,
+                onMonthBChange = { compareMonthB = it },
                 onAddClick = {
                     currentPage = 0
                     openKeyboardForNew()
@@ -745,7 +750,6 @@ fun MainApp() {
             )
         }
 
-        // 3 秒功能性復原 Undo Toast
         AnimatedVisibility(
             visible = showUndoToast,
             enter = slideInVertically { it } + fadeIn(),
@@ -1304,12 +1308,12 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            // Sticky Header: 背景完全封閉（無透光縫隙），文字恢復質感黑色，金額加粗
+                            // Sticky Header: 背景完全封閉，防止滾動時內容透過縫隙透出
                             stickyHeader(key = "header_$dateKey") {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(SURFACE_BG) // 徹底封閉縫隙背景
+                                        .background(SURFACE_BG)
                                         .padding(vertical = 4.dp)
                                 ) {
                                     Surface(
@@ -1341,28 +1345,31 @@ fun LedgerContent(
                                             placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
                                         )
                                 ) {
-                                    AnimatedRecordItem(
-                                        animateOnMount = r.id == justAddedId,
-                                        isDeleting = r.id == deletingRecordId
-                                    ) {
-                                        SwipeableRecordItem(
-                                            backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                            record = r,
-                                            expandedId = expandedId,
-                                            onExpand = onExpandChange,
-                                            onCopy = { onCopyClick(r) },
-                                            onEdit = { onEditClick(r) },
-                                            onFilter = { onFilterByName(r.note) },
-                                            onDelete = { onDeleteClick(r) },
-                                            onChangeIcon = { onChangeIconClick(r) }
-                                        )
-                                    }
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        AnimatedRecordItem(
+                                            animateOnMount = r.id == justAddedId,
+                                            isDeleting = r.id == deletingRecordId
+                                        ) {
+                                            SwipeableRecordItem(
+                                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                                record = r,
+                                                expandedId = expandedId,
+                                                onExpand = onExpandChange,
+                                                onCopy = { onCopyClick(r) },
+                                                onEdit = { onEditClick(r) },
+                                                onFilter = { onFilterByName(r.note) },
+                                                onDelete = { onDeleteClick(r) },
+                                                onChangeIcon = { onChangeIconClick(r) }
+                                            )
+                                        }
 
-                                    if (afterSaveHint?.recordId == r.id) {
-                                        CategoryTotalHint(
-                                            hint = afterSaveHint,
-                                            onDismiss = onAfterSaveHintDismiss
-                                        )
+                                        // 提示面板出現在項目下方，不遮擋項目主體
+                                        if (afterSaveHint?.recordId == r.id) {
+                                            CategoryTotalHint(
+                                                hint = afterSaveHint,
+                                                onDismiss = onAfterSaveHintDismiss
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1400,16 +1407,13 @@ fun LedgerContent(
     }
 }
 
-// 酷炫粒子粉末化（Disintegrate）刪除 + 升級版新增彈簧光芒入場動畫
+// 刪除粉末化（Disintegrate）+ 升級版彈簧進場動畫
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
     isDeleting: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val density = LocalDensity.current
-
-    // 新增進場動畫（彈簧物理 + 柔和光芒）
     var appeared by remember { mutableStateOf(!animateOnMount) }
     LaunchedEffect(animateOnMount) {
         if (animateOnMount) {
@@ -1434,7 +1438,6 @@ fun AnimatedRecordItem(
         label = "eY"
     )
 
-    // 刪除粉末粒子溶解動畫（Particle Disintegrate/Dissolve Effect）
     val particleProgress = remember { Animatable(0f) }
     LaunchedEffect(isDeleting) {
         if (isDeleting) {
@@ -1463,15 +1466,14 @@ fun AnimatedRecordItem(
         content()
 
         if (isDeleting && prog > 0f) {
-            // 繪製卡片粉末化飛散粒子 Canvas
             val particleCount = 45
             val random = remember { Random(42) }
             val particles = remember {
                 List(particleCount) {
                     Triple(
-                        random.nextFloat(), // x ratio
-                        random.nextFloat(), // y ratio
-                        (random.nextFloat() - 0.5f) * 180f // angle
+                        random.nextFloat(),
+                        random.nextFloat(),
+                        (random.nextFloat() - 0.5f) * 180f
                     )
                 }
             }
@@ -1499,6 +1501,7 @@ fun AnimatedRecordItem(
     }
 }
 
+// 新增記錄後顯示於項目下方的類別消費總額提示
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
@@ -1525,20 +1528,20 @@ fun CategoryTotalHint(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .padding(horizontal = 4.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(bgColor)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, tint = fgColor, modifier = Modifier.size(18.dp))
+            Icon(icon, null, tint = fgColor, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Text(
                 text = if (isIncome)
                     "今個月「${hint.category}」共收入 ${formatAmount(hint.monthTotal)}"
                 else
                     "今個月「${hint.category}」共支出 ${formatAmount(hint.monthTotal)}",
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 color = fgColor,
                 fontWeight = FontWeight.Medium
             )
@@ -1845,7 +1848,6 @@ fun DayDetailPanel(
             }
             HorizontalDivider(color = DIVIDER_COLOR)
 
-            // 修復：當日明細內所有動作按鈕完美傳遞對應記錄並調用 Callback
             records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
                 SwipeableRecordItem(
                     backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
@@ -2016,7 +2018,6 @@ fun CalendarDayCell(
             when (displayMode) {
                 0 -> {
                     if (absNet > 0) {
-                        // 格仔內金額改為質感的暗綠色與暗紅色
                         Text(
                             text = compactAmount(net),
                             fontSize = 11.sp,
@@ -2427,7 +2428,6 @@ fun CalendarContent(
                                         Locale.US, "%04d-%02d-%02d",
                                         year, month, selectedDay
                                     )
-                                    // 升級版當日明細：帶有質感滑動展開與完整動作 Callback
                                     DayDetailPanel(
                                         dateKey = dateKey,
                                         records = recordsByDay[selectedDay] ?: emptyList(),
@@ -2651,37 +2651,38 @@ fun FadedText(
 fun CompareContent(
     records: List<Record>,
     availableMonths: List<String>,
+    selectedMonthA: String,
+    onMonthAChange: (String) -> Unit,
+    selectedMonthB: String,
+    onMonthBChange: (String) -> Unit,
     onAddClick: () -> Unit,
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
-    var monthA by remember { mutableStateOf(currentMonthKey) }
-    var monthB by remember { mutableStateOf(shiftMonthKey(currentMonthKey, -1)) }
-
-    LaunchedEffect(availableMonths) {
-        if (availableMonths.isNotEmpty()) {
-            val last = availableMonths.last()
-            val prev = availableMonths.dropLast(1).lastOrNull() ?: last
-            if (monthA !in availableMonths) monthA = last
-            if (monthB !in availableMonths) monthB = prev
-        }
-    }
-
-    val sortedCategories = remember(records, monthB) {
+    val sortedCategories = remember(records, selectedMonthB) {
         val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
-            sumByCategoryAndMonth(records, cat, monthB)
+            sumByCategoryAndMonth(records, cat, selectedMonthB)
         }
         listOf(INCOME_CATEGORY) + expenses
     }
 
-    val incomeA = remember(records, monthA) { sumByCategoryAndMonth(records, INCOME_CATEGORY, monthA) }
-    val incomeB = remember(records, monthB) { sumByCategoryAndMonth(records, INCOME_CATEGORY, monthB) }
-
-    val totalExpenseA = remember(records, monthA) {
-        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, monthA) }
+    // 當兩個選取月份在該類別的金額皆為 0 時，自動隱藏該行
+    val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB) {
+        sortedCategories.filter { cat ->
+            val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
+            val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+            amtA != 0.0 || amtB != 0.0
+        }
     }
-    val totalExpenseB = remember(records, monthB) {
-        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, monthB) }
+
+    val incomeA = remember(records, selectedMonthA) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthA) }
+    val incomeB = remember(records, selectedMonthB) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthB) }
+
+    val totalExpenseA = remember(records, selectedMonthA) {
+        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthA) }
+    }
+    val totalExpenseB = remember(records, selectedMonthB) {
+        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthB) }
     }
     val balanceA = incomeA - totalExpenseA
     val balanceB = incomeB - totalExpenseB
@@ -2699,7 +2700,6 @@ fun CompareContent(
                 modifier = Modifier.padding(vertical = 8.dp)
             )
 
-            // 外框限制高度，止於 FAB 按鈕上方
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2726,22 +2726,26 @@ fun CompareContent(
                         )
                         Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                             MonthDropdown(
-                                value = monthA,
+                                value = selectedMonthA,
                                 months = availableMonths.ifEmpty { listOf(currentMonthKey) },
                                 onChange = { newA ->
-                                    if (newA == monthB) monthB = shiftMonthKey(newA, 1)
-                                    monthA = newA
+                                    var newB = selectedMonthB
+                                    if (newA == newB) newB = shiftMonthKey(newA, 1)
+                                    onMonthAChange(newA)
+                                    if (newB != selectedMonthB) onMonthBChange(newB)
                                 }
                             )
                         }
                         Spacer(Modifier.width(6.dp))
                         Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                             MonthDropdown(
-                                value = monthB,
+                                value = selectedMonthB,
                                 months = availableMonths.ifEmpty { listOf(currentMonthKey) },
                                 onChange = { newB ->
-                                    if (newB == monthA) monthA = shiftMonthKey(newB, -1)
-                                    monthB = newB
+                                    var newA = selectedMonthA
+                                    if (newB == newA) newA = shiftMonthKey(newB, -1)
+                                    onMonthBChange(newB)
+                                    if (newA != selectedMonthA) onMonthAChange(newA)
                                 }
                             )
                         }
@@ -2749,90 +2753,97 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR)
 
-                    // 比較列表內容
-                    LazyColumn(
-                        Modifier.weight(1f),
-                        contentPadding = PaddingValues(vertical = 4.dp)
-                    ) {
-                        itemsIndexed(sortedCategories) { idx, cat ->
-                            val amtA = sumByCategoryAndMonth(records, cat, monthA)
-                            val amtB = sumByCategoryAndMonth(records, cat, monthB)
-                            val style = CATEGORY_STYLES[cat]
-                            val isIncome = cat == INCOME_CATEGORY
+                    // 比較列表內容：動態權重 (weight = 1f) 均分整體剩餘高度，剛好填滿整個頁面
+                    if (displayCategories.isEmpty()) {
+                        Box(
+                            Modifier.weight(1f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 14.sp)
+                        }
+                    } else {
+                        Column(
+                            Modifier.weight(1f).fillMaxWidth()
+                        ) {
+                            displayCategories.forEachIndexed { idx, cat ->
+                                val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
+                                val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+                                val style = CATEGORY_STYLES[cat]
+                                val isIncome = cat == INCOME_CATEGORY
 
-                            val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) (amtA / incomeA * 100.0) else null
-                            val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) (amtB / incomeB * 100.0) else null
+                                val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) (amtA / incomeA * 100.0) else null
+                                val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) (amtB / incomeB * 100.0) else null
 
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
-                                    .padding(horizontal = 10.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(Modifier.weight(1.1f), verticalAlignment = Alignment.CenterVertically) {
-                                    if (style != null) {
-                                        Box(
-                                            Modifier
-                                                .size(22.dp)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(style.bgColor),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(13.dp))
+                                Row(
+                                    Modifier
+                                        .weight(1f) // 動態均分垂直空間
+                                        .fillMaxWidth()
+                                        .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
+                                        .padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(Modifier.weight(1.1f), verticalAlignment = Alignment.CenterVertically) {
+                                        if (style != null) {
+                                            Box(
+                                                Modifier
+                                                    .size(22.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(style.bgColor),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(13.dp))
+                                            }
+                                            Spacer(Modifier.width(6.dp))
                                         }
-                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            cat, fontSize = 13.sp, color = TEXT_PRIMARY,
+                                            fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
+                                        )
                                     }
-                                    Text(
-                                        cat, fontSize = 13.sp, color = TEXT_PRIMARY,
-                                        fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                }
 
-                                // 月份 A: 金額 + 右側百分比專屬欄位
-                                Row(
-                                    Modifier.weight(1.8f),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        formatAmountNoDecimal(amtA),
-                                        fontSize = 13.sp,
-                                        color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
-                                        fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        if (pctA != null) String.format(Locale.US, "%.0f%%", pctA) else "",
-                                        fontSize = 10.sp,
-                                        color = TEXT_TERTIARY,
-                                        modifier = Modifier.widthIn(min = 26.dp),
-                                        textAlign = TextAlign.End
-                                    )
-                                }
+                                    Row(
+                                        Modifier.weight(1.8f),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            formatAmountNoDecimal(amtA),
+                                            fontSize = 13.sp,
+                                            color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
+                                            fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            if (pctA != null) String.format(Locale.US, "%.0f%%", pctA) else "",
+                                            fontSize = 10.sp,
+                                            color = TEXT_TERTIARY,
+                                            modifier = Modifier.widthIn(min = 26.dp),
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
 
-                                Spacer(Modifier.width(6.dp))
+                                    Spacer(Modifier.width(6.dp))
 
-                                // 月份 B: 金額 + 右側百分比專屬欄位
-                                Row(
-                                    Modifier.weight(1.8f),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        formatAmountNoDecimal(amtB),
-                                        fontSize = 13.sp,
-                                        color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
-                                        fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        if (pctB != null) String.format(Locale.US, "%.0f%%", pctB) else "",
-                                        fontSize = 10.sp,
-                                        color = TEXT_TERTIARY,
-                                        modifier = Modifier.widthIn(min = 26.dp),
-                                        textAlign = TextAlign.End
-                                    )
+                                    Row(
+                                        Modifier.weight(1.8f),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            formatAmountNoDecimal(amtB),
+                                            fontSize = 13.sp,
+                                            color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
+                                            fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            if (pctB != null) String.format(Locale.US, "%.0f%%", pctB) else "",
+                                            fontSize = 10.sp,
+                                            color = TEXT_TERTIARY,
+                                            modifier = Modifier.widthIn(min = 26.dp),
+                                            textAlign = TextAlign.End
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2840,7 +2851,7 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
 
-                    // 最底層：餘額行 (Balance Row = 總收入 - 所有支出)
+                    // 餘額欄位：已移除 $ 符號
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -2857,7 +2868,7 @@ fun CompareContent(
                         )
                         Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End) {
                             Text(
-                                "$${formatAmountNoDecimal(balanceA)}",
+                                formatAmountNoDecimal(balanceA),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (balanceA >= 0) COLOR_INCOME else COLOR_EXPENSE
@@ -2866,7 +2877,7 @@ fun CompareContent(
                         Spacer(Modifier.width(6.dp))
                         Row(Modifier.weight(1.8f), horizontalArrangement = Arrangement.End) {
                             Text(
-                                "$${formatAmountNoDecimal(balanceB)}",
+                                formatAmountNoDecimal(balanceB),
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (balanceB >= 0) COLOR_INCOME else COLOR_EXPENSE
@@ -3446,7 +3457,6 @@ fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
-// 類別 FilterChip：嚴格將文字垂直水平精確對齊至 Chip 正中央
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedFilterChip(
@@ -3538,7 +3548,6 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
     }
 }
 
-// Sticky Header: 金額字體 ExtraBold 粗體，日期字體恢復質感黑色 TEXT_PRIMARY
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
     val headerText = remember(dateKey) { formatDateHeader(dateKey) }
