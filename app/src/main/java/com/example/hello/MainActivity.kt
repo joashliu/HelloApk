@@ -45,12 +45,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -121,7 +119,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -814,28 +811,17 @@ fun MainApp() {
                     modifier = Modifier
                         .size(44.dp)
                         .pointerInput(filterModeOn) {
-                            awaitEachGesture {
-                                // 等第一次按下
-                                awaitFirstDown(requireUnconsumed = false)
-                                val up1 = waitForUpOrCancellation() ?: return@awaitEachGesture
-                                // 第一次放手：立即執行單擊（零延遲）
-                                filterModeOn = !filterModeOn
-
-                                // 喺 doubleTapTimeout 內，如果仲有第二次按下，就係雙擊
-                                val secondDown = withTimeoutOrNull(
-                                    viewConfiguration.doubleTapTimeoutMillis
-                                ) {
-                                    awaitFirstDown(requireUnconsumed = false)
-                                }
-                                if (secondDown != null) {
-                                    val up2 = waitForUpOrCancellation()
-                                    if (up2 != null) {
-                                        // 補做雙擊動作：強制進入篩選 + 全選
+                            detectTapGestures(
+                                onTap = {
+                                    if (!filterModeOn) {
+                                        // 未進入篩選：即刻進入篩選狀態
                                         filterModeOn = true
+                                    } else {
+                                        // 已進入篩選：focus 搜尋框 + 全選現有文字
                                         filterSelectAllTrigger++
                                     }
                                 }
-                            }
+                            )
                         },
                     shape = CircleShape,
                     color = if (filterModeOn) BRAND_PRIMARY else Color.White,
