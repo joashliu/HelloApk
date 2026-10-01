@@ -1,10 +1,8 @@
 package com.example.hello
 
-import android.Manifest
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -34,6 +32,8 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
@@ -44,7 +44,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,6 +54,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -72,10 +72,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -92,6 +94,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,7 +108,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.google.firebase.Firebase
@@ -143,10 +145,11 @@ val DIVIDER_COLOR = Color(0xFFE2E8F0)
 val COLOR_INCOME = Color(0xFF059669)
 val COLOR_EXPENSE = Color(0xFFDC2626)
 
-val CELL_BG_POS = Color(0xFFD1FAE5)
-val CELL_BAR_POS = Color(0xFF34D399)
+// 月曆格子配色
+val CELL_BG_POS = Color(0xFFDCFCE7)
+val CELL_BAR_POS = Color(0xFF86EFAC)
 val CELL_BG_NEG = Color(0xFFFEE2E2)
-val CELL_BAR_NEG = Color(0xFFF87171)
+val CELL_BAR_NEG = Color(0xFFFCA5A5)
 
 const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
 const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
@@ -358,20 +361,6 @@ fun avatarColor(name: String): Color {
     return AVATAR_COLORS[(name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size]
 }
 
-/**
- * 計算一個時間戳距離而家（每日時間）嘅接近度，單位係秒。
- * 例如 23:15 同 23:10 相差 300 秒。
- * 用環繞式計算（一日 86400 秒），凌晨 0:05 同 23:55 只差 600 秒。
- */
-fun timeOfDayDistanceSeconds(timestamp: Long, nowMillis: Long): Int {
-    val calNow = Calendar.getInstance().apply { timeInMillis = nowMillis }
-    val secNow = calNow.get(Calendar.HOUR_OF_DAY) * 3600 + calNow.get(Calendar.MINUTE) * 60
-    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val sec = cal.get(Calendar.HOUR_OF_DAY) * 3600 + cal.get(Calendar.MINUTE) * 60
-    val d = abs(secNow - sec)
-    return minOf(d, 86400 - d)
-}
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -456,37 +445,12 @@ fun MainApp() {
     val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount } } }
     val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount } } }
     val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
-
-    // 快捷輸入：依時間接近度排序（第一個永遠最接近當前時間）
     val topNotes by remember {
         derivedStateOf {
-            val now = System.currentTimeMillis()
-            ledgerRecords
-                .filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .map { (note, list) ->
-                    val diff = list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) }
-                    note to diff
-                }
-                .sortedBy { it.second }
-                .take(20)
-                .map { it.first to 0 }
+            ledgerRecords.filter { it.note.isNotBlank() }.groupBy { it.note }
+                .map { (n, l) -> n to l.size }.sortedByDescending { it.second }.take(20)
         }
     }
-
-    // 每個名稱對應「時間上最接近當前時間」嗰筆記錄嘅金額
-    val recentAmountByNote by remember {
-        derivedStateOf {
-            val now = System.currentTimeMillis()
-            ledgerRecords
-                .filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .mapValues { (_, list) ->
-                    list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0
-                }
-        }
-    }
-
     val noteIconMap by remember {
         derivedStateOf {
             ledgerRecords.filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
@@ -536,25 +500,6 @@ fun MainApp() {
         }
         pendingCameraUri = null; iconTargetRecord = null
     }
-    // 相機權限請求
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val target = iconTargetRecord
-        if (granted && target != null) {
-            try {
-                val uri = createTempImageUri(context)
-                pendingCameraUri = uri
-                takePictureLauncher.launch(uri)
-            } catch (e: Exception) {
-                Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show()
-                iconTargetRecord = null
-            }
-        } else if (!granted) {
-            Toast.makeText(context, "需要相機權限先可以影相做圖標", Toast.LENGTH_SHORT).show()
-            iconTargetRecord = null
-        }
-    }
 
     DisposableEffect(Unit) {
         val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
@@ -572,23 +517,12 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-    fun openKeyboardForNew(note: String = "", amount: Double? = null) {
-        val amtText = amount?.let {
-            if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
-        } ?: ""
+    fun openKeyboardForNew(note: String = "") {
         if (!showKeyboard) {
-            keyboardState = KeyboardState(
-                noteText = note,
-                amountText = amtText,
-                selectAmountOnInput = amount != null
-            )
+            keyboardState = KeyboardState(noteText = note)
             showKeyboard = true
         } else {
-            keyboardState = keyboardState.copy(
-                noteText = note,
-                amountText = amtText.ifBlank { keyboardState.amountText },
-                selectAmountOnInput = amount != null
-            )
+            keyboardState = keyboardState.copy(noteText = note)
         }
         if (note.isNotBlank()) nameFlashTrigger++
     }
@@ -669,10 +603,7 @@ fun MainApp() {
                 availableMonths = availableMonths,
                 visibleCategories = visibleCategories,
                 expandedId = expandedId, onExpandChange = { expandedId = it },
-                onQuickInputClick = { name ->
-                    val amt = recentAmountByNote[name]
-                    openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
-                },
+                onQuickInputClick = { openKeyboardForNew(it) },
                 onCopyClick = { openKeyboardForCopy(it) },
                 onEditClick = { openKeyboardForEdit(it) },
                 onDeleteClick = { db.collection("records").document(it.id).delete() },
@@ -899,21 +830,8 @@ fun MainApp() {
                     }
                     IconSourceOption(Icons.Default.PhotoCamera, "即時拍照") {
                         showIconSourceDialog = false
-                        val hasCam = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.CAMERA
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasCam) {
-                            try {
-                                val uri = createTempImageUri(context)
-                                pendingCameraUri = uri
-                                takePictureLauncher.launch(uri)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show()
-                                iconTargetRecord = null
-                            }
-                        } else {
-                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
+                        val uri = createTempImageUri(context); pendingCameraUri = uri
+                        takePictureLauncher.launch(uri)
                     }
                     IconSourceOption(Icons.Default.Link, "貼上網址") {
                         showIconSourceDialog = false; urlInput = ""; showUrlInputDialog = true
@@ -980,6 +898,7 @@ fun MainApp() {
         )
     }
 }
+
 @Composable
 fun FloatingNavBar(items: List<NavItem>, selectedIndex: Int, onIndexChange: (Int) -> Unit, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
@@ -1506,112 +1425,9 @@ fun TrianglePointer(
 }
 
 @Composable
-fun SwipeableDetailRow(
-    record: Record,
-    backgroundColor: Color,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val density = LocalDensity.current
-    val bw = 56.dp
-    val bh = 44.dp
-    val gap = 6.dp
-    val bwPx = with(density) { bw.toPx() }
-    val gapPx = with(density) { gap.toPx() }
-    val edgePx = with(density) { 8.dp.toPx() }
-    val leftTotal = bwPx * 2 + gapPx
-    val maxLeft = -(leftTotal + edgePx)
-
-    var targetOffset by remember { mutableStateOf(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-    val offsetX by animateFloatAsState(
-        targetOffset,
-        if (isDragging) snap<Float>() else spring(
-            stiffness = Spring.StiffnessMediumLow,
-            dampingRatio = Spring.DampingRatioNoBouncy
-        ),
-        label = "detailSwipe"
-    )
-    val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .wrapContentHeight()
-            .background(backgroundColor)
-            .pointerInput(record.id) {
-                detectHorizontalDragGestures(
-                    onDragStart = { isDragging = true },
-                    onDragEnd = {
-                        isDragging = false
-                        targetOffset = if (targetOffset < maxLeft * 0.3f) maxLeft else 0f
-                    },
-                    onDragCancel = { isDragging = false; targetOffset = 0f },
-                    onHorizontalDrag = { c, d ->
-                        c.consume()
-                        targetOffset = (targetOffset + d).coerceIn(maxLeft, 0f)
-                    })
-            }
-    ) {
-        Row(
-            Modifier.matchParentSize().padding(end = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AnimatedActionButton(
-                icon = Icons.Default.Edit, label = "編輯",
-                iconTint = Color(0xFF3B82F6),
-                width = bw, height = bh,
-                progress = leftProgress, delay = 0f
-            ) { targetOffset = 0f; onEdit() }
-            AnimatedActionButton(
-                icon = Icons.Default.Delete, label = "刪除",
-                iconTint = Color(0xFFEF4444),
-                width = bw, height = bh,
-                progress = leftProgress, delay = 0.15f
-            ) { targetOffset = 0f; onDelete() }
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .offset { IntOffset(offsetX.roundToInt(), 0) }
-                .background(backgroundColor)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconView(record.iconUrl, record.note, size = 36.dp)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    record.note.ifBlank { "(無名稱)" },
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                    color = TEXT_PRIMARY, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "${record.category}．${formatRecordTime(record.timestamp)}",
-                    fontSize = 11.sp, color = TEXT_TERTIARY,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                displayAmount(record),
-                color = amountColor(record.category),
-                fontSize = 15.sp, fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
 fun DayDetailPanel(
     dateKey: String,
     records: List<Record>,
-    onEdit: (Record) -> Unit,
-    onDelete: (Record) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -1662,13 +1478,36 @@ fun DayDetailPanel(
         }
         HorizontalDivider(color = DIVIDER_COLOR)
 
-        records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-            SwipeableDetailRow(
-                record = r,
-                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                onEdit = { onEdit(r) },
-                onDelete = { onDelete(r) }
-            )
+        records.sortedByDescending { it.timestamp }.forEach { r ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconView(r.iconUrl, r.note, size = 36.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        r.note.ifBlank { "(無名稱)" },
+                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                        color = TEXT_PRIMARY, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${r.category}．${formatRecordTime(r.timestamp)}",
+                        fontSize = 11.sp, color = TEXT_TERTIARY,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    displayAmount(r),
+                    color = amountColor(r.category),
+                    fontSize = 15.sp, fontWeight = FontWeight.Bold
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
     }
@@ -1688,24 +1527,16 @@ fun CalendarRow(
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
-
-    var maxItemsInRow = 0
-    for (col in 0 until 7) {
-        val day = rowIdx * 7 + col - firstDayOffset + 1
-        if (day in 1..daysInMonth) {
-            val c = recordsByDay[day]?.size ?: 0
-            if (c > maxItemsInRow) maxItemsInRow = c
-        }
+    val maxItemsInRow = remember(rowIdx, recordsByDay, displayMode) {
+        (0 until 7).maxOfOrNull { col ->
+            val day = rowIdx * 7 + col - firstDayOffset + 1
+            if (day in 1..daysInMonth) recordsByDay[day]?.size ?: 0 else 0
+        } ?: 0
     }
-
-    val rowHeight: Dp = when (displayMode) {
-        0 -> 52.dp
-        1 -> (30 + maxItemsInRow * 16).dp.coerceAtLeast(52.dp)
-        2 -> {
-            val iconRows = (maxItemsInRow + 2) / 3
-            (30 + iconRows * 21).dp.coerceAtLeast(52.dp)
-        }
-        else -> 52.dp
+    val rowHeight = if (displayMode == 1) {
+        (24 + maxItemsInRow * 15).dp.coerceAtLeast(52.dp)
+    } else {
+        52.dp
     }
 
     Row(
@@ -1833,15 +1664,23 @@ fun CalendarContent(
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.padding(horizontal = 10.dp)) {
                 Spacer(Modifier.height(8.dp))
+                Text(
+                    "${year}年",
+                    fontSize = 13.sp,
+                    color = TEXT_TERTIARY,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+                Spacer(Modifier.height(4.dp))
 
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 用 Surface(onClick) 取代 clickable，避免圓形變方形水波
                     Surface(
-                        onClick = { currentMonthKey = shiftMonthKey(currentMonthKey, -1) },
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(36.dp).clickable {
+                            currentMonthKey = shiftMonthKey(currentMonthKey, -1)
+                        },
                         shape = CircleShape,
                         color = SURFACE_ELEVATED
                     ) {
@@ -1854,24 +1693,17 @@ fun CalendarContent(
                         }
                     }
                     Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            "${year}年",
-                            fontSize = 11.sp,
-                            color = TEXT_TERTIARY,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            "${month}月",
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TEXT_PRIMARY
-                        )
-                    }
+                    Text(
+                        "${month}月",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY
+                    )
                     Spacer(Modifier.width(10.dp))
                     Surface(
-                        onClick = { currentMonthKey = shiftMonthKey(currentMonthKey, 1) },
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(36.dp).clickable {
+                            currentMonthKey = shiftMonthKey(currentMonthKey, 1)
+                        },
                         shape = CircleShape,
                         color = SURFACE_ELEVATED
                     ) {
@@ -2013,8 +1845,6 @@ fun CalendarContent(
                                     DayDetailPanel(
                                         dateKey = dateKey,
                                         records = recordsByDay[selectedDay] ?: emptyList(),
-                                        onEdit = onEditClick,
-                                        onDelete = onDeleteClick,
                                         onDismiss = {
                                             selectedDay = null
                                             selectedRowIdx = null
@@ -2058,40 +1888,14 @@ fun SegmentedModeControl(
             Triple("圖標", Icons.Default.Apps, 2)
         )
     }
-    val itemWidth = 76.dp
-    val itemHeight = 28.dp
-    val density = LocalDensity.current
-    val itemWidthPx = with(density) { itemWidth.toPx() }
-
-    var dragAccum by remember { mutableFloatStateOf(0f) }
-    val latestMode by rememberUpdatedState(displayMode)
-    val latestOnChange by rememberUpdatedState(onModeChange)
+    val itemWidth = 58.dp
+    val itemHeight = 26.dp
 
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = SURFACE_ELEVATED
     ) {
-        Box(
-            Modifier
-                .padding(3.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { dragAccum = 0f },
-                        onDragEnd = { dragAccum = 0f },
-                        onDragCancel = { dragAccum = 0f },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragAccum += dragAmount.x
-                            val steps = (dragAccum / itemWidthPx).toInt()
-                            if (steps != 0) {
-                                val newMode = (latestMode + steps).coerceIn(0, 2)
-                                if (newMode != latestMode) latestOnChange(newMode)
-                                dragAccum -= steps * itemWidthPx
-                            }
-                        }
-                    )
-                }
-        ) {
+        Box(Modifier.padding(3.dp)) {
             val indicatorOffset by animateDpAsState(
                 targetValue = itemWidth * displayMode,
                 animationSpec = spring(
@@ -2129,12 +1933,12 @@ fun SegmentedModeControl(
                         Icon(
                             icon, label,
                             tint = if (selected) BRAND_PRIMARY else TEXT_SECONDARY,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(13.dp)
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
                             label,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             color = if (selected) TEXT_PRIMARY else TEXT_SECONDARY,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                             maxLines = 1
@@ -2179,42 +1983,34 @@ fun FadedText(
 ) {
     val density = LocalDensity.current
     val fadePx = with(density) { fadeWidth.toPx() }
-    var textWidthPx by remember { mutableFloatStateOf(0f) }
-
-    val brush = remember(textWidthPx, fadePx, color) {
-        if (textWidthPx > 1f) {
-            val effectiveFade = fadePx.coerceAtMost(textWidthPx * 0.45f)
-            val stop = ((textWidthPx - effectiveFade) / textWidthPx).coerceIn(0.5f, 1f)
-            Brush.horizontalGradient(
-                colorStops = arrayOf(
-                    0f to color,
-                    stop to color,
-                    1f to color.copy(alpha = 0f)
-                ),
-                startX = 0f,
-                endX = textWidthPx
-            )
-        } else {
-            SolidColor(color)
-        }
-    }
-
     Text(
         text = text,
+        color = color,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Clip,
-        style = TextStyle(
-            brush = brush,
-            fontSize = fontSize,
-            fontWeight = fontWeight
-        ),
-        onTextLayout = { result ->
-            if (result.lineCount > 0) {
-                textWidthPx = result.getLineRight(0) - result.getLineLeft(0)
+        modifier = modifier.drawWithContent {
+            drawContent()
+            if (size.width > 1f && fadePx > 0f) {
+                val effectiveFade = fadePx.coerceAtMost(size.width * 0.45f)
+                val stop = ((size.width - effectiveFade) / size.width).coerceIn(0.55f, 1f)
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to Color.Black,
+                            stop to Color.Black,
+                            1f to Color.Transparent
+                        ),
+                        startX = 0f,
+                        endX = size.width
+                    ),
+                    size = size,
+                    blendMode = BlendMode.DstIn
+                )
             }
-        },
-        modifier = modifier
+        }
     )
 }
 
@@ -2278,7 +2074,7 @@ fun CalendarDayCell(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(barRatio)
-                    .background(barColor.copy(alpha = 0.75f))
+                    .background(barColor.copy(alpha = 0.85f))
             )
         }
 
@@ -2296,7 +2092,7 @@ fun CalendarDayCell(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.weight(1f))
 
             when (displayMode) {
                 0 -> {
@@ -2309,15 +2105,16 @@ fun CalendarDayCell(
                             maxLines = 1,
                             overflow = TextOverflow.Clip,
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 1.dp)
                         )
                     }
-                    Spacer(Modifier.weight(1f))
                 }
                 1 -> {
                     records.sortedBy { it.timestamp }.forEach { r ->
                         Row(
-                            Modifier.fillMaxWidth().height(16.dp),
+                            Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             FadedText(
@@ -2325,7 +2122,7 @@ fun CalendarDayCell(
                                 color = TEXT_PRIMARY,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Medium,
-                                fadeWidth = 6.dp,
+                                fadeWidth = 5.dp,
                                 modifier = Modifier.weight(1f)
                             )
                             Spacer(Modifier.width(3.dp))
@@ -2338,21 +2135,21 @@ fun CalendarDayCell(
                                 maxLines = 1
                             )
                         }
+                        Spacer(Modifier.height(1.dp))
                     }
-                    Spacer(Modifier.weight(1f))
                 }
                 2 -> {
                     val rows = records.chunked(3)
                     rows.forEach { row ->
                         Row(
-                            Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 1.dp),
+                            Modifier.fillMaxWidth().padding(horizontal = 1.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             row.forEach { r ->
                                 IconViewAdaptive(
                                     iconUrl = r.iconUrl,
                                     name = r.note,
-                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                    modifier = Modifier.weight(1f).aspectRatio(1f)
                                 )
                             }
                             repeat(3 - row.size) {
@@ -2361,7 +2158,6 @@ fun CalendarDayCell(
                         }
                         Spacer(Modifier.height(2.dp))
                     }
-                    Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -2436,11 +2232,11 @@ fun CompareContent(
                             Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
                                 fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
                         }
-                        Text(formatAmountNoDecimal(amtA), Modifier.weight(1f), fontSize = 15.sp,
+                        Text(formatAmount(amtA), Modifier.weight(1f), fontSize = 15.sp,
                             color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
                             fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
                             textAlign = TextAlign.End)
-                        Text(formatAmountNoDecimal(amtB), Modifier.weight(1f), fontSize = 15.sp,
+                        Text(formatAmount(amtB), Modifier.weight(1f), fontSize = 15.sp,
                             color = if (isIncome) COLOR_INCOME else TEXT_PRIMARY,
                             fontWeight = if (isIncome) FontWeight.SemiBold else FontWeight.Normal,
                             textAlign = TextAlign.End)
@@ -3279,12 +3075,6 @@ fun IconViewAdaptive(
     }
 }
 
-/**
- * 記帳頁可左右滑動嘅項目行。
- * 改動：
- * - 整個 Box（包括按鈕上方同內容區）都可以偵測橫向拖動
- * - 反方向滑動可以收回已滑出嘅按鈕
- */
 @Composable
 fun SwipeableRecordItem(
     modifier: Modifier = Modifier,
@@ -3327,32 +3117,6 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
             .background(backgroundColor)
-            // 整個區域都支援橫向拖動，包括按鈕上方
-            .pointerInput(record.id) {
-                detectHorizontalDragGestures(
-                    onDragStart = { isDragging = true; onExpand(record.id) },
-                    onDragEnd = {
-                        isDragging = false
-                        val newOffset = when {
-                            targetOffset < maxLeft * 0.25f -> maxLeft
-                            targetOffset > maxRight * 0.25f -> maxRight
-                            else -> 0f
-                        }
-                        targetOffset = newOffset
-                        if (newOffset == 0f) onExpand(null)
-                    },
-                    onDragCancel = { isDragging = false; targetOffset = 0f; onExpand(null) },
-                    onHorizontalDrag = { c, d ->
-                        c.consume()
-                        targetOffset = (targetOffset + d).coerceIn(maxLeft, maxRight)
-                    })
-            }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                if (expandedId != null) onExpand(null)
-            }
     ) {
         Row(
             Modifier.matchParentSize().padding(end = 8.dp),
@@ -3403,6 +3167,27 @@ fun SwipeableRecordItem(
                 .fillMaxWidth()
                 .height(72.dp)
                 .offset { IntOffset(offsetX.roundToInt(), 0) }
+                .pointerInput(record.id) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { isDragging = true; onExpand(record.id) },
+                        onDragEnd = {
+                            isDragging = false
+                            val newOffset = when {
+                                targetOffset < maxLeft * 0.25f -> maxLeft
+                                targetOffset > maxRight * 0.25f -> maxRight
+                                else -> 0f
+                            }
+                            targetOffset = newOffset
+                            if (newOffset == 0f) onExpand(null)
+                        },
+                        onDragCancel = { isDragging = false; targetOffset = 0f; onExpand(null) },
+                        onHorizontalDrag = { c, d ->
+                            c.consume(); targetOffset = (targetOffset + d).coerceIn(maxLeft, maxRight)
+                        })
+                }
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                    if (expandedId != null) onExpand(null)
+                }
                 .background(backgroundColor)
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
