@@ -692,7 +692,8 @@ fun MainApp() {
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = !showKeyboard,
+            // 月曆頁永遠顯示導航欄；其他頁只喺冇鍵盤時顯示
+            visible = if (currentPage == 2) true else !showKeyboard,
             enter = fadeIn(tween(220)),
             exit = fadeOut(tween(200)),
             modifier = Modifier
@@ -1895,11 +1896,11 @@ fun CalendarDayCell(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(Modifier.height(3.dp))
+            // 金額模式：日期同金額之間間距加至 5dp（令金額低返少少）
+            Spacer(Modifier.height(5.dp))
 
             when (displayMode) {
                 0 -> {
-                    // 金額模式：金額貼近日期頂，用顯式 lineHeight 避免裁切
                     if (absNet > 0) {
                         Text(
                             text = compactAmount(net),
@@ -2180,42 +2181,37 @@ fun CalendarContent(
                     exit = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
                 ) {
                     Column {
-                        // 類別 chips 隨月份切換有流暢動畫
-                        AnimatedContent(
-                            targetState = currentMonthKey,
-                            transitionSpec = {
-                                val forward = monthDirection > 0
-                                if (forward) {
-                                    (fadeIn(tween(280)) + slideInHorizontally(tween(320)) { it / 3 })
-                                        .togetherWith(fadeOut(tween(200)) + slideOutHorizontally(tween(320)) { -it / 3 })
-                                } else {
-                                    (fadeIn(tween(280)) + slideInHorizontally(tween(320)) { -it / 3 })
-                                        .togetherWith(fadeOut(tween(200)) + slideOutHorizontally(tween(320)) { it / 3 })
-                                }
-                            },
-                            label = "catsAnim"
-                        ) { _ ->
-                            FlowRow(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
+                        // 類別 chips 用 LazyVerticalGrid + animateItem，
+                        // 只有位置有變嘅 chip 先做動畫，「全部」永遠唔郁
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 72.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateContentSize(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            userScrollEnabled = false
+                        ) {
+                            item(key = "__all__") {
                                 AnimatedFilterChip(
+                                    modifier = Modifier.fillMaxWidth(),
                                     selected = filterCategory == null,
                                     label = "全部",
                                     onClick = { filterCategory = null }
                                 )
-                                visibleCategories.forEach { cat ->
-                                    key(cat) {
-                                        AnimatedFilterChip(
-                                            selected = filterCategory == cat,
-                                            label = cat,
-                                            onClick = {
-                                                filterCategory = if (filterCategory == cat) null else cat
-                                            }
-                                        )
+                            }
+                            items(
+                                items = visibleCategories,
+                                key = { it }
+                            ) { cat ->
+                                AnimatedFilterChip(
+                                    modifier = Modifier.animateItem().fillMaxWidth(),
+                                    selected = filterCategory == cat,
+                                    label = cat,
+                                    onClick = {
+                                        filterCategory = if (filterCategory == cat) null else cat
                                     }
-                                }
+                                )
                             }
                         }
                         Spacer(Modifier.height(8.dp))
@@ -2223,9 +2219,12 @@ fun CalendarContent(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            InfoChip("總計", formatAmountNoDecimal(totalAmount), Modifier.weight(1f))
-                            InfoChip("平均每項", formatAmountNoDecimal(avgPerItem), Modifier.weight(1f))
-                            InfoChip("日均支出", formatAmountNoDecimal(avgPerDay), Modifier.weight(1f))
+                            InfoChip("總計", formatAmountNoDecimal(totalAmount),
+                                Modifier.weight(1f), valueFontSize = 16.sp)
+                            InfoChip("平均每項", formatAmountNoDecimal(avgPerItem),
+                                Modifier.weight(1f), valueFontSize = 16.sp)
+                            InfoChip("日均支出", formatAmountNoDecimal(avgPerDay),
+                                Modifier.weight(1f), valueFontSize = 16.sp)
                         }
                     }
                 }
@@ -2449,8 +2448,16 @@ fun SegmentedModeControl(
     }
 }
 
+/**
+ * InfoChip：可選 valueFontSize 參數，月曆頁三大資訊傳 16.sp
+ */
 @Composable
-fun InfoChip(label: String, value: String, modifier: Modifier = Modifier) {
+fun InfoChip(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueFontSize: TextUnit = 13.sp
+) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
@@ -2463,7 +2470,7 @@ fun InfoChip(label: String, value: String, modifier: Modifier = Modifier) {
             Text(label, fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Text(
-                value, fontSize = 13.sp, color = TEXT_PRIMARY,
+                value, fontSize = valueFontSize, color = TEXT_PRIMARY,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis
             )
