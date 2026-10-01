@@ -2710,7 +2710,7 @@ fun CompareValueCell(
             if (!isIncome) {
                 Text(
                     text = "(",
-                    fontSize = 14.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = amtColor
                 )
@@ -2718,7 +2718,7 @@ fun CompareValueCell(
 
             Text(
                 text = formattedAmt,
-                fontSize = 14.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = amtColor,
                 textAlign = TextAlign.End
@@ -2726,7 +2726,7 @@ fun CompareValueCell(
 
             Text(
                 text = ")",
-                fontSize = 14.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = amtColor,
                 modifier = Modifier.graphicsLayer {
@@ -2735,16 +2735,16 @@ fun CompareValueCell(
             )
         }
 
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(6.dp))
 
         Box(
-            modifier = Modifier.width(34.dp),
+            modifier = Modifier.width(42.dp),
             contentAlignment = Alignment.CenterEnd
         ) {
             if (pctText != null) {
                 Text(
                     text = pctText,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     color = TEXT_TERTIARY,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.End,
@@ -2794,7 +2794,6 @@ fun CompareContent(
     val balanceA = incomeA - totalExpenseA
     val balanceB = incomeB - totalExpenseB
 
-    // ===== 迷你直方圖：當前年份 1 月至當前月份 =====
     val nowCal = remember { Calendar.getInstance() }
     val currentYear = remember { nowCal.get(Calendar.YEAR) }
     val currentMonthNum = remember { nowCal.get(Calendar.MONTH) + 1 }
@@ -2822,7 +2821,7 @@ fun CompareContent(
         ) {
             Text(
                 "月份比較",
-                fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
+                fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
 
@@ -2840,17 +2839,16 @@ fun CompareContent(
                         Modifier
                             .fillMaxWidth()
                             .background(SURFACE_ELEVATED)
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             "類別",
                             Modifier.weight(1.0f),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
+                            fontSize = 15.sp,
                             color = TEXT_SECONDARY
                         )
-                        // 直方圖欄（空標題）
                         Spacer(Modifier.weight(0.7f))
 
                         Row(
@@ -2895,7 +2893,7 @@ fun CompareContent(
                             Modifier.weight(1f).fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 14.sp)
+                            Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
                         }
                     } else {
                         Column(
@@ -2918,27 +2916,27 @@ fun CompareContent(
                                         .padding(horizontal = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // 類別名稱
+                                    // 類別名稱（加大）
                                     Row(Modifier.weight(1.0f), verticalAlignment = Alignment.CenterVertically) {
                                         if (style != null) {
                                             Box(
                                                 Modifier
-                                                    .size(22.dp)
-                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .size(26.dp)
+                                                    .clip(RoundedCornerShape(7.dp))
                                                     .background(style.bgColor),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(13.dp))
+                                                Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
                                             }
-                                            Spacer(Modifier.width(6.dp))
+                                            Spacer(Modifier.width(7.dp))
                                         }
                                         Text(
-                                            cat, fontSize = 13.sp, color = TEXT_PRIMARY,
+                                            cat, fontSize = 15.sp, color = TEXT_PRIMARY,
                                             fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
                                         )
                                     }
 
-                                    // 迷你直方圖（只喺支出類別顯示；由 1 月到當前月份）
+                                    // 迷你直方圖
                                     Box(
                                         Modifier
                                             .weight(0.7f)
@@ -2953,12 +2951,11 @@ fun CompareContent(
                                                 color = style?.fgColor ?: TEXT_TERTIARY,
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .height(28.dp)
+                                                    .height(30.dp)
                                             )
                                         }
                                     }
 
-                                    // 月份 A 值
                                     CompareValueCell(
                                         amount = amtA,
                                         isIncome = isIncome,
@@ -2968,7 +2965,6 @@ fun CompareContent(
 
                                     Spacer(Modifier.width(6.dp))
 
-                                    // 月份 B 值
                                     CompareValueCell(
                                         amount = amtB,
                                         isIncome = isIncome,
@@ -2982,22 +2978,21 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
 
-                    // 餘額行
+                    // 餘額行（加大）
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .background(SURFACE_ELEVATED)
-                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                            .padding(horizontal = 10.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             "餘額",
                             Modifier.weight(1.0f),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            fontSize = 16.sp,
                             color = BRAND_PRIMARY_DARK
                         )
-                        // 與直方圖欄對齊的空白
                         Spacer(Modifier.weight(0.7f))
 
                         CompareValueCell(
@@ -3046,20 +3041,20 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
             color = SURFACE_CARD
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     formatMonthLabel(value),
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = BRAND_PRIMARY
                 )
-                Spacer(Modifier.width(2.dp))
+                Spacer(Modifier.width(3.dp))
                 Icon(
                     Icons.Default.ArrowDropDown, "選擇月份",
                     tint = BRAND_PRIMARY,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -3071,14 +3066,13 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
         ) {
             months.forEach { m ->
                 DropdownMenuItem(
-                    text = { Text(formatMonthLabel(m), fontSize = 13.sp) },
+                    text = { Text(formatMonthLabel(m), fontSize = 15.sp) },
                     onClick = { onChange(m); expanded = false }
                 )
             }
         }
     }
 }
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
