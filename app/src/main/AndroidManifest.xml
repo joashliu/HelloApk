@@ -1,18 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 網絡（Cloudinary 上傳圖標） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 相機（即時拍照做圖標） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 相機唔係必須，冇相機嘅裝置照樣可以裝 -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+
+    <!-- Android 13+ 讀取媒體圖片（PickVisualMedia 由系統 photo picker 處理，
+         但如果日後想直接讀取圖片庫，就需要呢個） -->
+    <uses-permission
+        android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:targetApi="33" />
 
     <application
-        android:label="記帳"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:name=".HelloApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Hello"
+        tools:targetApi="31">
 
+        <!-- 主 Activity -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Hello"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- FileProvider：用於將 cache 內嘅臨時相機圖片 URI 傳畀相機 App -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Firebase / Firestore 相關 metadata 通常由 google-services.json 自動合併 -->
+        <meta-data
+            android:name="com.google.firebase.components.version"
+            android:value="33.1.0" />
+
+        <!-- 確保 Compose 正常運作（部分舊版本需要） -->
+        <meta-data
+            android:name="androidx.compose.ui.platform.ComposeView"
+            android:value="true" />
 
     </application>
 
