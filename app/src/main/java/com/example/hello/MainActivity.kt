@@ -1195,7 +1195,6 @@ fun MainApp() {
         )
     }
 }
-
 @Composable
 fun FloatingNavBar(
     items: List<NavItem>,
@@ -1441,12 +1440,11 @@ fun LedgerContent(
                 )
             }
             else -> {
-                                                Row(
+                Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // ===== 類別 chip：唔再用 AnimatedVisibility（避免 expandHorizontally 同 weight 相沖） =====
-                    // 用 alpha + translationX 手動動畫，效果一樣但唔會爭奪 Row 嘅寬度分配
+                    // ===== 類別 chip：修復 size.width NaN 閃退問題 =====
                     val catChipAlpha by animateFloatAsState(
                         targetValue = if (exactNoteCategory != null) 1f else 0f,
                         animationSpec = tween(240, easing = FastOutSlowInEasing),
@@ -1457,14 +1455,20 @@ fun LedgerContent(
                         animationSpec = tween(240, easing = FastOutSlowInEasing),
                         label = "catChipOffset"
                     )
-                    if (catChipAlpha > 0.001f && exactNoteCategory != null) {
+                    
+                    var displayCategory by remember { mutableStateOf<String?>(null) }
+                    if (exactNoteCategory != null) {
+                        displayCategory = exactNoteCategory
+                    }
+
+                    if (catChipAlpha > 0.001f && displayCategory != null) {
                         Box(
                             Modifier.graphicsLayer {
                                 alpha = catChipAlpha
-                                translationX = catChipOffset * size.width
+                                translationX = if (size.width.isNaN()) 0f else catChipOffset * size.width
                             }
                         ) {
-                            CategoryStatChip(exactNoteCategory!!)
+                            CategoryStatChip(displayCategory!!)
                         }
                     }
 
@@ -1791,7 +1795,6 @@ fun AnimatedRecordItem(
         }
     }
 }
-
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
@@ -3919,7 +3922,6 @@ fun FadedText(
         modifier = modifier
     )
 }
-
 // ===== 比較頁 =====
 
 @Composable
