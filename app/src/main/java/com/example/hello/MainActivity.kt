@@ -442,7 +442,7 @@ fun MainApp() {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
-    val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODEPRIVATE) }
+    val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
 
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
