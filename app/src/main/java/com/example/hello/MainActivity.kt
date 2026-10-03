@@ -1,4 +1,4 @@
-// 第一段：Imports, Constants, 資料類別與 MainActivity
+// 第一段：Imports, Constants, 資料類別, MainActivity, MainApp, FloatingNavBar
 package com.example.hello
 
 import android.app.DatePickerDialog
@@ -358,12 +358,10 @@ fun timeOfDayDistanceSeconds(timestamp: Long, nowMillis: Long): Int {
     return minOf(d, 86400 - d)
 }
 
-// 改進版：先縮圖、量化色彩、跳過極亮/極暗像素，再抽取佔比最大嘅顏色
-// 之後把 HSV 飽和度調低，得出柔和底色 (適合快速輸入 chip 背景)
+// 從 Bitmap 抽取主色，降低飽和度做柔和背景色
 fun getDominantMutedColor(bitmap: Bitmap): Color {
     if (bitmap.width <= 0 || bitmap.height <= 0) return Color(0xFFF1F5F9)
 
-    // 縮到細圖加快運算
     val targetSize = 72
     val scaled: Bitmap = if (bitmap.width > targetSize || bitmap.height > targetSize) {
         val ratio = minOf(targetSize.toFloat() / bitmap.width, targetSize.toFloat() / bitmap.height)
@@ -379,7 +377,6 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     if (scaled !== bitmap) scaled.recycle()
 
     val colorCount = mutableMapOf<Int, Int>()
-    // 每個像素都掃，量化到 24 級
     for (p in pixels) {
         val a = android.graphics.Color.alpha(p)
         if (a < 120) continue
@@ -388,7 +385,6 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
         val b = android.graphics.Color.blue(p) / 24 * 24
         val maxC = maxOf(r, g, b)
         val minC = minOf(r, g, b)
-        // 跳過接近純白、接近純黑
         if (maxC > 235 && minC > 220) continue
         if (maxC < 28) continue
         val rgb = android.graphics.Color.rgb(r, g, b)
@@ -398,7 +394,6 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     val dominant = colorCount.maxByOrNull { it.value }?.key ?: android.graphics.Color.LTGRAY
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(dominant, hsv)
-    // 大幅降低飽和度、提升亮度，做出「低飽和柔和色」
     hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
     hsv[2] = 0.96f
     return Color(android.graphics.Color.HSVToColor(hsv))
@@ -414,7 +409,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-// 第二段：MainApp 與 FloatingNavBar
+
 @Composable
 fun MainApp() {
     val db = Firebase.firestore
@@ -422,7 +417,6 @@ fun MainApp() {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
-    // 持久化月份選擇（SharedPreferences）
     val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
 
     val records = remember { mutableStateListOf<Record>() }
@@ -444,15 +438,11 @@ fun MainApp() {
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
 
-    // 用於 FAB 同 Keyboard 之間嘅動畫過渡狀態
     var isKeyboardAnimating by remember { mutableStateOf(false) }
 
     // ===== FAB ↔ 鍵盤交叉圖示無縫移動動畫 =====
-    // 記錄 FAB 中心位置（相對 root），最後已知值會保留，鍵盤打開時 FAB 隱藏亦唔會影響
     var fabCenterInRoot by remember { mutableStateOf<Offset?>(null) }
-    // 記錄鍵盤交叉圖示中心位置（相對 root）
     var crossCenterInRoot by remember { mutableStateOf<Offset?>(null) }
-    // 覆蓋層圖示動畫進度：0 = FAB 位置，1 = 交叉位置
     val fabOverlayProgress = remember { Animatable(0f) }
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
@@ -462,7 +452,6 @@ fun MainApp() {
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
 
-    // ===== 比較頁月份：從 prefs 讀取，並持久化 =====
     val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
     val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
 
@@ -627,13 +616,11 @@ fun MainApp() {
     // ===== FAB ↔ 交叉 覆蓋層動畫：跟隨 showKeyboard 觸發 =====
     LaunchedEffect(showKeyboard, crossCenterInRoot) {
         if (showKeyboard && crossCenterInRoot != null && fabCenterInRoot != null) {
-            // 開始／繼續向交叉位置進發
             fabOverlayProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(420, easing = FastOutSlowInEasing)
             )
         } else if (!showKeyboard) {
-            // 收起：反向返回 FAB 位置
             fabOverlayProgress.animateTo(
                 targetValue = 0f,
                 animationSpec = tween(380, easing = FastOutSlowInEasing)
@@ -651,8 +638,7 @@ fun MainApp() {
                 amountText = amtText,
                 selectAmountOnInput = amount != null
             )
-            // 重設覆蓋層進度至 FAB 位置，令動畫由頭開始
-            fabOverlayProgress.snapTo(0f)
+            scope.launch { fabOverlayProgress.snapTo(0f) }
             showKeyboard = true
             isKeyboardAnimating = true
         } else {
@@ -669,7 +655,7 @@ fun MainApp() {
         keyboardState = KeyboardState(
             amountText = r.amount.toString(), noteText = r.note,
             category = r.category, selectAmountOnInput = true)
-        fabOverlayProgress.snapTo(0f)
+        scope.launch { fabOverlayProgress.snapTo(0f) }
         showKeyboard = true
         isKeyboardAnimating = true
     }
@@ -679,7 +665,7 @@ fun MainApp() {
         keyboardState = KeyboardState(
             amountText = amt, noteText = r.note, category = r.category,
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
-        fabOverlayProgress.snapTo(0f)
+        scope.launch { fabOverlayProgress.snapTo(0f) }
         showKeyboard = true
         isKeyboardAnimating = true
     }
@@ -699,7 +685,6 @@ fun MainApp() {
             if (recentlyDeletedRecord?.id == r.id) {
                 showUndoToast = false
                 recentlyDeletedRecord = null
-                // 同時清掉 deletingRecordId，避免下次重新掛載仍然播消失動畫
                 if (deletingRecordId == r.id) deletingRecordId = null
             }
         }
@@ -709,7 +694,6 @@ fun MainApp() {
         val target = recentlyDeletedRecord ?: return
         showUndoToast = false
         recentlyDeletedRecord = null
-        // 關鍵：即刻清掉 deletingRecordId，等 AnimatedRecordItem 唔會再次觸發消失動畫
         deletingRecordId = null
         db.collection("records").document(target.id).set(target)
     }
@@ -800,9 +784,9 @@ fun MainApp() {
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
                 onCrossPositioned = { rect ->
-                    // 用中心點，方便做 offset 動畫
                     crossCenterInRoot = Offset(rect.center.x, rect.center.y)
                 },
+                overlayProgress = fabOverlayProgress.value,
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
                 allNoteNames = allNoteNames,
                 noteCategoryMap = noteCategoryMap,
@@ -857,7 +841,6 @@ fun MainApp() {
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                // 升高避開 FAB，由 16.dp 改為 88.dp
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
         ) {
             Surface(
@@ -1031,14 +1014,10 @@ fun MainApp() {
                     containerColor = BRAND_PRIMARY,
                     contentColor = Color.White,
                     modifier = Modifier.onGloballyPositioned { coords ->
-                        // 記錄 FAB 中心（相對 root）
                         val b = coords.boundsInRoot()
                         fabCenterInRoot = Offset(b.center.x, b.center.y)
-                        // 若果鍵盤未開，同時將覆蓋層進度重設
-                        if (!showKeyboard) fabOverlayProgress.snapTo(0f)
                     }
                 ) {
-                    // FAB 圖示：當覆蓋層郁緊就隱藏，避免重疊
                     val hideFabIcon = fabOverlayProgress.value > 0.001f || showKeyboard
                     Icon(
                         Icons.Default.Add, "新增",
@@ -1049,14 +1028,12 @@ fun MainApp() {
         }
 
         // ===== FAB ↔ 交叉 覆蓋層圖示 =====
-        // 條件：兩邊位置已知，且 (鍵盤開緊 或 覆蓋層進度 > 0)
         val fabC = fabCenterInRoot
         val crossC = crossCenterInRoot
         if (fabC != null && crossC != null && (showKeyboard || fabOverlayProgress.value > 0.001f)) {
             val prog = fabOverlayProgress.value
             val cx = fabC.x + (crossC.x - fabC.x) * prog
             val cy = fabC.y + (crossC.y - fabC.y) * prog
-            // 45° 旋轉（加號 ↔ 交叉）
             val rotation = 45f * prog
             val density = LocalDensity.current
             val iconSize = 24.dp
@@ -1276,7 +1253,7 @@ fun FloatingNavBar(
         }
     }
 }
-// 第三段：LedgerContent 與各類輔助組件 (RecordItem, KeyboardPanel, QuickInputSection)
+// 第二段：LedgerContent 與各類輔助組件 (RecordItem, KeyboardPanel, QuickInputSection)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -1348,7 +1325,7 @@ fun LedgerContent(
                     .padding(horizontal = 16.dp, vertical = 4.dp)
                     .animateContentSize(animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
             ) {
-                // 類別 Chips：用 Grid，一行多個，每個 chip 撐滿 cell
+                // 類別 Chips：Grid，一行多個，每個 chip 撐滿 cell
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 72.dp),
                     modifier = Modifier.fillMaxWidth().animateContentSize(),
@@ -1376,7 +1353,7 @@ fun LedgerContent(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                // 月份 Chips：用 FlowRow，寬度跟文字，一行多個
+                // 月份 Chips：FlowRow，寬度跟文字，一行多個
                 if (availableMonths.isNotEmpty()) {
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -1458,8 +1435,6 @@ fun LedgerContent(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            // 關鍵修正：頂部 padding 移到 sticky header 自己身上，
-                            // 令凍結前後位置完全一致，唔會郁
                             start = 12.dp, end = 12.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
@@ -1473,7 +1448,6 @@ fun LedgerContent(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(SURFACE_BG)
-                                        // 凍結前後同樣嘅垂直 padding，保證位置一致
                                         .padding(top = 6.dp, bottom = 4.dp)
                                 ) {
                                     Surface(
@@ -1535,7 +1509,6 @@ fun LedgerContent(
                         }
                     }
 
-                    // 鍵盤開啟時，由 FAB 位置（TransformOrigin(1f, 1f)）非線性平滑放大變形
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showKeyboard,
                         enter = scaleIn(
@@ -1606,12 +1579,10 @@ fun AnimatedRecordItem(
     )
 
     val particleProgress = remember { Animatable(0f) }
-    // 用 key 記住觸發嘅 record id，避免重組時重複觸發
     LaunchedEffect(isDeleting) {
         if (isDeleting) {
             particleProgress.animateTo(1f, animationSpec = tween(550, easing = FastOutSlowInEasing))
         } else {
-            // 若取消刪除（復原），即刻回彈至 0
             particleProgress.snapTo(0f)
         }
     }
@@ -2630,7 +2601,6 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 // 快速輸入 Chip：由圖標抽取主色（低飽和度）做底色，無圖標時用中性色
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
-    // 用 key 快取，避免每次重組都重新抽色
     var bgColor by remember(iconUrl) { mutableStateOf(SURFACE_ELEVATED) }
     val ctx = LocalContext.current
 
@@ -2646,13 +2616,12 @@ fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
                     .allowHardware(false)
                     .build()
                 val result = ctx.imageLoader.execute(request)
-                val drawable = result.drawable
-                when (drawable) {
+                when (val d = result.drawable) {
                     is android.graphics.drawable.BitmapDrawable -> {
-                        getDominantMutedColor(drawable.bitmap)
+                        getDominantMutedColor(d.bitmap)
                     }
                     is android.graphics.drawable.ColorDrawable -> {
-                        val c = drawable.color
+                        val c = d.color
                         if (android.graphics.Color.alpha(c) > 0 &&
                             android.graphics.Color.red(c) < 240 &&
                             android.graphics.Color.green(c) < 240 &&
@@ -2664,13 +2633,7 @@ fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
                             Color(android.graphics.Color.HSVToColor(hsv))
                         } else null
                     }
-                    else -> {
-                        // 嘗試轉做 bitmap
-                        try {
-                            val bmp = drawable?.toBitmap()
-                            if (bmp != null) getDominantMutedColor(bmp) else null
-                        } catch (_: Exception) { null }
-                    }
+                    else -> null
                 }
             } catch (e: Exception) { null }
         }
@@ -2711,7 +2674,6 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .padding(vertical = 12.dp, horizontal = 14.dp)
     ) {
-        // 利用 FlowRow 自動換行，寬度完全跟隨文字長度
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2727,7 +2689,7 @@ fun QuickInputSection(
         }
     }
 }
-// 第四段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
+// 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
 
 // 月曆專用 FilterChip：文字用黑色，取代原本淺灰色
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2758,7 +2720,6 @@ fun CalendarFilterChip(
                     textAlign = TextAlign.Center,
                     fontSize = 13.sp,
                     maxLines = 1,
-                    // 未選中都用黑色（原本 TEXT_SECONDARY），選中白色
                     color = if (selected) Color.White else Color.Black,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                 )
@@ -3223,7 +3184,7 @@ fun CalendarContent(
                     exit = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
                 ) {
                     Column {
-                        // 類別 chips：改用 CalendarFilterChip，文字黑色
+                        // 類別 chips：用 CalendarFilterChip，文字黑色
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 72.dp),
                             modifier = Modifier
@@ -3472,7 +3433,6 @@ fun SegmentedModeControl(
                     ) {
                         Icon(
                             icon, label,
-                            // 未選中都用黑色（原本 TEXT_SECONDARY）
                             tint = if (selected) BRAND_PRIMARY else Color.Black,
                             modifier = Modifier.size(14.dp)
                         )
@@ -3480,7 +3440,6 @@ fun SegmentedModeControl(
                         Text(
                             label,
                             fontSize = 12.sp,
-                            // 未選中都用黑色
                             color = if (selected) TEXT_PRIMARY else Color.Black,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1
