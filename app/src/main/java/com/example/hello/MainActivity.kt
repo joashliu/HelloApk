@@ -1441,22 +1441,31 @@ fun LedgerContent(
                 )
             }
             else -> {
-                                Row(
+                                                Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = exactNoteCategory != null,
-                        enter = fadeIn(tween(240)) + expandHorizontally(
-                            animationSpec = tween(280, easing = FastOutSlowInEasing),
-                            expandFrom = Alignment.Start
-                        ),
-                        exit = fadeOut(tween(180)) + shrinkHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            shrinkTowards = Alignment.Start
-                        )
-                    ) {
-                        exactNoteCategory?.let { cat -> CategoryStatChip(cat) }
+                    // ===== 類別 chip：唔再用 AnimatedVisibility（避免 expandHorizontally 同 weight 相沖） =====
+                    // 用 alpha + translationX 手動動畫，效果一樣但唔會爭奪 Row 嘅寬度分配
+                    val catChipAlpha by animateFloatAsState(
+                        targetValue = if (exactNoteCategory != null) 1f else 0f,
+                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        label = "catChipAlpha"
+                    )
+                    val catChipOffset by animateFloatAsState(
+                        targetValue = if (exactNoteCategory != null) 0f else -0.3f,
+                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        label = "catChipOffset"
+                    )
+                    if (catChipAlpha > 0.001f && exactNoteCategory != null) {
+                        Box(
+                            Modifier.graphicsLayer {
+                                alpha = catChipAlpha
+                                translationX = catChipOffset * size.width
+                            }
+                        ) {
+                            CategoryStatChip(exactNoteCategory!!)
+                        }
                     }
 
                     Box(Modifier.weight(if (filterMode) 2f else 1f)) {
