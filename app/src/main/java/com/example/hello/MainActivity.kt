@@ -1,3 +1,4 @@
+// 第一段：Imports, Constants, 資料類別與 MainActivity
 package com.example.hello
 
 import android.app.DatePickerDialog
@@ -17,29 +18,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -75,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -82,9 +63,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+    import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -112,6 +95,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.imageLoader
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -371,6 +356,33 @@ fun timeOfDayDistanceSeconds(timestamp: Long, nowMillis: Long): Int {
     return minOf(d, 86400 - d)
 }
 
+// 提取並調低圖標色彩飽和度嘅輔助函數
+fun getDominantMutedColor(bitmap: Bitmap): Color {
+    val w = bitmap.width
+    val h = bitmap.height
+    val pixels = IntArray(w * h)
+    bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+    val colorCount = mutableMapOf<Int, Int>()
+    
+    for (i in pixels.indices step 7) {
+        val p = pixels[i]
+        val r = android.graphics.Color.red(p) / 16 * 16
+        val g = android.graphics.Color.green(p) / 16 * 16
+        val b = android.graphics.Color.blue(p) / 16 * 16
+        if (r > 240 && g > 240 && b > 240) continue 
+        if (r < 20 && g < 20 && b < 20) continue 
+        val rgb = android.graphics.Color.rgb(r, g, b)
+        colorCount[rgb] = (colorCount[rgb] ?: 0) + 1
+    }
+    
+    val dominant = colorCount.maxByOrNull { it.value }?.key ?: android.graphics.Color.LTGRAY
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(dominant, hsv)
+    hsv[1] = (hsv[1] * 0.35f).coerceAtMost(0.35f) 
+    hsv[2] = 0.95f 
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -381,7 +393,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
+// 第二段：MainApp 與 FloatingNavBar
 @Composable
 fun MainApp() {
     val db = Firebase.firestore
@@ -410,6 +422,10 @@ fun MainApp() {
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
+    
+    // 用於 FAB 同 Keyboard 之間嘅動畫過渡狀態
+    var isKeyboardAnimating by remember { mutableStateOf(false) }
+    
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
@@ -590,6 +606,7 @@ fun MainApp() {
                 selectAmountOnInput = amount != null
             )
             showKeyboard = true
+            isKeyboardAnimating = true
         } else {
             keyboardState = keyboardState.copy(
                 noteText = note,
@@ -599,18 +616,22 @@ fun MainApp() {
         }
         if (note.isNotBlank()) nameFlashTrigger++
     }
+    
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
             amountText = r.amount.toString(), noteText = r.note,
             category = r.category, selectAmountOnInput = true)
         showKeyboard = true
+        isKeyboardAnimating = true
     }
+    
     fun openKeyboardForEdit(r: Record) {
         val amt = if (r.amount % 1.0 == 0.0) r.amount.toInt().toString() else r.amount.toString()
         keyboardState = KeyboardState(
             amountText = amt, noteText = r.note, category = r.category,
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
+        isKeyboardAnimating = true
     }
 
     fun deleteRecordWithUndo(r: Record) {
@@ -619,7 +640,8 @@ fun MainApp() {
         showUndoToast = true
         db.collection("records").document(r.id).delete()
         scope.launch {
-            delay(3000)
+            // 改為 5 秒
+            delay(5000)
             if (recentlyDeletedRecord?.id == r.id) {
                 showUndoToast = false
                 recentlyDeletedRecord = null
@@ -773,7 +795,8 @@ fun MainApp() {
             exit = slideOutVertically { it } + fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 16.dp)
+                // 升高避開 FAB，由 16.dp 改為 88.dp
+                .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
         ) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -938,6 +961,7 @@ fun MainApp() {
                     }
                 }
 
+                // 呢個係舊有嘅 FAB，不過已經配合 Keyboard 動畫機制做咗準備
                 FloatingActionButton(
                     onClick = {
                         if (filterModeOn) filterModeOn = false
@@ -1145,6 +1169,7 @@ fun FloatingNavBar(
         }
     }
 }
+// 第三段：LedgerContent 與各類輔助組件 (RecordItem, KeyboardPanel, QuickInputSection)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -1325,7 +1350,6 @@ fun LedgerContent(
                             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                            // Sticky Header: 背景完全封閉，防止滾動時內容透過縫隙透出
                             stickyHeader(key = "header_$dateKey") {
                                 Box(
                                     modifier = Modifier
@@ -1336,7 +1360,8 @@ fun LedgerContent(
                                     Surface(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .shadow(elevation = 4.dp, shape = RoundedCornerShape(14.dp), clip = false),
+                                            // 移除 clip = false 並統一 padding，徹底解決 Sticky 縫隙同跳動問題
+                                            .shadow(elevation = 2.dp, shape = RoundedCornerShape(14.dp)),
                                         shape = RoundedCornerShape(14.dp),
                                         color = SURFACE_CARD
                                     ) {
@@ -1380,7 +1405,6 @@ fun LedgerContent(
                                             )
                                         }
 
-                                        // 提示面板出現在項目下方，不遮擋項目主體
                                         if (afterSaveHint?.recordId == r.id) {
                                             CategoryTotalHint(
                                                 hint = afterSaveHint,
@@ -1393,17 +1417,23 @@ fun LedgerContent(
                         }
                     }
 
+                    // 鍵盤開啟時，由 FAB 位置（TransformOrigin(1f, 1f)）非線性平滑放大變形
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showKeyboard,
-                        enter = slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
-                        ) + fadeIn(tween(150)),
-                        exit = slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = tween(320, easing = FastOutSlowInEasing)
-                        ) + fadeOut(tween(220)),
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 32.dp)
+                        enter = scaleIn(
+                            initialScale = 0.05f,
+                            transformOrigin = TransformOrigin(1f, 1f),
+                            animationSpec = tween(400, easing = FastOutSlowInEasing)
+                        ) + fadeIn(tween(300)),
+                        exit = scaleOut(
+                            targetScale = 0.05f,
+                            transformOrigin = TransformOrigin(1f, 1f),
+                            animationSpec = tween(350, easing = FastOutSlowInEasing)
+                        ) + fadeOut(tween(250)),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .fillMaxWidth()
+                            .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
                     ) {
                         LedgerKeyboardPanel(
                             state = keyboardState,
@@ -1415,6 +1445,7 @@ fun LedgerContent(
                             allNoteNames = allNoteNames,
                             noteCategoryMap = noteCategoryMap,
                             nameFlashTrigger = nameFlashTrigger,
+                            showKeyboard = showKeyboard,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -1424,7 +1455,6 @@ fun LedgerContent(
     }
 }
 
-// 刪除粉末化（Disintegrate）+ 升級版彈簧進場動畫
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
@@ -1518,7 +1548,6 @@ fun AnimatedRecordItem(
     }
 }
 
-// 新增記錄後顯示於項目下方的類別消費總額提示
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
@@ -1614,7 +1643,9 @@ fun SwipeableRecordItem(
     val maxRight = bwPx + edgePx
 
     var targetOffset by remember { mutableStateOf(0f) }
+    var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
+    
     LaunchedEffect(expandedId) { if (expandedId != record.id && targetOffset != 0f) targetOffset = 0f }
     val offsetX by animateFloatAsState(targetOffset,
         if (isDragging) snap<Float>() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
@@ -1637,12 +1668,20 @@ fun SwipeableRecordItem(
             .background(backgroundColor)
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
-                    onDragStart = { isDragging = true; onExpand(record.id) },
+                    onDragStart = { 
+                        isDragging = true 
+                        startOffset = targetOffset
+                        onExpand(record.id) 
+                    },
                     onDragEnd = {
                         isDragging = false
+                        val dist = targetOffset - startOffset
+                        // 優化收縮距離：如果本身已經打開，只需輕輕反向滑動 (15px) 即可自動縮回
                         val newOffset = when {
-                            targetOffset < maxLeft * 0.25f -> maxLeft
-                            targetOffset > maxRight * 0.25f -> maxRight
+                            startOffset == maxLeft && dist > 15f -> 0f 
+                            startOffset == maxRight && dist < -15f -> 0f 
+                            targetOffset < maxLeft * 0.65f -> maxLeft 
+                            targetOffset > maxRight * 0.65f -> maxRight
                             else -> 0f
                         }
                         targetOffset = newOffset
@@ -1781,6 +1820,7 @@ private fun AnimatedActionButton(
         )
     }
 }
+
 @Composable
 fun DayDetailPanel(
     dateKey: String,
@@ -1883,1325 +1923,6 @@ fun DayDetailPanel(
     }
 }
 
-@Composable
-fun CalendarRow(
-    rowIdx: Int,
-    firstDayOffset: Int,
-    daysInMonth: Int,
-    today: Calendar,
-    isCurrentMonth: Boolean,
-    recordsByDay: Map<Int, List<Record>>,
-    displayMode: Int,
-    maxAbsNet: Double,
-    selectedDay: Int?,
-    onCellClick: (day: Int, col: Int) -> Unit,
-) {
-    val spacing = 6.dp
-
-    var maxItemsInRow = 0
-    for (col in 0 until 7) {
-        val day = rowIdx * 7 + col - firstDayOffset + 1
-        if (day in 1..daysInMonth) {
-            val c = recordsByDay[day]?.size ?: 0
-            if (c > maxItemsInRow) maxItemsInRow = c
-        }
-    }
-
-    val targetHeight: Dp = when (displayMode) {
-        0 -> 52.dp
-        1 -> (34 + maxItemsInRow * 16).dp.coerceAtLeast(56.dp)
-        2 -> {
-            val iconRows = (maxItemsInRow + 2) / 3
-            (30 + iconRows * 21).dp.coerceAtLeast(52.dp)
-        }
-        else -> 52.dp
-    }
-
-    val rowHeight by animateDpAsState(
-        targetValue = targetHeight,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "rowHeight_$rowIdx"
-    )
-
-    Row(
-        Modifier.fillMaxWidth().height(rowHeight),
-        horizontalArrangement = Arrangement.spacedBy(spacing)
-    ) {
-        for (col in 0 until 7) {
-            val cellIdx = rowIdx * 7 + col
-            val dayOfMonth = cellIdx - firstDayOffset + 1
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (dayOfMonth in 1..daysInMonth) {
-                    CalendarDayCell(
-                        day = dayOfMonth,
-                        isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
-                        isSelected = selectedDay == dayOfMonth,
-                        records = recordsByDay[dayOfMonth] ?: emptyList(),
-                        displayMode = displayMode,
-                        maxAbsNet = maxAbsNet,
-                        onClick = { onCellClick(dayOfMonth, col) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun CalendarDayCell(
-    day: Int,
-    isToday: Boolean,
-    isSelected: Boolean,
-    records: List<Record>,
-    displayMode: Int,
-    maxAbsNet: Double,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(12.dp)
-    val hasRecords = records.isNotEmpty()
-
-    val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-    val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-    val net = income - expense
-    val absNet = abs(net)
-
-    val bgColor = when {
-        isSelected -> BRAND_PRIMARY_LIGHT
-        hasRecords && net > 0 -> CELL_BG_POS
-        hasRecords && net < 0 -> CELL_BG_NEG
-        else -> SURFACE_CARD
-    }
-    val elevation = if (hasRecords || isToday || isSelected) 1.dp else 0.dp
-
-    val barRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
-        (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
-    else 0f
-    val barColor = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .shadow(
-                elevation = elevation,
-                shape = shape,
-                clip = false,
-                ambientColor = Color(0x1A000000),
-                spotColor = Color(0x1A000000)
-            )
-            .clip(shape)
-            .background(bgColor)
-            .border(
-                width = if (isSelected) 2.dp else 0.5.dp,
-                color = if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR,
-                shape = shape
-            )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
-    ) {
-        if (displayMode == 0 && barRatio > 0.001f) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(barRatio)
-                    .background(barColor.copy(alpha = 0.75f))
-            )
-        }
-
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 2.dp, vertical = 3.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Top
-        ) {
-            Text(
-                "$day",
-                fontSize = 13.sp,
-                lineHeight = 14.sp,
-                fontWeight = FontWeight.Black,
-                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else TEXT_PRIMARY,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(5.dp))
-
-            when (displayMode) {
-                0 -> {
-                    if (absNet > 0) {
-                        Text(
-                            text = compactAmount(net),
-                            fontSize = 11.sp,
-                            lineHeight = 13.sp,
-                            color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
-                            fontWeight = FontWeight.Black,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Clip,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-                1 -> {
-                    records.sortedBy { it.timestamp }.forEach { r ->
-                        Row(
-                            Modifier.fillMaxWidth().height(16.dp)
-                        ) {
-                            FadedText(
-                                text = r.note.ifBlank { "(無)" },
-                                color = TEXT_PRIMARY,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Medium,
-                                fadeWidth = 6.dp,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .alignByBaseline()
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
-                                       else compactAmount(-r.amount),
-                                fontSize = 9.sp,
-                                lineHeight = 11.sp,
-                                color = amountColor(r.category),
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.alignByBaseline()
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-                2 -> {
-                    val rows = records.chunked(3)
-                    rows.forEach { row ->
-                        Row(
-                            Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 1.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            row.forEach { r ->
-                                IconViewAdaptive(
-                                    iconUrl = r.iconUrl,
-                                    name = r.note,
-                                    modifier = Modifier.weight(1f).fillMaxHeight()
-                                )
-                            }
-                            repeat(3 - row.size) {
-                                Spacer(Modifier.weight(1f))
-                            }
-                        }
-                        Spacer(Modifier.height(2.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun CalendarContent(
-    records: List<Record>,
-    onCopyClick: (Record) -> Unit,
-    onEditClick: (Record) -> Unit,
-    onFilterClick: (Record) -> Unit,
-    onDeleteClick: (Record) -> Unit,
-    onChangeIconClick: (Record) -> Unit,
-    onAddClick: () -> Unit,
-) {
-    val today = remember { Calendar.getInstance() }
-    val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
-
-    var currentMonthKey by remember { mutableStateOf(todayKey) }
-    var monthDirection by remember { mutableIntStateOf(1) }
-    var filterCategory by remember { mutableStateOf<String?>(null) }
-    var displayMode by remember { mutableIntStateOf(0) }
-
-    var selectedDay by remember { mutableStateOf<Int?>(null) }
-    var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
-    var selectedColIdx by remember { mutableStateOf<Int?>(null) }
-    var detailExpandedId by remember { mutableStateOf<String?>(null) }
-
-    val scrollState = rememberScrollState()
-
-    val curCal = remember(currentMonthKey) {
-        val parts = currentMonthKey.split("-")
-        Calendar.getInstance().apply {
-            set(parts[0].toInt(), parts[1].toInt() - 1, 1)
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-        }
-    }
-    val year = curCal.get(Calendar.YEAR)
-    val month = curCal.get(Calendar.MONTH) + 1
-    val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
-
-    val monthAllRecords = remember(records, currentMonthKey) {
-        records.filter { monthKeyFromTimestamp(it.timestamp) == currentMonthKey }
-    }
-
-    val visibleCategories = remember(monthAllRecords) {
-        val hasIncome = monthAllRecords.any { it.category == INCOME_CATEGORY }
-        val expenseCats = monthAllRecords
-            .filter { it.category != INCOME_CATEGORY }
-            .groupBy { it.category }
-            .mapValues { (_, list) -> list.sumOf { it.amount } }
-            .toList()
-            .sortedByDescending { it.second }
-            .map { it.first }
-        (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
-    }
-
-    val monthRecords = remember(monthAllRecords, filterCategory) {
-        if (filterCategory == null) monthAllRecords
-        else monthAllRecords.filter { it.category == filterCategory }
-    }
-
-    val recordsByDay = remember(monthRecords) {
-        monthRecords.groupBy { r ->
-            Calendar.getInstance().apply { timeInMillis = r.timestamp }
-                .get(Calendar.DAY_OF_MONTH)
-        }
-    }
-
-    val maxAbsNet = remember(recordsByDay) {
-        recordsByDay.values.maxOfOrNull { dayRecords ->
-            val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-            val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-            abs(inc - exp)
-        } ?: 0.0
-    }
-
-    val totalAmount = monthRecords.sumOf { it.amount }
-    val itemCount = monthRecords.size
-    val avgPerItem = if (itemCount > 0) totalAmount / itemCount else 0.0
-    val isCurrentMonth = currentMonthKey == todayKey
-    val daysElapsed = if (isCurrentMonth) today.get(Calendar.DAY_OF_MONTH) else daysInMonth
-    val avgPerDay = if (daysElapsed > 0) totalAmount / daysElapsed else 0.0
-
-    val firstDayOffset = remember(curCal) {
-        val first = curCal.clone() as Calendar
-        first.set(Calendar.DAY_OF_MONTH, 1)
-        (first.get(Calendar.DAY_OF_WEEK) + 5) % 7
-    }
-    val totalCells = firstDayOffset + daysInMonth
-    val totalRows = (totalCells + 6) / 7
-
-    LaunchedEffect(currentMonthKey) {
-        selectedDay = null
-        selectedRowIdx = null
-        selectedColIdx = null
-        detailExpandedId = null
-    }
-    LaunchedEffect(selectedDay) {
-        if (selectedDay != null) {
-            try { scrollState.animateScrollTo(0) } catch (_: Exception) {}
-        }
-    }
-
-    BackHandler(enabled = selectedDay != null) {
-        selectedDay = null
-        selectedRowIdx = null
-        selectedColIdx = null
-        detailExpandedId = null
-    }
-
-    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        Column(Modifier.fillMaxSize()) {
-            Column(Modifier.padding(horizontal = 10.dp)) {
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        onClick = {
-                            monthDirection = -1
-                            currentMonthKey = shiftMonthKey(currentMonthKey, -1)
-                        },
-                        modifier = Modifier.size(36.dp),
-                        shape = CircleShape,
-                        color = SURFACE_ELEVATED
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.ChevronLeft, "上個月",
-                                tint = TEXT_SECONDARY,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.width(10.dp))
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            if (currentMonthKey != todayKey) {
-                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
-                                currentMonthKey = todayKey
-                            }
-                        }
-                    ) {
-                        Text(
-                            "${year}年",
-                            fontSize = 11.sp,
-                            lineHeight = 12.sp,
-                            color = TEXT_TERTIARY,
-                            fontWeight = FontWeight.Medium
-                        )
-                        AnimatedContent(
-                            targetState = currentMonthKey,
-                            transitionSpec = {
-                                val forward = monthDirection > 0
-                                if (forward) {
-                                    (slideInHorizontally(animationSpec = tween(280)) { it } + fadeIn(tween(200)))
-                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { -it } + fadeOut(tween(180)))
-                                } else {
-                                    (slideInHorizontally(animationSpec = tween(280)) { -it } + fadeIn(tween(200)))
-                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { it } + fadeOut(tween(180)))
-                                }
-                            },
-                            label = "monthAnim"
-                        ) { key ->
-                            val m = key.split("-").getOrNull(1)?.toIntOrNull() ?: month
-                            Text(
-                                "${m}月",
-                                fontSize = 28.sp,
-                                lineHeight = 30.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TEXT_PRIMARY
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.width(10.dp))
-                    Surface(
-                        onClick = {
-                            monthDirection = 1
-                            currentMonthKey = shiftMonthKey(currentMonthKey, 1)
-                        },
-                        modifier = Modifier.size(36.dp),
-                        shape = CircleShape,
-                        color = SURFACE_ELEVATED
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.ChevronRight, "下個月",
-                                tint = TEXT_SECONDARY,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.weight(1f))
-
-                    SegmentedModeControl(
-                        displayMode = displayMode,
-                        onModeChange = { displayMode = it }
-                    )
-                }
-
-                Spacer(Modifier.height(10.dp))
-
-                AnimatedVisibility(
-                    visible = selectedDay == null,
-                    enter = fadeIn(tween(250)) + expandVertically(tween(300, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
-                ) {
-                    Column {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 72.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .animateContentSize(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            userScrollEnabled = false
-                        ) {
-                            item(key = "__all__") {
-                                AnimatedFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部",
-                                    onClick = { filterCategory = null }
-                                )
-                            }
-                            items(
-                                items = visibleCategories,
-                                key = { it }
-                            ) { cat ->
-                                AnimatedFilterChip(
-                                    modifier = Modifier.animateItem().fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat,
-                                    onClick = {
-                                        filterCategory = if (filterCategory == cat) null else cat
-                                    }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            InfoChip("總計", "$${formatAmountNoDecimal(totalAmount)}",
-                                Modifier.weight(1f), valueFontSize = 16.sp)
-                            InfoChip("平均每項", "$${formatAmountNoDecimal(avgPerItem)}",
-                                Modifier.weight(1f), valueFontSize = 16.sp)
-                            InfoChip("日均支出", "$${formatAmountNoDecimal(avgPerDay)}",
-                                Modifier.weight(1f), valueFontSize = 16.sp)
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(10.dp))
-
-                Row(Modifier.fillMaxWidth()) {
-                    listOf("一", "二", "三", "四", "五", "六", "日").forEach { w ->
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Text(
-                                w, fontSize = 12.sp,
-                                color = TEXT_TERTIARY,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(scrollState)
-                        .padding(horizontal = 10.dp)
-                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
-                ) {
-                    for (rowIdx in 0 until totalRows) {
-                        val isThisRowSelected = selectedRowIdx == rowIdx
-                        val isHidden = selectedDay != null && !isThisRowSelected
-
-                        AnimatedVisibility(
-                            visible = !isHidden,
-                            enter = fadeIn(tween(300)) + expandVertically(
-                                tween(320, easing = FastOutSlowInEasing),
-                                expandFrom = Alignment.Top
-                            ),
-                            exit = fadeOut(tween(200)) + shrinkVertically(
-                                tween(300, easing = FastOutSlowInEasing),
-                                shrinkTowards = Alignment.Top
-                            )
-                        ) {
-                            Column(Modifier.fillMaxWidth()) {
-                                CalendarRow(
-                                    rowIdx = rowIdx,
-                                    firstDayOffset = firstDayOffset,
-                                    daysInMonth = daysInMonth,
-                                    today = today,
-                                    isCurrentMonth = isCurrentMonth,
-                                    recordsByDay = recordsByDay,
-                                    displayMode = displayMode,
-                                    maxAbsNet = maxAbsNet,
-                                    selectedDay = if (isThisRowSelected) selectedDay else null,
-                                    onCellClick = { day, col ->
-                                        if (selectedDay == day) {
-                                            selectedDay = null
-                                            selectedRowIdx = null
-                                            selectedColIdx = null
-                                            detailExpandedId = null
-                                        } else {
-                                            selectedDay = day
-                                            selectedRowIdx = rowIdx
-                                            selectedColIdx = col
-                                            detailExpandedId = null
-                                        }
-                                    }
-                                )
-
-                                if (isThisRowSelected && selectedDay != null && selectedColIdx != null) {
-                                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                        val cellWidth = maxWidth / 7
-                                        TrianglePointer(
-                                            colIndex = selectedColIdx!!,
-                                            cellWidth = cellWidth,
-                                            color = SURFACE_CARD
-                                        )
-                                    }
-                                    val dateKey = String.format(
-                                        Locale.US, "%04d-%02d-%02d",
-                                        year, month, selectedDay
-                                    )
-                                    DayDetailPanel(
-                                        dateKey = dateKey,
-                                        records = recordsByDay[selectedDay] ?: emptyList(),
-                                        expandedId = detailExpandedId,
-                                        onExpandChange = { detailExpandedId = it },
-                                        onCopy = { onCopyClick(it) },
-                                        onEdit = { onEditClick(it) },
-                                        onFilter = { onFilterClick(it) },
-                                        onDelete = { onDeleteClick(it) },
-                                        onChangeIcon = { onChangeIconClick(it) },
-                                        onDismiss = {
-                                            selectedDay = null
-                                            selectedRowIdx = null
-                                            selectedColIdx = null
-                                            detailExpandedId = null
-                                        }
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                } else {
-                                    Spacer(Modifier.height(6.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        FloatingActionButton(
-            onClick = onAddClick,
-            containerColor = BRAND_PRIMARY,
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-        ) {
-            Icon(Icons.Default.Add, "新增")
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SegmentedModeControl(
-    displayMode: Int,
-    onModeChange: (Int) -> Unit
-) {
-    val modes = remember {
-        listOf(
-            Triple("金額", Icons.Default.AttachMoney, 0),
-            Triple("項目", Icons.Default.List, 1),
-            Triple("圖標", Icons.Default.Apps, 2)
-        )
-    }
-    val itemWidth = 76.dp
-    val itemHeight = 28.dp
-    val density = LocalDensity.current
-    val itemWidthPx = with(density) { itemWidth.toPx() }
-
-    var dragAccum by remember { mutableFloatStateOf(0f) }
-    val latestMode by rememberUpdatedState(displayMode)
-    val latestOnChange by rememberUpdatedState(onModeChange)
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = SURFACE_ELEVATED
-    ) {
-        Box(
-            Modifier
-                .padding(3.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { dragAccum = 0f },
-                        onDragEnd = { dragAccum = 0f },
-                        onDragCancel = { dragAccum = 0f },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragAccum += dragAmount.x
-                            val steps = (dragAccum / itemWidthPx).toInt()
-                            if (steps != 0) {
-                                val newMode = (latestMode + steps).coerceIn(0, 2)
-                                if (newMode != latestMode) latestOnChange(newMode)
-                                dragAccum -= steps * itemWidthPx
-                            }
-                        }
-                    )
-                }
-        ) {
-            val indicatorOffset by animateDpAsState(
-                targetValue = itemWidth * displayMode,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                ),
-                label = "segIndicator"
-            )
-
-            Box(
-                Modifier
-                    .offset(x = indicatorOffset)
-                    .width(itemWidth)
-                    .height(itemHeight)
-                    .shadow(2.dp, RoundedCornerShape(9.dp), clip = false)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(SURFACE_CARD)
-            )
-
-            Row {
-                modes.forEach { (label, icon, mode) ->
-                    val selected = displayMode == mode
-                    Row(
-                        modifier = Modifier
-                            .width(itemWidth)
-                            .height(itemHeight)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onModeChange(mode) }
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            icon, label,
-                            tint = if (selected) BRAND_PRIMARY else TEXT_SECONDARY,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            label,
-                            fontSize = 12.sp,
-                            color = if (selected) TEXT_PRIMARY else TEXT_SECONDARY,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun InfoChip(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    valueFontSize: TextUnit = 13.sp
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = SURFACE_ELEVATED
-    ) {
-        Column(
-            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(label, fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(2.dp))
-            Text(
-                value, fontSize = valueFontSize, color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-fun FadedText(
-    text: String,
-    color: Color,
-    fontSize: TextUnit,
-    fontWeight: FontWeight = FontWeight.Normal,
-    modifier: Modifier = Modifier,
-    fadeWidth: Dp = 6.dp
-) {
-    val density = LocalDensity.current
-    val fadePx = with(density) { fadeWidth.toPx() }
-    var textWidthPx by remember { mutableFloatStateOf(0f) }
-
-    val brush = remember(textWidthPx, fadePx, color) {
-        if (textWidthPx > 1f) {
-            val effectiveFade = fadePx.coerceAtMost(textWidthPx * 0.45f)
-            val stop = ((textWidthPx - effectiveFade) / textWidthPx).coerceIn(0.5f, 1f)
-            Brush.horizontalGradient(
-                colorStops = arrayOf(
-                    0f to color,
-                    stop to color,
-                    1f to color.copy(alpha = 0f)
-                ),
-                startX = 0f,
-                endX = textWidthPx
-            )
-        } else {
-            SolidColor(color)
-        }
-    }
-
-    Text(
-        text = text,
-        maxLines = 1,
-        softWrap = false,
-        overflow = TextOverflow.Clip,
-        style = TextStyle(
-            brush = brush,
-            fontSize = fontSize,
-            fontWeight = fontWeight,
-            lineHeight = 11.sp
-        ),
-        onTextLayout = { result ->
-            if (result.lineCount > 0) {
-                textWidthPx = result.getLineRight(0) - result.getLineLeft(0)
-            }
-        },
-        modifier = modifier
-    )
-}
-@Composable
-fun MiniHistogram(
-    values: List<Double>,
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    if (values.isEmpty()) {
-        Spacer(modifier)
-        return
-    }
-    val maxValue = values.maxOrNull() ?: 0.0
-    if (maxValue <= 0.0) {
-        Spacer(modifier)
-        return
-    }
-    Canvas(modifier) {
-        val count = values.size
-        val gapRatio = 0.2f
-        val totalWidth = size.width
-        val barWidth = if (count == 1) totalWidth
-                       else totalWidth / (count + (count - 1) * gapRatio)
-        val gap = if (count == 1) 0f else barWidth * gapRatio
-        values.forEachIndexed { i, v ->
-            val ratio = (v / maxValue).toFloat().coerceIn(0f, 1f)
-            val h = (ratio * size.height).coerceAtLeast(1.5f)
-            val x = i * (barWidth + gap)
-            val y = size.height - h
-            drawRect(
-                color = color,
-                topLeft = Offset(x, y),
-                size = androidx.compose.ui.geometry.Size(barWidth, h)
-            )
-        }
-    }
-}
-
-@Composable
-fun CompareValueCell(
-    amount: Double,
-    isIncome: Boolean,
-    pct: Double?,
-    modifier: Modifier = Modifier
-) {
-    val formattedAmt = formatAmountNoDecimal(abs(amount))
-    val amtColor = if (isIncome) COLOR_INCOME else COLOR_EXPENSE
-
-    val pctText: String? = when {
-        pct == null -> null
-        pct > 999.0 -> ">1K%"
-        else -> String.format(Locale.US, "%.0f%%", pct)
-    }
-
-    // 收入冇括號，支出有括號；用單一 Text 顯示，靠右對齊
-    val amtDisplay = if (isIncome) formattedAmt else "($formattedAmt)"
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // 金額：撐滿剩餘空間，永遠靠右貼齊
-        Text(
-            text = amtDisplay,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = amtColor,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-            modifier = Modifier.weight(1f)
-        )
-        Spacer(Modifier.width(6.dp))
-        // 百分比：固定寬度，靠右貼齊
-        Box(
-            modifier = Modifier.width(42.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            if (pctText != null) {
-                Text(
-                    text = pctText,
-                    fontSize = 12.sp,
-                    color = TEXT_TERTIARY,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.End,
-                    maxLines = 1
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun CompareContent(
-    records: List<Record>,
-    availableMonths: List<String>,
-    selectedMonthA: String,
-    onMonthAChange: (String) -> Unit,
-    selectedMonthB: String,
-    onMonthBChange: (String) -> Unit,
-    onAddClick: () -> Unit,
-) {
-    val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
-
-    val sortedCategories = remember(records, selectedMonthB) {
-        val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
-            sumByCategoryAndMonth(records, cat, selectedMonthB)
-        }
-        listOf(INCOME_CATEGORY) + expenses
-    }
-
-    val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB) {
-        sortedCategories.filter { cat ->
-            val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
-            val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
-            amtA != 0.0 || amtB != 0.0
-        }
-    }
-
-    val incomeA = remember(records, selectedMonthA) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthA) }
-    val incomeB = remember(records, selectedMonthB) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthB) }
-
-    val totalExpenseA = remember(records, selectedMonthA) {
-        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthA) }
-    }
-    val totalExpenseB = remember(records, selectedMonthB) {
-        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthB) }
-    }
-    val balanceA = incomeA - totalExpenseA
-    val balanceB = incomeB - totalExpenseB
-
-    val nowCal = remember { Calendar.getInstance() }
-    val currentYear = remember { nowCal.get(Calendar.YEAR) }
-    val currentMonthNum = remember { nowCal.get(Calendar.MONTH) + 1 }
-
-    val monthlyKeysThisYear = remember(currentYear, currentMonthNum) {
-        (1..currentMonthNum).map { m ->
-            String.format(Locale.US, "%04d-%02d", currentYear, m)
-        }
-    }
-
-    val histogramData = remember(records, monthlyKeysThisYear) {
-        EXPENSE_CATEGORIES.associateWith { cat ->
-            monthlyKeysThisYear.map { key ->
-                sumByCategoryAndMonth(records, cat, key)
-            }
-        }
-    }
-
-    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
-        ) {
-            Text(
-                "月份比較",
-                fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                shape = RoundedCornerShape(16.dp),
-                color = SURFACE_CARD,
-                shadowElevation = 4.dp
-            ) {
-                Column(Modifier.fillMaxSize()) {
-                    // ===== 表頭 =====
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(SURFACE_ELEVATED)
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "類別",
-                            Modifier.weight(1.0f),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = TEXT_SECONDARY
-                        )
-                        Spacer(Modifier.weight(0.75f))
-
-                        Row(
-                            Modifier.weight(1.55f),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            MonthDropdown(
-                                value = selectedMonthA,
-                                months = availableMonths.ifEmpty { listOf(currentMonthKey) },
-                                onChange = { newA ->
-                                    var newB = selectedMonthB
-                                    if (newA == newB) newB = shiftMonthKey(newA, 1)
-                                    onMonthAChange(newA)
-                                    if (newB != selectedMonthB) onMonthBChange(newB)
-                                }
-                            )
-                        }
-                        Spacer(Modifier.width(6.dp))
-                        Row(
-                            Modifier.weight(1.55f),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            MonthDropdown(
-                                value = selectedMonthB,
-                                months = availableMonths.ifEmpty { listOf(currentMonthKey) },
-                                onChange = { newB ->
-                                    var newA = selectedMonthA
-                                    if (newB == newA) newA = shiftMonthKey(newB, -1)
-                                    onMonthBChange(newB)
-                                    if (newA != selectedMonthA) onMonthAChange(newA)
-                                }
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = DIVIDER_COLOR)
-
-                    // ===== 表格主體：每行均分剩餘頁高 =====
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        if (displayCategories.isEmpty()) {
-                            Box(
-                                Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
-                            }
-                        } else {
-                            BoxWithConstraints(Modifier.fillMaxSize()) {
-                                val rowCount = displayCategories.size
-                                val calculatedHeight = maxHeight / rowCount
-                                // 最低 44dp，避免太多類別時擠爆
-                                val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
-
-                                LazyColumn(
-                                    Modifier.fillMaxSize(),
-                                    userScrollEnabled = false
-                                ) {
-                                    itemsIndexed(
-                                        items = displayCategories,
-                                        key = { _, cat -> cat }
-                                    ) { idx, cat ->
-                                        val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
-                                        val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
-                                        val style = CATEGORY_STYLES[cat]
-                                        val isIncome = cat == INCOME_CATEGORY
-
-                                        val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) (amtA / incomeA * 100.0) else null
-                                        val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) (amtB / incomeB * 100.0) else null
-
-                                        Row(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .height(rowHeight)
-                                                .animateItem(
-                                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
-                                                    fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
-                                                    placementSpec = spring(
-                                                        stiffness = Spring.StiffnessMediumLow,
-                                                        dampingRatio = Spring.DampingRatioLowBouncy
-                                                    )
-                                                )
-                                                .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
-                                                .padding(horizontal = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            // 類別名稱
-                                            Row(Modifier.weight(1.0f), verticalAlignment = Alignment.CenterVertically) {
-                                                if (style != null) {
-                                                    Box(
-                                                        Modifier
-                                                            .size(26.dp)
-                                                            .clip(RoundedCornerShape(7.dp))
-                                                            .background(style.bgColor),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
-                                                    }
-                                                    Spacer(Modifier.width(7.dp))
-                                                }
-                                                Text(
-                                                    cat, fontSize = 15.sp, color = TEXT_PRIMARY,
-                                                    fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
-                                                )
-                                            }
-
-                                            // 迷你直方圖
-                                            Box(
-                                                Modifier
-                                                    .weight(0.75f)
-                                                    .fillMaxHeight()
-                                                    .padding(start = 6.dp, end = 12.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (!isIncome) {
-                                                    val values = histogramData[cat].orEmpty()
-                                                    val histHeight = (rowHeight - 16.dp).coerceAtLeast(20.dp)
-                                                    MiniHistogram(
-                                                        values = values,
-                                                        color = style?.fgColor ?: TEXT_TERTIARY,
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .height(histHeight)
-                                                    )
-                                                }
-                                            }
-
-                                            CompareValueCell(
-                                                amount = amtA,
-                                                isIncome = isIncome,
-                                                pct = pctA,
-                                                modifier = Modifier.weight(1.55f)
-                                            )
-
-                                            Spacer(Modifier.width(6.dp))
-
-                                            CompareValueCell(
-                                                amount = amtB,
-                                                isIncome = isIncome,
-                                                pct = pctB,
-                                                modifier = Modifier.weight(1.55f)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
-
-                    // ===== 餘額行 =====
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(SURFACE_ELEVATED)
-                            .padding(horizontal = 10.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "餘額",
-                            Modifier.weight(1.0f),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = BRAND_PRIMARY_DARK
-                        )
-                        Spacer(Modifier.weight(0.75f))
-
-                        CompareValueCell(
-                            amount = balanceA,
-                            isIncome = balanceA >= 0,
-                            pct = null,
-                            modifier = Modifier.weight(1.55f)
-                        )
-
-                        Spacer(Modifier.width(6.dp))
-
-                        CompareValueCell(
-                            amount = balanceB,
-                            isIncome = balanceB >= 0,
-                            pct = null,
-                            modifier = Modifier.weight(1.55f)
-                        )
-                    }
-                }
-            }
-        }
-
-        FloatingActionButton(
-            onClick = onAddClick,
-            containerColor = BRAND_PRIMARY,
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-        ) {
-            Icon(Icons.Default.Add, "新增")
-        }
-    }
-}
-
-fun sumByCategoryAndMonth(records: List<Record>, category: String, month: String): Double =
-    records.filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == month }.sumOf { it.amount }
-
-@Composable
-fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier) {
-        Surface(
-            onClick = { expanded = true },
-            shape = RoundedCornerShape(10.dp),
-            color = SURFACE_CARD
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    formatMonthLabel(value),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = BRAND_PRIMARY
-                )
-                Spacer(Modifier.width(3.dp))
-                Icon(
-                    Icons.Default.ArrowDropDown, "選擇月份",
-                    tint = BRAND_PRIMARY,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            shape = RoundedCornerShape(14.dp),
-            containerColor = SURFACE_CARD
-        ) {
-            months.forEach { m ->
-                DropdownMenuItem(
-                    text = { Text(formatMonthLabel(m), fontSize = 15.sp) },
-                    onClick = { onChange(m); expanded = false }
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun QuickInputSection(
-    topNotes: List<Pair<String, Int>>,
-    noteIconMap: Map<String, String>,
-    onClick: (String) -> Unit
-) {
-    if (topNotes.isEmpty()) return
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val availWidth = maxWidth - 32.dp
-        val perRow = max(1, (availWidth / 90.dp).toInt()).coerceIn(2, 5)
-        val perPage = perRow * 4
-        val pageCount = max(1, (topNotes.size + perPage - 1) / perPage)
-        val pagerState = rememberPagerState { pageCount }
-        val linesToShow = if (pageCount == 1) {
-            ((topNotes.size + perRow - 1) / perRow).coerceAtLeast(1)
-        } else 4
-        val rowHeight = 40.dp
-        val vGap = 4.dp
-        val pagerHeight = rowHeight * linesToShow + vGap * (linesToShow - 1).coerceAtLeast(0)
-
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-                .shadow(2.dp, RoundedCornerShape(18.dp))
-                .background(SURFACE_CARD, RoundedCornerShape(18.dp))
-                .padding(vertical = 10.dp)
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxWidth().height(pagerHeight)
-                ) { page ->
-                    val start = page * perPage
-                    val end = minOf(start + perPage, topNotes.size)
-                    if (start >= end) return@HorizontalPager
-
-                    Column(
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(vGap)
-                    ) {
-                        for (line in 0 until linesToShow) {
-                            val lineStart = start + line * perRow
-                            val lineEnd = minOf(lineStart + perRow, end)
-                            if (lineStart >= lineEnd) break
-
-                            Row(
-                                Modifier.fillMaxWidth().height(rowHeight),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                for (i in lineStart until lineEnd) {
-                                    val name = topNotes[i].first
-                                    Surface(
-                                        modifier = Modifier.weight(1f).fillMaxHeight(),
-                                        shape = RoundedCornerShape(11.dp),
-                                        color = SURFACE_ELEVATED,
-                                        onClick = { onClick(name) }
-                                    ) {
-                                        Row(
-                                            Modifier.padding(horizontal = 6.dp),
-                                            horizontalArrangement = Arrangement.Center,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            IconView(noteIconMap[name] ?: "", name, size = 18.dp)
-                                            Spacer(Modifier.width(4.dp))
-                                            Text(
-                                                name,
-                                                fontSize = 12.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                color = TEXT_PRIMARY,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (pageCount > 1) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        repeat(pageCount) { i ->
-                            val active = i == pagerState.currentPage
-                            Box(
-                                Modifier.padding(horizontal = 3.dp)
-                                    .size(if (active) 6.dp else 4.dp)
-                                    .clip(CircleShape)
-                                    .background(if (active) BRAND_PRIMARY else DIVIDER_COLOR)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
@@ -3214,6 +1935,7 @@ fun LedgerKeyboardPanel(
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
+    showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -3230,14 +1952,14 @@ fun LedgerKeyboardPanel(
     Surface(
         modifier = modifier.imePadding(),
         color = SURFACE_CARD,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(24.dp),
         shadowElevation = 16.dp
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 16.dp, bottom = 16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -3315,12 +2037,34 @@ fun LedgerKeyboardPanel(
             Spacer(Modifier.height(10.dp))
 
             Surface(Modifier.fillMaxWidth().height(76.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
-                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(horizontal = 22.dp),
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(start = 22.dp, end = 12.dp),
                     contentAlignment = Alignment.CenterEnd) {
                     val showText = if (state.amountText.isEmpty()) "0" else state.amountText
-                    Text(showText, fontSize = 38.sp, fontWeight = FontWeight.Bold,
+                    Text(
+                        showText, fontSize = 38.sp, fontWeight = FontWeight.Bold,
                         color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
-                        textAlign = TextAlign.End, maxLines = 1)
+                        textAlign = TextAlign.End, maxLines = 1,
+                        modifier = Modifier.padding(end = 44.dp)
+                    )
+                    
+                    // 利用 showKeyboard 控制加號變交叉嘅無縫旋轉
+                    val crossRotation by animateFloatAsState(
+                        targetValue = if (showKeyboard) 45f else 0f, 
+                        animationSpec = tween(450, easing = FastOutSlowInEasing),
+                        label = "fabToCross"
+                    )
+                    
+                    IconButton(
+                        onClick = { onStateChange(state.copy(amountText = "", selectAmountOnInput = false)) },
+                        modifier = Modifier.align(Alignment.CenterEnd).size(36.dp).rotate(crossRotation)
+                    ) {
+                        Icon(
+                            Icons.Default.Add, 
+                            contentDescription = "清除金額", 
+                            tint = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_SECONDARY, 
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
             }
 
@@ -3751,6 +2495,1297 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
         Icon(icon, null, tint = tint, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
         Text(label, color = tint, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+// 快速輸入 Chip：配合文字長度、自動抽取圖標主色調
+@Composable
+fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
+    var bgColor by remember { mutableStateOf(SURFACE_ELEVATED) }
+    val ctx = LocalContext.current
+    
+    LaunchedEffect(iconUrl) {
+        if (iconUrl.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val request = ImageRequest.Builder(ctx).data(iconUrl).allowHardware(false).build()
+                    val result = ctx.imageLoader.execute(request)
+                    val drawable = result.drawable
+                    if (drawable is android.graphics.drawable.BitmapDrawable) {
+                        val bmp = drawable.bitmap
+                        bgColor = getDominantMutedColor(bmp)
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+    }
+    
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = bgColor,
+        onClick = onClick,
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp), 
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconView(iconUrl, name, size = 18.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+// 快速輸入區塊：改用 FlowRow 按照字體長度排列
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun QuickInputSection(
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    onClick: (String) -> Unit
+) {
+    if (topNotes.isEmpty()) return
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .shadow(2.dp, RoundedCornerShape(18.dp))
+            .background(SURFACE_CARD, RoundedCornerShape(18.dp))
+            .padding(vertical = 12.dp, horizontal = 14.dp)
+    ) {
+        // 利用 FlowRow 自動換行，寬度完全跟隨文字長度
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            topNotes.take(12).forEach { (name, _) ->
+                QuickInputChip(
+                    name = name, 
+                    iconUrl = noteIconMap[name] ?: "", 
+                    onClick = { onClick(name) }
+                )
+            }
+        }
+    }
+}
+// 第四段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
+@Composable
+fun CalendarRow(
+    rowIdx: Int,
+    firstDayOffset: Int,
+    daysInMonth: Int,
+    today: Calendar,
+    isCurrentMonth: Boolean,
+    recordsByDay: Map<Int, List<Record>>,
+    displayMode: Int,
+    maxAbsNet: Double,
+    selectedDay: Int?,
+    onCellClick: (day: Int, col: Int) -> Unit,
+) {
+    val spacing = 6.dp
+
+    var maxItemsInRow = 0
+    for (col in 0 until 7) {
+        val day = rowIdx * 7 + col - firstDayOffset + 1
+        if (day in 1..daysInMonth) {
+            val c = recordsByDay[day]?.size ?: 0
+            if (c > maxItemsInRow) maxItemsInRow = c
+        }
+    }
+
+    val targetHeight: Dp = when (displayMode) {
+        0 -> 52.dp
+        1 -> (34 + maxItemsInRow * 16).dp.coerceAtLeast(56.dp)
+        2 -> {
+            val iconRows = (maxItemsInRow + 2) / 3
+            (30 + iconRows * 21).dp.coerceAtLeast(52.dp)
+        }
+        else -> 52.dp
+    }
+
+    val rowHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "rowHeight_$rowIdx"
+    )
+
+    Row(
+        Modifier.fillMaxWidth().height(rowHeight),
+        horizontalArrangement = Arrangement.spacedBy(spacing)
+    ) {
+        for (col in 0 until 7) {
+            val cellIdx = rowIdx * 7 + col
+            val dayOfMonth = cellIdx - firstDayOffset + 1
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                if (dayOfMonth in 1..daysInMonth) {
+                    CalendarDayCell(
+                        day = dayOfMonth,
+                        isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
+                        isSelected = selectedDay == dayOfMonth,
+                        records = recordsByDay[dayOfMonth] ?: emptyList(),
+                        displayMode = displayMode,
+                        maxAbsNet = maxAbsNet,
+                        onClick = { onCellClick(dayOfMonth, col) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CalendarDayCell(
+    day: Int,
+    isToday: Boolean,
+    isSelected: Boolean,
+    records: List<Record>,
+    displayMode: Int,
+    maxAbsNet: Double,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    val hasRecords = records.isNotEmpty()
+
+    val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+    val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+    val net = income - expense
+    val absNet = abs(net)
+
+    val bgColor = when {
+        isSelected -> BRAND_PRIMARY_LIGHT
+        hasRecords && net > 0 -> CELL_BG_POS
+        hasRecords && net < 0 -> CELL_BG_NEG
+        else -> SURFACE_CARD
+    }
+    val elevation = if (hasRecords || isToday || isSelected) 1.dp else 0.dp
+
+    val barRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
+        (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
+    else 0f
+    val barColor = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .shadow(
+                elevation = elevation,
+                shape = shape,
+                clip = false,
+                ambientColor = Color(0x1A000000),
+                spotColor = Color(0x1A000000)
+            )
+            .clip(shape)
+            .background(bgColor)
+            .border(
+                width = if (isSelected) 2.dp else 0.5.dp,
+                color = if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR,
+                shape = shape
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() }
+    ) {
+        if (displayMode == 0 && barRatio > 0.001f) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(barRatio)
+                    .background(barColor.copy(alpha = 0.75f))
+            )
+        }
+
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 2.dp, vertical = 3.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top
+        ) {
+            Text(
+                "$day",
+                fontSize = 13.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Black,
+                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else Color.Black,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(5.dp))
+
+            when (displayMode) {
+                0 -> {
+                    if (absNet > 0) {
+                        Text(
+                            text = compactAmount(net),
+                            fontSize = 11.sp,
+                            lineHeight = 13.sp,
+                            color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+                1 -> {
+                    records.sortedBy { it.timestamp }.forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth().height(16.dp)
+                        ) {
+                            FadedText(
+                                text = r.note.ifBlank { "(無)" },
+                                color = TEXT_PRIMARY,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Medium,
+                                fadeWidth = 6.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .alignByBaseline()
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
+                                       else compactAmount(-r.amount),
+                                fontSize = 9.sp,
+                                lineHeight = 11.sp,
+                                color = amountColor(r.category),
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.alignByBaseline()
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                2 -> {
+                    val rows = records.chunked(3)
+                    rows.forEach { row ->
+                        Row(
+                            Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 1.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            row.forEach { r ->
+                                IconViewAdaptive(
+                                    iconUrl = r.iconUrl,
+                                    name = r.note,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
+                            }
+                            repeat(3 - row.size) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun CalendarContent(
+    records: List<Record>,
+    onCopyClick: (Record) -> Unit,
+    onEditClick: (Record) -> Unit,
+    onFilterClick: (Record) -> Unit,
+    onDeleteClick: (Record) -> Unit,
+    onChangeIconClick: (Record) -> Unit,
+    onAddClick: () -> Unit,
+) {
+    val today = remember { Calendar.getInstance() }
+    val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+
+    var currentMonthKey by remember { mutableStateOf(todayKey) }
+    var monthDirection by remember { mutableIntStateOf(1) }
+    var filterCategory by remember { mutableStateOf<String?>(null) }
+    var displayMode by remember { mutableIntStateOf(0) }
+
+    var selectedDay by remember { mutableStateOf<Int?>(null) }
+    var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
+    var selectedColIdx by remember { mutableStateOf<Int?>(null) }
+    var detailExpandedId by remember { mutableStateOf<String?>(null) }
+
+    val scrollState = rememberScrollState()
+
+    val curCal = remember(currentMonthKey) {
+        val parts = currentMonthKey.split("-")
+        Calendar.getInstance().apply {
+            set(parts[0].toInt(), parts[1].toInt() - 1, 1)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+    }
+    val year = curCal.get(Calendar.YEAR)
+    val month = curCal.get(Calendar.MONTH) + 1
+    val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    // 使用 derivedStateOf 修復刪除後不刷新嘅 Bug
+    val monthAllRecords by remember(currentMonthKey) {
+        derivedStateOf { records.filter { monthKeyFromTimestamp(it.timestamp) == currentMonthKey } }
+    }
+
+    val visibleCategories by remember {
+        derivedStateOf {
+            val hasIncome = monthAllRecords.any { it.category == INCOME_CATEGORY }
+            val expenseCats = monthAllRecords
+                .filter { it.category != INCOME_CATEGORY }
+                .groupBy { it.category }
+                .mapValues { (_, list) -> list.sumOf { it.amount } }
+                .toList()
+                .sortedByDescending { it.second }
+                .map { it.first }
+            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+        }
+    }
+
+    val monthRecords by remember(filterCategory) {
+        derivedStateOf {
+            if (filterCategory == null) monthAllRecords
+            else monthAllRecords.filter { it.category == filterCategory }
+        }
+    }
+
+    val recordsByDay by remember {
+        derivedStateOf {
+            monthRecords.groupBy { r ->
+                Calendar.getInstance().apply { timeInMillis = r.timestamp }
+                    .get(Calendar.DAY_OF_MONTH)
+            }
+        }
+    }
+
+    val maxAbsNet by remember {
+        derivedStateOf {
+            recordsByDay.values.maxOfOrNull { dayRecords ->
+                val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+                val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+                abs(inc - exp)
+            } ?: 0.0
+        }
+    }
+
+    val totalAmount = monthRecords.sumOf { it.amount }
+    val itemCount = monthRecords.size
+    val avgPerItem = if (itemCount > 0) totalAmount / itemCount else 0.0
+    val isCurrentMonth = currentMonthKey == todayKey
+    val daysElapsed = if (isCurrentMonth) today.get(Calendar.DAY_OF_MONTH) else daysInMonth
+    val avgPerDay = if (daysElapsed > 0) totalAmount / daysElapsed else 0.0
+
+    val firstDayOffset = remember(curCal) {
+        val first = curCal.clone() as Calendar
+        first.set(Calendar.DAY_OF_MONTH, 1)
+        (first.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    }
+    val totalCells = firstDayOffset + daysInMonth
+    val totalRows = (totalCells + 6) / 7
+
+    LaunchedEffect(currentMonthKey) {
+        selectedDay = null
+        selectedRowIdx = null
+        selectedColIdx = null
+        detailExpandedId = null
+    }
+    LaunchedEffect(selectedDay) {
+        if (selectedDay != null) {
+            try { scrollState.animateScrollTo(0) } catch (_: Exception) {}
+        }
+    }
+
+    BackHandler(enabled = selectedDay != null) {
+        selectedDay = null
+        selectedRowIdx = null
+        selectedColIdx = null
+        detailExpandedId = null
+    }
+
+    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.padding(horizontal = 10.dp)) {
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = {
+                            monthDirection = -1
+                            currentMonthKey = shiftMonthKey(currentMonthKey, -1)
+                        },
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape,
+                        color = SURFACE_ELEVATED
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.ChevronLeft, "上個月",
+                                tint = TEXT_SECONDARY,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            if (currentMonthKey != todayKey) {
+                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
+                                currentMonthKey = todayKey
+                            }
+                        }
+                    ) {
+                        Text(
+                            "${year}年",
+                            fontSize = 11.sp,
+                            lineHeight = 12.sp,
+                            color = Color.Black,
+                            fontWeight = FontWeight.Medium
+                        )
+                        AnimatedContent(
+                            targetState = currentMonthKey,
+                            transitionSpec = {
+                                val forward = monthDirection > 0
+                                if (forward) {
+                                    (slideInHorizontally(animationSpec = tween(280)) { it } + fadeIn(tween(200)))
+                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { -it } + fadeOut(tween(180)))
+                                } else {
+                                    (slideInHorizontally(animationSpec = tween(280)) { -it } + fadeIn(tween(200)))
+                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { it } + fadeOut(tween(180)))
+                                }
+                            },
+                            label = "monthAnim"
+                        ) { key ->
+                            val m = key.split("-").getOrNull(1)?.toIntOrNull() ?: month
+                            Text(
+                                "${m}月",
+                                fontSize = 28.sp,
+                                lineHeight = 30.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TEXT_PRIMARY
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.width(10.dp))
+                    Surface(
+                        onClick = {
+                            monthDirection = 1
+                            currentMonthKey = shiftMonthKey(currentMonthKey, 1)
+                        },
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape,
+                        color = SURFACE_ELEVATED
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.ChevronRight, "下個月",
+                                tint = TEXT_SECONDARY,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    SegmentedModeControl(
+                        displayMode = displayMode,
+                        onModeChange = { displayMode = it }
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                AnimatedVisibility(
+                    visible = selectedDay == null,
+                    enter = fadeIn(tween(250)) + expandVertically(tween(300, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
+                ) {
+                    Column {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 72.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .animateContentSize(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            userScrollEnabled = false
+                        ) {
+                            item(key = "__all__") {
+                                AnimatedFilterChip(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selected = filterCategory == null,
+                                    label = "全部",
+                                    onClick = { filterCategory = null }
+                                )
+                            }
+                            items(
+                                items = visibleCategories,
+                                key = { it }
+                            ) { cat ->
+                                AnimatedFilterChip(
+                                    modifier = Modifier.animateItem().fillMaxWidth(),
+                                    selected = filterCategory == cat,
+                                    label = cat,
+                                    onClick = {
+                                        filterCategory = if (filterCategory == cat) null else cat
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            InfoChip("總計", "$${formatAmountNoDecimal(totalAmount)}",
+                                Modifier.weight(1f), valueFontSize = 16.sp)
+                            InfoChip("平均每項", "$${formatAmountNoDecimal(avgPerItem)}",
+                                Modifier.weight(1f), valueFontSize = 16.sp)
+                            InfoChip("日均支出", "$${formatAmountNoDecimal(avgPerDay)}",
+                                Modifier.weight(1f), valueFontSize = 16.sp)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Row(Modifier.fillMaxWidth()) {
+                    listOf("一", "二", "三", "四", "五", "六", "日").forEach { w ->
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            Text(
+                                w, fontSize = 12.sp,
+                                color = Color.Black,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
+                ) {
+                    for (rowIdx in 0 until totalRows) {
+                        val isThisRowSelected = selectedRowIdx == rowIdx
+                        val isHidden = selectedDay != null && !isThisRowSelected
+
+                        AnimatedVisibility(
+                            visible = !isHidden,
+                            enter = fadeIn(tween(300)) + expandVertically(
+                                tween(320, easing = FastOutSlowInEasing),
+                                expandFrom = Alignment.Top
+                            ),
+                            exit = fadeOut(tween(200)) + shrinkVertically(
+                                tween(300, easing = FastOutSlowInEasing),
+                                shrinkTowards = Alignment.Top
+                            )
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                CalendarRow(
+                                    rowIdx = rowIdx,
+                                    firstDayOffset = firstDayOffset,
+                                    daysInMonth = daysInMonth,
+                                    today = today,
+                                    isCurrentMonth = isCurrentMonth,
+                                    recordsByDay = recordsByDay,
+                                    displayMode = displayMode,
+                                    maxAbsNet = maxAbsNet,
+                                    selectedDay = if (isThisRowSelected) selectedDay else null,
+                                    onCellClick = { day, col ->
+                                        if (selectedDay == day) {
+                                            selectedDay = null
+                                            selectedRowIdx = null
+                                            selectedColIdx = null
+                                            detailExpandedId = null
+                                        } else {
+                                            selectedDay = day
+                                            selectedRowIdx = rowIdx
+                                            selectedColIdx = col
+                                            detailExpandedId = null
+                                        }
+                                    }
+                                )
+
+                                if (isThisRowSelected && selectedDay != null && selectedColIdx != null) {
+                                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                        val cellWidth = maxWidth / 7
+                                        TrianglePointer(
+                                            colIndex = selectedColIdx!!,
+                                            cellWidth = cellWidth,
+                                            color = SURFACE_CARD
+                                        )
+                                    }
+                                    val dateKey = String.format(
+                                        Locale.US, "%04d-%02d-%02d",
+                                        year, month, selectedDay
+                                    )
+                                    DayDetailPanel(
+                                        dateKey = dateKey,
+                                        records = recordsByDay[selectedDay] ?: emptyList(),
+                                        expandedId = detailExpandedId,
+                                        onExpandChange = { detailExpandedId = it },
+                                        onCopy = { onCopyClick(it) },
+                                        onEdit = { onEditClick(it) },
+                                        onFilter = { onFilterClick(it) },
+                                        onDelete = { onDeleteClick(it) },
+                                        onChangeIcon = { onChangeIconClick(it) },
+                                        onDismiss = {
+                                            selectedDay = null
+                                            selectedRowIdx = null
+                                            selectedColIdx = null
+                                            detailExpandedId = null
+                                        }
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                } else {
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = onAddClick,
+            containerColor = BRAND_PRIMARY,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) {
+            Icon(Icons.Default.Add, "新增")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SegmentedModeControl(
+    displayMode: Int,
+    onModeChange: (Int) -> Unit
+) {
+    val modes = remember {
+        listOf(
+            Triple("金額", Icons.Default.AttachMoney, 0),
+            Triple("項目", Icons.Default.List, 1),
+            Triple("圖標", Icons.Default.Apps, 2)
+        )
+    }
+    val itemWidth = 76.dp
+    val itemHeight = 28.dp
+    val density = LocalDensity.current
+    val itemWidthPx = with(density) { itemWidth.toPx() }
+
+    var dragAccum by remember { mutableFloatStateOf(0f) }
+    val latestMode by rememberUpdatedState(displayMode)
+    val latestOnChange by rememberUpdatedState(onModeChange)
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = SURFACE_ELEVATED
+    ) {
+        Box(
+            Modifier
+                .padding(3.dp)
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { dragAccum = 0f },
+                        onDragEnd = { dragAccum = 0f },
+                        onDragCancel = { dragAccum = 0f },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragAccum += dragAmount.x
+                            val steps = (dragAccum / itemWidthPx).toInt()
+                            if (steps != 0) {
+                                val newMode = (latestMode + steps).coerceIn(0, 2)
+                                if (newMode != latestMode) latestOnChange(newMode)
+                                dragAccum -= steps * itemWidthPx
+                            }
+                        }
+                    )
+                }
+        ) {
+            val indicatorOffset by animateDpAsState(
+                targetValue = itemWidth * displayMode,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "segIndicator"
+            )
+
+            Box(
+                Modifier
+                    .offset(x = indicatorOffset)
+                    .width(itemWidth)
+                    .height(itemHeight)
+                    .shadow(2.dp, RoundedCornerShape(9.dp), clip = false)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(SURFACE_CARD)
+            )
+
+            Row {
+                modes.forEach { (label, icon, mode) ->
+                    val selected = displayMode == mode
+                    Row(
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .height(itemHeight)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onModeChange(mode) }
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            icon, label,
+                            tint = if (selected) BRAND_PRIMARY else TEXT_SECONDARY,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            color = if (selected) TEXT_PRIMARY else TEXT_SECONDARY,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun InfoChip(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueFontSize: TextUnit = 13.sp
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = SURFACE_ELEVATED
+    ) {
+        Column(
+            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(label, fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value, fontSize = valueFontSize, color = TEXT_PRIMARY,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun FadedText(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.Normal,
+    modifier: Modifier = Modifier,
+    fadeWidth: Dp = 6.dp
+) {
+    val density = LocalDensity.current
+    val fadePx = with(density) { fadeWidth.toPx() }
+    var textWidthPx by remember { mutableFloatStateOf(0f) }
+
+    val brush = remember(textWidthPx, fadePx, color) {
+        if (textWidthPx > 1f) {
+            val effectiveFade = fadePx.coerceAtMost(textWidthPx * 0.45f)
+            val stop = ((textWidthPx - effectiveFade) / textWidthPx).coerceIn(0.5f, 1f)
+            Brush.horizontalGradient(
+                colorStops = arrayOf(
+                    0f to color,
+                    stop to color,
+                    1f to color.copy(alpha = 0f)
+                ),
+                startX = 0f,
+                endX = textWidthPx
+            )
+        } else {
+            SolidColor(color)
+        }
+    }
+
+    Text(
+        text = text,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        style = TextStyle(
+            brush = brush,
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            lineHeight = 11.sp
+        ),
+        onTextLayout = { result ->
+            if (result.lineCount > 0) {
+                textWidthPx = result.getLineRight(0) - result.getLineLeft(0)
+            }
+        },
+        modifier = modifier
+    )
+}
+
+@Composable
+fun MiniHistogram(
+    values: List<Double>,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    if (values.isEmpty()) {
+        Spacer(modifier)
+        return
+    }
+    val maxValue = values.maxOrNull() ?: 0.0
+    if (maxValue <= 0.0) {
+        Spacer(modifier)
+        return
+    }
+    Canvas(modifier) {
+        val count = values.size
+        // 縮窄間隙，拉幼柱體
+        val gapRatio = 0.35f
+        val totalWidth = size.width
+        val barWidth = if (count == 1) totalWidth
+                       else totalWidth / (count + (count - 1) * gapRatio)
+        val gap = if (count == 1) 0f else barWidth * gapRatio
+        values.forEachIndexed { i, v ->
+            val ratio = (v / maxValue).toFloat().coerceIn(0f, 1f)
+            val h = (ratio * size.height).coerceAtLeast(1.5f)
+            val x = i * (barWidth + gap)
+            val y = size.height - h
+            drawRect(
+                color = color,
+                topLeft = Offset(x, y),
+                size = androidx.compose.ui.geometry.Size(barWidth, h)
+            )
+        }
+    }
+}
+
+@Composable
+fun CompareValueCell(
+    amount: Double,
+    isIncome: Boolean,
+    pct: Double?,
+    modifier: Modifier = Modifier
+) {
+    val formattedAmt = formatAmountNoDecimal(abs(amount))
+    val amtColor = if (isIncome) COLOR_INCOME else COLOR_EXPENSE
+
+    val pctText: String? = when {
+        pct == null -> null
+        pct > 999.0 -> ">1K%"
+        else -> String.format(Locale.US, "%.0f%%", pct)
+    }
+
+    val amtDisplay = if (isIncome) formattedAmt else "($formattedAmt)"
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = amtDisplay,
+            fontSize = 15.sp, // 縮細一級
+            fontWeight = FontWeight.ExtraBold,
+            color = amtColor,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(Modifier.width(4.dp))
+        Box(
+            modifier = Modifier.width(38.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            if (pctText != null) {
+                Text(
+                    text = pctText,
+                    fontSize = 11.sp, // 縮細百分比
+                    color = TEXT_TERTIARY,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.End,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun CompareContent(
+    records: List<Record>,
+    availableMonths: List<String>,
+    selectedMonthA: String,
+    onMonthAChange: (String) -> Unit,
+    selectedMonthB: String,
+    onMonthBChange: (String) -> Unit,
+    onAddClick: () -> Unit,
+) {
+    val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+
+    val sortedCategories = remember(records, selectedMonthB) {
+        val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
+            sumByCategoryAndMonth(records, cat, selectedMonthB)
+        }
+        listOf(INCOME_CATEGORY) + expenses
+    }
+
+    val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB) {
+        sortedCategories.filter { cat ->
+            val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
+            val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+            amtA != 0.0 || amtB != 0.0
+        }
+    }
+
+    val incomeA = remember(records, selectedMonthA) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthA) }
+    val incomeB = remember(records, selectedMonthB) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthB) }
+
+    val totalExpenseA = remember(records, selectedMonthA) {
+        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthA) }
+    }
+    val totalExpenseB = remember(records, selectedMonthB) {
+        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthB) }
+    }
+    val balanceA = incomeA - totalExpenseA
+    val balanceB = incomeB - totalExpenseB
+
+    val nowCal = remember { Calendar.getInstance() }
+    val currentYear = remember { nowCal.get(Calendar.YEAR) }
+    val currentMonthNum = remember { nowCal.get(Calendar.MONTH) + 1 }
+
+    val monthlyKeysThisYear = remember(currentYear, currentMonthNum) {
+        (1..currentMonthNum).map { m ->
+            String.format(Locale.US, "%04d-%02d", currentYear, m)
+        }
+    }
+
+    val histogramData = remember(records, monthlyKeysThisYear) {
+        EXPENSE_CATEGORIES.associateWith { cat ->
+            monthlyKeysThisYear.map { key ->
+                sumByCategoryAndMonth(records, cat, key)
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+        ) {
+            Text(
+                "月份比較",
+                fontSize = 26.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                shape = RoundedCornerShape(16.dp),
+                color = SURFACE_CARD,
+                shadowElevation = 4.dp
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(SURFACE_ELEVATED)
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "類別",
+                            Modifier.weight(1.0f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TEXT_SECONDARY
+                        )
+                        Spacer(Modifier.weight(0.65f)) // 直方圖佔位調整
+
+                        Row(
+                            Modifier.weight(1.55f),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MonthDropdown(
+                                value = selectedMonthA,
+                                months = availableMonths.ifEmpty { listOf(currentMonthKey) },
+                                onChange = { newA ->
+                                    var newB = selectedMonthB
+                                    if (newA == newB) newB = shiftMonthKey(newA, 1)
+                                    onMonthAChange(newA)
+                                    if (newB != selectedMonthB) onMonthBChange(newB)
+                                }
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Row(
+                            Modifier.weight(1.55f),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MonthDropdown(
+                                value = selectedMonthB,
+                                months = availableMonths.ifEmpty { listOf(currentMonthKey) },
+                                onChange = { newB ->
+                                    var newA = selectedMonthA
+                                    if (newB == newA) newA = shiftMonthKey(newB, -1)
+                                    onMonthBChange(newB)
+                                    if (newA != selectedMonthA) onMonthAChange(newA)
+                                }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = DIVIDER_COLOR)
+
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (displayCategories.isEmpty()) {
+                            Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
+                            }
+                        } else {
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
+                                val rowCount = displayCategories.size
+                                val calculatedHeight = maxHeight / rowCount
+                                val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
+
+                                LazyColumn(
+                                    Modifier.fillMaxSize(),
+                                    userScrollEnabled = false
+                                ) {
+                                    itemsIndexed(
+                                        items = displayCategories,
+                                        key = { _, cat -> cat }
+                                    ) { idx, cat ->
+                                        val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
+                                        val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+                                        val style = CATEGORY_STYLES[cat]
+                                        val isIncome = cat == INCOME_CATEGORY
+
+                                        val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) (amtA / incomeA * 100.0) else null
+                                        val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) (amtB / incomeB * 100.0) else null
+
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .height(rowHeight)
+                                                .animateItem(
+                                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                                    fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
+                                                    placementSpec = spring(
+                                                        stiffness = Spring.StiffnessMediumLow,
+                                                        dampingRatio = Spring.DampingRatioLowBouncy
+                                                    )
+                                                )
+                                                .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
+                                                .padding(horizontal = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(Modifier.weight(1.0f), verticalAlignment = Alignment.CenterVertically) {
+                                                if (style != null) {
+                                                    Box(
+                                                        Modifier
+                                                            .size(26.dp)
+                                                            .clip(RoundedCornerShape(7.dp))
+                                                            .background(style.bgColor),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
+                                                    }
+                                                    Spacer(Modifier.width(7.dp))
+                                                }
+                                                Text(
+                                                    cat, fontSize = 15.sp, color = TEXT_PRIMARY,
+                                                    fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
+                                                )
+                                            }
+
+                                            // 直方圖佔比與 padding 壓縮
+                                            Box(
+                                                Modifier
+                                                    .weight(0.65f)
+                                                    .fillMaxHeight()
+                                                    .padding(start = 12.dp, end = 16.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (!isIncome) {
+                                                    val values = histogramData[cat].orEmpty()
+                                                    val histHeight = (rowHeight - 16.dp).coerceAtLeast(20.dp)
+                                                    MiniHistogram(
+                                                        values = values,
+                                                        color = style?.fgColor ?: TEXT_TERTIARY,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(histHeight)
+                                                    )
+                                                }
+                                            }
+
+                                            CompareValueCell(
+                                                amount = amtA,
+                                                isIncome = isIncome,
+                                                pct = pctA,
+                                                modifier = Modifier.weight(1.55f)
+                                            )
+
+                                            Spacer(Modifier.width(6.dp))
+
+                                            CompareValueCell(
+                                                amount = amtB,
+                                                isIncome = isIncome,
+                                                pct = pctB,
+                                                modifier = Modifier.weight(1.55f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
+
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(SURFACE_ELEVATED)
+                            .padding(horizontal = 10.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "餘額",
+                            Modifier.weight(1.0f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = BRAND_PRIMARY_DARK
+                        )
+                        Spacer(Modifier.weight(0.65f))
+
+                        CompareValueCell(
+                            amount = balanceA,
+                            isIncome = balanceA >= 0,
+                            pct = null,
+                            modifier = Modifier.weight(1.55f)
+                        )
+
+                        Spacer(Modifier.width(6.dp))
+
+                        CompareValueCell(
+                            amount = balanceB,
+                            isIncome = balanceB >= 0,
+                            pct = null,
+                            modifier = Modifier.weight(1.55f)
+                        )
+                    }
+                }
+            }
+        }
+
+        FloatingActionButton(
+            onClick = onAddClick,
+            containerColor = BRAND_PRIMARY,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) {
+            Icon(Icons.Default.Add, "新增")
+        }
+    }
+}
+
+fun sumByCategoryAndMonth(records: List<Record>, category: String, month: String): Double =
+    records.filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == month }.sumOf { it.amount }
+
+@Composable
+fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Surface(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(10.dp),
+            color = SURFACE_CARD
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    formatMonthLabel(value),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BRAND_PRIMARY
+                )
+                Spacer(Modifier.width(3.dp))
+                Icon(
+                    Icons.Default.ArrowDropDown, "選擇月份",
+                    tint = BRAND_PRIMARY,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(14.dp),
+            containerColor = SURFACE_CARD
+        ) {
+            months.forEach { m ->
+                DropdownMenuItem(
+                    text = { Text(formatMonthLabel(m), fontSize = 15.sp) },
+                    onClick = { onChange(m); expanded = false }
+                )
+            }
+        }
     }
 }
 
