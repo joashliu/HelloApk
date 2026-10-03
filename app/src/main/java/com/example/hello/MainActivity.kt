@@ -1441,8 +1441,8 @@ fun LedgerContent(
                 )
             }
             else -> {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 4.dp).animateContentSize(),
+                                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     androidx.compose.animation.AnimatedVisibility(
@@ -1456,9 +1456,7 @@ fun LedgerContent(
                             shrinkTowards = Alignment.Start
                         )
                     ) {
-                        if (exactNoteCategory != null) {
-                            CategoryStatChip(exactNoteCategory!!)
-                        }
+                        exactNoteCategory?.let { cat -> CategoryStatChip(cat) }
                     }
 
                     Box(Modifier.weight(if (filterMode) 2f else 1f)) {
