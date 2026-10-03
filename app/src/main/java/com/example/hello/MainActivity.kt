@@ -1729,20 +1729,21 @@ fun CategoryStatChip(category: String) {
 // Sticky header 外層：被推出時 alpha 漸隱，唔會一條硬線切走
 @Composable
 fun FadingStickyHeader(content: @Composable () -> Unit) {
-    var rootY by remember { mutableFloatStateOf(0f) }
+    var rootTop by remember { mutableFloatStateOf(0f) }
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .background(SURFACE_BG)
             .padding(top = 6.dp, bottom = 4.dp)
             .onGloballyPositioned { coords ->
-                rootY = coords.positionInRoot().y
+                // 用 boundsInRoot() 拎相對 root 嘅位置，兼容所有 Compose 版本
+                rootTop = coords.boundsInRoot().top
             }
             .graphicsLayer {
-                // 被推到 rootY < 0 時淡出（60px 內完成）
+                // 被推到 rootTop < 0 時淡出（60px 內完成）
                 val fadeDist = 60f
-                val a = if (rootY >= 0f) 1f
-                        else (1f + rootY / fadeDist).coerceIn(0f, 1f)
+                val a = if (rootTop >= 0f) 1f
+                        else (1f + rootTop / fadeDist).coerceIn(0f, 1f)
                 this.alpha = a
             }
     ) {
