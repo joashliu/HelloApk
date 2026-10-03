@@ -38,8 +38,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,7 +49,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,7 +65,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -141,10 +137,9 @@ val CELL_BAR_POS = Color(0xFF34D399)
 val CELL_BG_NEG = Color(0xFFFEE2E2)
 val CELL_BAR_NEG = Color(0xFFF87171)
 
-// 星期圓形配色（低飽和度）
-val WEEKDAY_BG = Color(0xFFE0E7FF)     // 平日：淡紫藍
+val WEEKDAY_BG = Color(0xFFE0E7FF)
 val WEEKDAY_FG = Color(0xFF4F46E5)
-val WEEKEND_BG = Color(0xFFFFE4E6)     // 週末：淡玫瑰
+val WEEKEND_BG = Color(0xFFFFE4E6)
 val WEEKEND_FG = Color(0xFFBE123C)
 
 const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
@@ -207,14 +202,13 @@ data class AfterSaveHint(
     val monthTotal: Double
 )
 
-// 拆解日期 Header 用嘅結構
 data class DateHeaderInfo(
     val year: Int,
     val month: Int,
     val day: Int,
-    val weekdayChar: String,  // "一"、"二"、…、"日"
+    val weekdayChar: String,
     val isWeekend: Boolean,
-    val dayTag: String?       // "今日"、"琴日"、"前日"、"明日"、"後日" 或 null
+    val dayTag: String?
 )
 
 object AboveAnchorPositionProvider : PopupPositionProvider {
@@ -322,7 +316,6 @@ fun formatMonthLabel(ym: String): String {
     return if (y == Calendar.getInstance().get(Calendar.YEAR)) "${m}月" else "${y % 100}年${m}月"
 }
 
-// 完整日期 Header（Panel 標題用） 例：2026年5月1日 週一 今日
 fun formatDateHeader(dateKey: String): String {
     val info = parseDateHeader(dateKey) ?: return dateKey
     val wk = "週${info.weekdayChar}"
@@ -330,7 +323,6 @@ fun formatDateHeader(dateKey: String): String {
     return if (info.dayTag != null) "$base ${info.dayTag}" else base
 }
 
-// 拆解 dateKey 成結構化資訊
 fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     val p = dateKey.split("-")
     if (p.size != 3) return null
@@ -343,7 +335,6 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
     val dow = cal.get(Calendar.DAY_OF_WEEK)
-    // Calendar: 1=Sun, 2=Mon, ..., 7=Sat
     val weekArr = arrayOf("日", "一", "二", "三", "四", "五", "六")
     val weekdayChar = weekArr[dow - 1]
     val isWeekend = dow == Calendar.SUNDAY || dow == Calendar.SATURDAY
@@ -393,10 +384,8 @@ fun timeOfDayDistanceSeconds(timestamp: Long, nowMillis: Long): Int {
     return minOf(d, 86400 - d)
 }
 
-// 從 Bitmap 抽取主色，降低飽和度做柔和背景色
 fun getDominantMutedColor(bitmap: Bitmap): Color {
     if (bitmap.width <= 0 || bitmap.height <= 0) return Color(0xFFF1F5F9)
-
     val targetSize = 72
     val scaled: Bitmap = if (bitmap.width > targetSize || bitmap.height > targetSize) {
         val ratio = minOf(targetSize.toFloat() / bitmap.width, targetSize.toFloat() / bitmap.height)
@@ -425,7 +414,6 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
         val rgb = android.graphics.Color.rgb(r, g, b)
         colorCount[rgb] = (colorCount[rgb] ?: 0) + 1
     }
-
     val dominant = colorCount.maxByOrNull { it.value }?.key ?: android.graphics.Color.LTGRAY
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(dominant, hsv)
@@ -473,10 +461,16 @@ fun MainApp() {
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
 
-    // ===== FAB ↔ 鍵盤交叉圖示無縫移動動畫 =====
-    var fabCenterInRoot by remember { mutableStateOf<Offset?>(null) }
-    var crossCenterInRoot by remember { mutableStateOf<Offset?>(null) }
-    val fabOverlayProgress = remember { Animatable(0f) }
+    // ===== 鍵盤動畫進度：0 = 完全收埋（等同 FAB），1 = 完全展開 =====
+    val keyboardAnimProgress = remember { Animatable(0f) }
+    LaunchedEffect(showKeyboard) {
+        if (showKeyboard) {
+            keyboardAnimProgress.snapTo(0f)
+            keyboardAnimProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
+        } else {
+            keyboardAnimProgress.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
+        }
+    }
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var showFuture by remember { mutableStateOf(false) }
@@ -494,15 +488,8 @@ fun MainApp() {
     var compareMonthB by remember {
         mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB)
     }
-
-    fun setCompareMonthA(v: String) {
-        compareMonthA = v
-        prefs.edit().putString("compare_month_a", v).apply()
-    }
-    fun setCompareMonthB(v: String) {
-        compareMonthB = v
-        prefs.edit().putString("compare_month_b", v).apply()
-    }
+    fun setCompareMonthA(v: String) { compareMonthA = v; prefs.edit().putString("compare_month_a", v).apply() }
+    fun setCompareMonthB(v: String) { compareMonthB = v; prefs.edit().putString("compare_month_b", v).apply() }
 
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
@@ -516,9 +503,7 @@ fun MainApp() {
         derivedStateOf {
             records.filter { it.note.isNotBlank() }
                 .groupBy { it.note }
-                .mapValues { (_, list) ->
-                    list.maxByOrNull { it.timestamp }?.category ?: "飲食"
-                }
+                .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
         }
     }
 
@@ -530,9 +515,7 @@ fun MainApp() {
             records.toList().filter { r ->
                 val catOk = filterCategory == null || r.category == filterCategory
                 val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
-                val searchOk = if (q.isBlank()) {
-                    true
-                } else when {
+                val searchOk = if (q.isBlank()) true else when {
                     hasExactNoteMatch -> r.note == q
                     hasExactCategoryMatch -> r.category == q
                     else -> r.note.contains(q, true) || r.category.contains(q, true)
@@ -553,7 +536,6 @@ fun MainApp() {
     val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount } } }
     val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
 
-    // 判斷係唔係「項目名稱 Exact Match」篩選
     val isExactNoteFilter by remember {
         derivedStateOf {
             filterModeOn &&
@@ -566,13 +548,9 @@ fun MainApp() {
     val topNotes by remember {
         derivedStateOf {
             val now = System.currentTimeMillis()
-            ledgerRecords
-                .filter { it.note.isNotBlank() }
+            ledgerRecords.filter { it.note.isNotBlank() }
                 .groupBy { it.note }
-                .map { (note, list) ->
-                    val diff = list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) }
-                    note to diff
-                }
+                .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
                 .sortedBy { it.second }
                 .take(20)
                 .map { it.first to 0 }
@@ -582,12 +560,9 @@ fun MainApp() {
     val recentAmountByNote by remember {
         derivedStateOf {
             val now = System.currentTimeMillis()
-            ledgerRecords
-                .filter { it.note.isNotBlank() }
+            ledgerRecords.filter { it.note.isNotBlank() }
                 .groupBy { it.note }
-                .mapValues { (_, list) ->
-                    list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0
-                }
+                .mapValues { (_, list) -> list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0 }
         }
     }
 
@@ -598,22 +573,17 @@ fun MainApp() {
         }
     }
     val availableMonths by remember {
-        derivedStateOf {
-            records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted()
-        }
+        derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() }
     }
     val visibleCategories by remember {
         derivedStateOf {
             val base = if (filterMonth == null) records.toList()
                        else records.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
             val hasIncome = base.any { it.category == INCOME_CATEGORY }
-            val expenseCats = base
-                .filter { it.category != INCOME_CATEGORY }
+            val expenseCats = base.filter { it.category != INCOME_CATEGORY }
                 .groupBy { it.category }
                 .mapValues { (_, list) -> list.sumOf { it.amount } }
-                .toList()
-                .sortedByDescending { it.second }
-                .map { it.first }
+                .toList().sortedByDescending { it.second }.map { it.first }
             (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
         }
     }
@@ -657,32 +627,6 @@ fun MainApp() {
         onDispose { listener.remove() }
     }
 
-    // ===== FAB ↔ 交叉 覆蓋層動畫：跟隨 showKeyboard 觸發 =====
-    val latestCrossCenter by rememberUpdatedState(crossCenterInRoot)
-    val latestFabCenter by rememberUpdatedState(fabCenterInRoot)
-
-    LaunchedEffect(showKeyboard) {
-        if (showKeyboard) {
-            // 交叉圖示可能未量度到，稍等，但唔加額外延遲
-            var waited = 0L
-            while (latestCrossCenter == null && waited < 400L) {
-                delay(15L)
-                waited += 15L
-            }
-            if (latestCrossCenter != null && latestFabCenter != null) {
-                fabOverlayProgress.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(400, easing = FastOutSlowInEasing)
-                )
-            }
-        } else {
-            fabOverlayProgress.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(350, easing = FastOutSlowInEasing)
-            )
-        }
-    }
-
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
         val amtText = amount?.let {
             if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
@@ -693,7 +637,6 @@ fun MainApp() {
                 amountText = amtText,
                 selectAmountOnInput = amount != null
             )
-            scope.launch { fabOverlayProgress.snapTo(0f) }
             showKeyboard = true
         } else {
             keyboardState = keyboardState.copy(
@@ -709,7 +652,6 @@ fun MainApp() {
         keyboardState = KeyboardState(
             amountText = r.amount.toString(), noteText = r.note,
             category = r.category, selectAmountOnInput = true)
-        scope.launch { fabOverlayProgress.snapTo(0f) }
         showKeyboard = true
     }
 
@@ -718,7 +660,6 @@ fun MainApp() {
         keyboardState = KeyboardState(
             amountText = amt, noteText = r.note, category = r.category,
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
-        scope.launch { fabOverlayProgress.snapTo(0f) }
         showKeyboard = true
     }
 
@@ -746,8 +687,7 @@ fun MainApp() {
 
     fun restoreDeletedRecord() {
         val target = recentlyDeletedRecord ?: return
-        deleteJob?.cancel()
-        deleteJob = null
+        deleteJob?.cancel(); deleteJob = null
         showUndoToast = false
         recentlyDeletedRecord = null
         deletingRecordId = null
@@ -757,9 +697,7 @@ fun MainApp() {
     fun saveFromKeyboard() {
         val amt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
-
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-
         val note = keyboardState.noteText
         val category = keyboardState.category
         val editId = keyboardState.editingRecordId
@@ -767,8 +705,7 @@ fun MainApp() {
         val monthKey = monthKeyFromTimestamp(ts)
         if (editId != null) {
             db.collection("records").document(editId).update(mapOf(
-                "amount" to amt, "note" to note, "category" to category,
-                "timestamp" to ts))
+                "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
         } else {
             val inherited = records.filter { it.note == note && it.note.isNotBlank() }
                 .maxByOrNull { it.timestamp }?.iconUrl ?: ""
@@ -779,24 +716,16 @@ fun MainApp() {
                 .sumOf { it.amount } + amt
             afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
             db.collection("records").document(newId).set(Record(
-                amount = amt, note = note, category = category,
-                timestamp = ts, iconUrl = inherited))
-            scope.launch {
-                delay(800)
-                if (justAddedId == newId) justAddedId = null
-            }
+                amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
+            scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
         }
         showKeyboard = false
         keyboardState = KeyboardState()
         scrollToTopTrigger++
     }
 
-    BackHandler(enabled = showKeyboard) {
-        dismissKeyboard()
-    }
-    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) {
-        filterModeOn = false
-    }
+    BackHandler(enabled = showKeyboard) { dismissKeyboard() }
+    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filterModeOn && currentPage == 0) {
             delay(300)
@@ -840,10 +769,7 @@ fun MainApp() {
                 onKeyboardConfirm = { saveFromKeyboard() },
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
-                onCrossPositioned = { rect ->
-                    crossCenterInRoot = Offset(rect.center.x, rect.center.y)
-                },
-                overlayProgress = fabOverlayProgress.value,
+                keyboardAnimProgress = keyboardAnimProgress.value,
                 showFuture = showFuture, onShowFutureChange = { showFuture = it },
                 allNoteNames = allNoteNames,
                 noteCategoryMap = noteCategoryMap,
@@ -855,40 +781,23 @@ fun MainApp() {
                 onAfterSaveHintDismiss = { afterSaveHint = null }
             )
             1 -> CompareContent(
-                records = records,
-                availableMonths = availableMonths,
-                selectedMonthA = compareMonthA,
-                onMonthAChange = { setCompareMonthA(it) },
-                selectedMonthB = compareMonthB,
-                onMonthBChange = { setCompareMonthB(it) },
-                onAddClick = {
-                    currentPage = 0
-                    openKeyboardForNew()
-                }
+                records = records, availableMonths = availableMonths,
+                selectedMonthA = compareMonthA, onMonthAChange = { setCompareMonthA(it) },
+                selectedMonthB = compareMonthB, onMonthBChange = { setCompareMonthB(it) },
+                onAddClick = { currentPage = 0; openKeyboardForNew() }
             )
             2 -> CalendarContent(
                 records = records,
-                onCopyClick = { r ->
-                    currentPage = 0
-                    openKeyboardForCopy(r)
-                },
-                onEditClick = { r ->
-                    currentPage = 0
-                    openKeyboardForEdit(r)
-                },
+                onCopyClick = { r -> currentPage = 0; openKeyboardForCopy(r) },
+                onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
                 onFilterClick = { r ->
                     currentPage = 0
-                    filterCategory = null
-                    filterMonth = null
-                    filterSearch = TextFieldValue(r.note)
-                    filterModeOn = true
+                    filterCategory = null; filterMonth = null
+                    filterSearch = TextFieldValue(r.note); filterModeOn = true
                 },
                 onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onAddClick = {
-                    currentPage = 0
-                    openKeyboardForNew()
-                }
+                onAddClick = { currentPage = 0; openKeyboardForNew() }
             )
         }
 
@@ -904,9 +813,7 @@ fun MainApp() {
                 shape = RoundedCornerShape(16.dp),
                 color = TEXT_PRIMARY,
                 shadowElevation = 8.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
             ) {
                 Row(
                     Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -939,104 +846,111 @@ fun MainApp() {
                 modifier = Modifier)
         }
 
-        // ===== 底部橫向操作列：篩選掣 + FAB 在所有頁面都有 =====
-        // 用 AnimatedVisibility 做 fade，令 FAB 消失唔會太硬
-        androidx.compose.animation.AnimatedVisibility(
-            visible = !showKeyboard,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(160)),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(
-                    start = 16.dp, end = 20.dp,
-                    bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(Modifier.weight(1f)) {
-                    if (currentPage == 0) {
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = filterModeOn,
-                            enter = expandHorizontally(
-                                animationSpec = tween(300, easing = FastOutSlowInEasing),
-                                expandFrom = Alignment.End
-                            ) + fadeIn(tween(200)),
-                            exit = shrinkHorizontally(
-                                animationSpec = tween(260, easing = FastOutSlowInEasing),
-                                shrinkTowards = Alignment.End
-                            ) + fadeOut(tween(180))
-                        ) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(26.dp),
-                                color = SURFACE_CARD,
-                                shadowElevation = 8.dp
+        // ===== 底部操作列：篩選掣 + FAB（只在鍵盤未完全展開時顯示）=====
+        // FAB 會隨 keyboardAnimProgress 慢慢淡出（在動畫後段才開始收），做出「FAB 變大成為鍵盤」錯覺
+        if (currentPage == 0 || currentPage != 0) {
+            val fabAlpha = if (showKeyboard) {
+                // 開啟時：p < 0.65 → alpha 1；p 0.65→1 之間淡出
+                val p = keyboardAnimProgress.value
+                (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
+            } else {
+                // 收起時：p > 0.35 → alpha 0；p 0.35→0 之間淡入
+                val p = keyboardAnimProgress.value
+                (1f - (p / 0.35f).coerceIn(0f, 1f))
+            }
+            if (fabAlpha > 0.001f) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(
+                            start = 16.dp, end = 20.dp,
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+                        .graphicsLayer { alpha = fabAlpha },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(Modifier.weight(1f)) {
+                        if (currentPage == 0) {
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = filterModeOn,
+                                enter = expandHorizontally(
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                                    expandFrom = Alignment.End
+                                ) + fadeIn(tween(200)),
+                                exit = shrinkHorizontally(
+                                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                                    shrinkTowards = Alignment.End
+                                ) + fadeOut(tween(180))
                             ) {
-                                Row(
-                                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(26.dp),
+                                    color = SURFACE_CARD,
+                                    shadowElevation = 8.dp
                                 ) {
-                                    Box(Modifier.weight(1f)) {
-                                        BasicTextField(
-                                            value = filterSearch,
-                                            onValueChange = { filterSearch = it },
-                                            singleLine = true,
-                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                            cursorBrush = SolidColor(BRAND_PRIMARY),
-                                            decorationBox = { inner ->
-                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                    if (filterSearch.text.isEmpty())
-                                                        Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                    inner()
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .focusRequester(filterSearchFocusRequester)
-                                                .onFocusChanged { filterSearchHasFocus = it.isFocused }
-                                        )
-                                    }
-                                    if (filterSearch.text.isNotBlank()) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(
-                                            Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                            modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
-                                        )
+                                    Row(
+                                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(Modifier.weight(1f)) {
+                                            BasicTextField(
+                                                value = filterSearch,
+                                                onValueChange = { filterSearch = it },
+                                                singleLine = true,
+                                                textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                                cursorBrush = SolidColor(BRAND_PRIMARY),
+                                                decorationBox = { inner ->
+                                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                        if (filterSearch.text.isEmpty())
+                                                            Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                        inner()
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .focusRequester(filterSearchFocusRequester)
+                                                    .onFocusChanged { filterSearchHasFocus = it.isFocused }
+                                            )
+                                        }
+                                        if (filterSearch.text.isNotBlank()) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Icon(
+                                                Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                                modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        if (filterModeOn && filterSearchHasFocus) {
-                            val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                            if (filterSuggestions.isNotEmpty()) {
-                                androidx.compose.ui.window.Popup(
-                                    popupPositionProvider = AboveAnchorPositionProvider,
-                                    onDismissRequest = { },
-                                    properties = PopupProperties(focusable = false)
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = SURFACE_CARD,
-                                        shadowElevation = 8.dp,
-                                        modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                            if (filterModeOn && filterSearchHasFocus) {
+                                val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
+                                if (filterSuggestions.isNotEmpty()) {
+                                    androidx.compose.ui.window.Popup(
+                                        popupPositionProvider = AboveAnchorPositionProvider,
+                                        onDismissRequest = { },
+                                        properties = PopupProperties(focusable = false)
                                     ) {
-                                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                                            filterSuggestions.forEach { s ->
-                                                Row(
-                                                    Modifier.fillMaxWidth()
-                                                        .clickable { filterSearch = TextFieldValue(s) }
-                                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = SURFACE_CARD,
+                                            shadowElevation = 8.dp,
+                                            modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                                        ) {
+                                            Column(Modifier.verticalScroll(rememberScrollState())) {
+                                                filterSuggestions.forEach { s ->
+                                                    Row(
+                                                        Modifier.fillMaxWidth()
+                                                            .clickable { filterSearch = TextFieldValue(s) }
+                                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    }
+                                                    HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                                 }
-                                                HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                             }
                                         }
                                     }
@@ -1044,90 +958,80 @@ fun MainApp() {
                             }
                         }
                     }
-                }
 
-                Surface(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .pointerInput(filterModeOn, currentPage) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (currentPage != 0) {
-                                        currentPage = 0
-                                        filterModeOn = true
-                                    } else if (!filterModeOn) {
-                                        filterModeOn = true
-                                    } else {
-                                        filterSelectAllTrigger++
+                    Surface(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .pointerInput(filterModeOn, currentPage) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (currentPage != 0) {
+                                            currentPage = 0
+                                            filterModeOn = true
+                                        } else if (!filterModeOn) {
+                                            filterModeOn = true
+                                        } else {
+                                            filterSelectAllTrigger++
+                                        }
                                     }
-                                }
-                            )
-                        },
-                    shape = CircleShape,
-                    color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else Color.White,
-                    shadowElevation = 4.dp
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.FilterAlt, "篩選",
-                            tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
-                            modifier = Modifier.size(22.dp))
+                                )
+                            },
+                        shape = CircleShape,
+                        color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else Color.White,
+                        shadowElevation = 4.dp
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.FilterAlt, "篩選",
+                                tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
+                                modifier = Modifier.size(22.dp))
+                        }
                     }
-                }
 
-                FloatingActionButton(
-                    onClick = {
-                        if (filterModeOn) filterModeOn = false
-                        if (currentPage != 0) currentPage = 0
-                        openKeyboardForNew()
-                    },
-                    containerColor = BRAND_PRIMARY,
-                    contentColor = Color.White,
-                    modifier = Modifier
-                        .onGloballyPositioned { coords ->
-                            val b = coords.boundsInRoot()
-                            fabCenterInRoot = Offset(b.center.x, b.center.y)
-                        }
-                        .graphicsLayer {
-                            // FAB 整體跟隨 overlay 進度淡出，避免同覆蓋層圖示重疊
-                            alpha = (1f - fabOverlayProgress.value * 1.5f).coerceIn(0f, 1f)
-                        }
-                ) {
-                    Icon(Icons.Default.Add, "新增")
+                    FloatingActionButton(
+                        onClick = {
+                            if (filterModeOn) filterModeOn = false
+                            if (currentPage != 0) currentPage = 0
+                            openKeyboardForNew()
+                        },
+                        shape = RoundedCornerShape(20.dp),
+                        containerColor = BRAND_PRIMARY,
+                        contentColor = Color.White
+                    ) {
+                        Icon(Icons.Default.Add, "新增")
+                    }
                 }
             }
         }
 
-        // ===== FAB ↔ 交叉 覆蓋層圖示（只有圖示，冇任何背景，白色 → 深色過渡）=====
-        val fabC = fabCenterInRoot
-        val crossC = crossCenterInRoot
-        if (fabC != null && crossC != null && (showKeyboard || fabOverlayProgress.value > 0.001f)) {
-            val prog = fabOverlayProgress.value
-            val cx = fabC.x + (crossC.x - fabC.x) * prog
-            val cy = fabC.y + (crossC.y - fabC.y) * prog
-            val rotation = 45f * prog
-            val density = LocalDensity.current
-            val iconSize = 24.dp
-            val iconSizePx = with(density) { iconSize.toPx() }
-            val iconColor = lerp(Color.White, TEXT_SECONDARY, prog)
-
+        // ===== 鍵盤：由 FAB 位置（右下角）非線性放大變形 =====
+        if (showKeyboard || keyboardAnimProgress.value > 0.001f) {
+            val p = keyboardAnimProgress.value
             Box(
                 modifier = Modifier
-                    .offset {
-                        IntOffset(
-                            (cx - iconSizePx / 2f).roundToInt(),
-                            (cy - iconSizePx / 2f).roundToInt()
-                        )
+                    .align(Alignment.BottomEnd)
+                    .fillMaxWidth()
+                    .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
+                    .graphicsLayer {
+                        alpha = p
+                        // 由 FAB 大小 (~56dp) 開始放大；鍵盤寬約 328dp、FAB 56dp → scale ≈ 0.17
+                        scaleX = 0.17f + 0.83f * p
+                        scaleY = 0.17f + 0.83f * p
+                        transformOrigin = TransformOrigin(1f, 1f)
                     }
-                    .size(iconSize)
-                    .rotate(rotation),
-                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = null,
-                    tint = iconColor,
-                    modifier = Modifier.fillMaxSize()
+                LedgerKeyboardPanel(
+                    state = keyboardState,
+                    onStateChange = { keyboardState = it },
+                    onDismiss = { dismissKeyboard() },
+                    onConfirm = { saveFromKeyboard() },
+                    onNext = { keyboardState = keyboardState.copy(editingNote = true) },
+                    onPickCategory = { },
+                    allNoteNames = allNoteNames,
+                    noteCategoryMap = noteCategoryMap,
+                    nameFlashTrigger = nameFlashTrigger,
+                    showKeyboard = showKeyboard,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -1263,7 +1167,6 @@ fun FloatingNavBar(
         label = "bubble"
     )
 
-    // 用 Box + Modifier.shadow + clip 取代 Surface，避免動畫初期出現假直角陰影
     Box(
         modifier = modifier
             .width(NAV_TAB_WIDTH * items.size)
@@ -1372,8 +1275,7 @@ fun LedgerContent(
     onKeyboardConfirm: () -> Unit,
     onKeyboardNext: () -> Unit,
     onKeyboardPickCategory: () -> Unit,
-    onCrossPositioned: ((androidx.compose.ui.geometry.Rect) -> Unit)?,
-    overlayProgress: Float,
+    keyboardAnimProgress: Float,
     showFuture: Boolean,
     onShowFutureChange: (Boolean) -> Unit,
     allNoteNames: List<String>,
@@ -1394,7 +1296,6 @@ fun LedgerContent(
         }
     }
 
-    // Exact Note Filter 情況下，提取單一類別
     val exactNoteCategory by remember {
         derivedStateOf {
             if (isExactNoteFilter) filtered.firstOrNull()?.category else null
@@ -1486,7 +1387,7 @@ fun LedgerContent(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 類別 chip：exact note filter 時顯示喺最左
+                    // 類別 chip：exact note filter 時顯示喺最左（收入/支出/筆數左邊）
                     androidx.compose.animation.AnimatedVisibility(
                         visible = isExactNoteFilter && exactNoteCategory != null,
                         enter = fadeIn(tween(240)) + expandHorizontally(
@@ -1546,14 +1447,14 @@ fun LedgerContent(
                         )
                     ) {
                         if (isExactNoteFilter) {
-                            // 唔顯示 header，直接列所有項目
+                            // 冇 header，直接列 items
                             itemsIndexed(
                                 items = filtered,
                                 key = { _, r -> r.id }
                             ) { idx, r ->
                                 Box(
                                     modifier = Modifier
-                                        .padding(top = if (idx == 0) 4.dp else 0.dp)
+                                        .padding(top = if (idx == 0) 6.dp else 0.dp)
                                         .animateItem(
                                             fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
                                             fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -1653,47 +1554,13 @@ fun LedgerContent(
                             }
                         }
                     }
-
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showKeyboard,
-                        enter = scaleIn(
-                            initialScale = 0.05f,
-                            transformOrigin = TransformOrigin(1f, 1f),
-                            animationSpec = tween(400, easing = FastOutSlowInEasing)
-                        ) + fadeIn(tween(300)),
-                        exit = scaleOut(
-                            targetScale = 0.05f,
-                            transformOrigin = TransformOrigin(1f, 1f),
-                            animationSpec = tween(350, easing = FastOutSlowInEasing)
-                        ) + fadeOut(tween(250)),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .fillMaxWidth()
-                            .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
-                    ) {
-                        LedgerKeyboardPanel(
-                            state = keyboardState,
-                            onStateChange = onKeyboardStateChange,
-                            onDismiss = onKeyboardDismiss,
-                            onConfirm = onKeyboardConfirm,
-                            onNext = onKeyboardNext,
-                            onPickCategory = onKeyboardPickCategory,
-                            allNoteNames = allNoteNames,
-                            noteCategoryMap = noteCategoryMap,
-                            nameFlashTrigger = nameFlashTrigger,
-                            showKeyboard = showKeyboard,
-                            overlayProgress = overlayProgress,
-                            onCrossPositioned = onCrossPositioned,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
                 }
             }
         }
     }
 }
 
-// 類別統計 chip：顯示於 exact note filter 情況下嘅頂部
+// 類別統計 chip：exact note filter 時顯示喺收入/支出/筆數左邊
 @Composable
 fun CategoryStatChip(category: String) {
     val style = CATEGORY_STYLES[category]
@@ -1726,7 +1593,7 @@ fun CategoryStatChip(category: String) {
     }
 }
 
-// Sticky header 外層：被推出時 alpha 漸隱，唔會一條硬線切走
+// Sticky header 外層：被推出頂部時 alpha 漸隱（用 boundsInRoot 兼容所有 Compose 版本）
 @Composable
 fun FadingStickyHeader(content: @Composable () -> Unit) {
     var rootTop by remember { mutableFloatStateOf(0f) }
@@ -1736,7 +1603,6 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
             .background(SURFACE_BG)
             .padding(top = 6.dp, bottom = 4.dp)
             .onGloballyPositioned { coords ->
-                // 用 boundsInRoot() 拎相對 root 嘅位置，兼容所有 Compose 版本
                 rootTop = coords.boundsInRoot().top
             }
             .graphicsLayer {
@@ -1795,14 +1661,14 @@ fun AnimatedRecordItem(
     val prog = particleProgress.value
 
     // 幼細粒子：數量多、粒徑小、擴散廣
-    val particleCount = 80
+    val particleCount = 90
     val random = remember { Random(42) }
     val particles = remember {
         List(particleCount) {
             Triple(
                 random.nextFloat(),
                 random.nextFloat(),
-                (random.nextFloat() - 0.5f) * 260f
+                (random.nextFloat() - 0.5f) * 280f
             )
         }
     }
@@ -1846,22 +1712,22 @@ fun AnimatedRecordItem(
                 particles.forEachIndexed { idx, (rx, ry, angle) ->
                     val startX = rx * w
                     val startY = ry * h
-                    val dist = prog * 260f
+                    val dist = prog * 280f
                     val rad = Math.toRadians(angle.toDouble())
                     val px = startX + dist * kotlin.math.cos(rad).toFloat()
-                    val py = startY + dist * kotlin.math.sin(rad).toFloat() - prog * 70f
+                    val py = startY + dist * kotlin.math.sin(rad).toFloat() - prog * 80f
                     val pAlpha = (1f - prog).coerceIn(0f, 1f)
-                    // 粒徑改細：2dp → 0.6dp
-                    val pRadius = (2.dp.toPx() * (1f - prog * 0.4f)).coerceAtLeast(0.6f)
-                    // 外圈 glow 更柔
+                    // 幼細粒徑：0.8dp，越細越幼
+                    val pRadius = (1.6.dp.toPx() * (1f - prog * 0.4f)).coerceAtLeast(0.5f)
+                    // 外圈 glow 極柔
                     drawCircle(
-                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.18f),
+                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.15f),
                         radius = pRadius * 2.0f,
                         center = Offset(px, py)
                     )
                     // 實心細粒子
                     drawCircle(
-                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.9f),
+                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.95f),
                         radius = pRadius,
                         center = Offset(px, py)
                     )
@@ -1978,7 +1844,6 @@ fun SwipeableRecordItem(
     val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
 
-    // 隱藏類別時只顯示時間
     val metaText = remember(record.category, record.timestamp, hideCategory) {
         if (hideCategory) formatRecordTime(record.timestamp)
         else "${record.category}．${formatRecordTime(record.timestamp)}"
@@ -2265,8 +2130,6 @@ fun LedgerKeyboardPanel(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
     showKeyboard: Boolean = true,
-    overlayProgress: Float = 0f,
-    onCrossPositioned: ((androidx.compose.ui.geometry.Rect) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -2284,7 +2147,6 @@ fun LedgerKeyboardPanel(
     val panelShape = RoundedCornerShape(24.dp)
     Box(
         modifier = modifier
-            .imePadding()
             .shadow(
                 elevation = 16.dp,
                 shape = panelShape,
@@ -2392,9 +2254,6 @@ fun LedgerKeyboardPanel(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .size(36.dp)
-                            .onGloballyPositioned { coords ->
-                                onCrossPositioned?.invoke(coords.boundsInRoot())
-                            }
                     ) {
                         Icon(
                             Icons.Default.Add,
@@ -2402,7 +2261,7 @@ fun LedgerKeyboardPanel(
                             tint = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_SECONDARY,
                             modifier = Modifier
                                 .size(26.dp)
-                                .graphicsLayer { alpha = if (overlayProgress > 0.01f) 0f else 1f }
+                                .rotate(45f) // 用旋轉顯示為交叉 X
                         )
                     }
                 }
@@ -2840,7 +2699,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                     )
                 }
             } else {
-                // fallback
                 Text(
                     formatDateHeader(dateKey),
                     fontSize = 13.sp,
@@ -3025,7 +2883,7 @@ fun CalendarFilterChip(
     )
 }
 
-// 帶滾動數字效果嘅 InfoChip
+// 帶滾動數字效果嘅 InfoChip（總計/平均每項/日均支出）
 @Composable
 fun AnimatedInfoChip(
     label: String,
@@ -3159,7 +3017,6 @@ fun CalendarDayCell(
         label = "cellBg"
     )
 
-    // 選中時輕微「彈一下」，令點擊感更自然
     val selectionScale by animateFloatAsState(
         targetValue = if (isSelected) 1.06f else 1f,
         animationSpec = spring(
@@ -3581,7 +3438,6 @@ fun CalendarContent(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // 三個數字都用 AnimatedAmount 做滾動效果
                             AnimatedInfoChip(
                                 label = "總計",
                                 valueText = "$${formatAmountNoDecimal(totalNet)}",
@@ -3627,6 +3483,8 @@ fun CalendarContent(
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
+                        // 修正：加返頂部 padding，令選中行嘅紫色邊框唔會被切
+                        .padding(top = 10.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
                     for (rowIdx in 0 until totalRows) {
@@ -3690,7 +3548,6 @@ fun CalendarContent(
                                         Locale.US, "%04d-%02d-%02d",
                                         year, month, selectedDay
                                     )
-                                    // DayDetailPanel 內部有 220ms 延遲，配合其他行嘅收縮波浪
                                     DayDetailPanel(
                                         dateKey = dateKey,
                                         records = recordsByDay[selectedDay] ?: emptyList(),
@@ -3721,6 +3578,7 @@ fun CalendarContent(
 
         FloatingActionButton(
             onClick = onAddClick,
+            shape = RoundedCornerShape(20.dp),
             containerColor = BRAND_PRIMARY,
             contentColor = Color.White,
             modifier = Modifier
@@ -4252,6 +4110,7 @@ fun CompareContent(
 
         FloatingActionButton(
             onClick = onAddClick,
+            shape = RoundedCornerShape(20.dp),
             containerColor = BRAND_PRIMARY,
             contentColor = Color.White,
             modifier = Modifier
