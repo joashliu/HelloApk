@@ -737,8 +737,15 @@ fun MainApp() {
         scrollToTopTrigger++
     }
 
-    BackHandler(enabled = showKeyboard) { dismissKeyboard() }
-    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
+        BackHandler(enabled = showKeyboard) { dismissKeyboard() }
+    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) {
+        filterModeOn = false
+        filterSearchHasFocus = false
+    }
+    // 額外保險：filterModeOn 一變 false 就清焦點
+    LaunchedEffect(filterModeOn) {
+        if (!filterModeOn) filterSearchHasFocus = false
+    }
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filterModeOn && currentPage == 0) {
             delay(300)
@@ -772,8 +779,9 @@ fun MainApp() {
                 onEditClick = { openKeyboardForEdit(it) },
                 onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onFilterByName = { name ->
+                                onFilterByName = { name ->
                     filterCategory = null; filterMonth = null
+                    filterSearchHasFocus = false   // 關鍵：清走舊 session 焦點狀態
                     filterSearch = TextFieldValue(name); filterModeOn = true
                 },
                 showKeyboard = showKeyboard, keyboardState = keyboardState,
@@ -883,7 +891,7 @@ fun MainApp() {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(Modifier.weight(1f)) {
-                        if (currentPage == 0) {
+                                                if (currentPage == 0) {
                             // ===== 篩選搜尋框：用 alpha + translationX 手動動畫，避免 AnimatedVisibility 裁剪造成直角陰影 =====
                             val searchAlpha by animateFloatAsState(
                                 targetValue = if (filterModeOn) 1f else 0f,
@@ -896,19 +904,18 @@ fun MainApp() {
                                 label = "searchOffset"
                             )
 
-                            if (searchAlpha > 0.001f) {
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(52.dp)
-                                        .graphicsLayer {
-                                            alpha = searchAlpha
-                                            translationX = searchOffset * size.width
-                                        },
-                                    shape = RoundedCornerShape(26.dp),
-                                    color = SURFACE_CARD,
-                                    shadowElevation = 8.dp
-                                ) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .graphicsLayer {
+                                        alpha = searchAlpha
+                                        translationX = searchOffset * size.width
+                                    },
+                                shape = RoundedCornerShape(26.dp),
+                                color = SURFACE_CARD,
+                                shadowElevation = 8.dp
+                            ) {
                                     Row(
                                         Modifier.fillMaxSize().padding(horizontal = 16.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -944,7 +951,8 @@ fun MainApp() {
                                 }
                             }
 
-                            if (filterModeOn && filterSearchHasFocus) {
+                                                        // 加上 searchAlpha 條件：確保搜尋框已經 layout 好先顯示 popup
+                            if (filterModeOn && filterSearchHasFocus && searchAlpha > 0.5f) {
                                 val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                                 if (filterSuggestions.isNotEmpty()) {
                                     androidx.compose.ui.window.Popup(
@@ -1345,16 +1353,15 @@ fun LedgerContent(
         }
     }
 
-    // ===== 穩定版類別顯示：只喺 exact-match 項目名稱篩選下顯示 =====
-    val exactNoteCategory by remember {
-        derivedStateOf {
-            if (!filterMode) return@derivedStateOf null
-            if (!isExactNoteFilter) return@derivedStateOf null
-            val first = filtered.firstOrNull() ?: return@derivedStateOf null
-            if (first.note.isBlank()) return@derivedStateOf null
-            if (filtered.any { it.note != first.note }) return@derivedStateOf null
-            first.category
-        }
+        // ===== 穩定版類別顯示：只喺 exact-match 項目名稱篩選下顯示 =====
+    // 注意：唔用 remember { derivedStateOf { ... } }，因為 parameters 會被捕捉成舊值
+    val exactNoteCategory: String? = if (!filterMode || !isExactNoteFilter) {
+        null
+    } else {
+        val first = filtered.firstOrNull()
+        if (first == null || first.note.isBlank() || filtered.any { it.note != first.note }) {
+            null
+        } else first.category
     }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
