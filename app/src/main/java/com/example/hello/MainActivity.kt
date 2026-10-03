@@ -1,7 +1,6 @@
-// 第一段：Imports, Constants, 資料類別, MainActivity, MainApp, FloatingNavBar
+// ===== Imports, Constants, 資料類別, MainActivity, MainApp, FloatingNavBar =====
 package com.example.hello
 
-import androidx.compose.ui.layout.SubcomposeLayout
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -52,7 +51,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -74,6 +72,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -536,7 +535,6 @@ fun MainApp() {
     val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount } } }
     val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
 
-    // ===== Exact-match note filter 判斷：所有可見記錄嘅 note 都等於搜尋字串 =====
     val isExactNoteFilter by remember {
         derivedStateOf {
             filterModeOn &&
@@ -737,12 +735,11 @@ fun MainApp() {
         scrollToTopTrigger++
     }
 
-        BackHandler(enabled = showKeyboard) { dismissKeyboard() }
+    BackHandler(enabled = showKeyboard) { dismissKeyboard() }
     BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) {
         filterModeOn = false
         filterSearchHasFocus = false
     }
-    // 額外保險：filterModeOn 一變 false 就清焦點
     LaunchedEffect(filterModeOn) {
         if (!filterModeOn) filterSearchHasFocus = false
     }
@@ -779,9 +776,9 @@ fun MainApp() {
                 onEditClick = { openKeyboardForEdit(it) },
                 onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                                onFilterByName = { name ->
+                onFilterByName = { name ->
                     filterCategory = null; filterMonth = null
-                    filterSearchHasFocus = false   // 關鍵：清走舊 session 焦點狀態
+                    filterSearchHasFocus = false
                     filterSearch = TextFieldValue(name); filterModeOn = true
                 },
                 showKeyboard = showKeyboard, keyboardState = keyboardState,
@@ -814,6 +811,7 @@ fun MainApp() {
                 onFilterClick = { r ->
                     currentPage = 0
                     filterCategory = null; filterMonth = null
+                    filterSearchHasFocus = false
                     filterSearch = TextFieldValue(r.note); filterModeOn = true
                 },
                 onDeleteClick = { deleteRecordWithUndo(it) },
@@ -822,7 +820,7 @@ fun MainApp() {
             )
         }
 
-        // ===== Undo Toast：玻璃質感背景（半透明深灰藍 + 微白描邊 + 柔和陰影） =====
+        // ===== Undo Toast：玻璃質感背景 =====
         AnimatedVisibility(
             visible = showUndoToast,
             enter = slideInVertically { it } + fadeIn(),
@@ -891,8 +889,7 @@ fun MainApp() {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(Modifier.weight(1f)) {
-                                                if (currentPage == 0) {
-                            // ===== 篩選搜尋框：用 alpha + translationX 手動動畫，避免 AnimatedVisibility 裁剪造成直角陰影 =====
+                        if (currentPage == 0) {
                             val searchAlpha by animateFloatAsState(
                                 targetValue = if (filterModeOn) 1f else 0f,
                                 animationSpec = tween(300, easing = FastOutSlowInEasing),
@@ -916,42 +913,41 @@ fun MainApp() {
                                 color = SURFACE_CARD,
                                 shadowElevation = 8.dp
                             ) {
-                                    Row(
-                                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(Modifier.weight(1f)) {
-                                            BasicTextField(
-                                                value = filterSearch,
-                                                onValueChange = { filterSearch = it },
-                                                singleLine = true,
-                                                textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                                cursorBrush = SolidColor(BRAND_PRIMARY),
-                                                decorationBox = { inner ->
-                                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                        if (filterSearch.text.isEmpty())
-                                                            Text("搜尋項目名稱…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                        inner()
-                                                    }
-                                                },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .focusRequester(filterSearchFocusRequester)
-                                                    .onFocusChanged { filterSearchHasFocus = it.isFocused }
-                                            )
-                                        }
-                                        if (filterSearch.text.isNotBlank()) {
-                                            Spacer(Modifier.width(4.dp))
-                                            Icon(
-                                                Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                                modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
-                                            )
-                                        }
+                                Row(
+                                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(Modifier.weight(1f)) {
+                                        BasicTextField(
+                                            value = filterSearch,
+                                            onValueChange = { filterSearch = it },
+                                            singleLine = true,
+                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                            cursorBrush = SolidColor(BRAND_PRIMARY),
+                                            decorationBox = { inner ->
+                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                    if (filterSearch.text.isEmpty())
+                                                        Text("搜尋項目名稱…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                    inner()
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .focusRequester(filterSearchFocusRequester)
+                                                .onFocusChanged { filterSearchHasFocus = it.isFocused }
+                                        )
+                                    }
+                                    if (filterSearch.text.isNotBlank()) {
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(
+                                            Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                            modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
+                                        )
                                     }
                                 }
                             }
 
-                                                        // 加上 searchAlpha 條件：確保搜尋框已經 layout 好先顯示 popup
+                            // 加上 searchAlpha 條件：確保搜尋框已經 layout 好先顯示 popup（避免 anchor 未 valid 而閃退）
                             if (filterModeOn && filterSearchHasFocus && searchAlpha > 0.5f) {
                                 val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                                 if (filterSuggestions.isNotEmpty()) {
@@ -1296,7 +1292,8 @@ fun FloatingNavBar(
         }
     }
 }
-// 第二段：LedgerContent 與各類輔助組件 (RecordItem, KeyboardPanel, QuickInputSection)
+
+// ===== LedgerContent 與各類輔助組件 =====
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -1353,8 +1350,7 @@ fun LedgerContent(
         }
     }
 
-        // ===== 穩定版類別顯示：只喺 exact-match 項目名稱篩選下顯示 =====
-    // 注意：唔用 remember { derivedStateOf { ... } }，因為 parameters 會被捕捉成舊值
+    // ===== 穩定版類別顯示：唔用 remember { derivedStateOf { } }，避免捕捉舊 parameter =====
     val exactNoteCategory: String? = if (!filterMode || !isExactNoteFilter) {
         null
     } else {
@@ -1620,7 +1616,6 @@ fun LedgerContent(
     }
 }
 
-// 類別統計 chip：exact note filter 時顯示喺收入/支出/筆數左邊 (字體大小已與 TopStats 同步)
 @Composable
 fun CategoryStatChip(category: String) {
     val style = CATEGORY_STYLES[category]
@@ -1653,7 +1648,6 @@ fun CategoryStatChip(category: String) {
     }
 }
 
-// Sticky header 外層：被推出頂部時 alpha 漸隱（漸變消失設計）
 @Composable
 fun FadingStickyHeader(content: @Composable () -> Unit) {
     var rootTop by remember { mutableFloatStateOf(0f) }
@@ -1676,7 +1670,6 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
     }
 }
 
-// 刪除動畫：主體淡出縮細 + 幼細彩色粒子向外擴散
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
@@ -2066,7 +2059,7 @@ private fun AnimatedActionButton(
     }
 }
 
-// 日曆當日明細：改用 alpha + scaleY 動畫，令陰影同明細框完全同步出現
+// 日曆當日明細：用 alpha + scaleY 手動動畫，令陰影同明細框完全同步出現
 @Composable
 fun DayDetailPanel(
     dateKey: String,
@@ -2697,7 +2690,7 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
     }
 }
 
-// 每日 Header：加入 animateContentSize 令高度變化有流暢動畫
+// 每日 Header：同時有收支 → 上下排列；加入 animateContentSize 令高度變化有流暢動畫
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
@@ -2829,7 +2822,6 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
-// 快速輸入 Chip：內容自適應寬度、單行 ellipsize
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var bgColor by remember(iconUrl) { mutableStateOf(SURFACE_ELEVATED) }
@@ -2895,7 +2887,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-// ===== 左右對齊 FlowRow：每行 chip 拉伸填滿，唔留右邊空白 =====
+// 左右對齊 FlowRow：每行 chip 拉伸填滿，唔留右邊空白
 @Composable
 fun JustifiedFlowRow(
     items: List<String>,
@@ -2919,7 +2911,6 @@ fun JustifiedFlowRow(
                 .first()
         }
 
-        // 分行
         val rows = mutableListOf<MutableList<Int>>()
         var curRow = mutableListOf<Int>()
         var curW = 0
@@ -2957,8 +2948,6 @@ fun JustifiedFlowRow(
     }
 }
 
-// 快速輸入區塊：使用 JustifiedFlowRow 令每行 chip 拉伸填滿
-// 加入流暢嘅出現 / 消失動畫（新增、刪除、調位都有過渡）
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3020,9 +3009,9 @@ fun QuickInputSection(
         }
     }
 }
-// 第三段：月曆相關 (CalendarFilterChip, AnimatedInfoChip, CalendarRow, CalendarDayCell, CalendarContent, SegmentedModeControl, FadedText)
 
-// 月曆專用 FilterChip：文字用黑色
+// ===== 月曆相關 =====
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarFilterChip(
@@ -3069,7 +3058,6 @@ fun CalendarFilterChip(
     )
 }
 
-// 帶滾動數字效果嘅 InfoChip（總計/平均每項/日均支出）
 @Composable
 fun AnimatedInfoChip(
     label: String,
@@ -3924,7 +3912,8 @@ fun FadedText(
         modifier = modifier
     )
 }
-// 第四段：比較 (CompareContent) 及 工具函數 (Utils)
+
+// ===== 比較頁 =====
 
 @Composable
 fun MiniHistogram(
@@ -4352,6 +4341,8 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
     }
 }
 
+// ===== 工具函數 =====
+
 fun createTempImageUri(context: Context): Uri? {
     return try {
         val name = "camera_${System.currentTimeMillis()}.jpg"
@@ -4465,7 +4456,6 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
     } catch (e: Exception) { null }
 }
 
-// 文字型 icon：用 includeFontPadding=false + 完全置中，唔再加 vertical offset
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
@@ -4492,7 +4482,6 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     }
 }
 
-// 文字型 icon（自適應大小）：同樣精準置中，唔再加 vertical offset
 @Composable
 fun IconViewAdaptive(
     iconUrl: String,
