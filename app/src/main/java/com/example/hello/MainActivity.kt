@@ -1042,8 +1042,8 @@ fun MainApp() {
         val p = keyboardAnimProgress.value
         val isKeyboardOpening = showKeyboard || p > 0.001f
         if (isKeyboardOpening || currentPage == 0 || currentPage != 0) {
-            val fabX = androidx.compose.ui.unit.lerp(20.dp, 28.dp, p)
-            val fabY = androidx.compose.ui.unit.lerp(92.dp, 400.dp, p)
+            val fabX = androidx.compose.ui.unit.lerp(20.dp, 26.dp, p)    // 26dp 精準對齊金額框內 padding
+val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)   // 458dp 對準金額框垂直中心
             val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p)
             val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
             val iconTint = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
