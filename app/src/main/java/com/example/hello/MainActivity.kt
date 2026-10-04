@@ -1543,53 +1543,52 @@ fun LedgerContent(
                 )
             }
             else -> {
-                // 修正 TopStats 閃跳佈局問題：使用絕對 Box 置疊佈局確保置中唔受擠壓
-                Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)) {
-                    // 左手邊：單一類別（向左邊緣對齊）
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = isSingleCategoryFilter && singleCategory != null,
-                        modifier = Modifier.align(Alignment.CenterStart),
-                        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
-                        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
-                    ) {
-                        if (singleCategory != null) {
-                            CategoryStatChip(singleCategory!!)
-                        }
-                    }
+                // 改用 Row + weight，令中間 TopStats 撐滿剩餘空間，左右元素自然排隊
+Row(
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically
+) {
+    // 左手邊：單一類別
+    androidx.compose.animation.AnimatedVisibility(
+        visible = isSingleCategoryFilter && singleCategory != null,
+        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
+        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
+    ) {
+        if (singleCategory != null) {
+            CategoryStatChip(singleCategory!!)
+        }
+    }
 
-                    // 正中間：收支狀態（永遠絕對置中，唔會左右閃避）
-                    Box(modifier = Modifier.align(Alignment.Center)) {
-                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
-                    }
-                    
-                    // 右手邊：筆數與顯示按鈕（向右邊緣對齊）
-                    Row(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = filterMode,
-                            enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { it },
-                            exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { it }
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(end = 8.dp)
-                            ) {
-                                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                                Spacer(Modifier.height(2.dp))
-                                Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                            Icon(
-                                if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                "顯示未來項目",
-                                tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-                            )
-                        }
-                    }
-                }
+    // 正中間：收支狀態（weight 撐滿剩餘空間）
+    Box(modifier = Modifier.weight(1f)) {
+        TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
+    }
+
+    // 右手邊：筆數與顯示按鈕
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = filterMode,
+            enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { it },
+            exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { it }
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(2.dp))
+                Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+            }
+        }
+        IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+            Icon(
+                if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                "顯示未來項目",
+                tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+            )
+        }
+    }
+}
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
@@ -2668,10 +2667,10 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
     val balance = income - expense
     // 徹底改用 Arrangement.spacedBy，令佢哋有固定舒適距離置中平分，加入餘額顯示
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
+    horizontalArrangement = Arrangement.SpaceEvenly,
+    verticalAlignment = Alignment.CenterVertically
+) {
         androidx.compose.animation.AnimatedVisibility(
             visible = hasIncome || (!hasIncome && !hasExpense),
             enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
