@@ -1349,16 +1349,6 @@ fun LedgerContent(
         }
     }
 
-    // ===== 穩定版類別顯示：唔用 remember { derivedStateOf { } }，避免捕捉舊 parameter =====
-    val exactNoteCategory: String? = if (!filterMode || !isExactNoteFilter) {
-        null
-    } else {
-        val first = filtered.firstOrNull()
-        if (first == null || first.note.isBlank() || filtered.any { it.note != first.note }) {
-            null
-        } else first.category
-    }
-
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         AnimatedVisibility(
             visible = filterMode,
@@ -1440,38 +1430,10 @@ fun LedgerContent(
                 )
             }
             else -> {
-                Row(
+                                Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // ===== 類別 chip：修復 size.width NaN 閃退問題 =====
-                    val catChipAlpha by animateFloatAsState(
-                        targetValue = if (exactNoteCategory != null) 1f else 0f,
-                        animationSpec = tween(240, easing = FastOutSlowInEasing),
-                        label = "catChipAlpha"
-                    )
-                    val catChipOffset by animateFloatAsState(
-                        targetValue = if (exactNoteCategory != null) 0f else -0.3f,
-                        animationSpec = tween(240, easing = FastOutSlowInEasing),
-                        label = "catChipOffset"
-                    )
-                    
-                    var displayCategory by remember { mutableStateOf<String?>(null) }
-                    if (exactNoteCategory != null) {
-                        displayCategory = exactNoteCategory
-                    }
-
-                    if (catChipAlpha > 0.001f && displayCategory != null) {
-                        Box(
-                            Modifier.graphicsLayer {
-                                alpha = catChipAlpha
-                                translationX = if (size.width.isNaN()) 0f else catChipOffset * size.width
-                            }
-                        ) {
-                            CategoryStatChip(displayCategory!!)
-                        }
-                    }
-
                     Box(Modifier.weight(if (filterMode) 2f else 1f)) {
                         TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
                     }
@@ -1623,38 +1585,6 @@ fun LedgerContent(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun CategoryStatChip(category: String) {
-    val style = CATEGORY_STYLES[category]
-    Column(
-        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("類別", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (style != null) {
-                Box(
-                    Modifier
-                        .size(20.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(style.bgColor),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(12.dp))
-                }
-                Spacer(Modifier.width(4.dp))
-            }
-            Text(
-                category,
-                fontSize = 22.sp,
-                color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Bold
-            )
         }
     }
 }
