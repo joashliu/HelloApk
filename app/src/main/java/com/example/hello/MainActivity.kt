@@ -2717,11 +2717,18 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        info.weekdayChar,
+                        text = info.weekdayChar,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = fgColor,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        style = TextStyle(
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                            lineHeightStyle = LineHeightStyle(
+                                alignment = LineHeightStyle.Alignment.Center,
+                                trim = LineHeightStyle.Trim.Both
+                            )
+                        )
                     )
                 }
                 if (info.dayTag != null) {
