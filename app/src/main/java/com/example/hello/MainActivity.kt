@@ -539,9 +539,8 @@ fun MainApp() {
     val isExactNoteFilter by remember {
         derivedStateOf {
             filterModeOn &&
-                filterSearch.text.isNotBlank() &&
                 ledgerRecords.isNotEmpty() &&
-                ledgerRecords.all { it.note == filterSearch.text }
+                ledgerRecords.map { it.note }.distinct().size == 1
         }
     }
 
@@ -1568,24 +1567,24 @@ fun CategoryStatChip(category: String) {
         Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("類別", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(4.dp))
+        Text("類別", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(2.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (style != null) {
                 Box(
                     Modifier
-                        .size(20.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(style.bgColor),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(12.dp))
+                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(16.dp))
                 }
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(6.dp))
             }
             Text(
                 category,
-                fontSize = 14.sp,
+                fontSize = 22.sp,
                 color = TEXT_PRIMARY,
                 fontWeight = FontWeight.Bold
             )
@@ -2052,67 +2051,68 @@ fun DayDetailPanel(
         )
     ) {
         val shape = RoundedCornerShape(16.dp)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .shadow(4.dp, shape, clip = false)
-                .clip(shape)
-                .background(SURFACE_CARD)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = shape,
+            shadowElevation = 6.dp,
+            color = SURFACE_CARD
         ) {
-            val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-            val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        formatDateHeader(dateKey),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TEXT_PRIMARY
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (income > 0) {
-                            Text(
-                                "收 $${formatAmountNoDecimal(income)}",
-                                fontSize = 12.sp, color = COLOR_INCOME,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
-                        if (expense > 0) {
-                            Text(
-                                "支 $${formatAmountNoDecimal(expense)}",
-                                fontSize = 12.sp, color = COLOR_EXPENSE,
-                                fontWeight = FontWeight.Bold
-                            )
+            Column(Modifier.fillMaxWidth()) {
+                val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+                val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            formatDateHeader(dateKey),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TEXT_PRIMARY
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (income > 0) {
+                                Text(
+                                    "收 $${formatAmountNoDecimal(income)}",
+                                    fontSize = 12.sp, color = COLOR_INCOME,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+                            if (expense > 0) {
+                                Text(
+                                    "支 $${formatAmountNoDecimal(expense)}",
+                                    fontSize = 12.sp, color = COLOR_EXPENSE,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
+                    }
                 }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
-                }
-            }
-            HorizontalDivider(color = DIVIDER_COLOR)
+                HorizontalDivider(color = DIVIDER_COLOR)
 
-            records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-                SwipeableRecordItem(
-                    backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                    record = r,
-                    expandedId = expandedId,
-                    onExpand = onExpandChange,
-                    onCopy = { onCopy(r) },
-                    onEdit = { onEdit(r) },
-                    onFilter = { onFilter(r) },
-                    onDelete = { onDelete(r) },
-                    onChangeIcon = { onChangeIcon(r) }
-                )
+                records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
+                    SwipeableRecordItem(
+                        backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                        record = r,
+                        expandedId = expandedId,
+                        onExpand = onExpandChange,
+                        onCopy = { onCopy(r) },
+                        onEdit = { onEdit(r) },
+                        onFilter = { onFilter(r) },
+                        onDelete = { onDelete(r) },
+                        onChangeIcon = { onChangeIcon(r) }
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
             }
-            Spacer(Modifier.height(6.dp))
         }
     }
 }
