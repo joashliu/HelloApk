@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -896,7 +897,7 @@ fun MainApp() {
                             enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
                             exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
                         ) {
-                            Box(Modifier.padding(vertical = 8.dp, end = 8.dp)) {
+                            Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
                                 Surface(
                                     modifier = Modifier.fillMaxWidth().height(52.dp),
                                     shape = RoundedCornerShape(26.dp),
@@ -1558,7 +1559,7 @@ fun LedgerContent(
 
                     // 正中間：收支狀態（永遠絕對置中，唔會左右閃避）
                     Box(modifier = Modifier.align(Alignment.Center)) {
-                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
+                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
                     }
                     
                     // 右手邊：筆數與顯示按鈕（向右邊緣對齊）
@@ -2663,7 +2664,7 @@ fun AnimatedFilterChip(
 }
 
 @Composable
-fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: Double) {
+fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: Double, isFilterMode: Boolean = false) {
     val balance = income - expense
     // 徹底改用 Arrangement.spacedBy，令佢哋有固定舒適距離置中平分，加入餘額顯示
     Row(
@@ -2685,9 +2686,9 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
         ) {
             StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
         }
-        // 加入餘額
+        // 加入餘額，如果入咗篩選模式就唔顯示餘額
         androidx.compose.animation.AnimatedVisibility(
-            visible = hasIncome || hasExpense,
+            visible = !isFilterMode && (hasIncome || hasExpense),
             enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
             exit = fadeOut(tween(220)) + shrinkHorizontally(tween(220))
         ) {
