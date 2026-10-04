@@ -20,6 +20,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -33,6 +34,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -813,8 +815,9 @@ fun MainApp() {
         ) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = TEXT_PRIMARY,
-                shadowElevation = 8.dp,
+                color = Color(0xB31E293B), // 毛玻璃半透明深色 Slate 800
+                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
+                shadowElevation = 0.dp,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
             ) {
                 Row(
@@ -872,18 +875,12 @@ fun MainApp() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Box(Modifier.weight(1f)) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                         if (currentPage == 0) {
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = filterModeOn,
-                                enter = expandHorizontally(
-                                    animationSpec = tween(300, easing = FastOutSlowInEasing),
-                                    expandFrom = Alignment.End
-                                ) + fadeIn(tween(200)),
-                                exit = shrinkHorizontally(
-                                    animationSpec = tween(260, easing = FastOutSlowInEasing),
-                                    shrinkTowards = Alignment.End
-                                ) + fadeOut(tween(180))
+                                enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(200)),
+                                exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(180))
                             ) {
                                 Surface(
                                     modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -2622,8 +2619,11 @@ fun AnimatedFilterChip(
         shape = RoundedCornerShape(12.dp),
         border = null,
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BRAND_PRIMARY, selectedLabelColor = Color.White,
-            containerColor = SURFACE_ELEVATED, labelColor = TEXT_SECONDARY),
+            selectedContainerColor = BRAND_PRIMARY, 
+            selectedLabelColor = Color.White,
+            containerColor = SURFACE_ELEVATED, 
+            labelColor = Color.Black // 已修正為黑色字體
+        ),
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
@@ -2788,7 +2788,7 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 
 // 快速輸入 Chip：由圖標抽取主色（低飽和度）做底色
 @Composable
-fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
+fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var bgColor by remember(iconUrl) { mutableStateOf(SURFACE_ELEVATED) }
     val ctx = LocalContext.current
 
@@ -2829,6 +2829,7 @@ fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
     }
 
     Surface(
+        modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
         onClick = onClick,
@@ -2859,18 +2860,22 @@ fun QuickInputSection(
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .shadow(2.dp, RoundedCornerShape(18.dp))
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
-            .padding(vertical = 12.dp, horizontal = 14.dp)
     ) {
-        FlowRow(
+        LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            topNotes.take(12).forEach { (name, _) ->
+            items(items = topNotes.take(12), key = { it.first }) { (name, _) ->
                 QuickInputChip(
                     name = name,
                     iconUrl = noteIconMap[name] ?: "",
-                    onClick = { onClick(name) }
+                    onClick = { onClick(name) },
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = tween(250),
+                        fadeOutSpec = tween(250),
+                        placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                    )
                 )
             }
         }
