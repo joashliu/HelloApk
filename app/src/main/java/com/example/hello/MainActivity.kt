@@ -1295,9 +1295,15 @@ fun LedgerContent(
         }
     }
 
-    val exactNoteCategory by remember {
+    // 判斷是否為單一類別（包括點擊類別按鈕或者搜尋剛好只得一種類別嘅結果）
+    val isSingleCategoryFilter by remember(filterMode, filtered) {
         derivedStateOf {
-            if (isExactNoteFilter) filtered.firstOrNull()?.category else null
+            filterMode && filtered.isNotEmpty() && filtered.map { it.category }.distinct().size == 1
+        }
+    }
+    val singleCategory by remember(isSingleCategoryFilter, filtered) {
+        derivedStateOf {
+            if (isSingleCategoryFilter) filtered.firstOrNull()?.category else null
         }
     }
 
@@ -1386,36 +1392,43 @@ fun LedgerContent(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 類別 chip：exact note filter 時顯示喺最左（收入/支出/筆數左邊）
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = isExactNoteFilter && exactNoteCategory != null,
-                        enter = fadeIn(tween(240)) + expandHorizontally(
-                            animationSpec = tween(280, easing = FastOutSlowInEasing),
-                            expandFrom = Alignment.Start
-                        ),
-                        exit = fadeOut(tween(180)) + shrinkHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            shrinkTowards = Alignment.Start
-                        )
-                    ) {
-                        if (exactNoteCategory != null) {
-                            CategoryStatChip(exactNoteCategory!!)
-                        }
-                    }
-
-                    Box(Modifier.weight(if (filterMode) 2f else 1f)) {
+                    Box(Modifier.weight(if (filterMode) 1.2f else 1f)) {
                         TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
                     }
+                    
                     if (filterMode) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                        // 喺筆數旁邊顯示單一類別結果嘅 CategoryStatChip
+                        Row(
+                            modifier = Modifier.weight(1.3f),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                            Spacer(Modifier.height(2.dp))
-                            Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = isSingleCategoryFilter && singleCategory != null,
+                                enter = fadeIn(tween(240)) + expandHorizontally(
+                                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                                    expandFrom = Alignment.End
+                                ),
+                                exit = fadeOut(tween(180)) + shrinkHorizontally(
+                                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                    shrinkTowards = Alignment.End
+                                )
+                            ) {
+                                if (singleCategory != null) {
+                                    CategoryStatChip(singleCategory!!)
+                                }
+                            }
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                                Spacer(Modifier.height(2.dp))
+                                Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
+                    
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                         Icon(
                             if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
@@ -1559,12 +1572,12 @@ fun LedgerContent(
     }
 }
 
-// 類別統計 chip：exact note filter 時顯示喺收入/支出/筆數左邊
+// 類別統計 chip
 @Composable
 fun CategoryStatChip(category: String) {
     val style = CATEGORY_STYLES[category]
     Column(
-        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("類別", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
@@ -1573,18 +1586,18 @@ fun CategoryStatChip(category: String) {
             if (style != null) {
                 Box(
                     Modifier
-                        .size(26.dp)
+                        .size(24.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(style.bgColor),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(16.dp))
+                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(14.dp))
                 }
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(4.dp))
             }
             Text(
                 category,
-                fontSize = 22.sp,
+                fontSize = 20.sp,
                 color = TEXT_PRIMARY,
                 fontWeight = FontWeight.Bold
             )
