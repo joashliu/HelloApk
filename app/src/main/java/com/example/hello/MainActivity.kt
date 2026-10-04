@@ -34,10 +34,12 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -66,6 +68,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -812,21 +815,35 @@ fun MainApp() {
                 .align(Alignment.BottomCenter)
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xB31E293B), // 毛玻璃半透明深色 Slate 800
-                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
-                shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+            // 毛玻璃效果與高質感半透明 Toast
+            val blurModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Modifier.graphicsLayer {
+                    renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                        30f, 30f, android.graphics.Shader.TileMode.CLAMP
+                    ).asComposeRenderEffect()
+                }
+            } else Modifier
+
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                // 背景模糊層
+                Box(modifier = Modifier.matchParentSize().then(blurModifier))
+                
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0x991E293B), // 高質感半透明深藍/灰色
+                    border = BorderStroke(1.dp, Color(0x4DFFFFFF)), // 半透明幼白邊加強懸浮感
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("已刪除項目", color = Color.White, fontSize = 14.sp)
-                    TextButton(onClick = { restoreDeletedRecord() }) {
-                        Text("復原", color = BRAND_PRIMARY_LIGHT, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("已刪除項目", color = Color.White, fontSize = 14.sp)
+                        TextButton(onClick = { restoreDeletedRecord() }) {
+                            Text("復原", color = BRAND_PRIMARY_LIGHT, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
                     }
                 }
             }
@@ -879,42 +896,44 @@ fun MainApp() {
                             enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
                             exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
                         ) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(26.dp),
-                                color = SURFACE_CARD,
-                                shadowElevation = 8.dp
-                            ) {
-                                Row(
-                                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Box(Modifier.padding(vertical = 8.dp, end = 8.dp)) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(26.dp),
+                                    color = SURFACE_CARD,
+                                    shadowElevation = 8.dp
                                 ) {
-                                    Box(Modifier.weight(1f)) {
-                                        BasicTextField(
-                                            value = filterSearch,
-                                            onValueChange = { filterSearch = it },
-                                            singleLine = true,
-                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                            cursorBrush = SolidColor(BRAND_PRIMARY),
-                                            decorationBox = { inner ->
-                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                    if (filterSearch.text.isEmpty())
-                                                        Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                    inner()
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .focusRequester(filterSearchFocusRequester)
-                                                .onFocusChanged { filterSearchHasFocus = it.isFocused }
-                                        )
-                                    }
-                                    if (filterSearch.text.isNotBlank()) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(
-                                            Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                            modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
-                                        )
+                                    Row(
+                                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(Modifier.weight(1f)) {
+                                            BasicTextField(
+                                                value = filterSearch,
+                                                onValueChange = { filterSearch = it },
+                                                singleLine = true,
+                                                textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                                cursorBrush = SolidColor(BRAND_PRIMARY),
+                                                decorationBox = { inner ->
+                                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                        if (filterSearch.text.isEmpty())
+                                                            Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                        inner()
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .focusRequester(filterSearchFocusRequester)
+                                                    .onFocusChanged { filterSearchHasFocus = it.isFocused }
+                                            )
+                                        }
+                                        if (filterSearch.text.isNotBlank()) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Icon(
+                                                Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                                modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1023,7 +1042,7 @@ fun MainApp() {
         val isKeyboardOpening = showKeyboard || p > 0.001f
         if (isKeyboardOpening || currentPage == 0 || currentPage != 0) {
             val fabX = androidx.compose.ui.unit.lerp(20.dp, 28.dp, p)
-            val fabY = androidx.compose.ui.unit.lerp(92.dp, 402.dp, p)
+            val fabY = androidx.compose.ui.unit.lerp(92.dp, 400.dp, p)
             val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p)
             val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
             val iconTint = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
@@ -1047,8 +1066,10 @@ fun MainApp() {
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        if (showKeyboard) dismissKeyboard()
-                        else {
+                        if (showKeyboard) {
+                            // 鍵盤打開時，呢個掣變成清空金額
+                            keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
+                        } else {
                             if (filterModeOn) filterModeOn = false
                             if (currentPage != 0) currentPage = 0
                             openKeyboardForNew()
@@ -1677,7 +1698,7 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
     }
 }
 
-// 刪除動畫：主體淡出縮細 + 幼細彩色粒子向外擴散
+// 刪除動畫：主體淡出縮細 + 幼細彩色粒子向外擴散，並且平滑折疊高度
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
@@ -1691,6 +1712,12 @@ fun AnimatedRecordItem(
             appeared = true
         }
     }
+
+    val itemHeight by animateDpAsState(
+        targetValue = if (isDeleting) 0.dp else 72.dp,
+        animationSpec = tween(550, easing = FastOutSlowInEasing),
+        label = "eHeight"
+    )
 
     val entranceScale by animateFloatAsState(
         targetValue = if (appeared) 1f else 0.65f,
@@ -1745,7 +1772,11 @@ fun AnimatedRecordItem(
         )
     }
 
-    Box(Modifier.fillMaxWidth()) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(itemHeight)
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2089,97 +2120,77 @@ fun DayDetailPanel(
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(durationMillis = 320, delayMillis = 220)) +
-                expandVertically(
-                    animationSpec = tween(
-                        durationMillis = 380,
-                        delayMillis = 220,
-                        easing = FastOutSlowInEasing
-                    ),
-                    expandFrom = Alignment.Top
-                ) +
-                slideInVertically(
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessLow
-                    ),
-                    initialOffsetY = { -it / 5 }
-                ),
-        exit = fadeOut(tween(220)) + shrinkVertically(
-            animationSpec = tween(240, easing = FastOutSlowInEasing),
-            shrinkTowards = Alignment.Top
-        )
-    ) {
-        val shape = RoundedCornerShape(16.dp)
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = shape,
-            shadowElevation = 6.dp,
-            color = SURFACE_CARD
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-                val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            formatDateHeader(dateKey),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TEXT_PRIMARY
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (income > 0) {
-                                Text(
-                                    "收 $${formatAmountNoDecimal(income)}",
-                                    fontSize = 12.sp, color = COLOR_INCOME,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
-                            if (expense > 0) {
-                                Text(
-                                    "支 $${formatAmountNoDecimal(expense)}",
-                                    fontSize = 12.sp, color = COLOR_EXPENSE,
-                                    fontWeight = FontWeight.Bold
-                                )
+    // 用 animateContentSize 確保高度變化順暢，唔會 cut 走陰影
+    Box(Modifier.animateContentSize(tween(380, easing = FastOutSlowInEasing))) {
+        if (visible) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                shadowElevation = 6.dp, // 陰影即時出現
+                color = SURFACE_CARD
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+                    val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                formatDateHeader(dateKey),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TEXT_PRIMARY
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (income > 0) {
+                                    Text(
+                                        "收 $${formatAmountNoDecimal(income)}",
+                                        fontSize = 12.sp, color = COLOR_INCOME,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+                                if (expense > 0) {
+                                    Text(
+                                        "支 $${formatAmountNoDecimal(expense)}",
+                                        fontSize = 12.sp, color = COLOR_EXPENSE,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
+                        }
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
-                    }
-                }
-                HorizontalDivider(color = DIVIDER_COLOR)
+                    HorizontalDivider(color = DIVIDER_COLOR)
 
-                records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-                    // 加上刪除動畫包裝
-                    AnimatedRecordItem(
-                        animateOnMount = false,
-                        isDeleting = r.id == deletingRecordId
-                    ) {
-                        SwipeableRecordItem(
-                            backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                            record = r,
-                            expandedId = expandedId,
-                            onExpand = onExpandChange,
-                            onCopy = { onCopy(r) },
-                            onEdit = { onEdit(r) },
-                            onFilter = { onFilter(r) },
-                            onDelete = { onDelete(r) },
-                            onChangeIcon = { onChangeIcon(r) }
-                        )
+                    records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
+                        // 加上刪除動畫包裝
+                        AnimatedRecordItem(
+                            animateOnMount = false,
+                            isDeleting = r.id == deletingRecordId
+                        ) {
+                            SwipeableRecordItem(
+                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                record = r,
+                                expandedId = expandedId,
+                                onExpand = onExpandChange,
+                                onCopy = { onCopy(r) },
+                                onEdit = { onEdit(r) },
+                                onFilter = { onFilter(r) },
+                                onDelete = { onDelete(r) },
+                                onChangeIcon = { onChangeIcon(r) }
+                            )
+                        }
                     }
+                    Spacer(Modifier.height(6.dp))
                 }
-                Spacer(Modifier.height(6.dp))
             }
         }
     }
@@ -2701,14 +2712,19 @@ fun StatCard(icon: ImageVector, label: String, amountText: String, gradStart: Co
 
 @Composable
 fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier) {
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = modifier.animateContentSize(), verticalAlignment = Alignment.CenterVertically) {
         text.forEachIndexed { idx, c ->
-            AnimatedContent(c, transitionSpec = {
-                if (targetState > initialState)
-                    (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
-                else
-                    (slideInVertically { -it } + fadeIn()) togetherWith (slideOutVertically { it } + fadeOut())
-            }, label = "d_$idx") { ch -> Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight) }
+            key(idx) {
+                AnimatedContent(
+                    targetState = c, 
+                    transitionSpec = {
+                        (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
+                    }, 
+                    label = "d_$idx"
+                ) { ch -> 
+                    Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight) 
+                }
+            }
         }
     }
 }
@@ -3574,6 +3590,7 @@ fun CalendarContent(
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
+                        // 修正：加返頂部 padding，令選中行嘅紫色邊框唔會被切
                         .padding(top = 10.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
@@ -4185,6 +4202,18 @@ fun CompareContent(
                     }
                 }
             }
+        }
+
+        FloatingActionButton(
+            onClick = onAddClick,
+            shape = RoundedCornerShape(20.dp),
+            containerColor = BRAND_PRIMARY,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) {
+            Icon(Icons.Default.Add, "新增")
         }
     }
 }
