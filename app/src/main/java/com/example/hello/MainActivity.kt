@@ -1,4 +1,4 @@
-// ===== Imports, Constants, 資料類別, MainActivity, MainApp, FloatingNavBar =====
+// 第一段：Imports, Constants, 資料類別, MainActivity, MainApp, FloatingNavBar
 package com.example.hello
 
 import android.app.DatePickerDialog
@@ -20,7 +20,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -52,7 +51,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -72,14 +70,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -87,7 +83,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -466,6 +461,7 @@ fun MainApp() {
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
 
+    // ===== 鍵盤動畫進度：0 = 完全收埋（等同 FAB），1 = 完全展開 =====
     val keyboardAnimProgress = remember { Animatable(0f) }
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
@@ -511,14 +507,19 @@ fun MainApp() {
         }
     }
 
-    // ===== 搜尋：只搜項目名稱，唔再搜類別 =====
     val filtered by remember {
         derivedStateOf {
             val q = filterSearch.text
+            val hasExactNoteMatch = q.isNotBlank() && records.any { it.note == q }
+            val hasExactCategoryMatch = q.isNotBlank() && CATEGORIES.any { it == q }
             records.toList().filter { r ->
                 val catOk = filterCategory == null || r.category == filterCategory
                 val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
-                val searchOk = if (q.isBlank()) true else r.note.contains(q, ignoreCase = true)
+                val searchOk = if (q.isBlank()) true else when {
+                    hasExactNoteMatch -> r.note == q
+                    hasExactCategoryMatch -> r.category == q
+                    else -> r.note.contains(q, true) || r.category.contains(q, true)
+                }
                 catOk && monthOk && searchOk
             }
         }
@@ -544,27 +545,15 @@ fun MainApp() {
         }
     }
 
-    // ===== 快速輸入排序：第一位放最接近當前時間嘅項目，其他按數量降序 =====
     val topNotes by remember {
         derivedStateOf {
             val now = System.currentTimeMillis()
-            val grouped = ledgerRecords.filter { it.note.isNotBlank() }.groupBy { it.note }
-            if (grouped.isEmpty()) return@derivedStateOf emptyList<Pair<String, Int>>()
-
-            val noteInfo = grouped.map { (note, list) ->
-                val minDist = list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) }
-                Triple(note, list.size, minDist)
-            }
-
-            val closestNote = noteInfo.minByOrNull { it.third }?.first
-
-            val ordered = mutableListOf<String>()
-            if (closestNote != null) ordered.add(closestNote)
-            noteInfo.filter { it.first != closestNote }
-                .sortedByDescending { it.second }
-                .forEach { ordered.add(it.first) }
-
-            ordered.take(20).map { it to 0 }
+            ledgerRecords.filter { it.note.isNotBlank() }
+                .groupBy { it.note }
+                .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
+                .sortedBy { it.second }
+                .take(20)
+                .map { it.first to 0 }
         }
     }
 
@@ -736,13 +725,7 @@ fun MainApp() {
     }
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
-    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) {
-        filterModeOn = false
-        filterSearchHasFocus = false
-    }
-    LaunchedEffect(filterModeOn) {
-        if (!filterModeOn) filterSearchHasFocus = false
-    }
+    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filterModeOn && currentPage == 0) {
             delay(300)
@@ -778,7 +761,6 @@ fun MainApp() {
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                 onFilterByName = { name ->
                     filterCategory = null; filterMonth = null
-                    filterSearchHasFocus = false
                     filterSearch = TextFieldValue(name); filterModeOn = true
                 },
                 showKeyboard = showKeyboard, keyboardState = keyboardState,
@@ -811,7 +793,6 @@ fun MainApp() {
                 onFilterClick = { r ->
                     currentPage = 0
                     filterCategory = null; filterMonth = null
-                    filterSearchHasFocus = false
                     filterSearch = TextFieldValue(r.note); filterModeOn = true
                 },
                 onDeleteClick = { deleteRecordWithUndo(it) },
@@ -820,7 +801,6 @@ fun MainApp() {
             )
         }
 
-        // ===== Undo Toast：玻璃質感背景 =====
         AnimatedVisibility(
             visible = showUndoToast,
             enter = slideInVertically { it } + fadeIn(),
@@ -831,9 +811,8 @@ fun MainApp() {
         ) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xCC1E293B),
-                border = BorderStroke(1.dp, Color(0x33FFFFFF)),
-                shadowElevation = 10.dp,
+                color = TEXT_PRIMARY,
+                shadowElevation = 8.dp,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
             ) {
                 Row(
@@ -867,12 +846,15 @@ fun MainApp() {
                 modifier = Modifier)
         }
 
-        // ===== 底部操作列：篩選掣 + FAB =====
+        // ===== 底部操作列：篩選掣 + FAB（只在鍵盤未完全展開時顯示）=====
+        // FAB 會隨 keyboardAnimProgress 慢慢淡出（在動畫後段才開始收），做出「FAB 變大成為鍵盤」錯覺
         if (currentPage == 0 || currentPage != 0) {
             val fabAlpha = if (showKeyboard) {
+                // 開啟時：p < 0.65 → alpha 1；p 0.65→1 之間淡出
                 val p = keyboardAnimProgress.value
                 (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
             } else {
+                // 收起時：p > 0.35 → alpha 0；p 0.35→0 之間淡入
                 val p = keyboardAnimProgress.value
                 (1f - (p / 0.35f).coerceIn(0f, 1f))
             }
@@ -890,65 +872,59 @@ fun MainApp() {
                 ) {
                     Box(Modifier.weight(1f)) {
                         if (currentPage == 0) {
-                            val searchAlpha by animateFloatAsState(
-                                targetValue = if (filterModeOn) 1f else 0f,
-                                animationSpec = tween(300, easing = FastOutSlowInEasing),
-                                label = "searchAlpha"
-                            )
-                            val searchOffset by animateFloatAsState(
-                                targetValue = if (filterModeOn) 0f else -1f,
-                                animationSpec = tween(300, easing = FastOutSlowInEasing),
-                                label = "searchOffset"
-                            )
-
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .graphicsLayer {
-                                        alpha = searchAlpha
-                                        translationX = searchOffset * size.width
-                                    },
-                                shape = RoundedCornerShape(26.dp),
-                                color = SURFACE_CARD,
-                                shadowElevation = 8.dp
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = filterModeOn,
+                                enter = expandHorizontally(
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                                    expandFrom = Alignment.End
+                                ) + fadeIn(tween(200)),
+                                exit = shrinkHorizontally(
+                                    animationSpec = tween(260, easing = FastOutSlowInEasing),
+                                    shrinkTowards = Alignment.End
+                                ) + fadeOut(tween(180))
                             ) {
-                                Row(
-                                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(26.dp),
+                                    color = SURFACE_CARD,
+                                    shadowElevation = 8.dp
                                 ) {
-                                    Box(Modifier.weight(1f)) {
-                                        BasicTextField(
-                                            value = filterSearch,
-                                            onValueChange = { filterSearch = it },
-                                            singleLine = true,
-                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                            cursorBrush = SolidColor(BRAND_PRIMARY),
-                                            decorationBox = { inner ->
-                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                    if (filterSearch.text.isEmpty())
-                                                        Text("搜尋項目名稱…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                    inner()
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .focusRequester(filterSearchFocusRequester)
-                                                .onFocusChanged { filterSearchHasFocus = it.isFocused }
-                                        )
-                                    }
-                                    if (filterSearch.text.isNotBlank()) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(
-                                            Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                            modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
-                                        )
+                                    Row(
+                                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(Modifier.weight(1f)) {
+                                            BasicTextField(
+                                                value = filterSearch,
+                                                onValueChange = { filterSearch = it },
+                                                singleLine = true,
+                                                textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                                cursorBrush = SolidColor(BRAND_PRIMARY),
+                                                decorationBox = { inner ->
+                                                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                        if (filterSearch.text.isEmpty())
+                                                            Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                        inner()
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .focusRequester(filterSearchFocusRequester)
+                                                    .onFocusChanged { filterSearchHasFocus = it.isFocused }
+                                            )
+                                        }
+                                        if (filterSearch.text.isNotBlank()) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Icon(
+                                                Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                                modifier = Modifier.size(20.dp).clickable { filterSearch = TextFieldValue("") }
+                                            )
+                                        }
                                     }
                                 }
                             }
 
-                            // 加上 searchAlpha 條件：確保搜尋框已經 layout 好先顯示 popup（避免 anchor 未 valid 而閃退）
-                            if (filterModeOn && filterSearchHasFocus && searchAlpha > 0.5f) {
+                            if (filterModeOn && filterSearchHasFocus) {
                                 val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                                 if (filterSuggestions.isNotEmpty()) {
                                     androidx.compose.ui.window.Popup(
@@ -1022,11 +998,7 @@ fun MainApp() {
                         containerColor = BRAND_PRIMARY,
                         contentColor = Color.White
                     ) {
-                        Icon(
-                            Icons.Default.Add,
-                            "新增",
-                            modifier = Modifier.alpha(if (keyboardAnimProgress.value > 0f) 0f else 1f)
-                        )
+                        Icon(Icons.Default.Add, "新增")
                     }
                 }
             }
@@ -1042,6 +1014,7 @@ fun MainApp() {
                     .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
                     .graphicsLayer {
                         alpha = p
+                        // 由 FAB 大小 (~56dp) 開始放大；鍵盤寬約 328dp、FAB 56dp → scale ≈ 0.17
                         scaleX = 0.17f + 0.83f * p
                         scaleY = 0.17f + 0.83f * p
                         transformOrigin = TransformOrigin(1f, 1f)
@@ -1058,34 +1031,8 @@ fun MainApp() {
                     noteCategoryMap = noteCategoryMap,
                     nameFlashTrigger = nameFlashTrigger,
                     showKeyboard = showKeyboard,
-                    animProgress = p,
                     modifier = Modifier.fillMaxWidth()
                 )
-            }
-        }
-
-        // ===== 附加獨立懸浮圖標，用嚟做 FAB 到鍵盤嘅變形動畫 =====
-        val p = keyboardAnimProgress.value
-        if (p > 0f && p < 1f) {
-            val iconSize = 24.dp + (2.dp * p)
-            val rightOffset = 48.dp + (12.dp * p)
-            val bottomOffset = NAV_HEIGHT + NAV_BOTTOM_PADDING + 40.dp + (356.dp * p)
-            val rotation = 45f * p
-            val targetColor = if (keyboardState.amountText.isEmpty()) TEXT_TERTIARY else TEXT_SECONDARY
-            val iconColor = lerp(Color.White, targetColor, p)
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = rightOffset - (iconSize / 2),
-                        bottom = bottomOffset - (iconSize / 2)
-                    )
-                    .size(iconSize)
-                    .graphicsLayer { rotationZ = rotation },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Add, null, tint = iconColor, modifier = Modifier.fillMaxSize())
             }
         }
 
@@ -1195,6 +1142,7 @@ fun MainApp() {
         )
     }
 }
+
 @Composable
 fun FloatingNavBar(
     items: List<NavItem>,
@@ -1291,8 +1239,7 @@ fun FloatingNavBar(
         }
     }
 }
-
-// ===== LedgerContent 與各類輔助組件 =====
+// 第二段：LedgerContent 與各類輔助組件 (RecordItem, KeyboardPanel, QuickInputSection)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -1346,6 +1293,12 @@ fun LedgerContent(
         if (scrollToTopTrigger > 0) {
             try { listState.requestScrollToItem(0) }
             catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
+        }
+    }
+
+    val exactNoteCategory by remember {
+        derivedStateOf {
+            if (isExactNoteFilter) filtered.firstOrNull()?.category else null
         }
     }
 
@@ -1430,10 +1383,27 @@ fun LedgerContent(
                 )
             }
             else -> {
-                                Row(
+                Row(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 類別 chip：exact note filter 時顯示喺最左（收入/支出/筆數左邊）
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isExactNoteFilter && exactNoteCategory != null,
+                        enter = fadeIn(tween(240)) + expandHorizontally(
+                            animationSpec = tween(280, easing = FastOutSlowInEasing),
+                            expandFrom = Alignment.Start
+                        ),
+                        exit = fadeOut(tween(180)) + shrinkHorizontally(
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                            shrinkTowards = Alignment.Start
+                        )
+                    ) {
+                        if (exactNoteCategory != null) {
+                            CategoryStatChip(exactNoteCategory!!)
+                        }
+                    }
+
                     Box(Modifier.weight(if (filterMode) 2f else 1f)) {
                         TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
                     }
@@ -1477,6 +1447,7 @@ fun LedgerContent(
                         )
                     ) {
                         if (isExactNoteFilter) {
+                            // 冇 header，直接列 items
                             itemsIndexed(
                                 items = filtered,
                                 key = { _, r -> r.id }
@@ -1589,6 +1560,40 @@ fun LedgerContent(
     }
 }
 
+// 類別統計 chip：exact note filter 時顯示喺收入/支出/筆數左邊
+@Composable
+fun CategoryStatChip(category: String) {
+    val style = CATEGORY_STYLES[category]
+    Column(
+        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("類別", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (style != null) {
+                Box(
+                    Modifier
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(style.bgColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(12.dp))
+                }
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(
+                category,
+                fontSize = 14.sp,
+                color = TEXT_PRIMARY,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+// Sticky header 外層：被推出頂部時 alpha 漸隱（用 boundsInRoot 兼容所有 Compose 版本）
 @Composable
 fun FadingStickyHeader(content: @Composable () -> Unit) {
     var rootTop by remember { mutableFloatStateOf(0f) }
@@ -1601,6 +1606,7 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
                 rootTop = coords.boundsInRoot().top
             }
             .graphicsLayer {
+                // 被推到 rootTop < 0 時淡出（60px 內完成）
                 val fadeDist = 60f
                 val a = if (rootTop >= 0f) 1f
                         else (1f + rootTop / fadeDist).coerceIn(0f, 1f)
@@ -1611,6 +1617,7 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
     }
 }
 
+// 刪除動畫：主體淡出縮細 + 幼細彩色粒子向外擴散
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
@@ -1653,6 +1660,7 @@ fun AnimatedRecordItem(
 
     val prog = particleProgress.value
 
+    // 幼細粒子：數量多、粒徑小、擴散廣
     val particleCount = 90
     val random = remember { Random(42) }
     val particles = remember {
@@ -1709,12 +1717,15 @@ fun AnimatedRecordItem(
                     val px = startX + dist * kotlin.math.cos(rad).toFloat()
                     val py = startY + dist * kotlin.math.sin(rad).toFloat() - prog * 80f
                     val pAlpha = (1f - prog).coerceIn(0f, 1f)
+                    // 幼細粒徑：0.8dp，越細越幼
                     val pRadius = (1.6.dp.toPx() * (1f - prog * 0.4f)).coerceAtLeast(0.5f)
+                    // 外圈 glow 極柔
                     drawCircle(
                         color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.15f),
                         radius = pRadius * 2.0f,
                         center = Offset(px, py)
                     )
+                    // 實心細粒子
                     drawCircle(
                         color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.95f),
                         radius = pRadius,
@@ -1725,6 +1736,7 @@ fun AnimatedRecordItem(
         }
     }
 }
+
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
@@ -1999,7 +2011,7 @@ private fun AnimatedActionButton(
     }
 }
 
-// 日曆當日明細：用 alpha + scaleY 手動動畫，令陰影同明細框完全同步出現
+// 日曆當日明細：延遲展開，用 spring 令佢睇落舒服
 @Composable
 fun DayDetailPanel(
     dateKey: String,
@@ -2016,34 +2028,37 @@ fun DayDetailPanel(
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
-    val alpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
-        label = "detailAlpha"
-    )
-    val scaleY by animateFloatAsState(
-        targetValue = if (visible) 1f else 0.65f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "detailScaleY"
-    )
-
-    val shape = RoundedCornerShape(16.dp)
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                this.alpha = alpha
-                this.scaleY = scaleY
-                transformOrigin = TransformOrigin(0.5f, 0f)
-            },
-        shape = shape,
-        color = SURFACE_CARD,
-        shadowElevation = 4.dp
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(durationMillis = 320, delayMillis = 220)) +
+                expandVertically(
+                    animationSpec = tween(
+                        durationMillis = 380,
+                        delayMillis = 220,
+                        easing = FastOutSlowInEasing
+                    ),
+                    expandFrom = Alignment.Top
+                ) +
+                slideInVertically(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessLow
+                    ),
+                    initialOffsetY = { -it / 5 }
+                ),
+        exit = fadeOut(tween(220)) + shrinkVertically(
+            animationSpec = tween(240, easing = FastOutSlowInEasing),
+            shrinkTowards = Alignment.Top
+        )
     ) {
-        Column {
+        val shape = RoundedCornerShape(16.dp)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .shadow(4.dp, shape, clip = false)
+                .clip(shape)
+                .background(SURFACE_CARD)
+        ) {
             val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
             val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
             Row(
@@ -2115,7 +2130,6 @@ fun LedgerKeyboardPanel(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
     showKeyboard: Boolean = true,
-    animProgress: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -2129,6 +2143,7 @@ fun LedgerKeyboardPanel(
         }
     }
 
+    // 用 Box + Modifier.shadow 取代 Surface，避免動畫初期出現假直角陰影
     val panelShape = RoundedCornerShape(24.dp)
     Box(
         modifier = modifier
@@ -2239,7 +2254,6 @@ fun LedgerKeyboardPanel(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .size(36.dp)
-                            .alpha(if (animProgress >= 1f) 1f else 0f)
                     ) {
                         Icon(
                             Icons.Default.Add,
@@ -2247,7 +2261,7 @@ fun LedgerKeyboardPanel(
                             tint = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_SECONDARY,
                             modifier = Modifier
                                 .size(26.dp)
-                                .rotate(45f)
+                                .rotate(45f) // 用旋轉顯示為交叉 X
                         )
                     }
                 }
@@ -2630,7 +2644,7 @@ fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: F
     }
 }
 
-// 每日 Header：同時有收支 → 上下排列；加入 animateContentSize 令高度變化有流暢動畫
+// 每日 Header：2026年5月1日．[一]．今日
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
@@ -2644,12 +2658,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
         Modifier
             .fillMaxWidth()
             .background(SURFACE_ELEVATED)
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
             .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -2663,6 +2671,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                     color = TEXT_PRIMARY
                 )
                 Text("．", fontSize = 13.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.ExtraBold)
+                // 星期圓形：低飽和色 + 加粗
                 val bgColor = if (info.isWeekend) WEEKEND_BG else WEEKDAY_BG
                 val fgColor = if (info.isWeekend) WEEKEND_FG else WEEKDAY_FG
                 Box(
@@ -2677,10 +2686,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                         fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = fgColor,
-                        textAlign = TextAlign.Center,
-                        style = TextStyle(
-                            platformStyle = PlatformTextStyle(includeFontPadding = false)
-                        )
+                        textAlign = TextAlign.Center
                     )
                 }
                 if (info.dayTag != null) {
@@ -2689,7 +2695,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                         info.dayTag,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.Black
+                        color = BRAND_PRIMARY_DARK
                     )
                 }
             } else {
@@ -2701,48 +2707,24 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                 )
             }
         }
-
-        if (income > 0 && expense > 0) {
-            Column(horizontalAlignment = Alignment.End) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
-                }
-                Spacer(Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.ExtraBold)
-                    if (countText.isNotEmpty()) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            countText, fontSize = 11.sp,
-                            color = COLOR_EXPENSE.copy(alpha = 0.7f),
-                            fontWeight = FontWeight.Normal
-                        )
-                    }
-                }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (income > 0) {
+                Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(2.dp))
+                Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
             }
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (income > 0) {
-                    Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
-                }
-                if (expense > 0) {
-                    Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(2.dp))
-                    Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.ExtraBold)
-                    if (countText.isNotEmpty()) {
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            countText, fontSize = 11.sp,
-                            color = COLOR_EXPENSE.copy(alpha = 0.7f),
-                            fontWeight = FontWeight.Normal
-                        )
-                    }
+            if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+            if (expense > 0) {
+                Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(2.dp))
+                Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.ExtraBold)
+                if (countText.isNotEmpty()) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        countText, fontSize = 11.sp,
+                        color = COLOR_EXPENSE.copy(alpha = 0.7f),
+                        fontWeight = FontWeight.Normal
+                    )
                 }
             }
         }
@@ -2762,8 +2744,9 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
+// 快速輸入 Chip：由圖標抽取主色（低飽和度）做底色
 @Composable
-fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun QuickInputChip(name: String, iconUrl: String, onClick: () -> Unit) {
     var bgColor by remember(iconUrl) { mutableStateOf(SURFACE_ELEVATED) }
     val ctx = LocalContext.current
 
@@ -2780,7 +2763,9 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                     .build()
                 val result = ctx.imageLoader.execute(request)
                 when (val d = result.drawable) {
-                    is android.graphics.drawable.BitmapDrawable -> getDominantMutedColor(d.bitmap)
+                    is android.graphics.drawable.BitmapDrawable -> {
+                        getDominantMutedColor(d.bitmap)
+                    }
                     is android.graphics.drawable.ColorDrawable -> {
                         val c = d.color
                         if (android.graphics.Color.alpha(c) > 0 &&
@@ -2805,109 +2790,27 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
         onClick = onClick,
-        shadowElevation = 1.dp,
-        modifier = modifier
+        shadowElevation = 1.dp
     ) {
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            verticalAlignment = Alignment.CenterVertically
         ) {
             IconView(iconUrl, name, size = 18.dp)
             Spacer(Modifier.width(6.dp))
-            Text(
-                name,
-                fontSize = 13.sp,
-                color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
         }
     }
 }
 
-// 左右對齊 FlowRow：每行 chip 拉伸填滿，唔留右邊空白
-@Composable
-fun JustifiedFlowRow(
-    items: List<String>,
-    modifier: Modifier = Modifier,
-    horizontalGap: Dp = 8.dp,
-    verticalGap: Dp = 8.dp,
-    itemContent: @Composable (String) -> Unit
-) {
-    SubcomposeLayout(modifier = modifier) { constraints ->
-        val hGapPx = horizontalGap.roundToPx()
-        val vGapPx = verticalGap.roundToPx()
-        val maxWidth = constraints.maxWidth
-
-        if (items.isEmpty() || maxWidth <= 0) {
-            return@SubcomposeLayout layout(0, 0) {}
-        }
-
-        val placeables = items.map { item ->
-            subcompose(item) { itemContent(item) }
-                .map { it.measure(Constraints(maxWidth = maxWidth)) }
-                .first()
-        }
-
-        val rows = mutableListOf<MutableList<Int>>()
-        var curRow = mutableListOf<Int>()
-        var curW = 0
-        placeables.forEachIndexed { i, p ->
-            val add = if (curRow.isEmpty()) p.width else curW + hGapPx + p.width
-            if (add > maxWidth && curRow.isNotEmpty()) {
-                rows.add(curRow)
-                curRow = mutableListOf(i)
-                curW = p.width
-            } else {
-                curRow.add(i)
-                curW = add
-            }
-        }
-        if (curRow.isNotEmpty()) rows.add(curRow)
-
-        val rowHeights = rows.map { row -> row.maxOf { placeables[it].height } }
-        val totalHeight = rowHeights.sum() + (rows.size - 1).coerceAtLeast(0) * vGapPx
-
-        layout(maxWidth, totalHeight) {
-            var y = 0
-            rows.forEachIndexed { rowIdx, row ->
-                val itemsWidth = row.sumOf { placeables[it].width }
-                val gapCount = row.size - 1
-                val gap = if (gapCount > 0) (maxWidth - itemsWidth).toFloat() / gapCount else 0f
-                var x = 0f
-                row.forEach { idx ->
-                    val p = placeables[idx]
-                    p.placeRelative(x.roundToInt(), y)
-                    x += p.width + gap
-                }
-                y += rowHeights[rowIdx] + vGapPx
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     onClick: (String) -> Unit
 ) {
-    val targetNames = topNotes.take(12).map { it.first }
-
-    val displayNames = remember {
-        mutableStateListOf<String>().apply { addAll(targetNames) }
-    }
-
-    LaunchedEffect(targetNames) {
-        targetNames.forEach { if (it !in displayNames) displayNames.add(it) }
-        delay(450)
-        displayNames.removeAll { it !in targetNames }
-    }
-
-    if (displayNames.isEmpty()) return
-
+    if (topNotes.isEmpty()) return
     Box(
         Modifier
             .fillMaxWidth()
@@ -2915,31 +2818,13 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp))
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .padding(vertical = 12.dp, horizontal = 14.dp)
-            .animateContentSize()
     ) {
-        JustifiedFlowRow(
-            items = displayNames.toList(),
-            modifier = Modifier.fillMaxWidth().animateContentSize(),
-            horizontalGap = 8.dp,
-            verticalGap = 8.dp
-        ) { name ->
-            val isVisible = name in targetNames
-            androidx.compose.animation.AnimatedVisibility(
-                visible = isVisible,
-                enter = fadeIn(tween(280, easing = FastOutSlowInEasing)) +
-                        scaleIn(
-                            initialScale = 0.7f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ),
-                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) +
-                        scaleOut(
-                            targetScale = 0.7f,
-                            animationSpec = tween(200, easing = FastOutSlowInEasing)
-                        )
-            ) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            topNotes.take(12).forEach { (name, _) ->
                 QuickInputChip(
                     name = name,
                     iconUrl = noteIconMap[name] ?: "",
@@ -2949,9 +2834,9 @@ fun QuickInputSection(
         }
     }
 }
+// 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
 
-// ===== 月曆相關 =====
-
+// 月曆專用 FilterChip：文字用黑色
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarFilterChip(
@@ -2998,6 +2883,7 @@ fun CalendarFilterChip(
     )
 }
 
+// 帶滾動數字效果嘅 InfoChip（總計/平均每項/日均支出）
 @Composable
 fun AnimatedInfoChip(
     label: String,
@@ -3369,6 +3255,7 @@ fun CalendarContent(
         }
     }
 
+    // 總計：收入 - 支出（淨值）
     val monthIncome = monthRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
     val monthExpense = monthRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
     val totalNet = monthIncome - monthExpense
@@ -3596,12 +3483,14 @@ fun CalendarContent(
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
-                        .padding(top = 8.dp)
+                        // 修正：加返頂部 padding，令選中行嘅紫色邊框唔會被切
+                        .padding(top = 10.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
                     for (rowIdx in 0 until totalRows) {
                         val isThisRowSelected = selectedRowIdx == rowIdx
                         val isHidden = selectedDay != null && !isThisRowSelected
+                        // 距離 selected row 幾遠：近嘅先收，遠嘅遲啲收，形成波浪感
                         val distance = if (selectedRowIdx != null) abs(rowIdx - selectedRowIdx!!) else 0
                         val exitDelay = (distance * 28).coerceAtMost(220)
                         val enterDelay = (distance * 22).coerceAtMost(180)
@@ -3852,7 +3741,6 @@ fun FadedText(
         modifier = modifier
     )
 }
-// ===== 比較頁 =====
 
 @Composable
 fun MiniHistogram(
@@ -4280,8 +4168,6 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
     }
 }
 
-// ===== 工具函數 =====
-
 fun createTempImageUri(context: Context): Uri? {
     return try {
         val name = "camera_${System.currentTimeMillis()}.jpg"
@@ -4400,19 +4286,13 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     if (iconUrl.isBlank()) {
         val ch = remember(name) { name.trim().take(1).ifBlank { "?" } }
         val bgColor = remember(name) { avatarColor(name) }
-        Box(
-            Modifier.size(size).clip(CircleShape).background(bgColor),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(Modifier.size(size).clip(CircleShape).background(bgColor), contentAlignment = Alignment.Center) {
             Text(
                 ch,
                 color = Color.White,
                 fontSize = (size.value * 0.42f).sp,
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                style = TextStyle(
-                    platformStyle = PlatformTextStyle(includeFontPadding = false)
-                )
+                modifier = Modifier.offset(y = (-size.value * 0.03f).dp)
             )
         }
     } else {
@@ -4439,11 +4319,7 @@ fun IconViewAdaptive(
                     ch,
                     color = Color.White,
                     fontSize = (sizeDp.value * 0.5f).sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    style = TextStyle(
-                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                    )
+                    fontWeight = FontWeight.Bold
                 )
             }
         } else {
