@@ -1042,7 +1042,7 @@ fun MainApp() {
         val p = keyboardAnimProgress.value
         val isKeyboardOpening = showKeyboard || p > 0.001f
         if (isKeyboardOpening || currentPage == 0 || currentPage != 0) {
-            val fabX = androidx.compose.ui.unit.lerp(20.dp, 26.dp, p)    // 26dp 精準對齊金額框內 padding
+            val fabX = androidx.compose.ui.unit.lerp(20.dp, 38.dp, p)
 val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)   // 458dp 對準金額框垂直中心
             val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p)
             val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
@@ -2712,18 +2712,38 @@ fun StatCard(icon: ImageVector, label: String, amountText: String, gradStart: Co
 }
 
 @Composable
-fun AnimatedAmount(text: String, color: Color, fontSize: TextUnit, fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier) {
-    Row(modifier = modifier.animateContentSize(), verticalAlignment = Alignment.CenterVertically) {
-        text.forEachIndexed { idx, c ->
-            key(idx) {
-                AnimatedContent(
-                    targetState = c, 
-                    transitionSpec = {
-                        (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
-                    }, 
-                    label = "d_$idx"
-                ) { ch -> 
-                    Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight) 
+fun AnimatedAmount(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.Bold,
+    modifier: Modifier = Modifier,
+) {
+    // 追蹤上一個長度，用嚟偵測「清空」操作（由多字 → 單一「0」）
+    var prevLen by remember { mutableIntStateOf(text.length) }
+    val isClearing = prevLen > 1 && text == "0"
+    LaunchedEffect(text) { prevLen = text.length }
+
+    Row(
+        modifier = modifier.animateContentSize(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isClearing) {
+            // 清空：直接顯示「0」，唔播逐字滾動，避免殘影滾動錯覺
+            Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight)
+        } else {
+            text.forEachIndexed { idx, c ->
+                key(idx) {
+                    AnimatedContent(
+                        targetState = c,
+                        transitionSpec = {
+                            (slideInVertically { it } + fadeIn()) togetherWith
+                                    (slideOutVertically { -it } + fadeOut())
+                        },
+                        label = "d_$idx"
+                    ) { ch ->
+                        Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight)
+                    }
                 }
             }
         }
