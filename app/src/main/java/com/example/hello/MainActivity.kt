@@ -1392,34 +1392,46 @@ fun LedgerContent(
                     Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(Modifier.weight(if (filterMode) 1.2f else 1f)) {
-                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
-                    }
-                    
                     if (filterMode) {
-                        // 喺筆數旁邊顯示單一類別結果嘅 CategoryStatChip
-                        Row(
-                            modifier = Modifier.weight(1.3f),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
+                        // 左手邊：類別晶片（置左對齊），即使無觸發單一類別都會預留空間，保持佈局對稱
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
                         ) {
                             androidx.compose.animation.AnimatedVisibility(
                                 visible = isSingleCategoryFilter && singleCategory != null,
                                 enter = fadeIn(tween(240)) + expandHorizontally(
                                     animationSpec = tween(280, easing = FastOutSlowInEasing),
-                                    expandFrom = Alignment.End
+                                    expandFrom = Alignment.Start
                                 ),
                                 exit = fadeOut(tween(180)) + shrinkHorizontally(
                                     animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                    shrinkTowards = Alignment.End
+                                    shrinkTowards = Alignment.Start
                                 )
                             ) {
                                 if (singleCategory != null) {
                                     CategoryStatChip(singleCategory!!)
                                 }
                             }
+                        }
+                    }
 
+                    // 正中間：TopStats (獲得 1.5 權重，置中顯示)
+                    Box(
+                        modifier = Modifier.weight(if (filterMode) 1.5f else 1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense)
+                    }
+                    
+                    if (filterMode) {
+                        // 右手邊：筆數統計（置右對齊）
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
                             Column(
+                                modifier = Modifier.padding(end = 8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
