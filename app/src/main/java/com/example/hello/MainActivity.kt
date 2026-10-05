@@ -1571,13 +1571,7 @@ Row(
     // expand/shrink 會真正改變量度寬度，令旁邊嘅 weight(1f) 容器平滑擴展／收縮
     enter = fadeIn(tween(240)) + expandHorizontally(
         animationSpec = tween(320, easing = FastOutSlowInEasing),
-        expandFrom = Alignment.End
-    ),
-    exit = fadeOut(tween(180)) + shrinkHorizontally(
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        shrinkTowards = Alignment.End
-    )
-) {
+        if (filterMode) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(end = 8.dp)
@@ -2676,60 +2670,46 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
     val showExpense = hasExpense
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
 
-    // 卡片權重動畫：0f = 收埋、1f = 完整顯示
-    // 佈局每幀都會按當下權重重新分配寬度，所以係平滑過渡，唔會跳
-    val incomeW by animateFloatAsState(
-        targetValue = if (showIncome) 1f else 0f,
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "incomeW"
-    )
-    val expenseW by animateFloatAsState(
-        targetValue = if (showExpense) 1f else 0f,
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "expenseW"
-    )
-    val balanceW by animateFloatAsState(
-        targetValue = if (showBalance) 1f else 0f,
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "balanceW"
-    )
-
+    // 唔用 weight 動畫，唔用 AnimatedVisibility 做位置動畫
+    // 佈局瞬間切換 → SpaceEvenly 即時按可見卡片數量平均分配 → 一次到位，零抖動
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (incomeW > 0.001f) {
-            Box(
-                modifier = Modifier
-                    .weight(incomeW)
-                    .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
-                contentAlignment = Alignment.Center
-            ) {
+        if (showIncome) {
+            FadeInCard {
                 StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
             }
         }
-        if (expenseW > 0.001f) {
-            Box(
-                modifier = Modifier
-                    .weight(expenseW)
-                    .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
-                contentAlignment = Alignment.Center
-            ) {
+        if (showExpense) {
+            FadeInCard {
                 StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
             }
         }
-        if (balanceW > 0.001f) {
+        if (showBalance) {
             val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            Box(
-                modifier = Modifier
-                    .weight(balanceW)
-                    .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
-                contentAlignment = Alignment.Center
-            ) {
+            FadeInCard {
                 StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
             }
         }
     }
+}
+
+/**
+ * 卡片出現時只做透明度淡入；消失時直接從佈局移除（唔做淡出）。
+ * 因為位置切換係瞬間嘅，所以永遠係「一次移動就到終點」，唔會分兩段，亦都唔會抖。
+ */
+@Composable
+private fun FadeInCard(content: @Composable () -> Unit) {
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { appeared = true }
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(240, easing = FastOutSlowInEasing),
+        label = "cardAlpha"
+    )
+    Box(Modifier.graphicsLayer { this.alpha = alpha }) { content() }
 }
 
 @Composable
