@@ -2938,6 +2938,8 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
+    val items = topNotes.take(16)
+
     Box(
         Modifier
             .fillMaxWidth()
@@ -2946,29 +2948,34 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp)
-                .animateContentSize(),
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 100.dp),
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            userScrollEnabled = true
         ) {
-            topNotes.take(16).forEach { (name, _) ->
-                var visible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { visible = true }
-                AnimatedVisibility(
-                    visible = visible,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut()
-                ) {
-                    QuickInputChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        onClick = { onClick(name) }
+            items(
+                items = items,
+                key = { it.first }
+            ) { (name, _) ->
+                QuickInputChip(
+                    name = name,
+                    iconUrl = noteIconMap[name] ?: "",
+                    onClick = { onClick(name) },
+                    modifier = Modifier.animateItem(
+                        // 進場：柔和淡入
+                        fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        // 退場：柔和淡出
+                        fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        // 位置移動：無彈性、中低剛度 → 平穩滑到新位置
+                        placementSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = Spring.DampingRatioNoBouncy
+                        )
                     )
-                }
+                )
             }
         }
     }
