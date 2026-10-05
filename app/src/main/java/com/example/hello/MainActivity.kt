@@ -2686,22 +2686,6 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
     }
 }
 
-/**
- * 卡片進場只做透明度淡入；消失時即時從佈局移除（唔做淡出）。
- * 因為位置切換係瞬間嘅，所以永遠係「一次移動就到終點」，唔會分兩段，亦都唔會抖。
- */
-@Composable
-private fun FadeInCard(content: @Composable () -> Unit) {
-    var appeared by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { appeared = true }
-    val alpha by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0f,
-        animationSpec = tween(240, easing = FastOutSlowInEasing),
-        label = "cardAlpha"
-    )
-    Box(Modifier.graphicsLayer { this.alpha = alpha }) { content() }
-}
-
 @Composable
 fun StatCard(icon: ImageVector, label: String, amountText: String, gradStart: Color, gradEnd: Color) {
     Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
