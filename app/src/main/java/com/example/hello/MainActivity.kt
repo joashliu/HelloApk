@@ -2646,28 +2646,42 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
     val showExpense = hasExpense
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
 
-    // 佈局即時切換，配合 SpaceEvenly 自動平均分配 → 一次移動就到終點，零抖動
-    // 卡片進場只做 alpha 淡入（FadeInCard），唔會改變量度寬度
+    // 三張卡共用同一個動畫節奏，weight 同 alpha 用同一個 p 值驅動
+    // → 位置、寬度、透明度完全同步 → 路徑係一條直線，唔會分兩段
+    val spec = tween<Float>(durationMillis = 320, easing = FastOutSlowInEasing)
+    val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
+    val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
+    val balanceW by animateFloatAsState(if (showBalance) 1f else 0f, spec, label = "bW")
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (showIncome) {
-            FadeInCard {
-                StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
-            }
+        // 三個 Box 永遠存在（唔用 if），weight = 0.0001f 時寬度幾乎為 0，但唔會破壞 Row 佈局
+        Box(
+            modifier = Modifier
+                .weight(incomeW.coerceAtLeast(0.0001f))
+                .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
         }
-        if (showExpense) {
-            FadeInCard {
-                StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
-            }
+        Box(
+            modifier = Modifier
+                .weight(expenseW.coerceAtLeast(0.0001f))
+                .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
         }
-        if (showBalance) {
+        Box(
+            modifier = Modifier
+                .weight(balanceW.coerceAtLeast(0.0001f))
+                .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
             val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            FadeInCard {
-                StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
-            }
+            StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
         }
     }
 }
