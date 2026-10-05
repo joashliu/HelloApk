@@ -2665,34 +2665,42 @@ fun AnimatedFilterChip(
 @Composable
 fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: Double, isFilterMode: Boolean = false) {
     val balance = income - expense
-    // 徹底改用 Arrangement.spacedBy，令佢哋有固定舒適距離置中平分，加入餘額顯示
+    val showIncome = hasIncome || (!hasIncome && !hasExpense)
+    val showExpense = hasExpense
+    val showBalance = !isFilterMode && (hasIncome || hasExpense)
+
     Row(
-    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
-    horizontalArrangement = Arrangement.SpaceEvenly,
-    verticalAlignment = Alignment.CenterVertically
-) {
-        androidx.compose.animation.AnimatedVisibility(
-            visible = hasIncome || (!hasIncome && !hasExpense),
-            enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
-            exit = fadeOut(tween(220)) + shrinkHorizontally(tween(220))
-        ) {
-            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // 每個槽位固定 weight(1f)：佈局寬度永遠唔變，杜絕閃跳
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showIncome,
+                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
+                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.7f)
+            ) {
+                StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
+            }
         }
-        androidx.compose.animation.AnimatedVisibility(
-            visible = hasExpense,
-            enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
-            exit = fadeOut(tween(220)) + shrinkHorizontally(tween(220))
-        ) {
-            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showExpense,
+                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
+                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.7f)
+            ) {
+                StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
+            }
         }
-        // 加入餘額，如果入咗篩選模式就唔顯示餘額
-        androidx.compose.animation.AnimatedVisibility(
-            visible = !isFilterMode && (hasIncome || hasExpense),
-            enter = fadeIn(tween(220)) + expandHorizontally(tween(220)),
-            exit = fadeOut(tween(220)) + shrinkHorizontally(tween(220))
-        ) {
-            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showBalance,
+                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
+                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.7f)
+            ) {
+                val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+                StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
+            }
         }
     }
 }
