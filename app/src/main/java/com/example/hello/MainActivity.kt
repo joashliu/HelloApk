@@ -1564,30 +1564,24 @@ Row(
         TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
     }
 
-    // 右手邊：筆數與顯示按鈕
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        androidx.compose.animation.AnimatedVisibility(
-    visible = filterMode,
-    // expand/shrink 會真正改變量度寬度，令旁邊嘅 weight(1f) 容器平滑擴展／收縮
-    enter = fadeIn(tween(240)) + expandHorizontally(
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        if (filterMode) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(end = 8.dp)
-    ) {
-        Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(2.dp))
-        Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
-    }
-}
-        IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-            Icon(
-                if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                "顯示未來項目",
-                tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-            )
+    // 右手邊：筆數與顯示按鈕（向右邊緣對齊）
+Row(verticalAlignment = Alignment.CenterVertically) {
+    if (filterMode) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(end = 8.dp)
+        ) {
+            Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(2.dp))
+            Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
         }
+    }
+    IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+        Icon(
+            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+            "顯示未來項目",
+            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+        )
     }
 }
 
