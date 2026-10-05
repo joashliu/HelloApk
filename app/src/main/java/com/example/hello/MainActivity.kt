@@ -1,10 +1,6 @@
 package com.example.hello
 
-import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.layout.Placeable
-import androidx.compose.ui.layout.animatePlacement
-import androidx.compose.ui.unit.Constraints
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -2940,7 +2936,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
  * - 按 chip 實際量度闊度自動分行
  * - 每行內將剩餘空間平均分配落 chip 之間嘅間距
  *   → 每行第一粒貼左、最後一粒貼右（同卡片左右對齊）
- * - 保留最少 horizontalGap 嘅間距
  */
 @Composable
 fun AlignedChipFlow(
@@ -2962,8 +2957,8 @@ fun AlignedChipFlow(
         val placeables = measurables.map { it.measure(Constraints(maxWidth = maxW)) }
 
         // 逐行 pack
-        val rows = mutableListOf<MutableList<Placeable>>()
-        var currentRow = mutableListOf<Placeable>()
+        val rows = mutableListOf<MutableList<androidx.compose.ui.layout.Placeable>>()
+        var currentRow = mutableListOf<androidx.compose.ui.layout.Placeable>()
         var currentRowWidth = 0
         placeables.forEach { p ->
             val addW = if (currentRow.isEmpty()) p.width else hGapPx + p.width
@@ -2979,7 +2974,8 @@ fun AlignedChipFlow(
         if (currentRow.isNotEmpty()) rows.add(currentRow)
 
         val rowHeights = rows.map { row -> row.maxOf { it.height } }
-        val totalHeight = rowHeights.sum() + vGapPx * (rows.size - 1).coerceAtLeast(0)
+        val totalHeight = if (rows.isEmpty()) 0
+                          else rowHeights.sum() + vGapPx * (rows.size - 1)
 
         layout(maxW, totalHeight) {
             var y = 0
@@ -2993,7 +2989,6 @@ fun AlignedChipFlow(
 
                 var x = 0
                 row.forEachIndexed { i, p ->
-                    // 垂直置中
                     p.place(x, y + (rowH - p.height) / 2)
                     if (i < row.size - 1) {
                         x += p.width + hGapPx + extraPerGap
@@ -3013,7 +3008,6 @@ fun QuickInputSection(
 ) {
     if (topNotes.isEmpty()) return
 
-    // 避免每次 recomposition 都重算 list
     val displayed = remember(topNotes) { topNotes.take(16) }
 
     Box(
@@ -3024,50 +3018,51 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        // LookaheadScope + animatePlacement：chip 重新排版時平滑移位
-        LookaheadScope {
-            AlignedChipFlow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(14.dp),
-                horizontalGap = 8.dp,
-                verticalGap = 8.dp,
-            ) {
-                displayed.forEachIndexed { idx, (name, _) ->
-                    // 逐粒 stagger 入場（fade + spring scale）
-                    var visible by remember(name) { mutableStateOf(false) }
-                    LaunchedEffect(name) {
-                        delay((idx * 25L).coerceAtMost(350L))
-                        visible = true
-                    }
-                    val alpha by animateFloatAsState(
-                        targetValue = if (visible) 1f else 0f,
-                        animationSpec = tween(280, easing = FastOutSlowInEasing),
-                        label = "chipAlpha_$name"
+        AlignedChipFlow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp)
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
                     )
-                    val scale by animateFloatAsState(
-                        targetValue = if (visible) 1f else 0.7f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
-                        ),
-                        label = "chipScale_$name"
-                    )
-
-                    QuickInputChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        modifier = Modifier
-                            .animatePlacement()
-                            .graphicsLayer {
-                                this.alpha = alpha
-                                this.scaleX = scale
-                                this.scaleY = scale
-                            },
-                        onClick = { onClick(name) }
-                    )
+                ),
+            horizontalGap = 8.dp,
+            verticalGap = 8.dp,
+        ) {
+            displayed.forEachIndexed { idx, (name, _) ->
+                var visible by remember(name) { mutableStateOf(false) }
+                LaunchedEffect(name) {
+                    delay((idx * 25L).coerceAtMost(350L))
+                    visible = true
                 }
+                val chipAlpha by animateFloatAsState(
+                    targetValue = if (visible) 1f else 0f,
+                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    label = "chipAlpha_$name"
+                )
+                val chipScale by animateFloatAsState(
+                    targetValue = if (visible) 1f else 0.7f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessLow
+                    ),
+                    label = "chipScale_$name"
+                )
+
+                QuickInputChip(
+                    name = name,
+                    iconUrl = noteIconMap[name] ?: "",
+                    modifier = Modifier.graphicsLayer {
+                        // 注意：用 this.alpha / this.scaleX 避免同名局部變量遮蔽
+                        this.alpha = chipAlpha
+                        this.scaleX = chipScale
+                        this.scaleY = chipScale
+                    },
+                    onClick = { onClick(name) }
+                )
             }
         }
     }
