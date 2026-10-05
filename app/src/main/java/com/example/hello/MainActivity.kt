@@ -2920,12 +2920,15 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         shadowElevation = 1.dp
     ) {
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            // 加入 fillMaxWidth() 同 horizontalArrangement = Arrangement.Center 令內容置中
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconView(iconUrl, name, size = 18.dp)
             Spacer(Modifier.width(6.dp))
-            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
+            // 加入 maxLines 同 overflow 避免拉伸時文字變形
+            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -2951,23 +2954,31 @@ fun QuickInputSection(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(14.dp)
-                .animateContentSize(),
+                // 加上 spring 物理動畫，令外框高度變化更自然
+                .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             topNotes.take(16).forEach { (name, _) ->
-                var visible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { visible = true }
-                AnimatedVisibility(
-                    visible = visible,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut()
-                ) {
-                    QuickInputChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        onClick = { onClick(name) }
-                    )
+                // 加入 key() 令 Compose 記住每個元件，排序變化時會流暢過渡
+                key(name) {
+                    var visible by remember { mutableStateOf(false) }
+                    LaunchedEffect(name) { visible = true }
+                    AnimatedVisibility(
+                        visible = visible,
+                        // 加入 expandHorizontally / shrinkHorizontally，令空隙平滑推開同收起，避免瞬間閃跳
+                        enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.8f, animationSpec = tween(300)) + expandHorizontally(expandFrom = Alignment.CenterHorizontally, animationSpec = tween(300)),
+                        exit = fadeOut(tween(250)) + scaleOut(animationSpec = tween(250)) + shrinkHorizontally(shrinkTowards = Alignment.CenterHorizontally, animationSpec = tween(250)),
+                        // Modifier.weight(1f) 係靈魂所在：佢會按比例分配空間，完美填滿每行並左右對齊
+                        modifier = Modifier.weight(1f).animateContentSize()
+                    ) {
+                        QuickInputChip(
+                            name = name,
+                            iconUrl = noteIconMap[name] ?: "",
+                            modifier = Modifier.fillMaxWidth(), // 確保組件拉滿 AnimatedVisibility 分配到嘅空間
+                            onClick = { onClick(name) }
+                        )
+                    }
                 }
             }
         }
