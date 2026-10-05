@@ -1538,46 +1538,41 @@ fun LedgerContent(
             else -> {
                 // 頂部：單一類別 chip（左）、收支統計（中）、筆數與顯示按鈕（右）
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // 左手邊：單一類別 chip
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = isSingleCategoryFilter && singleCategory != null,
-                        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
-                        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
-                    ) {
-                        if (singleCategory != null) {
-                            CategoryStatChip(singleCategory!!)
-                        }
-                    }
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+    verticalAlignment = Alignment.CenterVertically
+) {
+    // 左手邊：單一類別 chip
+    androidx.compose.animation.AnimatedVisibility(
+        visible = isSingleCategoryFilter && singleCategory != null,
+        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
+        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
+    ) {
+        if (singleCategory != null) {
+            CategoryStatChip(singleCategory!!)
+        }
+    }
 
-                    // 正中間：收支狀態（weight 撐滿剩餘空間，內部 SpaceEvenly 平均分佈）
-                    Box(modifier = Modifier.weight(1f)) {
-                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
-                    }
+    // 正中間：收支狀態 + 篩選模式筆數，全部交由 TopStats 內部平均分配
+    Box(modifier = Modifier.weight(1f)) {
+        TopStats(
+            hasIncome = hasIncome,
+            hasExpense = hasExpense,
+            income = totalIncome,
+            expense = totalExpense,
+            isFilterMode = filterMode,
+            filteredCount = if (filterMode) filtered.size else null
+        )
+    }
 
-                    // 右手邊：筆數（篩選模式即時切換）與顯示未來按鈕
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (filterMode) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(end = 8.dp)
-                            ) {
-                                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                                Spacer(Modifier.height(2.dp))
-                                Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                            Icon(
-                                if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                "顯示未來項目",
-                                tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-                            )
-                        }
-                    }
-                }
+    // 右手邊：只剩顯示未來按鈕
+    IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+        Icon(
+            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+            "顯示未來項目",
+            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+        )
+    }
+}
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
