@@ -1,6 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.layout.Placeable
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -2931,75 +2930,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-/**
- * 自訂 Flow 佈局：
- * - 按 chip 實際量度闊度自動分行
- * - 每行內將剩餘空間平均分配落 chip 之間嘅間距
- *   → 每行第一粒貼左、最後一粒貼右（同卡片左右對齊）
- */
-@Composable
-fun AlignedChipFlow(
-    modifier: Modifier = Modifier,
-    horizontalGap: Dp = 8.dp,
-    verticalGap: Dp = 8.dp,
-    content: @Composable () -> Unit,
-) {
-    Layout(content = content, modifier = modifier) { measurables, constraints ->
-        val hGapPx = horizontalGap.roundToPx()
-        val vGapPx = verticalGap.roundToPx()
-
-        val maxW = if (constraints.maxWidth == Constraints.Infinity)
-            constraints.minWidth
-        else
-            constraints.maxWidth
-
-        // 量度所有 chip（限制闊度 = 卡片可用闊度）
-        val placeables = measurables.map { it.measure(Constraints(maxWidth = maxW)) }
-
-        // 逐行 pack
-        val rows = mutableListOf<MutableList<androidx.compose.ui.layout.Placeable>>()
-        var currentRow = mutableListOf<androidx.compose.ui.layout.Placeable>()
-        var currentRowWidth = 0
-        placeables.forEach { p ->
-            val addW = if (currentRow.isEmpty()) p.width else hGapPx + p.width
-            if (currentRow.isEmpty() || currentRowWidth + addW <= maxW) {
-                currentRow.add(p)
-                currentRowWidth += addW
-            } else {
-                rows.add(currentRow)
-                currentRow = mutableListOf(p)
-                currentRowWidth = p.width
-            }
-        }
-        if (currentRow.isNotEmpty()) rows.add(currentRow)
-
-        val rowHeights = rows.map { row -> row.maxOf { it.height } }
-        val totalHeight = if (rows.isEmpty()) 0
-                          else rowHeights.sum() + vGapPx * (rows.size - 1)
-
-        layout(maxW, totalHeight) {
-            var y = 0
-            rows.forEachIndexed { ri, row ->
-                val rowH = rowHeights[ri]
-                val itemsWidth = row.sumOf { it.width }
-                val gapCount = row.size - 1
-                val baseGapTotal = hGapPx * gapCount
-                val freeSpace = (maxW - itemsWidth - baseGapTotal).coerceAtLeast(0)
-                val extraPerGap = if (gapCount > 0) freeSpace / gapCount else 0
-
-                var x = 0
-                row.forEachIndexed { i, p ->
-                    p.place(x, y + (rowH - p.height) / 2)
-                    if (i < row.size - 1) {
-                        x += p.width + hGapPx + extraPerGap
-                    }
-                }
-                y += rowH + vGapPx
-            }
-        }
-    }
-}
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3007,9 +2938,6 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-
-    val displayed = remember(topNotes) { topNotes.take(16) }
-
     Box(
         Modifier
             .fillMaxWidth()
@@ -3018,55 +2946,34 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        AlignedChipFlow(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(14.dp)
-                .animateContentSize(
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ),
-            horizontalGap = 8.dp,
-            verticalGap = 8.dp,
+                .animateContentSize(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            displayed.forEachIndexed { idx, (name, _) ->
-                var visible by remember(name) { mutableStateOf(false) }
-                LaunchedEffect(name) {
-                    delay((idx * 25L).coerceAtMost(350L))
-                    visible = true
+            topNotes.take(16).forEach { (name, _) ->
+                var visible by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { visible = true }
+                AnimatedVisibility(
+                    visible = visible,
+                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
+                    exit = fadeOut() + scaleOut()
+                ) {
+                    QuickInputChip(
+                        name = name,
+                        iconUrl = noteIconMap[name] ?: "",
+                        onClick = { onClick(name) }
+                    )
                 }
-                val chipAlpha by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0f,
-                    animationSpec = tween(280, easing = FastOutSlowInEasing),
-                    label = "chipAlpha_$name"
-                )
-                val chipScale by animateFloatAsState(
-                    targetValue = if (visible) 1f else 0.7f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow
-                    ),
-                    label = "chipScale_$name"
-                )
-
-                QuickInputChip(
-                    name = name,
-                    iconUrl = noteIconMap[name] ?: "",
-                    modifier = Modifier.graphicsLayer {
-                        // 注意：用 this.alpha / this.scaleX 避免同名局部變量遮蔽
-                        this.alpha = chipAlpha
-                        this.scaleX = chipScale
-                        this.scaleY = chipScale
-                    },
-                    onClick = { onClick(name) }
-                )
             }
         }
     }
 }
+// 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
