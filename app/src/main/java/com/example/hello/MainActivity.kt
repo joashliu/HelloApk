@@ -1,8 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.layout.LookaheadScope
-import androidx.compose.ui.layout.animatePlacementInScope
-import androidx.compose.ui.unit.Constraints
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -78,6 +75,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.animatePlacementInScope
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -93,6 +94,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -1541,7 +1543,6 @@ fun LedgerContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // 左手邊：單一類別 chip
-                    // 用 expandHorizontally + 320ms 對齊 TopStats 內部 weight 動畫，避免擠壓錯覺
                     androidx.compose.animation.AnimatedVisibility(
                         visible = isSingleCategoryFilter && singleCategory != null,
                         enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
@@ -1554,7 +1555,7 @@ fun LedgerContent(
                         }
                     }
 
-                    // 正中間：收支狀態 + 篩選模式筆數，交由 TopStats 內部平均分配
+                    // 正中間：收支狀態 + 篩選模式筆數
                     Box(modifier = Modifier.weight(1f)) {
                         TopStats(
                             hasIncome = hasIncome,
@@ -1566,7 +1567,7 @@ fun LedgerContent(
                         )
                     }
 
-                    // 右手邊：只剩顯示未來按鈕
+                    // 右手邊：顯示未來按鈕
                     IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                         Icon(
                             if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
@@ -2638,9 +2639,6 @@ fun AnimatedFilterChip(
 
 /**
  * 頂部統計卡：收入／支出／餘額／筆數
- * - 四張卡永遠存在，weight 同 alpha 由同一個 tween 驅動 → 位置、寬度、透明度同步變化
- * - clipToBounds() 避免卡片內容在壓縮過程中溢出邊界
- * - 篩選模式下餘額卡收起、筆數卡出現，四張卡自動平均分配
  */
 @Composable
 fun TopStats(
@@ -2737,7 +2735,6 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    // 追蹤上一個長度，用嚟偵測「清空」操作（由多字 → 單一「0」）
     var prevLen by remember { mutableIntStateOf(text.length) }
     val isClearing = prevLen > 1 && text == "0"
     LaunchedEffect(text) { prevLen = text.length }
@@ -2747,7 +2744,6 @@ fun AnimatedAmount(
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isClearing) {
-            // 清空：直接顯示「0」，唔播逐字滾動，避免殘影滾動錯覺
             Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight)
         } else {
             text.forEachIndexed { idx, c ->
@@ -2768,7 +2764,7 @@ fun AnimatedAmount(
     }
 }
 
-// 每日 Header：2026年5月1日．[一]．今日
+// 每日 Header
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
@@ -2933,7 +2929,9 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 快速輸入區：自適應 chips + 完美左右對齊 + 位置移動 spring 動畫
+ */
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -2969,21 +2967,18 @@ fun QuickInputSection(
                                     name = name,
                                     iconUrl = noteIconMap[name] ?: "",
                                     onClick = { onClick(name) },
-                                    // 為每個 chip 補上位置移動動畫（spring 平滑）
                                     modifier = Modifier.animatePlacementInScope(this@LookaheadScope)
                                 )
                             }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
-                ) { measurables, constraints ->
+                ) { measurables: List<Measurable>, constraints: Constraints ->
                     val maxWidth = constraints.maxWidth
-                    // 先以「唔受約束」量度每顆 chip 的內容寬度
-                    val placeables = measurables.map { it.measure(Constraints()) }
+                    val placeables: List<Placeable> = measurables.map { it.measure(Constraints()) }
 
                     if (placeables.isEmpty()) return@Layout layout(maxWidth, 0) {}
 
-                    // Greedy 分行：塞唔落就開新行
                     val rows = mutableListOf<MutableList<Placeable>>()
                     var currentRow = mutableListOf<Placeable>()
                     var currentRowWidth = 0
@@ -3010,14 +3005,12 @@ fun QuickInputSection(
                             val contentWidth = row.sumOf { it.width } +
                                     (row.size - 1).coerceAtLeast(0) * hSpacingPx
                             val rowHeight = row.maxOf { it.height }
-                            // 行內剩餘空間平均分配到 gap 度 → 左右兩端貼齊卡片邊界
                             val extra = maxWidth - contentWidth
                             val gapCount = (row.size - 1).coerceAtLeast(1)
                             val gap = if (row.size > 1) hSpacingPx + extra / gapCount else 0
 
                             var x = 0
                             row.forEachIndexed { i, p ->
-                                // 垂直置中
                                 p.placeRelative(x, y + (rowHeight - p.height) / 2)
                                 if (i < row.size - 1) x += p.width + gap
                             }
