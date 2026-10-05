@@ -1,4 +1,3 @@
-// 第一段：Imports, Constants, 資料類別, MainActivity, MainApp, FloatingNavBar
 package com.example.hello
 
 import android.app.DatePickerDialog
@@ -816,7 +815,6 @@ fun MainApp() {
                 .align(Alignment.BottomCenter)
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
         ) {
-            // 毛玻璃效果與高質感半透明 Toast
             val blurModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 Modifier.graphicsLayer {
                     renderEffect = android.graphics.RenderEffect.createBlurEffect(
@@ -826,13 +824,12 @@ fun MainApp() {
             } else Modifier
 
             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                // 背景模糊層
                 Box(modifier = Modifier.matchParentSize().then(blurModifier))
-                
+
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0x991E293B), // 高質感半透明深藍/灰色
-                    border = BorderStroke(1.dp, Color(0x4DFFFFFF)), // 半透明幼白邊加強懸浮感
+                    color = Color(0x991E293B),
+                    border = BorderStroke(1.dp, Color(0x4DFFFFFF)),
                     shadowElevation = 8.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -881,7 +878,6 @@ fun MainApp() {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    // 預留右側位置畀全局 FAB 唔會疊住
                     .padding(
                         start = 16.dp, end = 86.dp,
                         bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
@@ -893,7 +889,6 @@ fun MainApp() {
                     if (currentPage == 0) {
                         androidx.compose.animation.AnimatedVisibility(
                             visible = filterModeOn,
-                            // 改為從左到右滑入，保持圓角陰影完美呈現
                             enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
                             exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
                         ) {
@@ -1016,7 +1011,6 @@ fun MainApp() {
                     .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
                     .graphicsLayer {
                         alpha = p
-                        // 由 FAB 大小 (~56dp) 開始放大；鍵盤寬約 328dp、FAB 56dp → scale ≈ 0.17
                         scaleX = 0.17f + 0.83f * p
                         scaleY = 0.17f + 0.83f * p
                         transformOrigin = TransformOrigin(1f, 1f)
@@ -1042,12 +1036,13 @@ fun MainApp() {
         val p = keyboardAnimProgress.value
         val isKeyboardOpening = showKeyboard || p > 0.001f
         if (isKeyboardOpening || currentPage == 0 || currentPage != 0) {
+            // 交叉掣：對準鍵盤金額框內嘅右邊（fabX = 38dp，fabY = 458dp）
             val fabX = androidx.compose.ui.unit.lerp(20.dp, 38.dp, p)
-val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)   // 458dp 對準金額框垂直中心
+            val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)
             val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p)
             val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
             val iconTint = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
-            val iconRot = p * -405f // 轉360再加45度，完美變成 X
+            val iconRot = p * -405f
 
             Box(
                 modifier = Modifier
@@ -1068,7 +1063,6 @@ val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)   // 458dp 對準金�
                         indication = null
                     ) {
                         if (showKeyboard) {
-                            // 鍵盤打開時，呢個掣變成清空金額
                             keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
                         } else {
                             if (filterModeOn) filterModeOn = false
@@ -1349,7 +1343,6 @@ fun LedgerContent(
         }
     }
 
-    // 判斷是否為單一類別（包括點擊類別按鈕或者搜尋剛好只得一種類別嘅結果）
     val isSingleCategoryFilter by remember(filterMode, filtered) {
         derivedStateOf {
             filterMode && filtered.isNotEmpty() && filtered.map { it.category }.distinct().size == 1
@@ -1414,7 +1407,7 @@ fun LedgerContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .shadow(elevation = 2.dp, shape = RoundedCornerShape(24.dp)),
-                            shape = RoundedCornerShape(24.dp), // 統一與篩選卡片相同嘅大圓角
+                            shape = RoundedCornerShape(24.dp),
                             color = SURFACE_CARD
                         ) {
                             DayHeader(
@@ -1543,47 +1536,48 @@ fun LedgerContent(
                 )
             }
             else -> {
-                // 改用 Row + weight，令中間 TopStats 撐滿剩餘空間，左右元素自然排隊
-Row(
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-    verticalAlignment = Alignment.CenterVertically
-) {
-    // 左手邊：單一類別
-    androidx.compose.animation.AnimatedVisibility(
-        visible = isSingleCategoryFilter && singleCategory != null,
-        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
-        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
-    ) {
-        if (singleCategory != null) {
-            CategoryStatChip(singleCategory!!)
-        }
-    }
+                // 頂部：單一類別 chip（左）、收支統計（中）、筆數與顯示按鈕（右）
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 左手邊：單一類別 chip
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isSingleCategoryFilter && singleCategory != null,
+                        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
+                        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
+                    ) {
+                        if (singleCategory != null) {
+                            CategoryStatChip(singleCategory!!)
+                        }
+                    }
 
-    // 正中間：收支狀態（weight 撐滿剩餘空間）
-    Box(modifier = Modifier.weight(1f)) {
-        TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
-    }
+                    // 正中間：收支狀態（weight 撐滿剩餘空間，內部 SpaceEvenly 平均分佈）
+                    Box(modifier = Modifier.weight(1f)) {
+                        TopStats(hasIncome, hasExpense, totalIncome, totalExpense, isFilterMode = filterMode)
+                    }
 
-    // 右手邊：筆數與顯示按鈕（向右邊緣對齊）
-Row(verticalAlignment = Alignment.CenterVertically) {
-    if (filterMode) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(end = 8.dp)
-        ) {
-            Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(2.dp))
-            Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
-        }
-    }
-    IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-        Icon(
-            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-            "顯示未來項目",
-            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-        )
-    }
-}
+                    // 右手邊：筆數（篩選模式即時切換）與顯示未來按鈕
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (filterMode) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                                Spacer(Modifier.height(2.dp))
+                                Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+                            Icon(
+                                if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                "顯示未來項目",
+                                tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                            )
+                        }
+                    }
+                }
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
@@ -1603,7 +1597,6 @@ Row(verticalAlignment = Alignment.CenterVertically) {
                                 .fillMaxSize()
                                 .padding(
                                     start = 12.dp, end = 12.dp, top = 4.dp,
-                                    // 確保圓角大框嘅底部必定高於 FAB (NAV + PADDING + 76dp = 156dp 高度，完美避開 148dp 高度嘅 FAB)
                                     bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 76.dp
                                 ),
                             shape = RoundedCornerShape(24.dp),
@@ -1676,8 +1669,7 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Transparent) // 配合 FilterMode 大白卡片，避免多餘底色
-            // 移除咗 top=6.dp，依家推上去會完美貼頂冇空隙
+            .background(Color.Transparent)
             .padding(bottom = 6.dp)
             .onGloballyPositioned { coords ->
                 rootTop = coords.boundsInRoot().top
@@ -1742,7 +1734,6 @@ fun AnimatedRecordItem(
 
     val prog = particleProgress.value
 
-    // 幼細粒子：數量多、粒徑小、擴散廣
     val particleCount = 90
     val random = remember { Random(42) }
     val particles = remember {
@@ -1803,15 +1794,12 @@ fun AnimatedRecordItem(
                     val px = startX + dist * kotlin.math.cos(rad).toFloat()
                     val py = startY + dist * kotlin.math.sin(rad).toFloat() - prog * 80f
                     val pAlpha = (1f - prog).coerceIn(0f, 1f)
-                    // 幼細粒徑：0.8dp，越細越幼
                     val pRadius = (1.6.dp.toPx() * (1f - prog * 0.4f)).coerceAtLeast(0.5f)
-                    // 外圈 glow 極柔
                     drawCircle(
                         color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.15f),
                         radius = pRadius * 2.0f,
                         center = Offset(px, py)
                     )
-                    // 實心細粒子
                     drawCircle(
                         color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.95f),
                         radius = pRadius,
@@ -2097,7 +2085,6 @@ private fun AnimatedActionButton(
     }
 }
 
-// 日曆當日明細：延遲展開，用 spring 令佢睇落舒服
 @Composable
 fun DayDetailPanel(
     dateKey: String,
@@ -2110,18 +2097,17 @@ fun DayDetailPanel(
     onDelete: (Record) -> Unit,
     onChangeIcon: (Record) -> Unit,
     onDismiss: () -> Unit,
-    deletingRecordId: String? = null // 加入刪除項目狀態
+    deletingRecordId: String? = null
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
-    // 用 animateContentSize 確保高度變化順暢，唔會 cut 走陰影
     Box(Modifier.animateContentSize(tween(380, easing = FastOutSlowInEasing))) {
         if (visible) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                shadowElevation = 6.dp, // 陰影即時出現
+                shadowElevation = 6.dp,
                 color = SURFACE_CARD
             ) {
                 Column(Modifier.fillMaxWidth()) {
@@ -2166,7 +2152,6 @@ fun DayDetailPanel(
                     HorizontalDivider(color = DIVIDER_COLOR)
 
                     records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-                        // 加上刪除動畫包裝
                         AnimatedRecordItem(
                             animateOnMount = false,
                             isDeleting = r.id == deletingRecordId
@@ -2217,7 +2202,6 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    // 用 Box + Modifier.shadow 取代 Surface，避免動畫初期出現假直角陰影
     val panelShape = RoundedCornerShape(24.dp)
     Box(
         modifier = modifier
@@ -2317,7 +2301,6 @@ fun LedgerKeyboardPanel(
                     contentAlignment = Alignment.CenterEnd) {
                     val showText = if (state.amountText.isEmpty()) "0" else state.amountText
                     
-                    // 改用帶有數字出場、消失動畫嘅 AnimatedAmount
                     AnimatedAmount(
                         text = showText, 
                         color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
@@ -2326,7 +2309,6 @@ fun LedgerKeyboardPanel(
                         modifier = Modifier.padding(end = 44.dp)
                     )
 
-                    // 原本嘅清除金額掣被移除咗，改為用 Spacer 霸位，因為全局 FAB 會補位飛上嚟
                     Spacer(Modifier.size(36.dp))
                 }
             }
@@ -2652,7 +2634,7 @@ fun AnimatedFilterChip(
             selectedContainerColor = BRAND_PRIMARY, 
             selectedLabelColor = Color.White,
             containerColor = SURFACE_ELEVATED, 
-            labelColor = Color.Black // 已修正為黑色字體
+            labelColor = Color.Black
         ),
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
@@ -2664,8 +2646,8 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
     val showExpense = hasExpense
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
 
-    // 唔用 weight 動畫，唔用 AnimatedVisibility 做位置動畫
-    // 佈局瞬間切換 → SpaceEvenly 即時按可見卡片數量平均分配 → 一次到位，零抖動
+    // 佈局即時切換，配合 SpaceEvenly 自動平均分配 → 一次移動就到終點，零抖動
+    // 卡片進場只做 alpha 淡入（FadeInCard），唔會改變量度寬度
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -2691,7 +2673,7 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
 }
 
 /**
- * 卡片出現時只做透明度淡入；消失時直接從佈局移除（唔做淡出）。
+ * 卡片進場只做透明度淡入；消失時即時從佈局移除（唔做淡出）。
  * 因為位置切換係瞬間嘅，所以永遠係「一次移動就到終點」，唔會分兩段，亦都唔會抖。
  */
 @Composable
@@ -2785,7 +2767,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                     color = TEXT_PRIMARY
                 )
                 Text("．", fontSize = 13.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.ExtraBold)
-                // 星期圓形：低飽和色 + 加粗
                 val bgColor = if (info.isWeekend) WEEKEND_BG else WEEKDAY_BG
                 val fgColor = if (info.isWeekend) WEEKEND_FG else WEEKDAY_FG
                 Box(
@@ -2816,7 +2797,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                         info.dayTag,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = TEXT_PRIMARY // 已修正為黑色字體
+                        color = TEXT_PRIMARY
                     )
                 }
             } else {
@@ -2933,14 +2914,13 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    // 修改為自動換行 FlowRow 配合 maxHeight，滿 4 行就自然 scroll
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .shadow(2.dp, RoundedCornerShape(18.dp))
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
-            .heightIn(max = 180.dp) // 約 4 行嘅高度
+            .heightIn(max = 180.dp)
     ) {
         FlowRow(
             modifier = Modifier
@@ -2971,7 +2951,6 @@ fun QuickInputSection(
 }
 // 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
 
-// 月曆專用 FilterChip：文字用黑色
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarFilterChip(
@@ -3018,7 +2997,6 @@ fun CalendarFilterChip(
     )
 }
 
-// 帶滾動數字效果嘅 InfoChip（總計/平均每項/日均支出）
 @Composable
 fun AnimatedInfoChip(
     label: String,
@@ -3391,7 +3369,6 @@ fun CalendarContent(
         }
     }
 
-    // 總計：收入 - 支出（淨值）
     val monthIncome = monthRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
     val monthExpense = monthRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
     val totalNet = monthIncome - monthExpense
@@ -3619,14 +3596,12 @@ fun CalendarContent(
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
-                        // 修正：加返頂部 padding，令選中行嘅紫色邊框唔會被切
                         .padding(top = 10.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
                     for (rowIdx in 0 until totalRows) {
                         val isThisRowSelected = selectedRowIdx == rowIdx
                         val isHidden = selectedDay != null && !isThisRowSelected
-                        // 距離 selected row 幾遠：近嘅先收，遠嘅遲啲收，形成波浪感
                         val distance = if (selectedRowIdx != null) abs(rowIdx - selectedRowIdx!!) else 0
                         val exitDelay = (distance * 28).coerceAtMost(220)
                         val enterDelay = (distance * 22).coerceAtMost(180)
