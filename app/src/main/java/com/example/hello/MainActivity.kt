@@ -1,5 +1,8 @@
 package com.example.hello
 
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.animatePlacementInScope
+import androidx.compose.ui.unit.Constraints
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -2939,6 +2942,9 @@ fun QuickInputSection(
 ) {
     if (topNotes.isEmpty()) return
     val items = topNotes.take(16)
+    val density = LocalDensity.current
+    val hSpacingPx = with(density) { 8.dp.roundToPx() }
+    val vSpacingPx = with(density) { 8.dp.roundToPx() }
 
     Box(
         Modifier
@@ -2948,34 +2954,77 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 100.dp),
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            userScrollEnabled = true
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp)
         ) {
-            items(
-                items = items,
-                key = { it.first }
-            ) { (name, _) ->
-                QuickInputChip(
-                    name = name,
-                    iconUrl = noteIconMap[name] ?: "",
-                    onClick = { onClick(name) },
-                    modifier = Modifier.animateItem(
-                        // 進場：柔和淡入
-                        fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        // 退場：柔和淡出
-                        fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        // 位置移動：無彈性、中低剛度 → 平穩滑到新位置
-                        placementSpec = spring(
-                            stiffness = Spring.StiffnessMediumLow,
-                            dampingRatio = Spring.DampingRatioNoBouncy
-                        )
-                    )
-                )
+            LookaheadScope {
+                Layout(
+                    content = {
+                        items.forEach { (name, _) ->
+                            key(name) {
+                                QuickInputChip(
+                                    name = name,
+                                    iconUrl = noteIconMap[name] ?: "",
+                                    onClick = { onClick(name) },
+                                    // 為每個 chip 補上位置移動動畫（spring 平滑）
+                                    modifier = Modifier.animatePlacementInScope(this@LookaheadScope)
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { measurables, constraints ->
+                    val maxWidth = constraints.maxWidth
+                    // 先以「唔受約束」量度每顆 chip 的內容寬度
+                    val placeables = measurables.map { it.measure(Constraints()) }
+
+                    if (placeables.isEmpty()) return@Layout layout(maxWidth, 0) {}
+
+                    // Greedy 分行：塞唔落就開新行
+                    val rows = mutableListOf<MutableList<Placeable>>()
+                    var currentRow = mutableListOf<Placeable>()
+                    var currentRowWidth = 0
+                    placeables.forEach { p ->
+                        val needed = if (currentRow.isEmpty()) p.width
+                                     else currentRowWidth + hSpacingPx + p.width
+                        if (needed > maxWidth && currentRow.isNotEmpty()) {
+                            rows.add(currentRow)
+                            currentRow = mutableListOf(p)
+                            currentRowWidth = p.width
+                        } else {
+                            currentRow.add(p)
+                            currentRowWidth = needed
+                        }
+                    }
+                    if (currentRow.isNotEmpty()) rows.add(currentRow)
+
+                    val totalHeight = rows.sumOf { row -> row.maxOf { it.height } } +
+                            (rows.size - 1).coerceAtLeast(0) * vSpacingPx
+
+                    layout(maxWidth, totalHeight) {
+                        var y = 0
+                        rows.forEach { row ->
+                            val contentWidth = row.sumOf { it.width } +
+                                    (row.size - 1).coerceAtLeast(0) * hSpacingPx
+                            val rowHeight = row.maxOf { it.height }
+                            // 行內剩餘空間平均分配到 gap 度 → 左右兩端貼齊卡片邊界
+                            val extra = maxWidth - contentWidth
+                            val gapCount = (row.size - 1).coerceAtLeast(1)
+                            val gap = if (row.size > 1) hSpacingPx + extra / gapCount else 0
+
+                            var x = 0
+                            row.forEachIndexed { i, p ->
+                                // 垂直置中
+                                p.placeRelative(x, y + (rowHeight - p.height) / 2)
+                                if (i < row.size - 1) x += p.width + gap
+                            }
+                            y += rowHeight + vSpacingPx
+                        }
+                    }
+                }
             }
         }
     }
