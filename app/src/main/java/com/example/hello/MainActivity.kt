@@ -2640,24 +2640,31 @@ fun AnimatedFilterChip(
 }
 
 @Composable
-fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: Double, isFilterMode: Boolean = false) {
+fun TopStats(
+    hasIncome: Boolean,
+    hasExpense: Boolean,
+    income: Double,
+    expense: Double,
+    isFilterMode: Boolean = false,
+    filteredCount: Int? = null,
+) {
     val balance = income - expense
     val showIncome = hasIncome || (!hasIncome && !hasExpense)
     val showExpense = hasExpense
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
+    val showCount = isFilterMode && filteredCount != null
 
-    // 三張卡共用同一個動畫節奏，weight 同 alpha 用同一個 p 值驅動
-    // → 位置、寬度、透明度完全同步 → 路徑係一條直線，唔會分兩段
+    // 四張卡共用同一動畫節奏，weight 同 alpha 由同一個 p 驅動
     val spec = tween<Float>(durationMillis = 320, easing = FastOutSlowInEasing)
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
     val balanceW by animateFloatAsState(if (showBalance) 1f else 0f, spec, label = "bW")
+    val countW by animateFloatAsState(if (showCount) 1f else 0f, spec, label = "cW")
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 三個 Box 永遠存在（唔用 if），weight = 0.0001f 時寬度幾乎為 0，但唔會破壞 Row 佈局
         Box(
             modifier = Modifier
                 .weight(incomeW.coerceAtLeast(0.0001f))
@@ -2682,6 +2689,24 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
         ) {
             val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
             StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
+        }
+        // 篩選模式下嘅筆數，同收入／支出一起平均分配
+        Box(
+            modifier = Modifier
+                .weight(countW.coerceAtLeast(0.0001f))
+                .graphicsLayer { alpha = countW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${filteredCount ?: 0}",
+                    fontSize = 22.sp,
+                    color = BRAND_PRIMARY,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
