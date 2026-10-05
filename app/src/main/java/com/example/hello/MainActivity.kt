@@ -1543,14 +1543,18 @@ fun LedgerContent(
 ) {
     // 左手邊：單一類別 chip
     androidx.compose.animation.AnimatedVisibility(
-        visible = isSingleCategoryFilter && singleCategory != null,
-        enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { -it },
-        exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { -it }
-    ) {
-        if (singleCategory != null) {
-            CategoryStatChip(singleCategory!!)
-        }
+    visible = isSingleCategoryFilter && singleCategory != null,
+    // 與 TopStats 內部 weight 動畫同一時長（320ms）、同一 easing
+    // expand 從左邊開始擴展寬度，與 TopStats 的壓縮同步，唔會兩段式
+    enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+            expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
+    exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+            shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+) {
+    if (singleCategory != null) {
+        CategoryStatChip(singleCategory!!)
     }
+}
 
     // 正中間：收支狀態 + 篩選模式筆數，全部交由 TopStats 內部平均分配
     Box(modifier = Modifier.weight(1f)) {
@@ -2661,47 +2665,46 @@ fun TopStats(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier
-                .weight(incomeW.coerceAtLeast(0.0001f))
-                .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
-            contentAlignment = Alignment.Center
-        ) {
-            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
-        }
-        Box(
-            modifier = Modifier
-                .weight(expenseW.coerceAtLeast(0.0001f))
-                .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
-            contentAlignment = Alignment.Center
-        ) {
-            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
-        }
-        Box(
-            modifier = Modifier
-                .weight(balanceW.coerceAtLeast(0.0001f))
-                .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
-            contentAlignment = Alignment.Center
-        ) {
-            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
-        }
-        // 篩選模式下嘅筆數，同收入／支出一起平均分配
-        Box(
-            modifier = Modifier
-                .weight(countW.coerceAtLeast(0.0001f))
-                .graphicsLayer { alpha = countW.coerceIn(0f, 1f) },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "${filteredCount ?: 0}",
-                    fontSize = 22.sp,
-                    color = BRAND_PRIMARY,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+    modifier = Modifier
+        .weight(incomeW.coerceAtLeast(0.0001f))
+        .clipToBounds()
+        .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
+    contentAlignment = Alignment.Center
+) {
+    StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
+}
+Box(
+    modifier = Modifier
+        .weight(expenseW.coerceAtLeast(0.0001f))
+        .clipToBounds()
+        .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
+    contentAlignment = Alignment.Center
+) {
+    StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
+}
+Box(
+    modifier = Modifier
+        .weight(balanceW.coerceAtLeast(0.0001f))
+        .clipToBounds()
+        .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
+    contentAlignment = Alignment.Center
+) {
+    val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+    StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
+}
+Box(
+    modifier = Modifier
+        .weight(countW.coerceAtLeast(0.0001f))
+        .clipToBounds()
+        .graphicsLayer { alpha = countW.coerceIn(0f, 1f) },
+    contentAlignment = Alignment.Center
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(4.dp))
+        Text("${filteredCount ?: 0}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+    }
+}
         }
     }
 }
