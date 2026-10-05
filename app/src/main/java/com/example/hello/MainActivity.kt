@@ -1,5 +1,10 @@
 package com.example.hello
 
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.animatePlacement
+import androidx.compose.ui.unit.Constraints
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -2930,7 +2935,76 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 自訂 Flow 佈局：
+ * - 按 chip 實際量度闊度自動分行
+ * - 每行內將剩餘空間平均分配落 chip 之間嘅間距
+ *   → 每行第一粒貼左、最後一粒貼右（同卡片左右對齊）
+ * - 保留最少 horizontalGap 嘅間距
+ */
+@Composable
+fun AlignedChipFlow(
+    modifier: Modifier = Modifier,
+    horizontalGap: Dp = 8.dp,
+    verticalGap: Dp = 8.dp,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val hGapPx = horizontalGap.roundToPx()
+        val vGapPx = verticalGap.roundToPx()
+
+        val maxW = if (constraints.maxWidth == Constraints.Infinity)
+            constraints.minWidth
+        else
+            constraints.maxWidth
+
+        // 量度所有 chip（限制闊度 = 卡片可用闊度）
+        val placeables = measurables.map { it.measure(Constraints(maxWidth = maxW)) }
+
+        // 逐行 pack
+        val rows = mutableListOf<MutableList<Placeable>>()
+        var currentRow = mutableListOf<Placeable>()
+        var currentRowWidth = 0
+        placeables.forEach { p ->
+            val addW = if (currentRow.isEmpty()) p.width else hGapPx + p.width
+            if (currentRow.isEmpty() || currentRowWidth + addW <= maxW) {
+                currentRow.add(p)
+                currentRowWidth += addW
+            } else {
+                rows.add(currentRow)
+                currentRow = mutableListOf(p)
+                currentRowWidth = p.width
+            }
+        }
+        if (currentRow.isNotEmpty()) rows.add(currentRow)
+
+        val rowHeights = rows.map { row -> row.maxOf { it.height } }
+        val totalHeight = rowHeights.sum() + vGapPx * (rows.size - 1).coerceAtLeast(0)
+
+        layout(maxW, totalHeight) {
+            var y = 0
+            rows.forEachIndexed { ri, row ->
+                val rowH = rowHeights[ri]
+                val itemsWidth = row.sumOf { it.width }
+                val gapCount = row.size - 1
+                val baseGapTotal = hGapPx * gapCount
+                val freeSpace = (maxW - itemsWidth - baseGapTotal).coerceAtLeast(0)
+                val extraPerGap = if (gapCount > 0) freeSpace / gapCount else 0
+
+                var x = 0
+                row.forEachIndexed { i, p ->
+                    // 垂直置中
+                    p.place(x, y + (rowH - p.height) / 2)
+                    if (i < row.size - 1) {
+                        x += p.width + hGapPx + extraPerGap
+                    }
+                }
+                y += rowH + vGapPx
+            }
+        }
+    }
+}
+
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -2938,6 +3012,10 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
+
+    // 避免每次 recomposition 都重算 list
+    val displayed = remember(topNotes) { topNotes.take(16) }
+
     Box(
         Modifier
             .fillMaxWidth()
@@ -2946,26 +3024,47 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp)
-                .animateContentSize(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            topNotes.take(16).forEach { (name, _) ->
-                var visible by remember { mutableStateOf(false) }
-                LaunchedEffect(Unit) { visible = true }
-                AnimatedVisibility(
-                    visible = visible,
-                    enter = fadeIn() + scaleIn(initialScale = 0.8f),
-                    exit = fadeOut() + scaleOut()
-                ) {
+        // LookaheadScope + animatePlacement：chip 重新排版時平滑移位
+        LookaheadScope {
+            AlignedChipFlow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(14.dp),
+                horizontalGap = 8.dp,
+                verticalGap = 8.dp,
+            ) {
+                displayed.forEachIndexed { idx, (name, _) ->
+                    // 逐粒 stagger 入場（fade + spring scale）
+                    var visible by remember(name) { mutableStateOf(false) }
+                    LaunchedEffect(name) {
+                        delay((idx * 25L).coerceAtMost(350L))
+                        visible = true
+                    }
+                    val alpha by animateFloatAsState(
+                        targetValue = if (visible) 1f else 0f,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                        label = "chipAlpha_$name"
+                    )
+                    val scale by animateFloatAsState(
+                        targetValue = if (visible) 1f else 0.7f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "chipScale_$name"
+                    )
+
                     QuickInputChip(
                         name = name,
                         iconUrl = noteIconMap[name] ?: "",
+                        modifier = Modifier
+                            .animatePlacement()
+                            .graphicsLayer {
+                                this.alpha = alpha
+                                this.scaleX = scale
+                                this.scaleY = scale
+                            },
                         onClick = { onClick(name) }
                     )
                 }
@@ -2973,7 +3072,6 @@ fun QuickInputSection(
         }
     }
 }
-// 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
