@@ -1567,19 +1567,26 @@ Row(
     // 右手邊：筆數與顯示按鈕
     Row(verticalAlignment = Alignment.CenterVertically) {
         androidx.compose.animation.AnimatedVisibility(
-            visible = filterMode,
-            enter = fadeIn(tween(240)) + slideInHorizontally(tween(280)) { it },
-            exit = fadeOut(tween(180)) + slideOutHorizontally(tween(240)) { it }
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(end = 8.dp)
-            ) {
-                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(2.dp))
-                Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
-            }
-        }
+    visible = filterMode,
+    // expand/shrink 會真正改變量度寬度，令旁邊嘅 weight(1f) 容器平滑擴展／收縮
+    enter = fadeIn(tween(240)) + expandHorizontally(
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        expandFrom = Alignment.End
+    ),
+    exit = fadeOut(tween(180)) + shrinkHorizontally(
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        shrinkTowards = Alignment.End
+    )
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(end = 8.dp)
+    ) {
+        Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(2.dp))
+        Text("${filtered.size}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+    }
+}
         IconButton(onClick = { onShowFutureChange(!showFuture) }) {
             Icon(
                 if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
@@ -2669,36 +2676,56 @@ fun TopStats(hasIncome: Boolean, hasExpense: Boolean, income: Double, expense: D
     val showExpense = hasExpense
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
 
+    // 卡片權重動畫：0f = 收埋、1f = 完整顯示
+    // 佈局每幀都會按當下權重重新分配寬度，所以係平滑過渡，唔會跳
+    val incomeW by animateFloatAsState(
+        targetValue = if (showIncome) 1f else 0f,
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        label = "incomeW"
+    )
+    val expenseW by animateFloatAsState(
+        targetValue = if (showExpense) 1f else 0f,
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        label = "expenseW"
+    )
+    val balanceW by animateFloatAsState(
+        targetValue = if (showBalance) 1f else 0f,
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        label = "balanceW"
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 每個槽位固定 weight(1f)：佈局寬度永遠唔變，杜絕閃跳
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showIncome,
-                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
-                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.7f)
+        if (incomeW > 0.001f) {
+            Box(
+                modifier = Modifier
+                    .weight(incomeW)
+                    .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
+                contentAlignment = Alignment.Center
             ) {
                 StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
             }
         }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showExpense,
-                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
-                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.7f)
+        if (expenseW > 0.001f) {
+            Box(
+                modifier = Modifier
+                    .weight(expenseW)
+                    .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
+                contentAlignment = Alignment.Center
             ) {
                 StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
             }
         }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showBalance,
-                enter = fadeIn(tween(220)) + scaleIn(tween(220), initialScale = 0.7f),
-                exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = 0.7f)
+        if (balanceW > 0.001f) {
+            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+            Box(
+                modifier = Modifier
+                    .weight(balanceW)
+                    .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
+                contentAlignment = Alignment.Center
             ) {
-                val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
                 StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
             }
         }
