@@ -55,6 +55,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -467,7 +468,6 @@ fun MainApp() {
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
 
-    // ===== 鍵盤動畫進度：0 = 完全收埋（等同 FAB），1 = 完全展開 =====
     val keyboardAnimProgress = remember { Animatable(0f) }
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
@@ -865,7 +865,6 @@ fun MainApp() {
                 modifier = Modifier)
         }
 
-        // ===== 底部操作列：篩選掣與搜尋框 =====
         val fabAlpha = if (showKeyboard) {
             val p = keyboardAnimProgress.value
             (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
@@ -1001,7 +1000,6 @@ fun MainApp() {
             }
         }
 
-        // ===== 鍵盤：由 FAB 位置（右下角）非線性放大變形 =====
         if (showKeyboard || keyboardAnimProgress.value > 0.001f) {
             val p = keyboardAnimProgress.value
             Box(
@@ -1031,12 +1029,10 @@ fun MainApp() {
                 )
             }
         }
-        
-        // ===== 全局懸浮按鈕：從 FAB 完美過渡至鍵盤交叉掣 =====
+
         val p = keyboardAnimProgress.value
         val isKeyboardOpening = showKeyboard || p > 0.001f
         if (isKeyboardOpening || currentPage == 0 || currentPage != 0) {
-            // 交叉掣：對準鍵盤金額框內嘅右邊（fabX = 38dp，fabY = 458dp）
             val fabX = androidx.compose.ui.unit.lerp(20.dp, 38.dp, p)
             val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)
             val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p)
@@ -1536,47 +1532,46 @@ fun LedgerContent(
                 )
             }
             else -> {
-                // 頂部：單一類別 chip（左）、收支統計（中）、筆數與顯示按鈕（右）
+                // 頂部：單一類別 chip（左）、收支統計＋筆數（中，平均分配）、顯示未來按鈕（右）
                 Row(
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-    verticalAlignment = Alignment.CenterVertically
-) {
-    // 左手邊：單一類別 chip
-    androidx.compose.animation.AnimatedVisibility(
-    visible = isSingleCategoryFilter && singleCategory != null,
-    // 與 TopStats 內部 weight 動畫同一時長（320ms）、同一 easing
-    // expand 從左邊開始擴展寬度，與 TopStats 的壓縮同步，唔會兩段式
-    enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
-            expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
-    exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
-            shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
-) {
-    if (singleCategory != null) {
-        CategoryStatChip(singleCategory!!)
-    }
-}
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 左手邊：單一類別 chip
+                    // 用 expandHorizontally + 320ms 對齊 TopStats 內部 weight 動畫，避免擠壓錯覺
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isSingleCategoryFilter && singleCategory != null,
+                        enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+                                expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
+                        exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+                                shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+                    ) {
+                        if (singleCategory != null) {
+                            CategoryStatChip(singleCategory!!)
+                        }
+                    }
 
-    // 正中間：收支狀態 + 篩選模式筆數，全部交由 TopStats 內部平均分配
-    Box(modifier = Modifier.weight(1f)) {
-        TopStats(
-            hasIncome = hasIncome,
-            hasExpense = hasExpense,
-            income = totalIncome,
-            expense = totalExpense,
-            isFilterMode = filterMode,
-            filteredCount = if (filterMode) filtered.size else null
-        )
-    }
+                    // 正中間：收支狀態 + 篩選模式筆數，交由 TopStats 內部平均分配
+                    Box(modifier = Modifier.weight(1f)) {
+                        TopStats(
+                            hasIncome = hasIncome,
+                            hasExpense = hasExpense,
+                            income = totalIncome,
+                            expense = totalExpense,
+                            isFilterMode = filterMode,
+                            filteredCount = if (filterMode) filtered.size else null
+                        )
+                    }
 
-    // 右手邊：只剩顯示未來按鈕
-    IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-        Icon(
-            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-            "顯示未來項目",
-            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-        )
-    }
-}
+                    // 右手邊：只剩顯示未來按鈕
+                    IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+                        Icon(
+                            if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            "顯示未來項目",
+                            tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                        )
+                    }
+                }
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
@@ -2638,6 +2633,12 @@ fun AnimatedFilterChip(
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
+/**
+ * 頂部統計卡：收入／支出／餘額／筆數
+ * - 四張卡永遠存在，weight 同 alpha 由同一個 tween 驅動 → 位置、寬度、透明度同步變化
+ * - clipToBounds() 避免卡片內容在壓縮過程中溢出邊界
+ * - 篩選模式下餘額卡收起、筆數卡出現，四張卡自動平均分配
+ */
 @Composable
 fun TopStats(
     hasIncome: Boolean,
@@ -2653,7 +2654,6 @@ fun TopStats(
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
     val showCount = isFilterMode && filteredCount != null
 
-    // 四張卡共用同一動畫節奏，weight 同 alpha 由同一個 p 驅動
     val spec = tween<Float>(durationMillis = 320, easing = FastOutSlowInEasing)
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
@@ -2665,46 +2665,50 @@ fun TopStats(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-    modifier = Modifier
-        .weight(incomeW.coerceAtLeast(0.0001f))
-        .clipToBounds()
-        .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
-    contentAlignment = Alignment.Center
-) {
-    StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
-}
-Box(
-    modifier = Modifier
-        .weight(expenseW.coerceAtLeast(0.0001f))
-        .clipToBounds()
-        .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
-    contentAlignment = Alignment.Center
-) {
-    StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
-}
-Box(
-    modifier = Modifier
-        .weight(balanceW.coerceAtLeast(0.0001f))
-        .clipToBounds()
-        .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
-    contentAlignment = Alignment.Center
-) {
-    val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-    StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
-}
-Box(
-    modifier = Modifier
-        .weight(countW.coerceAtLeast(0.0001f))
-        .clipToBounds()
-        .graphicsLayer { alpha = countW.coerceIn(0f, 1f) },
-    contentAlignment = Alignment.Center
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(4.dp))
-        Text("${filteredCount ?: 0}", fontSize = 22.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
-    }
-}
+            modifier = Modifier
+                .weight(incomeW.coerceAtLeast(0.0001f))
+                .clipToBounds()
+                .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
+        }
+        Box(
+            modifier = Modifier
+                .weight(expenseW.coerceAtLeast(0.0001f))
+                .clipToBounds()
+                .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
+        }
+        Box(
+            modifier = Modifier
+                .weight(balanceW.coerceAtLeast(0.0001f))
+                .clipToBounds()
+                .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+            StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
+        }
+        Box(
+            modifier = Modifier
+                .weight(countW.coerceAtLeast(0.0001f))
+                .clipToBounds()
+                .graphicsLayer { alpha = countW.coerceIn(0f, 1f) },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${filteredCount ?: 0}",
+                    fontSize = 22.sp,
+                    color = BRAND_PRIMARY,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -2867,7 +2871,6 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
-// 快速輸入 Chip：由圖標抽取主色（低飽和度）做底色
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var bgColor by remember(iconUrl) { mutableStateOf(SURFACE_ELEVATED) }
