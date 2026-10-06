@@ -1792,17 +1792,16 @@ fun LedgerContent(
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
                     enter = fadeIn(
-                        animationSpec = tween(220, easing = LinearOutSlowInEasing)
+                        animationSpec = tween(300, easing = LinearOutSlowInEasing)
                     ) + expandVertically(
-                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                        animationSpec = tween(350, easing = FastOutSlowInEasing),
                         expandFrom = Alignment.Top
                     ),
-                    // ★ 先淡出（140ms），等卡片完全透明先開始收縮（延遲 140ms）
-                    //   收縮期間 chips 已經睇唔到，唔會見到跳動
                     exit = fadeOut(
-                        animationSpec = tween(140, easing = FastOutLinearInEasing)
+                        // 稍微加快 fadeOut 嘅速度，等佢喺完全收縮前已經隱藏，感覺更自然
+                        animationSpec = tween(200, easing = FastOutLinearInEasing)
                     ) + shrinkVertically(
-                        animationSpec = tween(220, delayMillis = 140, easing = FastOutSlowInEasing),
+                        animationSpec = tween(300, easing = FastOutSlowInEasing),
                         shrinkTowards = Alignment.Top
                     )
                 ) {
@@ -1811,8 +1810,7 @@ fun LedgerContent(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
                             animatedQuickInputs = animatedQuickInputs,
-                            // ★ 篩選模式時停用位置動畫，防止 chips 喺收縮期間上下跳動
-                            animatePlacement = !filterMode,
+                            // 移除咗 animatePlacement = !filterMode，唔再需要依賴呢個參數
                             onClick = onQuickInputClick
                         )
                         Spacer(Modifier.height(4.dp))
@@ -3215,10 +3213,9 @@ private fun FlowRowScope.AnimatedQuickChip(
     iconUrl: String,
     index: Int,
     animatedNames: MutableMap<String, Boolean>,
-    animatePlacement: Boolean,
+    // 移除咗 animatePlacement: Boolean 參數
     onClick: () -> Unit
 ) {
-    // ★ 若呢個名已經喺 map 內，直接顯示；否則播放動畫並記錄
     val alreadyAnimated = animatedNames.containsKey(name)
     var visible by remember { mutableStateOf(alreadyAnimated) }
     LaunchedEffect(name) {
@@ -3255,10 +3252,8 @@ private fun FlowRowScope.AnimatedQuickChip(
             shrinkTowards = Alignment.CenterHorizontally,
             animationSpec = tween(200, easing = FastOutLinearInEasing)
         ),
-        modifier = Modifier
-            .weight(1f)
-            // ★ 條件化：父卡片收縮時唔用 animatePlacement，避免上下跳動
-            .then(if (animatePlacement) Modifier.animatePlacement() else Modifier)
+        modifier = Modifier.weight(1f)
+        // 移除咗 .then(if (animatePlacement) Modifier.animatePlacement() else Modifier)
     ) {
         QuickInputChip(
             name = name,
@@ -3275,7 +3270,7 @@ fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     animatedQuickInputs: MutableMap<String, Boolean>,
-    animatePlacement: Boolean = true,
+    // 移除咗 animatePlacement: Boolean = true 參數
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -3289,32 +3284,25 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        LookaheadScope {
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(14.dp)
-                    .animateContentSize(
-                        animationSpec = spring(
-                            dampingRatio = 0.85f,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items.forEachIndexed { index, (name, _) ->
-                    key(name) {
-                        AnimatedQuickChip(
-                            name = name,
-                            iconUrl = noteIconMap[name] ?: "",
-                            index = index,
-                            animatedNames = animatedQuickInputs,
-                            animatePlacement = animatePlacement,
-                            onClick = { onClick(name) }
-                        )
-                    }
+        // 移除咗 LookaheadScope，完全交俾外層 AnimatedVisibility 做遮罩裁切 (Clipping)
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp),
+            // 移除咗 animateContentSize()，防止同 shrinkVertically 互相拉扯
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items.forEachIndexed { index, (name, _) ->
+                key(name) {
+                    AnimatedQuickChip(
+                        name = name,
+                        iconUrl = noteIconMap[name] ?: "",
+                        index = index,
+                        animatedNames = animatedQuickInputs,
+                        onClick = { onClick(name) }
+                    )
                 }
             }
         }
