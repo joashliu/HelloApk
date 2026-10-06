@@ -1098,11 +1098,11 @@ private fun BoxScope.KeyboardAndFabLayer(
         ) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 if (currentPage == 0) {
-                    AnimatedVisibility(
-                        visible = filterModeOn,
-                        enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
-                        exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
-                    ) {
+                    androidx.compose.animation.AnimatedVisibility(
+    visible = filterModeOn,
+    enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
+    exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
+) {
                         Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
