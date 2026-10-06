@@ -1,5 +1,7 @@
 package com.example.hello
 
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.animateBounds
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -2985,7 +2987,9 @@ private fun FlowRowScope.AnimatedQuickChip(
         ),
         modifier = Modifier
             .weight(1f)
-            .animatePlacement()   // ★ 位置變化嘅平滑動畫
+            // ★ 官方 API：位置變化自動用 spring 平滑過渡
+            // 呢個 modifier 需要喺 LookaheadScope 內（見上）
+            .animateBounds(this@LookaheadScope)
     ) {
         QuickInputChip(
             name = name,
@@ -2995,9 +2999,6 @@ private fun FlowRowScope.AnimatedQuickChip(
         )
     }
 }
-
-import androidx.compose.ui.layout.LookaheadScope
-import androidx.compose.ui.layout.animatePlacement
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -3017,7 +3018,7 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        // ★ 關鍵：LookaheadScope 會先計算「最終位置」，再將實際 layout 平滑 animate 過去
+        // ★ LookaheadScope 包住 FlowRow，animateBounds 才可以運作
         LookaheadScope {
             FlowRow(
                 modifier = Modifier
