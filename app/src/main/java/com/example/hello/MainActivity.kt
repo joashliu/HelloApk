@@ -522,6 +522,24 @@ fun MainApp() {
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
+var afterSaveHintVisible by remember { mutableStateOf(false) }
+val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
+
+// ★ 用 MainApp 層面嘅計時器，切換頁面唔會 cancel 佢
+LaunchedEffect(afterSaveHint?.recordId) {
+    val hint = afterSaveHint
+    if (hint == null) {
+        afterSaveHintVisible = false
+        return@LaunchedEffect
+    }
+    afterSaveHintVisible = true
+    delay(5000)
+    afterSaveHintVisible = false
+    delay(320)   // 等 AnimatedVisibility 播完 exit 動畫
+    if (afterSaveHint?.recordId == hint.recordId) {
+        afterSaveHint = null
+    }
+}
 
     val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
     val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
@@ -820,7 +838,8 @@ fun MainApp() {
                 justAddedId = justAddedId,
                 deletingRecordId = deletingRecordId,
                 afterSaveHint = afterSaveHint,
-                onAfterSaveHintDismiss = { afterSaveHint = null }
+                afterSaveHintVisible = afterSaveHintVisible,
+                animatedQuickInputs = animatedQuickInputs,
             )
             1 -> CompareContent(
                 records = records, availableMonths = availableMonths,
@@ -1523,7 +1542,9 @@ fun LedgerContent(
     justAddedId: String?,
     deletingRecordId: String?,
     afterSaveHint: AfterSaveHint?,
-    onAfterSaveHintDismiss: () -> Unit,
+    afterSaveHintVisible: Boolean,
+    animatedQuickInputs: MutableMap<String, Boolean>,
+
 ) {
     val listState = rememberLazyListState()
 
@@ -1575,8 +1596,11 @@ fun LedgerContent(
                                 hideCategory = true
                             )
                         }
-                        if (afterSaveHint?.recordId == r.id) {
-                            CategoryTotalHint(hint = afterSaveHint, onDismiss = onAfterSaveHintDismiss)
+                                                if (afterSaveHint?.recordId == r.id) {
+                            CategoryTotalHint(
+                                hint = afterSaveHint,
+                                visible = afterSaveHintVisible
+                            )
                         }
                     }
                 }
@@ -1769,8 +1793,12 @@ fun LedgerContent(
                     exit = fadeOut(tween(280)) + shrinkVertically(tween(380, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
                 ) {
                     Column {
-                        QuickInputSection(topNotes, noteIconMap, onQuickInputClick)
-                        Spacer(Modifier.height(4.dp))
+                                                QuickInputSection(
+                            topNotes = topNotes,
+                            noteIconMap = noteIconMap,
+                            animatedQuickInputs = animatedQuickInputs,
+                            onClick = onQuickInputClick
+                        )
                     }
                 }
 
@@ -2015,16 +2043,8 @@ fun AnimatedRecordItem(
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
-    onDismiss: () -> Unit
+    visible: Boolean
 ) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        visible = true
-        delay(5000)
-        visible = false
-        delay(320)
-        onDismiss()
-    }
     val isIncome = hint.category == INCOME_CATEGORY
     val bgColor = if (isIncome) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)
     val fgColor = if (isIncome) COLOR_INCOME else COLOR_EXPENSE
@@ -3178,12 +3198,19 @@ private fun FlowRowScope.AnimatedQuickChip(
     name: String,
     iconUrl: String,
     index: Int,
+    animatedNames: MutableMap<String, Boolean>,
     onClick: () -> Unit
 ) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay((index * 28L).coerceAtMost(320L))
-        visible = true
+    // ★ 由 MainApp 記住「呢個名已經播過入場動畫」
+    //   切換頁面返嚟時會直接顯示，唔會再播一次
+    val alreadyAnimated = animatedNames.containsKey(name)
+    var visible by remember { mutableStateOf(alreadyAnimated) }
+    LaunchedEffect(name) {
+        if (!animatedNames.containsKey(name)) {
+            animatedNames[name] = true
+            delay((index * 28L).coerceAtMost(320L))
+            visible = true
+        }
     }
 
     AnimatedVisibility(
@@ -3230,6 +3257,7 @@ private fun FlowRowScope.AnimatedQuickChip(
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
+    animatedQuickInputs: MutableMap<String, Boolean>,
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -3264,6 +3292,7 @@ fun QuickInputSection(
                             name = name,
                             iconUrl = noteIconMap[name] ?: "",
                             index = index,
+                            animatedNames = animatedQuickInputs,
                             onClick = { onClick(name) }
                         )
                     }
