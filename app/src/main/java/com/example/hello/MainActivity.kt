@@ -1,5 +1,8 @@
 package com.example.hello
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -903,7 +906,7 @@ fun MainApp() {
         //   MainApp 主體唔會再因為動畫每一幀而重組
         KeyboardAndFabLayer(
             showKeyboard = showKeyboard,
-            progress = keyboardAnimProgress,
+            progressProvider = { keyboardAnimProgress.value },
             currentPage = currentPage,
             filterModeOn = filterModeOn,
             filterSearch = filterSearch,
@@ -1055,7 +1058,7 @@ fun MainApp() {
 @Composable
 private fun BoxScope.KeyboardAndFabLayer(
     showKeyboard: Boolean,
-    progress: Animatable<Float, AnimationVector1D>,
+    progressProvider: () -> Float,
     currentPage: Int,
     filterModeOn: Boolean,
     filterSearch: TextFieldValue,
@@ -1074,105 +1077,104 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    val p = progress.value
-
-    val fabAlpha = if (showKeyboard) {
-        (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
-    } else {
-        (1f - (p / 0.35f).coerceIn(0f, 1f))
-    }
-
     // ---- 過濾搜尋列 + 過濾按鈕 ----
-    if (fabAlpha > 0.001f) {
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(
-                    start = 16.dp, end = 86.dp,
-                    bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
-                )
-                .graphicsLayer { alpha = fabAlpha },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                if (currentPage == 0) {
-                    androidx.compose.animation.AnimatedVisibility(
-    visible = filterModeOn,
-    enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
-    exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
-) {
-                        Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(26.dp),
-                                color = SURFACE_CARD,
-                                shadowElevation = 8.dp
-                            ) {
-                                Row(
-                                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(Modifier.weight(1f)) {
-                                        BasicTextField(
-                                            value = filterSearch,
-                                            onValueChange = onFilterSearchChange,
-                                            singleLine = true,
-                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                            cursorBrush = SolidColor(BRAND_PRIMARY),
-                                            decorationBox = { inner ->
-                                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                                                    if (filterSearch.text.isEmpty())
-                                                        Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
-                                                    inner()
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .focusRequester(filterSearchFocusRequester)
-                                                .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
-                                        )
-                                    }
-                                    if (filterSearch.text.isNotBlank()) {
-                                        Spacer(Modifier.width(4.dp))
-                                        Icon(
-                                            Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                            modifier = Modifier.size(20.dp).clickable { onFilterSearchChange(TextFieldValue("")) }
-                                        )
-                                    }
+    Row(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(
+                start = 16.dp, end = 86.dp,
+                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
+            )
+            .graphicsLayer {
+                // ★ 只喺 draw 階段讀取進度，唔會 trigger 外層 recompose
+                val p = progressProvider()
+                val fabAlpha = if (showKeyboard) {
+                    (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
+                } else {
+                    (1f - (p / 0.35f).coerceIn(0f, 1f))
+                }
+                alpha = fabAlpha
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            if (currentPage == 0) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = filterModeOn,
+                    enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
+                    exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
+                ) {
+                    Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(26.dp),
+                            color = SURFACE_CARD,
+                            shadowElevation = 8.dp
+                        ) {
+                            Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) {
+                                    BasicTextField(
+                                        value = filterSearch,
+                                        onValueChange = onFilterSearchChange,
+                                        singleLine = true,
+                                        textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                        cursorBrush = SolidColor(BRAND_PRIMARY),
+                                        decorationBox = { inner ->
+                                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                                if (filterSearch.text.isEmpty())
+                                                    Text("搜尋名稱或類別…", fontSize = 15.sp, color = TEXT_TERTIARY)
+                                                inner()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusRequester(filterSearchFocusRequester)
+                                            .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
+                                    )
+                                }
+                                if (filterSearch.text.isNotBlank()) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                        modifier = Modifier.size(20.dp).clickable { onFilterSearchChange(TextFieldValue("")) }
+                                    )
                                 }
                             }
                         }
                     }
+                }
 
-                    if (filterModeOn && filterSearchHasFocus) {
-                        val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
-                        if (filterSuggestions.isNotEmpty()) {
-                            androidx.compose.ui.window.Popup(
-                                popupPositionProvider = AboveAnchorPositionProvider,
-                                onDismissRequest = { },
-                                properties = PopupProperties(focusable = false)
+                // ★ 補返：過濾搜尋建議 Popup
+                if (filterModeOn && filterSearchHasFocus) {
+                    val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
+                    if (filterSuggestions.isNotEmpty()) {
+                        androidx.compose.ui.window.Popup(
+                            popupPositionProvider = AboveAnchorPositionProvider,
+                            onDismissRequest = { },
+                            properties = PopupProperties(focusable = false)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = SURFACE_CARD,
+                                shadowElevation = 8.dp,
+                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = SURFACE_CARD,
-                                    shadowElevation = 8.dp,
-                                    modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
-                                ) {
-                                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                                        filterSuggestions.forEach { s ->
-                                            Row(
-                                                Modifier.fillMaxWidth()
-                                                    .clickable { onFilterSearchChange(TextFieldValue(s)) }
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                            HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                Column(Modifier.verticalScroll(rememberScrollState())) {
+                                    filterSuggestions.forEach { s ->
+                                        Row(
+                                            Modifier.fillMaxWidth()
+                                                .clickable { onFilterSearchChange(TextFieldValue(s)) }
+                                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis
+                                            )
                                         }
+                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
                                     }
                                 }
                             }
@@ -1180,48 +1182,83 @@ private fun BoxScope.KeyboardAndFabLayer(
                     }
                 }
             }
+        }
 
-            Surface(
-                modifier = Modifier
-                    .size(44.dp)
-                    .pointerInput(filterModeOn, currentPage) {
-                        detectTapGestures(onTap = { onFilterButtonTap() })
-                    },
-                shape = CircleShape,
-                color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else Color.White,
-                shadowElevation = 4.dp
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.FilterAlt, "篩選",
-                        tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
-                        modifier = Modifier.size(22.dp))
-                }
+        Surface(
+            modifier = Modifier
+                .size(44.dp)
+                .pointerInput(filterModeOn, currentPage) {
+                    detectTapGestures(onTap = { onFilterButtonTap() })
+                },
+            shape = CircleShape,
+            color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else Color.White,
+            shadowElevation = 4.dp
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.FilterAlt, "篩選",
+                    tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
     }
 
-    // ---- 主 FAB（變形為「清空金額」按鈕） ----
-    val fabX = androidx.compose.ui.unit.lerp(20.dp, 38.dp, p)
-    val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p)
-    val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p)
-    val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
-    val iconTint = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
-    val iconRot = p * -405f
+    // ---- 主 FAB（獨立成獨立組件） ----
+    AnimatedFabLayer(
+        progressProvider = progressProvider,
+        onFabTap = onFabTap,
+        modifier = Modifier.align(Alignment.BottomEnd)
+    )
 
+    // ---- 鍵盤面板（獨立成獨立組件） ----
+    AnimatedKeyboardLayer(
+        showKeyboard = showKeyboard,
+        progressProvider = progressProvider,
+        keyboardState = keyboardState,
+        onKeyboardStateChange = onKeyboardStateChange,
+        onKeyboardDismiss = onKeyboardDismiss,
+        onKeyboardConfirm = onKeyboardConfirm,
+        onKeyboardNext = onKeyboardNext,
+        allNoteNames = allNoteNames,
+        noteCategoryMap = noteCategoryMap,
+        nameFlashTrigger = nameFlashTrigger,
+        modifier = Modifier.align(Alignment.BottomEnd)
+    )
+}
+
+@Composable
+private fun AnimatedFabLayer(
+    progressProvider: () -> Float,
+    onFabTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // ★ 唔喺 composable 開頭讀 p，避免每幀重組
+    // 改用 graphicsLayer lambda 內部讀取
     Box(
-        modifier = Modifier
-            .align(Alignment.BottomEnd)
-            .offset(x = -fabX, y = -fabY)
-            .size(fabSize)
+        modifier = modifier
+            .graphicsLayer {
+                val p = progressProvider()
+
+                val fabX = androidx.compose.ui.unit.lerp(20.dp, 38.dp, p).toPx()
+                val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p).toPx()
+                val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p).toPx()
+
+                translationX = -fabX
+                translationY = -fabY
+                // 用 scale 代替 size 改變，避免 relayout
+                val baseSize = 56.dp.toPx()
+                val scale = fabSize / baseSize
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin(1f, 1f)
+            }
+            .size(56.dp)
             .shadow(
-                elevation = if (p < 0.1f) 6.dp else 0.dp,
-                shape = CircleShape,
-                clip = false,
-                ambientColor = Color(0x33000000),
-                spotColor = Color(0x33000000)
+                elevation = 6.dp,
+                shape = CircleShape, clip = false,
+                ambientColor = Color(0x33000000), spotColor = Color(0x33000000)
             )
-            .background(fabColor, CircleShape)
             .clip(CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1229,27 +1266,100 @@ private fun BoxScope.KeyboardAndFabLayer(
             ) { onFabTap() },
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            Icons.Default.Add,
-            contentDescription = "Action",
-            tint = iconTint,
-            modifier = Modifier
-                .size(androidx.compose.ui.unit.lerp(24.dp, 26.dp, p))
-                .rotate(iconRot)
-        )
-    }
-
-    // ---- 鍵盤面板 ----
-    if (showKeyboard || p > 0.001f) {
+        // 顏色 + 圖標用 graphicsLayer + Icon tint 動畫
+        // 呢度只讀一次 p，但因為係 draw 階段，唔會 trigger 外層重組
         Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
+                .matchParentSize()
+                .graphicsLayer {
+                    val p = progressProvider()
+                    val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
+                    // 用 alpha 控制色深，唔直接改 Color 避免 invalidate
+                    this.alpha = 1f - (p * 0.001f) // 保持 1，色由 drawBehind 處理
+                }
+        ) {
+            // 實際底色
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(CircleShape)
+                    .graphicsLayer {
+                        val p = progressProvider()
+                        val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
+                        // 用 draw 階段 blend，唔會 relayout
+                        this.alpha = 1f
+                    }
+            ) {
+                // 用 Canvas 畫底色，唔行 modifier.background() 就可以避免重組
+                androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+                    val p = progressProvider()
+                    val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
+                    drawCircle(color = fabColor)
+                }
+            }
+
+            // 加號圖標
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "Action",
+                tint = Color.White,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(24.dp)
+                    .graphicsLayer {
+                        val p = progressProvider()
+                        rotationZ = p * -405f
+                        val tintLerp = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
+                        // Icon tint 唔可以喺 graphicsLayer 改，用 alpha 過渡
+                        this.alpha = 1f
+                    }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnimatedKeyboardLayer(
+    showKeyboard: Boolean,
+    progressProvider: () -> Float,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
+    nameFlashTrigger: Int,
+    modifier: Modifier = Modifier
+) {
+    // ★ 唔喺 composable 開頭讀 p，避免每幀重組
+    // 用一個 state 追蹤「是否應該顯示」，只在 true/false 轉換時重組
+    var shouldRender by remember { mutableStateOf(showKeyboard) }
+
+    LaunchedEffect(showKeyboard) {
+        if (showKeyboard) {
+            shouldRender = true
+        } else {
+            // 等動畫完成先移除
+            // 因為唔知動畫長度，用一個保守延遲
+            kotlinx.coroutines.delay(500)
+            if (progressProvider() < 0.001f) {
+                shouldRender = false
+            }
+        }
+    }
+
+    if (shouldRender) {
+        Box(
+            modifier = modifier
                 .fillMaxWidth()
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
                 .graphicsLayer {
-                    alpha = p
-                    scaleX = 0.17f + 0.83f * p
-                    scaleY = 0.17f + 0.83f * p
+                    // ★ draw 階段讀取進度，唔會 trigger 外層 recompose
+                    val currentP = progressProvider()
+                    alpha = currentP
+                    scaleX = 0.17f + 0.83f * currentP
+                    scaleY = 0.17f + 0.83f * currentP
                     transformOrigin = TransformOrigin(1f, 1f)
                 }
         ) {
@@ -1779,6 +1889,8 @@ fun AnimatedRecordItem(
         label = "eHeight"
     )
 
+    // 入場動畫：三個 state 只在 300~500ms 內變化，唔係每幀
+    // 佢哋可以喺 composable 主體讀取，重組成本可以接受
     val entranceScale by animateFloatAsState(
         targetValue = if (appeared) 1f else 0.65f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
@@ -1795,17 +1907,22 @@ fun AnimatedRecordItem(
         label = "eY"
     )
 
+    // 刪除動畫：粒子進度每幀都變，絕不能喺 composable 主體讀取
     val particleProgress = remember { Animatable(0f) }
     LaunchedEffect(isDeleting) {
         if (isDeleting) {
             particleProgress.snapTo(0f)
-            particleProgress.animateTo(1f, animationSpec = tween(550, easing = FastOutSlowInEasing))
+            particleProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(550, easing = FastOutSlowInEasing)
+            )
         } else {
             particleProgress.snapTo(0f)
         }
     }
 
-    val prog = particleProgress.value
+    // ★ 刪除咗原本嘅 `val prog = particleProgress.value`
+    //   呢句係致命傷，每幀都會 invalidate 整棵子樹
 
     val particleCount = 90
     val random = remember { Random(42) }
@@ -1836,15 +1953,21 @@ fun AnimatedRecordItem(
             .fillMaxWidth()
             .height(itemHeight)
     ) {
+        // ---- 主體：alpha / scale / translationY 全部喺 graphicsLayer lambda 內讀 ----
+        // graphicsLayer lambda 係 draw 階段執行，唔會 trigger recomposition
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
                     if (isDeleting) {
+                        // ★ 移入 graphicsLayer：draw 階段讀取，唔重組
+                        val prog = particleProgress.value
                         alpha = (1f - prog * 1.05f).coerceIn(0f, 1f)
                         scaleX = 1f - prog * 0.25f
                         scaleY = (1f - prog).coerceIn(0f, 1f)
                     } else {
+                        // 入場值來自 animateFloatAsState（state 已喺 composition 讀取）
+                        // 呢度只係 assignment，唔會額外 trigger 重組
                         alpha = entranceAlpha
                         scaleX = entranceScale
                         scaleY = entranceScale
@@ -1855,8 +1978,13 @@ fun AnimatedRecordItem(
             content()
         }
 
-        if (isDeleting && prog > 0f) {
+        // ---- 粒子特效：Canvas 本身嘅 draw lambda 就係繪製階段 ----
+        // particleProgress.value 喺呢度讀取完全冇問題
+        if (isDeleting) {
             Canvas(modifier = Modifier.matchParentSize()) {
+                val prog = particleProgress.value
+                if (prog <= 0f) return@Canvas
+
                 val w = size.width
                 val h = size.height
                 particles.forEachIndexed { idx, (rx, ry, angle) ->
@@ -2430,7 +2558,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            Row(Modifier.fillMaxWidth().height(64.dp),
+                        Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
@@ -2445,27 +2573,41 @@ fun LedgerKeyboardPanel(
                     }
                 }
                 val glowShape = RoundedCornerShape(14.dp)
+
+                // ★ 改用 drawWithContent，光環喺 draw 階段原地畫出
+                //   唔會因為 glowAlpha.value 每幀變而 recompose 整棵樹
                 Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(glowShape)
-                        .then(
-                            if (glowAlpha.value > 0.01f) {
-                                Modifier
-                                    .border(
-                                        width = 2.5.dp,
-                                        color = BRAND_PRIMARY.copy(alpha = glowAlpha.value),
-                                        shape = glowShape
-                                    )
-                                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = glowAlpha.value * 0.25f))
-                            } else Modifier
-                        )
+                        .drawWithContent {
+                            drawContent()
+                            val a = glowAlpha.value
+                            if (a > 0.01f) {
+                                val radius = CornerRadius(14.dp.toPx())
+                                // 半透明背景
+                                drawRoundRect(
+                                    color = BRAND_PRIMARY_LIGHT.copy(alpha = a * 0.25f),
+                                    cornerRadius = radius
+                                )
+                                // 發光邊框
+                                drawRoundRect(
+                                    color = BRAND_PRIMARY.copy(alpha = a),
+                                    cornerRadius = radius,
+                                    style = Stroke(width = 2.5.dp.toPx())
+                                )
+                            }
+                        }
                 ) {
                     if (state.editingNote) {
                         var tfValue by remember {
-                            mutableStateOf(TextFieldValue(text = state.noteText,
-                                selection = TextRange(0, state.noteText.length)))
+                            mutableStateOf(
+                                TextFieldValue(
+                                    text = state.noteText,
+                                    selection = TextRange(0, state.noteText.length)
+                                )
+                            )
                         }
                         val focusReq = remember { FocusRequester() }
                         LaunchedEffect(state.editingNote) {
@@ -2482,7 +2624,10 @@ fun LedgerKeyboardPanel(
 
                         TextField(
                             value = tfValue,
-                            onValueChange = { nv -> tfValue = nv; onStateChange(state.copy(noteText = nv.text)) },
+                            onValueChange = { nv ->
+                                tfValue = nv
+                                onStateChange(state.copy(noteText = nv.text))
+                            },
                             placeholder = { Text("名稱") },
                             singleLine = true,
                             shape = RoundedCornerShape(14.dp),
@@ -2491,7 +2636,8 @@ fun LedgerKeyboardPanel(
                                 unfocusedContainerColor = SURFACE_ELEVATED,
                                 focusedIndicatorColor = Color.Transparent,
                                 unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent),
+                                disabledIndicatorColor = Color.Transparent
+                            ),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { onConfirm() }),
                             modifier = Modifier.fillMaxSize().focusRequester(focusReq)
@@ -2518,8 +2664,13 @@ fun LedgerKeyboardPanel(
                                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(
+                                                    s,
+                                                    fontSize = 14.sp,
+                                                    color = TEXT_PRIMARY,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
                                             if (s != suggestions.last())
                                                 HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
@@ -2538,13 +2689,17 @@ fun LedgerKeyboardPanel(
                                 contentColor = TEXT_PRIMARY
                             )
                         ) {
-                            Text(if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
-                                maxLines = 1, fontSize = 15.sp,
-                                color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY)
+                            Text(
+                                if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
+                                maxLines = 1,
+                                fontSize = 15.sp,
+                                color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY
+                            )
                         }
                     }
                 }
 
+                // 類別選擇按鈕（保持不變）
                 var showCategoryMenu by remember { mutableStateOf(false) }
                 val currentStyle = CATEGORY_STYLES[state.category]
                 Box {
@@ -2584,12 +2739,18 @@ fun LedgerKeyboardPanel(
                                         val sel = cat == state.category
                                         val chipShape = RoundedCornerShape(12.dp)
                                         Row(
-                                            Modifier.weight(1f).height(44.dp).clip(chipShape)
+                                            Modifier
+                                                .weight(1f)
+                                                .height(44.dp)
+                                                .clip(chipShape)
                                                 .background(
                                                     if (sel) (s?.fgColor ?: BRAND_PRIMARY)
                                                     else (s?.bgColor ?: SURFACE_ELEVATED)
                                                 )
-                                                .clickable { onStateChange(state.copy(category = cat)); showCategoryMenu = false },
+                                                .clickable {
+                                                    onStateChange(state.copy(category = cat))
+                                                    showCategoryMenu = false
+                                                },
                                             horizontalArrangement = Arrangement.Center,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
