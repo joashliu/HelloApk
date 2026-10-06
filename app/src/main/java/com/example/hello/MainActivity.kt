@@ -1625,11 +1625,10 @@ fun LedgerContent(
                             shape = RoundedCornerShape(24.dp),
                             color = SURFACE_CARD
                         ) {
-                            DayHeader(
+                                DayHeader(
                                 dateKey = dateKey,
                                 income = dayIncome,
-                                expense = dayExpense,
-                                itemCount = if (filterMode) dayRecords.size else 0
+                                expense = dayExpense
                             )
                         }
                     }
@@ -3023,13 +3022,11 @@ fun AnimatedAmount(
 }
 
 @Composable
-fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int = 0) {
+fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
-    val incomeText = remember(income) { formatAmount(income) }
-    val expenseText = remember(expense) { formatAmount(expense) }
-    val countText = remember(itemCount) {
-        if (itemCount > 0) "(${itemCount}筆)" else ""
-    }
+    val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
+    val incomeText = remember(income) { formatAmountNoDecimal(income) }
+    val expenseText = remember(expense) { formatAmountNoDecimal(expense) }
 
     Row(
         Modifier
@@ -3041,8 +3038,13 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (info != null) {
+                // ★ 今年唔顯示年份
+                val dateText = if (info.year == currentYear)
+                    "${info.month}月${info.day}日"
+                else
+                    "${info.year}年${info.month}月${info.day}日"
                 Text(
-                    "${info.year}年${info.month}月${info.day}日",
+                    dateText,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = TEXT_PRIMARY
@@ -3101,14 +3103,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double, itemCount: Int =
                 Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(2.dp))
                 Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.ExtraBold)
-                if (countText.isNotEmpty()) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        countText, fontSize = 11.sp,
-                        color = COLOR_EXPENSE.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.Normal
-                    )
-                }
             }
         }
     }
