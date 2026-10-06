@@ -2949,8 +2949,9 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
  * - 退場：全部用 tween + FastOutLinearIn → 收得快、唔會 overshoot，同行 chip 順滑回位
  * - 進場時根據 index 做 stagger，波浪式浮現
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AnimatedQuickChip(
+private fun FlowRowScope.AnimatedQuickChip(
     name: String,
     iconUrl: String,
     index: Int,
