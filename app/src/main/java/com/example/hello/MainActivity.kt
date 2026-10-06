@@ -1282,6 +1282,7 @@ fun FloatingNavBar(
         }
     }
 }
+
 // 第二段：LedgerContent 與各類輔助組件 (RecordItem, KeyboardPanel, QuickInputSection)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -2872,12 +2873,7 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 }
 
 @Composable
-fun QuickInputChip(
-    name: String,
-    iconUrl: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
+fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val ctx = LocalContext.current
     var extracted by remember(iconUrl, name) { mutableStateOf<Color?>(null) }
 
@@ -2914,7 +2910,7 @@ fun QuickInputChip(
         }
     }
 
-    // ★ 關鍵：色由 SURFACE_ELEVATED → 主色調，用 tween 平滑過渡
+    // ★ 背景色由 SURFACE_ELEVATED → 主色調，用 tween 平滑過渡，避免圖標解析完硬切
     val bgColor by animateColorAsState(
         targetValue = extracted ?: SURFACE_ELEVATED,
         animationSpec = tween(420, easing = FastOutSlowInEasing),
@@ -2947,6 +2943,68 @@ fun QuickInputChip(
     }
 }
 
+/**
+ * 單一 chip 的進場／退場動畫包裝：
+ * - 進場：fadeIn(tween) + scaleIn(spring) + expandHorizontally(spring) → 帶微彈、唔浮誇
+ * - 退場：全部用 tween + FastOutLinearIn → 收得快、唔會 overshoot，同行 chip 順滑回位
+ * - 進場時根據 index 做 stagger，波浪式浮現
+ */
+@Composable
+private fun AnimatedQuickChip(
+    name: String,
+    iconUrl: String,
+    index: Int,
+    onClick: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // 每個 chip 遲 28ms 出場，最多 cap 320ms → 波浪式浮現
+        delay((index * 28L).coerceAtMost(320L))
+        visible = true
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            animationSpec = tween(280, easing = LinearOutSlowInEasing)
+        ) + scaleIn(
+            initialScale = 0.85f,
+            animationSpec = spring(
+                dampingRatio = 0.72f,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        ) + expandHorizontally(
+            expandFrom = Alignment.CenterHorizontally,
+            animationSpec = spring(
+                dampingRatio = 0.82f,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        ),
+        exit = fadeOut(
+            animationSpec = tween(180, easing = FastOutLinearInEasing)
+        ) + scaleOut(
+            targetScale = 0.85f,
+            animationSpec = tween(180, easing = FastOutLinearInEasing)
+        ) + shrinkHorizontally(
+            shrinkTowards = Alignment.CenterHorizontally,
+            animationSpec = tween(200, easing = FastOutLinearInEasing)
+        ),
+        modifier = Modifier.weight(1f)
+    ) {
+        QuickInputChip(
+            name = name,
+            iconUrl = iconUrl,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onClick
+        )
+    }
+}
+
+/**
+ * 快速記帳 chips 區域：
+ * - 外框高度用 spring animateContentSize → 加入／移除 chip 時有「呼吸感」
+ * - 每個 chip 用 key(name) 保持 identity，只有新 chip 先播 stagger 動畫，舊 chip 唔會重播
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
@@ -2993,56 +3051,6 @@ fun QuickInputSection(
     }
 }
 
-@Composable
-private fun AnimatedQuickChip(
-    name: String,
-    iconUrl: String,
-    index: Int,
-    onClick: () -> Unit
-) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        // 每個 chip 遲 28ms 出場，最多 cap 320ms → 波浪式浮現
-        delay((index * 28L).coerceAtMost(320L))
-        visible = true
-    }
-
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(
-            animationSpec = tween(280, easing = LinearOutSlowInEasing)
-        ) + scaleIn(
-            initialScale = 0.85f,
-            animationSpec = spring(
-                dampingRatio = 0.72f,          // 帶少少彈，唔會 overshoot 到浮誇
-                stiffness = Spring.StiffnessMediumLow
-            )
-        ) + expandHorizontally(
-            expandFrom = Alignment.CenterHorizontally,
-            animationSpec = spring(
-                dampingRatio = 0.82f,
-                stiffness = Spring.StiffnessMediumLow
-            )
-        ),
-        exit = fadeOut(
-            animationSpec = tween(180, easing = FastOutLinearInEasing)
-        ) + scaleOut(
-            targetScale = 0.85f,
-            animationSpec = tween(180, easing = FastOutLinearInEasing)
-        ) + shrinkHorizontally(
-            shrinkTowards = Alignment.CenterHorizontally,
-            animationSpec = tween(200, easing = FastOutLinearInEasing)
-        ),
-        modifier = Modifier.weight(1f)
-    ) {
-        QuickInputChip(
-            name = name,
-            iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(),
-            onClick = onClick
-        )
-    }
-}
 // 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
 
 @OptIn(ExperimentalMaterial3Api::class)
