@@ -2872,16 +2872,18 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 }
 
 @Composable
-fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    var bgColor by remember(iconUrl) { mutableStateOf(SURFACE_ELEVATED) }
+fun QuickInputChip(
+    name: String,
+    iconUrl: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     val ctx = LocalContext.current
+    var extracted by remember(iconUrl, name) { mutableStateOf<Color?>(null) }
 
     LaunchedEffect(iconUrl, name) {
-        if (iconUrl.isBlank()) {
-            bgColor = SURFACE_ELEVATED
-            return@LaunchedEffect
-        }
-        val extracted = withContext(Dispatchers.IO) {
+        if (iconUrl.isBlank()) { extracted = null; return@LaunchedEffect }
+        extracted = withContext(Dispatchers.IO) {
             try {
                 val request = ImageRequest.Builder(ctx)
                     .data(iconUrl)
@@ -2889,15 +2891,16 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                     .build()
                 val result = ctx.imageLoader.execute(request)
                 when (val d = result.drawable) {
-                    is android.graphics.drawable.BitmapDrawable -> {
+                    is android.graphics.drawable.BitmapDrawable ->
                         getDominantMutedColor(d.bitmap)
-                    }
+
                     is android.graphics.drawable.ColorDrawable -> {
                         val c = d.color
                         if (android.graphics.Color.alpha(c) > 0 &&
-                            android.graphics.Color.red(c) < 240 &&
+                            android.graphics.Color.red(c)   < 240 &&
                             android.graphics.Color.green(c) < 240 &&
-                            android.graphics.Color.blue(c) < 240) {
+                            android.graphics.Color.blue(c)  < 240
+                        ) {
                             val hsv = FloatArray(3)
                             android.graphics.Color.colorToHSV(c, hsv)
                             hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
@@ -2907,10 +2910,16 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                     }
                     else -> null
                 }
-            } catch (e: Exception) { null }
+            } catch (_: Exception) { null }
         }
-        if (extracted != null) bgColor = extracted
     }
+
+    // ★ 關鍵：色由 SURFACE_ELEVATED → 主色調，用 tween 平滑過渡
+    val bgColor by animateColorAsState(
+        targetValue = extracted ?: SURFACE_ELEVATED,
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "chipBg"
+    )
 
     Surface(
         modifier = modifier,
@@ -2920,15 +2929,20 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         shadowElevation = 1.dp
     ) {
         Row(
-            // 加入 fillMaxWidth() 同 horizontalArrangement = Arrangement.Center 令內容置中
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconView(iconUrl, name, size = 18.dp)
             Spacer(Modifier.width(6.dp))
-            // 加入 maxLines 同 overflow 避免拉伸時文字變形
-            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                name,
+                fontSize = 13.sp,
+                color = TEXT_PRIMARY,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -2941,6 +2955,8 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
+    val items = topNotes.take(16)
+
     Box(
         Modifier
             .fillMaxWidth()
@@ -2954,34 +2970,77 @@ fun QuickInputSection(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(14.dp)
-                // 加上 spring 物理動畫，令外框高度變化更自然
-                .animateContentSize(spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)),
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            topNotes.take(16).forEach { (name, _) ->
-                // 加入 key() 令 Compose 記住每個元件，排序變化時會流暢過渡
+            items.forEachIndexed { index, (name, _) ->
                 key(name) {
-                    var visible by remember { mutableStateOf(false) }
-                    LaunchedEffect(name) { visible = true }
-                    AnimatedVisibility(
-                        visible = visible,
-                        // 加入 expandHorizontally / shrinkHorizontally，令空隙平滑推開同收起，避免瞬間閃跳
-                        enter = fadeIn(tween(300)) + scaleIn(initialScale = 0.8f, animationSpec = tween(300)) + expandHorizontally(expandFrom = Alignment.CenterHorizontally, animationSpec = tween(300)),
-                        exit = fadeOut(tween(250)) + scaleOut(animationSpec = tween(250)) + shrinkHorizontally(shrinkTowards = Alignment.CenterHorizontally, animationSpec = tween(250)),
-                        // Modifier.weight(1f) 係靈魂所在：佢會按比例分配空間，完美填滿每行並左右對齊
-                        modifier = Modifier.weight(1f).animateContentSize()
-                    ) {
-                        QuickInputChip(
-                            name = name,
-                            iconUrl = noteIconMap[name] ?: "",
-                            modifier = Modifier.fillMaxWidth(), // 確保組件拉滿 AnimatedVisibility 分配到嘅空間
-                            onClick = { onClick(name) }
-                        )
-                    }
+                    AnimatedQuickChip(
+                        name = name,
+                        iconUrl = noteIconMap[name] ?: "",
+                        index = index,
+                        onClick = { onClick(name) }
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AnimatedQuickChip(
+    name: String,
+    iconUrl: String,
+    index: Int,
+    onClick: () -> Unit
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // 每個 chip 遲 28ms 出場，最多 cap 320ms → 波浪式浮現
+        delay((index * 28L).coerceAtMost(320L))
+        visible = true
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            animationSpec = tween(280, easing = LinearOutSlowInEasing)
+        ) + scaleIn(
+            initialScale = 0.85f,
+            animationSpec = spring(
+                dampingRatio = 0.72f,          // 帶少少彈，唔會 overshoot 到浮誇
+                stiffness = Spring.StiffnessMediumLow
+            )
+        ) + expandHorizontally(
+            expandFrom = Alignment.CenterHorizontally,
+            animationSpec = spring(
+                dampingRatio = 0.82f,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        ),
+        exit = fadeOut(
+            animationSpec = tween(180, easing = FastOutLinearInEasing)
+        ) + scaleOut(
+            targetScale = 0.85f,
+            animationSpec = tween(180, easing = FastOutLinearInEasing)
+        ) + shrinkHorizontally(
+            shrinkTowards = Alignment.CenterHorizontally,
+            animationSpec = tween(200, easing = FastOutLinearInEasing)
+        ),
+        modifier = Modifier.weight(1f)
+    ) {
+        QuickInputChip(
+            name = name,
+            iconUrl = iconUrl,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onClick
+        )
     }
 }
 // 第三段：月曆 (CalendarContent)、比較 (CompareContent) 及 工具函數 (Utils)
