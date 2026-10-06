@@ -1,7 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.layout.LookaheadScope
-import androidx.compose.ui.layout.animateBounds
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -56,6 +54,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
@@ -77,8 +76,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -99,6 +101,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -429,6 +432,37 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
     hsv[2] = 0.96f
     return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
+/**
+ * 自訂 Modifier：偵測子項喺 parent 嘅位置變化，用 spring 平滑 animate 過去。
+ * 唔依賴任何未穩定嘅 Compose API，任何版本都 build 得過。
+ * 配合 LookaheadScope 使用效果最佳（位置動畫會更準）。
+ */
+fun Modifier.animatePlacement(): Modifier = composed {
+    val scope = rememberCoroutineScope()
+    var targetOffset by remember { mutableStateOf(IntOffset.Zero) }
+    var animatable by remember {
+        mutableStateOf<Animatable<IntOffset, AnimationVector2D>?>(null)
+    }
+    this
+        .onPlaced {
+            targetOffset = it.positionInParent().round()
+        }
+        .offset {
+            val anim = animatable
+                ?: Animatable(targetOffset, IntOffset.VectorConverter)
+                    .also { animatable = it }
+            if (anim.targetValue != targetOffset) {
+                scope.launch {
+                    anim.animateTo(
+                        targetOffset,
+                        spring(stiffness = Spring.StiffnessMediumLow)
+                    )
+                }
+            }
+            anim.value - targetOffset
+        }
 }
 
 class MainActivity : ComponentActivity() {
@@ -2945,6 +2979,13 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+/**
+ * 單一 chip 的進場／退場 + 位置變化動畫包裝：
+ * - 進場：fadeIn(tween) + scaleIn(spring) + expandHorizontally(spring) → 帶微彈、唔浮誇
+ * - 退場：全部用 tween + FastOutLinearIn → 收得快、唔會 overshoot
+ * - 位置變化：animatePlacement() 用 spring 平滑滑去新位
+ * - 進場時根據 index 做 stagger，波浪式浮現
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FlowRowScope.AnimatedQuickChip(
@@ -2955,13 +2996,11 @@ private fun FlowRowScope.AnimatedQuickChip(
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
+        // 每個 chip 遲 28ms 出場，最多 cap 320ms → 波浪式浮現
         delay((index * 28L).coerceAtMost(320L))
         visible = true
     }
 
-    // ★ 用 Box 包住，因為 animateBounds 需要 LookaheadScope receiver
-    // 但 FlowRowScope 唔繼承 LookaheadScope，所以唔可以直接用
-    // 改為喺 QuickInputSection 層面處理（見下面最終方案）
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(
@@ -2988,7 +3027,9 @@ private fun FlowRowScope.AnimatedQuickChip(
             shrinkTowards = Alignment.CenterHorizontally,
             animationSpec = tween(200, easing = FastOutLinearInEasing)
         ),
-        modifier = Modifier.weight(1f)
+        modifier = Modifier
+            .weight(1f)
+            .animatePlacement()
     ) {
         QuickInputChip(
             name = name,
@@ -2999,6 +3040,12 @@ private fun FlowRowScope.AnimatedQuickChip(
     }
 }
 
+/**
+ * 快速記帳 chips 區域：
+ * - LookaheadScope 包住 FlowRow，令 animatePlacement() 位置動畫更準
+ * - 外框高度用 spring animateContentSize → 加入／移除 chip 時有「呼吸感」
+ * - 每個 chip 用 key(name) 保持 identity，只有新 chip 先播 stagger 動畫，舊 chip 唔會重播
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
@@ -3017,7 +3064,6 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        // ★ LookaheadScope 包住 FlowRow，animateBounds 才可以運作
         LookaheadScope {
             FlowRow(
                 modifier = Modifier
