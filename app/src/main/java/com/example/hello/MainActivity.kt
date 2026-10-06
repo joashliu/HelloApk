@@ -2943,12 +2943,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-/**
- * 單一 chip 的進場／退場動畫包裝：
- * - 進場：fadeIn(tween) + scaleIn(spring) + expandHorizontally(spring) → 帶微彈、唔浮誇
- * - 退場：全部用 tween + FastOutLinearIn → 收得快、唔會 overshoot，同行 chip 順滑回位
- * - 進場時根據 index 做 stagger，波浪式浮現
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FlowRowScope.AnimatedQuickChip(
@@ -2959,7 +2953,6 @@ private fun FlowRowScope.AnimatedQuickChip(
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        // 每個 chip 遲 28ms 出場，最多 cap 320ms → 波浪式浮現
         delay((index * 28L).coerceAtMost(320L))
         visible = true
     }
@@ -2990,7 +2983,9 @@ private fun FlowRowScope.AnimatedQuickChip(
             shrinkTowards = Alignment.CenterHorizontally,
             animationSpec = tween(200, easing = FastOutLinearInEasing)
         ),
-        modifier = Modifier.weight(1f)
+        modifier = Modifier
+            .weight(1f)
+            .animatePlacement()   // ★ 位置變化嘅平滑動畫
     ) {
         QuickInputChip(
             name = name,
@@ -3001,11 +2996,9 @@ private fun FlowRowScope.AnimatedQuickChip(
     }
 }
 
-/**
- * 快速記帳 chips 區域：
- * - 外框高度用 spring animateContentSize → 加入／移除 chip 時有「呼吸感」
- * - 每個 chip 用 key(name) 保持 identity，只有新 chip 先播 stagger 動畫，舊 chip 唔會重播
- */
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.animatePlacement
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
@@ -3024,28 +3017,31 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp)
-                .animateContentSize(
-                    animationSpec = spring(
-                        dampingRatio = 0.85f,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items.forEachIndexed { index, (name, _) ->
-                key(name) {
-                    AnimatedQuickChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        index = index,
-                        onClick = { onClick(name) }
-                    )
+        // ★ 關鍵：LookaheadScope 會先計算「最終位置」，再將實際 layout 平滑 animate 過去
+        LookaheadScope {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(14.dp)
+                    .animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = 0.85f,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items.forEachIndexed { index, (name, _) ->
+                    key(name) {
+                        AnimatedQuickChip(
+                            name = name,
+                            iconUrl = noteIconMap[name] ?: "",
+                            index = index,
+                            onClick = { onClick(name) }
+                        )
+                    }
                 }
             }
         }
