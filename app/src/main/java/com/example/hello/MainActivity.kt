@@ -522,24 +522,25 @@ fun MainApp() {
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
-var afterSaveHintVisible by remember { mutableStateOf(false) }
-val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
+    // ★ 提升到 MainApp：入賬提示嘅可見性 + 快速輸入動畫已播記錄
+    var afterSaveHintVisible by remember { mutableStateOf(false) }
+    val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
 
-// ★ 用 MainApp 層面嘅計時器，切換頁面唔會 cancel 佢
-LaunchedEffect(afterSaveHint?.recordId) {
-    val hint = afterSaveHint
-    if (hint == null) {
+    // ★ 5 秒倒數提升到 MainApp，切換頁面唔會 cancel / reset
+    LaunchedEffect(afterSaveHint?.recordId) {
+        val hint = afterSaveHint
+        if (hint == null) {
+            afterSaveHintVisible = false
+            return@LaunchedEffect
+        }
+        afterSaveHintVisible = true
+        delay(5000)
         afterSaveHintVisible = false
-        return@LaunchedEffect
+        delay(320)   // 等 AnimatedVisibility 播完 exit 動畫
+        if (afterSaveHint?.recordId == hint.recordId) {
+            afterSaveHint = null
+        }
     }
-    afterSaveHintVisible = true
-    delay(5000)
-    afterSaveHintVisible = false
-    delay(320)   // 等 AnimatedVisibility 播完 exit 動畫
-    if (afterSaveHint?.recordId == hint.recordId) {
-        afterSaveHint = null
-    }
-}
 
     val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
     val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
@@ -839,7 +840,7 @@ LaunchedEffect(afterSaveHint?.recordId) {
                 deletingRecordId = deletingRecordId,
                 afterSaveHint = afterSaveHint,
                 afterSaveHintVisible = afterSaveHintVisible,
-                animatedQuickInputs = animatedQuickInputs,
+                animatedQuickInputs = animatedQuickInputs
             )
             1 -> CompareContent(
                 records = records, availableMonths = availableMonths,
@@ -1544,7 +1545,6 @@ fun LedgerContent(
     afterSaveHint: AfterSaveHint?,
     afterSaveHintVisible: Boolean,
     animatedQuickInputs: MutableMap<String, Boolean>,
-
 ) {
     val listState = rememberLazyListState()
 
@@ -1596,7 +1596,7 @@ fun LedgerContent(
                                 hideCategory = true
                             )
                         }
-                                                if (afterSaveHint?.recordId == r.id) {
+                        if (afterSaveHint?.recordId == r.id) {
                             CategoryTotalHint(
                                 hint = afterSaveHint,
                                 visible = afterSaveHintVisible
@@ -1661,7 +1661,10 @@ fun LedgerContent(
                                 )
                             }
                             if (afterSaveHint?.recordId == r.id) {
-                                CategoryTotalHint(hint = afterSaveHint, onDismiss = onAfterSaveHintDismiss)
+                                CategoryTotalHint(
+                                    hint = afterSaveHint,
+                                    visible = afterSaveHintVisible
+                                )
                             }
                         }
                     }
@@ -1793,12 +1796,13 @@ fun LedgerContent(
                     exit = fadeOut(tween(280)) + shrinkVertically(tween(380, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
                 ) {
                     Column {
-                                                QuickInputSection(
+                        QuickInputSection(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
                             animatedQuickInputs = animatedQuickInputs,
                             onClick = onQuickInputClick
                         )
+                        Spacer(Modifier.height(4.dp))
                     }
                 }
 
@@ -2040,6 +2044,7 @@ fun AnimatedRecordItem(
     }
 }
 
+// ★ CategoryTotalHint 改為只接收 visible，計時器已提升到 MainApp
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
@@ -3192,6 +3197,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+// ★ AnimatedQuickChip 改用外部 animatedNames map 記住已播過
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FlowRowScope.AnimatedQuickChip(
@@ -3201,8 +3207,7 @@ private fun FlowRowScope.AnimatedQuickChip(
     animatedNames: MutableMap<String, Boolean>,
     onClick: () -> Unit
 ) {
-    // ★ 由 MainApp 記住「呢個名已經播過入場動畫」
-    //   切換頁面返嚟時會直接顯示，唔會再播一次
+    // ★ 若呢個名已經喺 map 內，直接顯示；否則播放動畫並記錄
     val alreadyAnimated = animatedNames.containsKey(name)
     var visible by remember { mutableStateOf(alreadyAnimated) }
     LaunchedEffect(name) {
