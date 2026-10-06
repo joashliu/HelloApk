@@ -1625,7 +1625,7 @@ fun LedgerContent(
                             shape = RoundedCornerShape(24.dp),
                             color = SURFACE_CARD
                         ) {
-                                DayHeader(
+                            DayHeader(
                                 dateKey = dateKey,
                                 income = dayIncome,
                                 expense = dayExpense
@@ -1791,14 +1791,28 @@ fun LedgerContent(
 
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
-                    enter = fadeIn(tween(FILTER_ANIM_MS)) + expandVertically(tween(FILTER_ANIM_MS), expandFrom = Alignment.Top),
-                    exit = fadeOut(tween(280)) + shrinkVertically(tween(380, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)
+                    enter = fadeIn(
+                        animationSpec = tween(220, easing = LinearOutSlowInEasing)
+                    ) + expandVertically(
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                        expandFrom = Alignment.Top
+                    ),
+                    // ★ 先淡出（140ms），等卡片完全透明先開始收縮（延遲 140ms）
+                    //   收縮期間 chips 已經睇唔到，唔會見到跳動
+                    exit = fadeOut(
+                        animationSpec = tween(140, easing = FastOutLinearInEasing)
+                    ) + shrinkVertically(
+                        animationSpec = tween(220, delayMillis = 140, easing = FastOutSlowInEasing),
+                        shrinkTowards = Alignment.Top
+                    )
                 ) {
                     Column {
                         QuickInputSection(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
                             animatedQuickInputs = animatedQuickInputs,
+                            // ★ 篩選模式時停用位置動畫，防止 chips 喺收縮期間上下跳動
+                            animatePlacement = !filterMode,
                             onClick = onQuickInputClick
                         )
                         Spacer(Modifier.height(4.dp))
@@ -3021,6 +3035,7 @@ fun AnimatedAmount(
     }
 }
 
+// ★ DayHeader 改：今年唔顯示年份、冇「x筆」、金額整數
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
@@ -3192,6 +3207,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
 }
 
 // ★ AnimatedQuickChip 改用外部 animatedNames map 記住已播過
+//   並加入 animatePlacement 參數，父卡片收縮時可停用位置動畫
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FlowRowScope.AnimatedQuickChip(
@@ -3199,6 +3215,7 @@ private fun FlowRowScope.AnimatedQuickChip(
     iconUrl: String,
     index: Int,
     animatedNames: MutableMap<String, Boolean>,
+    animatePlacement: Boolean,
     onClick: () -> Unit
 ) {
     // ★ 若呢個名已經喺 map 內，直接顯示；否則播放動畫並記錄
@@ -3240,7 +3257,8 @@ private fun FlowRowScope.AnimatedQuickChip(
         ),
         modifier = Modifier
             .weight(1f)
-            .animatePlacement()
+            // ★ 條件化：父卡片收縮時唔用 animatePlacement，避免上下跳動
+            .then(if (animatePlacement) Modifier.animatePlacement() else Modifier)
     ) {
         QuickInputChip(
             name = name,
@@ -3257,6 +3275,7 @@ fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     animatedQuickInputs: MutableMap<String, Boolean>,
+    animatePlacement: Boolean = true,
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -3292,6 +3311,7 @@ fun QuickInputSection(
                             iconUrl = noteIconMap[name] ?: "",
                             index = index,
                             animatedNames = animatedQuickInputs,
+                            animatePlacement = animatePlacement,
                             onClick = { onClick(name) }
                         )
                     }
