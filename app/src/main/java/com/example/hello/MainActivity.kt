@@ -2959,6 +2959,9 @@ private fun FlowRowScope.AnimatedQuickChip(
         visible = true
     }
 
+    // ★ 用 Box 包住，因為 animateBounds 需要 LookaheadScope receiver
+    // 但 FlowRowScope 唔繼承 LookaheadScope，所以唔可以直接用
+    // 改為喺 QuickInputSection 層面處理（見下面最終方案）
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(
@@ -2985,11 +2988,7 @@ private fun FlowRowScope.AnimatedQuickChip(
             shrinkTowards = Alignment.CenterHorizontally,
             animationSpec = tween(200, easing = FastOutLinearInEasing)
         ),
-        modifier = Modifier
-            .weight(1f)
-            // ★ 官方 API：位置變化自動用 spring 平滑過渡
-            // 呢個 modifier 需要喺 LookaheadScope 內（見上）
-            .animateBounds(this@LookaheadScope)
+        modifier = Modifier.weight(1f)
     ) {
         QuickInputChip(
             name = name,
