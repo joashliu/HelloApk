@@ -574,10 +574,12 @@ fun MainApp() {
         }
     }
 
+    // ★★★ 關鍵修改：topNotes / noteIconMap / recentAmountByNote 用 records（唔依賴 filterModeOn）
+    // 令過渡期間 QuickInput 內容保持不變，唔會突變
     val topNotes by remember {
         derivedStateOf {
             val now = System.currentTimeMillis()
-            ledgerRecords.filter { it.note.isNotBlank() }
+            records.toList().filter { it.note.isNotBlank() }
                 .groupBy { it.note }
                 .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
                 .sortedBy { it.second }
@@ -589,7 +591,7 @@ fun MainApp() {
     val recentAmountByNote by remember {
         derivedStateOf {
             val now = System.currentTimeMillis()
-            ledgerRecords.filter { it.note.isNotBlank() }
+            records.toList().filter { it.note.isNotBlank() }
                 .groupBy { it.note }
                 .mapValues { (_, list) -> list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0 }
         }
@@ -597,7 +599,7 @@ fun MainApp() {
 
     val noteIconMap by remember {
         derivedStateOf {
-            ledgerRecords.filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+            records.toList().filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
                 .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
         }
     }
@@ -1505,34 +1507,32 @@ fun LedgerContent(
         }
     }
 
-    // ===== LazyColumn 容器：全部用 animate 平滑過渡 =====
     val containerHPadding by animateDpAsState(
         targetValue = if (filterMode) 12.dp else 0.dp,
-        animationSpec = tween(340, easing = FastOutSlowInEasing),
+        animationSpec = tween(440, easing = FastOutSlowInEasing),
         label = "containerHPadding"
     )
     val containerTopPadding by animateDpAsState(
         targetValue = if (filterMode) 4.dp else 0.dp,
-        animationSpec = tween(340, easing = FastOutSlowInEasing),
+        animationSpec = tween(440, easing = FastOutSlowInEasing),
         label = "containerTopPadding"
     )
     val containerCorner by animateDpAsState(
         targetValue = if (filterMode) 24.dp else 0.dp,
-        animationSpec = tween(340, easing = FastOutSlowInEasing),
+        animationSpec = tween(440, easing = FastOutSlowInEasing),
         label = "containerCorner"
     )
     val containerColor by animateColorAsState(
         targetValue = if (filterMode) SURFACE_CARD else Color.Transparent,
-        animationSpec = tween(340, easing = FastOutSlowInEasing),
+        animationSpec = tween(440, easing = FastOutSlowInEasing),
         label = "containerColor"
     )
     val containerElevation by animateDpAsState(
         targetValue = if (filterMode) 4.dp else 0.dp,
-        animationSpec = tween(340, easing = FastOutSlowInEasing),
+        animationSpec = tween(440, easing = FastOutSlowInEasing),
         label = "containerElevation"
     )
 
-    // ===== 統一的 listContent =====
     val listContent: LazyListScope.() -> Unit = {
         if (isExactNoteFilter) {
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
@@ -1570,7 +1570,6 @@ fun LedgerContent(
                 }
             }
         } else {
-            // 統一用 filtered 分組，避免 filterMode 切換時 items 結構突變
             val dataToIterate = filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
 
             dataToIterate.forEach { (dateKey, dayRecords) ->
@@ -1627,21 +1626,27 @@ fun LedgerContent(
     }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        // ===== 頂部區域：AnimatedContent 一次過過渡 =====
+        // ★★★ 關鍵修改：AnimatedContent 加進入延遲，令舊內容完全消失後新內容先出現
         AnimatedContent(
             targetState = filterMode,
             transitionSpec = {
-                val enterFade = tween<Float>(durationMillis = 260, easing = LinearOutSlowInEasing)
-                val exitFade = tween<Float>(durationMillis = 200, easing = FastOutLinearInEasing)
+                val enterFade = tween<Float>(
+                    durationMillis = 240,
+                    delayMillis = 240,   // ← 延遲 240ms 才開始淡入
+                    easing = LinearOutSlowInEasing
+                )
+                val exitFade = tween<Float>(
+                    durationMillis = 220,   // 220ms 內完成淡出
+                    easing = FastOutLinearInEasing
+                )
                 (fadeIn(enterFade)) togetherWith (fadeOut(exitFade)) using SizeTransform(
                     clip = false,
-                    sizeAnimationSpec = { _, _ -> tween(340, easing = FastOutSlowInEasing) }
+                    sizeAnimationSpec = { _, _ -> tween(480, easing = FastOutSlowInEasing) }
                 )
             },
             label = "topArea"
         ) { isFilterMode ->
             Column(Modifier.fillMaxWidth()) {
-                // 統計行
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1680,7 +1685,6 @@ fun LedgerContent(
                     }
                 }
 
-                // chips 或 QuickInput
                 if (isFilterMode) {
                     Column(
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -1750,7 +1754,6 @@ fun LedgerContent(
             }
         }
 
-        // ===== LazyColumn 區域：永遠同一個實例 =====
         Box(
             Modifier
                 .weight(1f)
@@ -2836,6 +2839,8 @@ fun AnimatedFilterChip(
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
+// ★★★ 關鍵修改：TopStats 簡化動畫，只用 animateFloatAsState 數值滾動 + 寬度變化
+// 移除 alpha 動畫、移除逐字符 AnimatedAmount
 @Composable
 fun TopStats(
     hasIncome: Boolean,
@@ -2851,56 +2856,91 @@ fun TopStats(
     val showBalance = !isFilterMode && (hasIncome || hasExpense)
     val showCount = isFilterMode && filteredCount != null
 
-    val spec = tween<Float>(durationMillis = 320, easing = FastOutSlowInEasing)
-    val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
-    val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
-    val balanceW by animateFloatAsState(if (showBalance) 1f else 0f, spec, label = "bW")
-    val countW by animateFloatAsState(if (showCount) 1f else 0f, spec, label = "cW")
+    val spec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
+
+    // 數值：平滑滾動
+    val animIncome by animateFloatAsState(income.toFloat(), spec, label = "iAmt")
+    val animExpense by animateFloatAsState(expense.toFloat(), spec, label = "eAmt")
+    val animBalance by animateFloatAsState(balance.toFloat(), spec, label = "bAmt")
+    val animCount by animateFloatAsState((filteredCount ?: 0).toFloat(), spec, label = "cAmt")
+
+    // 寬度：平滑變化
+    val incomeW by animateFloatAsState(if (showIncome) 1f else 0.0001f, spec, label = "iW")
+    val expenseW by animateFloatAsState(if (showExpense) 1f else 0.0001f, spec, label = "eW")
+    val balanceW by animateFloatAsState(if (showBalance) 1f else 0.0001f, spec, label = "bW")
+    val countW by animateFloatAsState(if (showCount) 1f else 0.0001f, spec, label = "cW")
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            modifier = Modifier
-                .weight(incomeW.coerceAtLeast(0.0001f))
-                .clipToBounds()
-                .graphicsLayer { alpha = incomeW.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(incomeW).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            StatCard(Icons.Default.TrendingUp, "收入", formatAmountNoDecimal(income), COLOR_INCOME, COLOR_INCOME)
+            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    formatAmountNoDecimal(animIncome.toDouble()),
+                    color = COLOR_INCOME,
+                    fontSize = STAT_AMOUNT_FONT_SIZE,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         Box(
-            modifier = Modifier
-                .weight(expenseW.coerceAtLeast(0.0001f))
-                .clipToBounds()
-                .graphicsLayer { alpha = expenseW.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(expenseW).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            StatCard(Icons.Default.TrendingDown, "支出", formatAmountNoDecimal(expense), COLOR_EXPENSE, COLOR_EXPENSE)
+            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    formatAmountNoDecimal(animExpense.toDouble()),
+                    color = COLOR_EXPENSE,
+                    fontSize = STAT_AMOUNT_FONT_SIZE,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         Box(
-            modifier = Modifier
-                .weight(balanceW.coerceAtLeast(0.0001f))
-                .clipToBounds()
-                .graphicsLayer { alpha = balanceW.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(balanceW).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            StatCard(Icons.Default.AccountBalanceWallet, "餘額", formatAmountNoDecimal(balance), balColor, balColor)
+            val balColor = if (animBalance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    formatAmountNoDecimal(animBalance.toDouble()),
+                    color = balColor,
+                    fontSize = STAT_AMOUNT_FONT_SIZE,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         Box(
-            modifier = Modifier
-                .weight(countW.coerceAtLeast(0.0001f))
-                .clipToBounds()
-                .graphicsLayer { alpha = countW.coerceIn(0f, 1f) },
+            modifier = Modifier.weight(countW).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${filteredCount ?: 0}",
+                    "${animCount.roundToInt()}",
                     fontSize = 22.sp,
                     color = BRAND_PRIMARY,
                     fontWeight = FontWeight.Bold
@@ -3140,7 +3180,6 @@ private fun FlowRowScope.AnimatedQuickChip(
 ) {
     val alreadyAnimated = animatedNames.containsKey(name)
 
-    // 純視覺動畫：佈局空間由始至終都佔住，FlowRow 永遠唔會重排
     val animProgress = remember { Animatable(if (alreadyAnimated) 1f else 0f) }
 
     LaunchedEffect(name) {
@@ -3195,7 +3234,6 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            // 關鍵：requiredHeightIn 忽略父容器嘅高度約束
             .requiredHeightIn(max = 180.dp)
     ) {
         FlowRow(
