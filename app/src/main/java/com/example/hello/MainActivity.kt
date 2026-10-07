@@ -574,8 +574,6 @@ fun MainApp() {
         }
     }
 
-    // ★★★ 關鍵修改：topNotes / noteIconMap / recentAmountByNote 用 records（唔依賴 filterModeOn）
-    // 令過渡期間 QuickInput 內容保持不變，唔會突變
     val topNotes by remember {
         derivedStateOf {
             val now = System.currentTimeMillis()
@@ -1626,122 +1624,122 @@ fun LedgerContent(
     }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        // ★★★ 關鍵修改：AnimatedContent 加進入延遲，令舊內容完全消失後新內容先出現
+        // ★★★ 將頂部 Row 移出 AnimatedContent，令 TopStats 可以獨立平滑動畫
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, top = 4.dp, bottom = 0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AnimatedVisibility(
+                visible = filterMode && isSingleCategoryFilter && singleCategory != null,
+                enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
+                        expandHorizontally(tween(260, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
+                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) +
+                        shrinkHorizontally(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+            ) {
+                if (singleCategory != null) {
+                    CategoryStatChip(singleCategory!!)
+                }
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                TopStats(
+                    hasIncome = hasIncome,
+                    hasExpense = hasExpense,
+                    income = totalIncome,
+                    expense = totalExpense,
+                    isFilterMode = filterMode,
+                    filteredCount = if (filterMode) filtered.size else null
+                )
+            }
+
+            AnimatedVisibility(
+                visible = !filterMode,
+                enter = fadeIn(tween(300)) + scaleIn(tween(300)),
+                exit = fadeOut(tween(200)) + scaleOut(tween(200))
+            ) {
+                IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+                    Icon(
+                        if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        "顯示未來項目",
+                        tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                    )
+                }
+            }
+        }
+
         AnimatedContent(
             targetState = filterMode,
             transitionSpec = {
-                val enterFade = tween<Float>(
-                    durationMillis = 240,
-                    delayMillis = 240,   // ← 延遲 240ms 才開始淡入
-                    easing = LinearOutSlowInEasing
-                )
-                val exitFade = tween<Float>(
-                    durationMillis = 220,   // 220ms 內完成淡出
-                    easing = FastOutLinearInEasing
-                )
-                (fadeIn(enterFade)) togetherWith (fadeOut(exitFade)) using SizeTransform(
-                    clip = false,
-                    sizeAnimationSpec = { _, _ -> tween(480, easing = FastOutSlowInEasing) }
+                (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith
+                (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(
+                    clip = true,
+                    sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
                 )
             },
-            label = "topArea"
+            label = "bottomArea"
         ) { isFilterMode ->
-            Column(Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            if (isFilterMode) {
+                Column(
+                    Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
                 ) {
-                    AnimatedVisibility(
-                        visible = isFilterMode && isSingleCategoryFilter && singleCategory != null,
-                        enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
-                                expandHorizontally(tween(260, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
-                        exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) +
-                                shrinkHorizontally(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+                    Spacer(Modifier.height(4.dp))
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 72.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        userScrollEnabled = false
                     ) {
-                        if (singleCategory != null) {
-                            CategoryStatChip(singleCategory!!)
+                        item(key = "__all__") {
+                            AnimatedFilterChip(
+                                modifier = Modifier.fillMaxWidth(),
+                                selected = filterCategory == null,
+                                label = "全部",
+                                fillWidth = true,
+                                onClick = { onFilterCategoryChange(null) }
+                            )
                         }
-                    }
-
-                    Box(modifier = Modifier.weight(1f)) {
-                        TopStats(
-                            hasIncome = hasIncome,
-                            hasExpense = hasExpense,
-                            income = totalIncome,
-                            expense = totalExpense,
-                            isFilterMode = isFilterMode,
-                            filteredCount = if (isFilterMode) filtered.size else null
-                        )
-                    }
-
-                    if (!isFilterMode) {
-                        IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                            Icon(
-                                if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                "顯示未來項目",
-                                tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                        items(items = visibleCategories, key = { it }) { cat ->
+                            AnimatedFilterChip(
+                                modifier = Modifier.animateItem().fillMaxWidth(),
+                                selected = filterCategory == cat,
+                                label = cat,
+                                fillWidth = true,
+                                onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
                             )
                         }
                     }
-                }
-
-                if (isFilterMode) {
-                    Column(
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 72.dp),
+                    Spacer(Modifier.height(8.dp))
+                    if (availableMonths.isNotEmpty()) {
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            userScrollEnabled = false
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            item(key = "__all__") {
+                            AnimatedFilterChip(
+                                selected = filterMonth == null,
+                                label = "全年",
+                                fillWidth = false,
+                                onClick = { onFilterMonthChange(null) }
+                            )
+                            availableMonths.forEach { m ->
                                 AnimatedFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部",
-                                    fillWidth = true,
-                                    onClick = { onFilterCategoryChange(null) }
-                                )
-                            }
-                            items(items = visibleCategories, key = { it }) { cat ->
-                                AnimatedFilterChip(
-                                    modifier = Modifier.animateItem().fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat,
-                                    fillWidth = true,
-                                    onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        if (availableMonths.isNotEmpty()) {
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                AnimatedFilterChip(
-                                    selected = filterMonth == null,
-                                    label = "全年",
+                                    selected = filterMonth == m,
+                                    label = formatMonthLabel(m),
                                     fillWidth = false,
-                                    onClick = { onFilterMonthChange(null) }
+                                    onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
                                 )
-                                availableMonths.forEach { m ->
-                                    AnimatedFilterChip(
-                                        selected = filterMonth == m,
-                                        label = formatMonthLabel(m),
-                                        fillWidth = false,
-                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
-                                    )
-                                }
                             }
                         }
-                        Spacer(Modifier.height(6.dp))
                     }
-                } else {
+                    Spacer(Modifier.height(6.dp))
+                }
+            } else {
+                Column(Modifier.fillMaxWidth()) {
                     if (topNotes.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
                         QuickInputSection(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
@@ -2529,7 +2527,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-                        Row(Modifier.fillMaxWidth().height(64.dp),
+            Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
 
@@ -2839,8 +2837,6 @@ fun AnimatedFilterChip(
         modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
 }
 
-// ★★★ 關鍵修改：TopStats 簡化動畫，只用 animateFloatAsState 數值滾動 + 寬度變化
-// 移除 alpha 動畫、移除逐字符 AnimatedAmount
 @Composable
 fun TopStats(
     hasIncome: Boolean,
@@ -2858,13 +2854,11 @@ fun TopStats(
 
     val spec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
 
-    // 數值：平滑滾動
     val animIncome by animateFloatAsState(income.toFloat(), spec, label = "iAmt")
     val animExpense by animateFloatAsState(expense.toFloat(), spec, label = "eAmt")
     val animBalance by animateFloatAsState(balance.toFloat(), spec, label = "bAmt")
     val animCount by animateFloatAsState((filteredCount ?: 0).toFloat(), spec, label = "cAmt")
 
-    // 寬度：平滑變化
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0.0001f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0.0001f, spec, label = "eW")
     val balanceW by animateFloatAsState(if (showBalance) 1f else 0.0001f, spec, label = "bW")
