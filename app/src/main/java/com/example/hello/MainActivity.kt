@@ -1557,34 +1557,6 @@ fun LedgerContent(
         }
     }
 
-    val containerHPadding by animateDpAsState(
-        targetValue = if (filterMode) 12.dp else 0.dp,
-        animationSpec = tween(440, easing = FastOutSlowInEasing),
-        label = "containerHPadding"
-    )
-    val containerTopPadding by animateDpAsState(
-        targetValue = if (filterMode) 4.dp else 0.dp,
-        animationSpec = tween(440, easing = FastOutSlowInEasing),
-        label = "containerTopPadding"
-    )
-    val containerCorner by animateDpAsState(
-        targetValue = if (filterMode) 24.dp else 0.dp,
-        animationSpec = tween(440, easing = FastOutSlowInEasing),
-        label = "containerCorner"
-    )
-    val containerColor by animateColorAsState(
-        // ★ 放棄使用 Color.Transparent，改用透明嘅白色
-        // 噉樣喺漸變嘅過程入面，就唔會再經過灰黑色導致「黑一黑」
-        targetValue = if (filterMode) SURFACE_CARD else SURFACE_CARD.copy(alpha = 0f),
-        animationSpec = tween(440, easing = FastOutSlowInEasing),
-        label = "containerColor"
-    )
-    val containerElevation by animateDpAsState(
-        targetValue = if (filterMode) 4.dp else 0.dp,
-        animationSpec = tween(440, easing = FastOutSlowInEasing),
-        label = "containerElevation"
-    )
-
     val listContent: LazyListScope.() -> Unit = {
         if (isExactNoteFilter) {
             // 單一名稱搜尋模式：每個項目獨立成一張卡片
@@ -1854,56 +1826,46 @@ fun LedgerContent(
             }
         }
 
+        // 替換 LedgerContent 最底部嘅 Box 結構
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(
-                    start = containerHPadding,
-                    end = containerHPadding,
-                    top = containerTopPadding
-                )
+                // 移除咗 containerHPadding 同 containerTopPadding，等列表可以貼邊自然顯示
         ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                shape = RoundedCornerShape(containerCorner),
-                color = containerColor,
-                shadowElevation = containerElevation
-            ) {
-                if (loading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = BRAND_PRIMARY)
-                    }
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
-                            start = 0.dp, end = 0.dp, top = 0.dp,
-                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
-                        )
-                    ) {
-                        if (filtered.isEmpty() && !showKeyboard) {
-                            item(key = "__empty__") {
-                                Box(
-                                    Modifier.fillParentMaxWidth().padding(top = 80.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
-                                        color = TEXT_SECONDARY
-                                    )
-                                }
+            // 移除咗成個 Surface (大外框)，直接顯示 loading 或者 LazyColumn
+            if (loading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = BRAND_PRIMARY)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 0.dp, end = 0.dp, top = 0.dp,
+                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
+                    )
+                ) {
+                    if (filtered.isEmpty() && !showKeyboard) {
+                        item(key = "__empty__") {
+                            Box(
+                                Modifier.fillParentMaxWidth().padding(top = 80.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
+                                    color = TEXT_SECONDARY
+                                )
                             }
-                        } else {
-                            listContent()
                         }
+                    } else {
+                        listContent()
                     }
                 }
             }
         }
-    }
-}
+    } // LedgerContent 結尾
 
 // ===== 其他組件保持不變 =====
 
