@@ -1628,7 +1628,8 @@ fun LedgerContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, top = 4.dp, bottom = 0.dp),
+                .padding(horizontal = 4.dp)
+                .padding(top = 4.dp, bottom = 0.dp), // 將 padding 拆開兩行，解決編譯錯誤
             verticalAlignment = Alignment.CenterVertically
         ) {
             AnimatedVisibility(
@@ -1654,7 +1655,7 @@ fun LedgerContent(
                 )
             }
 
-            // ★ 移除咗 AnimatedVisibility，令眼仔按鈕喺任何模式下都直接顯示
+            // 顯示未來項目按鈕 (眼仔)
             IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                 Icon(
                     if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
