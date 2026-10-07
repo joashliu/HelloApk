@@ -1657,8 +1657,9 @@ fun LedgerContent(
 
             AnimatedVisibility(
                 visible = !filterMode,
-                enter = fadeIn(tween(300)) + scaleIn(tween(300)),
-                exit = fadeOut(tween(200)) + scaleOut(tween(200))
+                // ★ 加上 expand / shrink Horizontally，令闊度平滑改變，解決 TopStats 突變移位問題
+                enter = fadeIn(tween(300)) + expandHorizontally(tween(300), expandFrom = Alignment.End) + scaleIn(tween(300)),
+                exit = fadeOut(tween(200)) + shrinkHorizontally(tween(200), shrinkTowards = Alignment.End) + scaleOut(tween(200))
             ) {
                 IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                     Icon(
