@@ -3267,7 +3267,6 @@ fun AnimatedStretchingFlowRow(
     val hSpacingPx = with(LocalDensity.current) { horizontalSpacing.roundToPx() }
     val vSpacingPx = with(LocalDensity.current) { verticalSpacing.roundToPx() }
 
-    // 用嚟記住每個項目的位置，實現完美平滑過渡 (FLIP)
     val offsets = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
     val coroutineScope = rememberCoroutineScope()
 
@@ -3277,27 +3276,27 @@ fun AnimatedStretchingFlowRow(
     ) { measurables, constraints ->
         if (measurables.isEmpty()) return@Layout layout(0, 0) {}
         
-        val looseConstraints = constraints.copy(minWidth = 0)
-        val intrinsicPairs = measurables.map { it to it.measure(looseConstraints) }
-        
-        val rows = mutableListOf<MutableList<Pair<androidx.compose.ui.layout.Measurable, androidx.compose.ui.layout.Placeable>>>()
-        var currentRow = mutableListOf<Pair<androidx.compose.ui.layout.Measurable, androidx.compose.ui.layout.Placeable>>()
+        // ★ 核心閃退修復：改用 maxIntrinsicWidth 量度，唔消耗 measure() 次數！
+        val rows = mutableListOf<MutableList<Pair<androidx.compose.ui.layout.Measurable, Int>>>()
+        var currentRow = mutableListOf<Pair<androidx.compose.ui.layout.Measurable, Int>>()
         var currentWidth = 0
         
-        // 1. 測量文字長度並自動換行
-        intrinsicPairs.forEach { pair ->
-            val w = pair.second.width
+        val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
+        
+        // 1. 預先計算每個組件需要嘅闊度，然後決定點樣換行
+        measurables.forEach { measurable ->
+            val intrinsicW = measurable.maxIntrinsicWidth(constraints.maxHeight)
             if (currentRow.isEmpty()) {
-                currentRow.add(pair)
-                currentWidth = w
+                currentRow.add(measurable to intrinsicW)
+                currentWidth = intrinsicW
             } else {
-                if (currentWidth + hSpacingPx + w > constraints.maxWidth) {
+                if (currentWidth + hSpacingPx + intrinsicW > safeMaxWidth) {
                     rows.add(currentRow)
-                    currentRow = mutableListOf(pair)
-                    currentWidth = w
+                    currentRow = mutableListOf(measurable to intrinsicW)
+                    currentWidth = intrinsicW
                 } else {
-                    currentRow.add(pair)
-                    currentWidth += hSpacingPx + w
+                    currentRow.add(measurable to intrinsicW)
+                    currentWidth += hSpacingPx + intrinsicW
                 }
             }
         }
@@ -3306,36 +3305,37 @@ fun AnimatedStretchingFlowRow(
         val finalPlaceables = mutableListOf<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>()
         var y = 0
         
-        // 2. 將同行空間平均分配，拉長組件做到左右齊平
+        // 2. 將同行嘅剩餘空間平均分配俾各個 Clips，達到完美左右平齊
         rows.forEach { row ->
-            val rowIntrinsicWidth = row.sumOf { it.second.width } + (row.size - 1) * hSpacingPx
-            val extraSpace = constraints.maxWidth - rowIntrinsicWidth
+            val rowIntrinsicWidth = row.sumOf { it.second } + (row.size - 1) * hSpacingPx
+            val extraSpace = safeMaxWidth - rowIntrinsicWidth
             val extraPerItem = if (extraSpace > 0) extraSpace / row.size else 0
             var remainder = if (extraSpace > 0) extraSpace % row.size else 0
             
             var x = 0
             var rowMaxHeight = 0
             
-            row.forEach { (measurable, intrinsicPlaceable) ->
+            row.forEach { (measurable, intrinsicW) ->
                 val extra = extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
-                val targetWidth = intrinsicPlaceable.width + extra
+                val targetWidth = intrinsicW + extra
                 
-                val finalPlaceable = measurable.measure(
+                // ★ 呢度先至真正執行全個過程唯一一次嘅 measure()，保證唔會再閃退！
+                val placeable = measurable.measure(
                     constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
                 )
                 
-                finalPlaceables.add(finalPlaceable to IntOffset(x, y))
+                finalPlaceables.add(placeable to IntOffset(x, y))
                 
                 x += targetWidth + hSpacingPx
-                rowMaxHeight = maxOf(rowMaxHeight, finalPlaceable.height)
+                rowMaxHeight = maxOf(rowMaxHeight, placeable.height)
             }
             y += rowMaxHeight + vSpacingPx
         }
         
         val totalHeight = maxOf(0, y - vSpacingPx)
         
-        // 3. 處理平滑移位動畫
-        layout(constraints.maxWidth, totalHeight) {
+        // 3. FLIP 動畫移位：記住位置並觸發流暢飛行動畫
+        layout(safeMaxWidth, totalHeight) {
             finalPlaceables.forEachIndexed { index, (placeable, targetOffset) ->
                 val key = items[index].first
                 val animatable = offsets.getOrPut(key) { Animatable(targetOffset, IntOffset.VectorConverter) }
