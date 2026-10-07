@@ -3257,9 +3257,8 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope，解鎖 weight 拉伸功能
+private fun AnimatedQuickChip(
     name: String,
     iconUrl: String,
     index: Int,
@@ -3297,13 +3296,13 @@ fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope，解鎖 weight �
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(), // 充滿 Box 空間
+            modifier = Modifier.fillMaxWidth(), // 充滿網格空間
             onClick = onClick
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3312,12 +3311,19 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    val items = topNotes.take(36) // 放寬到 36 個，支援 3 頁滑動
-    val itemsPerPage = 12 // 每頁放 12 個，確保最多只會有大約 4 行
-    val pages = items.chunked(itemsPerPage)
+    val items = topNotes.take(36)
     
-    // 初始化橫向分頁器狀態
+    // 預設每頁放 12 個 (普通手機 Adaptive minSize=88.dp 通常會分 3 直行，3x4=12)
+    val itemsPerPage = 12
+    val pages = items.chunked(itemsPerPage)
     val pagerState = rememberPagerState(pageCount = { pages.size })
+
+    // 動態計算高度，防止項目太少時留白太多
+    val maxItemsInAnyPage = pages.maxOfOrNull { it.size } ?: 1
+    val estimatedCols = 3
+    val estimatedRows = minOf(4, (maxItemsInAnyPage + estimatedCols - 1) / estimatedCols)
+    val paddingBottom = if (pages.size > 1) 16 else 0
+    val gridHeight = (estimatedRows * 38 + maxOf(0, estimatedRows - 1) * 8 + 28 + paddingBottom).dp
 
     Box(
         Modifier
@@ -3326,7 +3332,6 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            // 自動適應每頁高度，平滑切換
             .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
         HorizontalPager(
@@ -3334,26 +3339,36 @@ fun QuickInputSection(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) { page ->
-            // ★ 使用 FlowRow 實現「左至右、排滿自動落下一行」
-            FlowRow(
+            // ★ 升級為 LazyVerticalGrid：完美結合「左至右排滿換行」、「自適應左右貼邊對齊」同埋「animateItem平滑位移」！
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 88.dp), // 智能判斷行數，保證唔會夾硬縮細
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(gridHeight)
                     .padding(horizontal = 14.dp, vertical = 14.dp)
-                    .padding(bottom = if (pages.size > 1) 16.dp else 0.dp), // 為分頁點點留白
+                    .padding(bottom = paddingBottom.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                userScrollEnabled = false // 禁止上下滑動，交畀外層 Pager 左右滑動
             ) {
-                pages[page].forEach { (name, _) ->
+                items(pages[page], key = { it.first }) { (name, _) ->
                     val originalIndex = items.indexOfFirst { it.first == name }
-                    AnimatedQuickChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        index = maxOf(0, originalIndex),
-                        animatedNames = animatedQuickInputs,
-                        onClick = { onClick(name) },
-                        // ★ 核心：設定 weight(1f)，系統會自動拉伸所有 Clip 填滿空隙，達成 100% 左右對齊！
-                        modifier = Modifier.weight(1f) 
-                    )
+                    Box(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            placementSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                        )
+                    ) {
+                        AnimatedQuickChip(
+                            name = name,
+                            iconUrl = noteIconMap[name] ?: "",
+                            index = maxOf(0, originalIndex),
+                            animatedNames = animatedQuickInputs,
+                            onClick = { onClick(name) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
         }
