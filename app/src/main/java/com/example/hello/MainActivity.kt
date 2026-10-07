@@ -1626,12 +1626,11 @@ fun LedgerContent(
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         // ★★★ 將頂部 Row 移出 AnimatedContent，令 TopStats 可以獨立平滑動畫
         Row(
-    modifier = Modifier
-        .fillMaxWidth()
-        .padding(horizontal = 4.dp)
-        .padding(top = 4.dp, bottom = 0.dp),
-    verticalAlignment = Alignment.CenterVertically
-) {
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, top = 4.dp, bottom = 0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             AnimatedVisibility(
                 visible = filterMode && isSingleCategoryFilter && singleCategory != null,
                 enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
@@ -1655,19 +1654,13 @@ fun LedgerContent(
                 )
             }
 
-            AnimatedVisibility(
-                visible = !filterMode,
-                // ★ 加上 expand / shrink Horizontally，令闊度平滑改變，解決 TopStats 突變移位問題
-                enter = fadeIn(tween(300)) + expandHorizontally(tween(300), expandFrom = Alignment.End) + scaleIn(tween(300)),
-                exit = fadeOut(tween(200)) + shrinkHorizontally(tween(200), shrinkTowards = Alignment.End) + scaleOut(tween(200))
-            ) {
-                IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                    Icon(
-                        if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        "顯示未來項目",
-                        tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-                    )
-                }
+            // ★ 移除咗 AnimatedVisibility，令眼仔按鈕喺任何模式下都直接顯示
+            IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+                Icon(
+                    if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    "顯示未來項目",
+                    tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                )
             }
         }
 
