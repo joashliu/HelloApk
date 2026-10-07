@@ -1626,11 +1626,12 @@ fun LedgerContent(
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
         // ★★★ 將頂部 Row 移出 AnimatedContent，令 TopStats 可以獨立平滑動畫
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, top = 4.dp, bottom = 0.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 4.dp)
+        .padding(top = 4.dp, bottom = 0.dp),
+    verticalAlignment = Alignment.CenterVertically
+) {
             AnimatedVisibility(
                 visible = filterMode && isSingleCategoryFilter && singleCategory != null,
                 enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
