@@ -3239,7 +3239,8 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         shadowElevation = 1.dp
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            // ★ 核心修復：移除咗 .fillMaxWidth()，等佢真正根據文字長度自然收縮！
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
