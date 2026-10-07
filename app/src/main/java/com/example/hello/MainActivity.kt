@@ -1222,12 +1222,6 @@ private fun BoxScope.KeyboardAndFabLayer(
         }
     }
 
-    AnimatedFabLayer(
-        progressProvider = progressProvider,
-        onFabTap = onFabTap,
-        modifier = Modifier.align(Alignment.BottomEnd)
-    )
-
     AnimatedKeyboardLayer(
         showKeyboard = showKeyboard,
         progressProvider = progressProvider,
@@ -1239,6 +1233,13 @@ private fun BoxScope.KeyboardAndFabLayer(
         allNoteNames = allNoteNames,
         noteCategoryMap = noteCategoryMap,
         nameFlashTrigger = nameFlashTrigger,
+        modifier = Modifier.align(Alignment.BottomCenter)
+    )
+
+    // ★ 修正 4：再畫 FAB，咁樣 FAB 飛入去嗰陣就會喺鍵盤最上層，可以完美點擊
+    AnimatedFabLayer(
+        progressProvider = progressProvider,
+        onFabTap = onFabTap,
         modifier = Modifier.align(Alignment.BottomEnd)
     )
 }
@@ -1249,77 +1250,56 @@ private fun AnimatedFabLayer(
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val p = progressProvider()
+    
     Box(
         modifier = modifier
             .graphicsLayer {
-                val p = progressProvider()
+                val currentP = progressProvider()
 
-                val fabX = androidx.compose.ui.unit.lerp(20.dp, 38.dp, p).toPx()
-                val fabY = androidx.compose.ui.unit.lerp(92.dp, 458.dp, p).toPx()
-                val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, p).toPx()
+                // ★ 修正 2：精準計算飛行軌跡，令佢完美降落喺金額卡片右側空位
+                val fabX = androidx.compose.ui.unit.lerp(20.dp, 32.dp, currentP).toPx()
+                val fabY = androidx.compose.ui.unit.lerp(92.dp, 388.dp, currentP).toPx()
+                val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, currentP).toPx()
 
                 translationX = -fabX
                 translationY = -fabY
-                val baseSize = 56.dp.toPx()
-                val scale = fabSize / baseSize
+                val scale = fabSize / 56.dp.toPx()
                 scaleX = scale
                 scaleY = scale
                 transformOrigin = TransformOrigin(1f, 1f)
+                
+                // 變身做清除掣嗰陣順滑消除陰影
+                shadowElevation = androidx.compose.ui.unit.lerp(6.dp, 0.dp, currentP).toPx()
+                shape = CircleShape
+                clip = true
             }
             .size(56.dp)
-            .shadow(
-                elevation = 6.dp,
-                shape = CircleShape, clip = false,
-                ambientColor = Color(0x33000000), spotColor = Color(0x33000000)
-            )
-            .clip(CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onFabTap() },
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .graphicsLayer {
-                    val p = progressProvider()
-                    val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
-                    this.alpha = 1f - (p * 0.001f)
-                }
-        ) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clip(CircleShape)
-                    .graphicsLayer {
-                        val p = progressProvider()
-                        val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
-                        this.alpha = 1f
-                    }
-            ) {
-                androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
-                    val p = progressProvider()
-                    val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
-                    drawCircle(color = fabColor)
-                }
-            }
-
-            Icon(
-                Icons.Default.Add,
-                contentDescription = "Action",
-                tint = Color.White,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(24.dp)
-                    .graphicsLayer {
-                        val p = progressProvider()
-                        rotationZ = p * -405f
-                        val tintLerp = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
-                        this.alpha = 1f
-                    }
-            )
+        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+            val currentP = progressProvider()
+            val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, currentP)
+            drawCircle(color = fabColor)
         }
+
+        // ★ 修正 3：真正套用圖標顏色變換 (白 -> 灰)，確保喺白色底上面清楚可見
+        val tintColor = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
+        Icon(
+            Icons.Default.Add,
+            contentDescription = "Clear",
+            tint = tintColor,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(24.dp)
+                .graphicsLayer {
+                    rotationZ = progressProvider() * -405f
+                }
+        )
     }
 }
 
@@ -1354,7 +1334,8 @@ private fun AnimatedKeyboardLayer(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
+                // ★ 修正 1：將底部邊距改為 20.dp，令鍵盤貼近畫面底部，視覺更優雅
+                .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
                 .graphicsLayer {
                     val currentP = progressProvider()
                     alpha = currentP
