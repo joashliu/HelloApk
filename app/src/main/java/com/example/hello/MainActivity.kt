@@ -3078,77 +3078,84 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
     Row(
         Modifier
             .fillMaxWidth()
-            // ★ 移除咗原本寫死嘅 .background(SURFACE_ELEVATED)，交畀外層 Surface 統一控制
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 左邊：現代化排版嘅日期
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (info != null) {
-                val dateText = if (info.year == currentYear)
-                    "${info.month}月${info.day}日"
-                else
-                    "${info.year}年${info.month}月${info.day}日"
+                val monthStr = if (info.year == currentYear) "${info.month}月" else "${info.year}年${info.month}月"
+
+                // 特大號日子數字，增強視覺層次
                 Text(
-                    dateText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    text = "${info.day}",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
                     color = TEXT_PRIMARY
                 )
-                Text("．", fontSize = 13.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.ExtraBold)
-                val bgColor = if (info.isWeekend) WEEKEND_BG else WEEKDAY_BG
-                val fgColor = if (info.isWeekend) WEEKEND_FG else WEEKDAY_FG
-                Box(
-                    Modifier
-                        .size(18.dp)
-                        .clip(CircleShape)
-                        .background(bgColor),
-                    contentAlignment = Alignment.Center
-                ) {
+                Spacer(Modifier.width(8.dp))
+                
+                // 月份同星期上下排列
+                Column(verticalArrangement = Arrangement.Center) {
                     Text(
-                        text = info.weekdayChar,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = fgColor,
-                        textAlign = TextAlign.Center,
-                        style = TextStyle(
-                            platformStyle = PlatformTextStyle(includeFontPadding = false),
-                            lineHeightStyle = LineHeightStyle(
-                                alignment = LineHeightStyle.Alignment.Center,
-                                trim = LineHeightStyle.Trim.Both
-                            )
-                        )
+                        text = monthStr,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_SECONDARY
+                    )
+                    Text(
+                        text = "週${info.weekdayChar}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (info.isWeekend) WEEKEND_FG else TEXT_TERTIARY
                     )
                 }
+
+                // 「今日/琴日」精緻標籤
                 if (info.dayTag != null) {
-                    Text("．", fontSize = 13.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.ExtraBold)
-                    Text(
-                        info.dayTag,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = TEXT_PRIMARY
-                    )
+                    Spacer(Modifier.width(12.dp))
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (info.dayTag == "今日") BRAND_PRIMARY else SURFACE_ELEVATED)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = info.dayTag,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (info.dayTag == "今日") Color.White else TEXT_SECONDARY
+                        )
+                    }
                 }
             } else {
                 Text(
                     formatDateHeader(dateKey),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
                     color = TEXT_PRIMARY
                 )
             }
         }
+
+        // 右邊：收入與支出
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (income > 0) {
-                Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(2.dp))
-                Text(incomeText, fontSize = 12.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text(incomeText, fontSize = 14.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
+                }
             }
             if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
             if (expense > 0) {
-                Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(2.dp))
-                Text(expenseText, fontSize = 12.sp, color = COLOR_EXPENSE, fontWeight = FontWeight.ExtraBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.TrendingDown, null, tint = TEXT_PRIMARY, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(2.dp))
+                    Text(expenseText, fontSize = 14.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.ExtraBold)
+                }
             }
         }
     }
