@@ -1541,7 +1541,6 @@ fun LedgerContent(
             } catch (_: Exception) {
                 try { listState.scrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) {}
             }
-            // 還原後重置
             preFilterIndex = -1
         }
     }
@@ -1559,7 +1558,6 @@ fun LedgerContent(
 
     val listContent: LazyListScope.() -> Unit = {
         if (isExactNoteFilter) {
-            // 單一名稱搜尋模式：每個項目獨立成一張卡片
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
                 Box(
                     modifier = Modifier
@@ -1583,7 +1581,7 @@ fun LedgerContent(
                                 isDeleting = r.id == deletingRecordId
                             ) {
                                 SwipeableRecordItem(
-                                    backgroundColor = Color.Transparent, // 卡片已經有白底
+                                    backgroundColor = Color.Transparent, 
                                     record = r,
                                     expandedId = expandedId,
                                     onExpand = onExpandChange,
@@ -1615,20 +1613,20 @@ fun LedgerContent(
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                // 1. 頂部日期標題 (維持背景漸變無縫融合)
+                // 日期標題
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(containerColor) 
+                                .background(SURFACE_CARD) // 強制白底，防止閃黑
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
                     }
                 }
 
-                // 2. 將整日嘅記錄放入一個超靚嘅大圓角卡片入面
+                // 將全日記錄放入大圓角卡片
                 item(key = "group_$dateKey") {
                     Surface(
                         modifier = Modifier
@@ -1639,9 +1637,9 @@ fun LedgerContent(
                                 fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
                                 placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
                             ),
-                        shape = RoundedCornerShape(20.dp), // 20.dp 特大圓角營造現代感
+                        shape = RoundedCornerShape(20.dp),
                         color = SURFACE_CARD,
-                        shadowElevation = 1.dp, // 輕微懸浮感
+                        shadowElevation = 1.dp,
                         border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -1651,7 +1649,6 @@ fun LedgerContent(
                                     isDeleting = r.id == deletingRecordId
                                 ) {
                                     SwipeableRecordItem(
-                                        // 放棄梅花間竹色，統一用純白底色，更加高級
                                         backgroundColor = SURFACE_CARD, 
                                         record = r,
                                         expandedId = expandedId,
@@ -1674,7 +1671,7 @@ fun LedgerContent(
                                     CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
                                 }
 
-                                // 3. 卡片內部加入極精緻嘅淡色分割線 (最後一項唔加)
+                                // 加入極精緻嘅淡色分割線
                                 if (idx < dayRecords.lastIndex) {
                                     AnimatedVisibility(
                                         visible = deletingRecordId != r.id,
@@ -1682,7 +1679,6 @@ fun LedgerContent(
                                         exit = fadeOut(tween(200))
                                     ) {
                                         HorizontalDivider(
-                                            // 縮排 68.dp 令分割線同文字對齊，避開左邊圖標
                                             modifier = Modifier.padding(start = 68.dp, end = 16.dp),
                                             color = DIVIDER_COLOR.copy(alpha = 0.4f),
                                             thickness = 0.5.dp
@@ -1694,7 +1690,7 @@ fun LedgerContent(
                     }
                 }
                 
-                // 4. 每日卡片之間留有呼吸空間
+                // 卡片之間留白
                 item(key = "spacer_$dateKey") {
                     Spacer(modifier = Modifier.height(10.dp))
                 }
@@ -1707,7 +1703,7 @@ fun LedgerContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp)
-                .padding(top = 4.dp, bottom = 0.dp), // 將 padding 拆開解決編譯錯誤
+                .padding(top = 4.dp, bottom = 0.dp), // 拆開 padding 解決編譯問題
             verticalAlignment = Alignment.CenterVertically
         ) {
             AnimatedVisibility(
@@ -1826,14 +1822,12 @@ fun LedgerContent(
             }
         }
 
-        // 替換 LedgerContent 最底部嘅 Box 結構
+        // 乾淨嘅列表容器，冇多餘外框
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                // 移除咗 containerHPadding 同 containerTopPadding，等列表可以貼邊自然顯示
         ) {
-            // 移除咗成個 Surface (大外框)，直接顯示 loading 或者 LazyColumn
             if (loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = BRAND_PRIMARY)
@@ -1865,7 +1859,8 @@ fun LedgerContent(
                 }
             }
         }
-    } // LedgerContent 結尾
+    }
+}
 
 // ===== 其他組件保持不變 =====
 
