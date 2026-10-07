@@ -2863,7 +2863,6 @@ fun TopStats(
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
 
     Row(
-        // 稍微增加上下 Padding，由 4.dp 加到 6.dp，令整體 TopStats 加高少少
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -2884,7 +2883,6 @@ fun TopStats(
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // 標題行高度由 16.dp 增加至 22.dp，防止中文字被截斷
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                         Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
@@ -2920,7 +2918,6 @@ fun TopStats(
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // 標題行高度由 16.dp 增加至 22.dp
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                         Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
@@ -2955,12 +2952,13 @@ fun TopStats(
                         (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
                     }
                 },
+                // ★ 關鍵修改：加入置中對齊，消除因為闊度改變而引起嘅打斜飛移位問題
+                contentAlignment = Alignment.Center, 
                 label = "balanceCountAnim"
             ) { isFilter ->
                 if (!isFilter) {
                     val balColor = if (animBalance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
                     Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 標題行高度由 16.dp 增加至 22.dp
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                             Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
@@ -2978,7 +2976,6 @@ fun TopStats(
                     }
                 } else {
                     Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        // 標題行高度由 16.dp 增加至 22.dp
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                             Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
