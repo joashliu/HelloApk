@@ -77,7 +77,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
@@ -437,36 +436,6 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
-/**
- * 自訂 Modifier：偵測子項喺 parent 嘅位置變化，用 spring 平滑 animate 過去。
- * 使用 snapshotFlow + collectLatest，避免協程堆疊，降低 CPU 負載。
- */
-fun Modifier.animatePlacement(): Modifier = composed {
-    val animatable = remember { Animatable(IntOffset.Zero, IntOffset.VectorConverter) }
-    var target by remember { mutableStateOf(IntOffset.Zero) }
-
-    LaunchedEffect(Unit) {
-        snapshotFlow { target }
-            .distinctUntilChanged()
-            .collectLatest { newTarget ->
-                animatable.animateTo(
-                    targetValue = newTarget,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                )
-            }
-    }
-
-    this
-        .onPlaced { coords ->
-            val pos = coords.positionInParent().round()
-            if (pos != target) target = pos
-        }
-        .offset { animatable.value - target }
-}
-
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -522,11 +491,9 @@ fun MainApp() {
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
-    // ★ 提升到 MainApp：入賬提示嘅可見性 + 快速輸入動畫已播記錄
     var afterSaveHintVisible by remember { mutableStateOf(false) }
     val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
 
-    // ★ 5 秒倒數提升到 MainApp，切換頁面唔會 cancel / reset
     LaunchedEffect(afterSaveHint?.recordId) {
         val hint = afterSaveHint
         if (hint == null) {
@@ -536,7 +503,7 @@ fun MainApp() {
         afterSaveHintVisible = true
         delay(5000)
         afterSaveHintVisible = false
-        delay(320)   // 等 AnimatedVisibility 播完 exit 動畫
+        delay(320)
         if (afterSaveHint?.recordId == hint.recordId) {
             afterSaveHint = null
         }
@@ -922,8 +889,6 @@ fun MainApp() {
                 modifier = Modifier)
         }
 
-        // ★ 隔離：呢個 Layer 內部會讀 keyboardAnimProgress.value
-        //   MainApp 主體唔會再因為動畫每一幀而重組
         KeyboardAndFabLayer(
             showKeyboard = showKeyboard,
             progressProvider = { keyboardAnimProgress.value },
@@ -1070,11 +1035,6 @@ fun MainApp() {
     }
 }
 
-/**
- * 隔離層：FAB 變形 + 過濾搜尋列 + 鍵盤面板
- * 只有呢層會因 keyboardAnimProgress.value 變化而重組，
- * MainApp 主體唔會再被動畫拖累。
- */
 @Composable
 private fun BoxScope.KeyboardAndFabLayer(
     showKeyboard: Boolean,
@@ -1097,7 +1057,6 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    // ---- 過濾搜尋列 + 過濾按鈕 ----
     Row(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -1107,7 +1066,6 @@ private fun BoxScope.KeyboardAndFabLayer(
                 bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
             )
             .graphicsLayer {
-                // ★ 只喺 draw 階段讀取進度，唔會 trigger 外層 recompose
                 val p = progressProvider()
                 val fabAlpha = if (showKeyboard) {
                     (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
@@ -1166,7 +1124,6 @@ private fun BoxScope.KeyboardAndFabLayer(
                     }
                 }
 
-                // ★ 補返：過濾搜尋建議 Popup
                 if (filterModeOn && filterSearchHasFocus) {
                     val filterSuggestions = filterNoteSuggestions(filterSearch.text, allNoteNames)
                     if (filterSuggestions.isNotEmpty()) {
@@ -1224,14 +1181,12 @@ private fun BoxScope.KeyboardAndFabLayer(
         }
     }
 
-    // ---- 主 FAB（獨立成獨立組件） ----
     AnimatedFabLayer(
         progressProvider = progressProvider,
         onFabTap = onFabTap,
         modifier = Modifier.align(Alignment.BottomEnd)
     )
 
-    // ---- 鍵盤面板（獨立成獨立組件） ----
     AnimatedKeyboardLayer(
         showKeyboard = showKeyboard,
         progressProvider = progressProvider,
@@ -1253,8 +1208,6 @@ private fun AnimatedFabLayer(
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // ★ 唔喺 composable 開頭讀 p，避免每幀重組
-    // 改用 graphicsLayer lambda 內部讀取
     Box(
         modifier = modifier
             .graphicsLayer {
@@ -1266,7 +1219,6 @@ private fun AnimatedFabLayer(
 
                 translationX = -fabX
                 translationY = -fabY
-                // 用 scale 代替 size 改變，避免 relayout
                 val baseSize = 56.dp.toPx()
                 val scale = fabSize / baseSize
                 scaleX = scale
@@ -1286,19 +1238,15 @@ private fun AnimatedFabLayer(
             ) { onFabTap() },
         contentAlignment = Alignment.Center
     ) {
-        // 顏色 + 圖標用 graphicsLayer + Icon tint 動畫
-        // 呢度只讀一次 p，但因為係 draw 階段，唔會 trigger 外層重組
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .graphicsLayer {
                     val p = progressProvider()
                     val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
-                    // 用 alpha 控制色深，唔直接改 Color 避免 invalidate
-                    this.alpha = 1f - (p * 0.001f) // 保持 1，色由 drawBehind 處理
+                    this.alpha = 1f - (p * 0.001f)
                 }
         ) {
-            // 實際底色
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -1306,11 +1254,9 @@ private fun AnimatedFabLayer(
                     .graphicsLayer {
                         val p = progressProvider()
                         val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
-                        // 用 draw 階段 blend，唔會 relayout
                         this.alpha = 1f
                     }
             ) {
-                // 用 Canvas 畫底色，唔行 modifier.background() 就可以避免重組
                 androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
                     val p = progressProvider()
                     val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, p)
@@ -1318,7 +1264,6 @@ private fun AnimatedFabLayer(
                 }
             }
 
-            // 加號圖標
             Icon(
                 Icons.Default.Add,
                 contentDescription = "Action",
@@ -1330,7 +1275,6 @@ private fun AnimatedFabLayer(
                         val p = progressProvider()
                         rotationZ = p * -405f
                         val tintLerp = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
-                        // Icon tint 唔可以喺 graphicsLayer 改，用 alpha 過渡
                         this.alpha = 1f
                     }
             )
@@ -1352,16 +1296,12 @@ private fun AnimatedKeyboardLayer(
     nameFlashTrigger: Int,
     modifier: Modifier = Modifier
 ) {
-    // ★ 唔喺 composable 開頭讀 p，避免每幀重組
-    // 用一個 state 追蹤「是否應該顯示」，只在 true/false 轉換時重組
     var shouldRender by remember { mutableStateOf(showKeyboard) }
 
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             shouldRender = true
         } else {
-            // 等動畫完成先移除
-            // 因為唔知動畫長度，用一個保守延遲
             kotlinx.coroutines.delay(500)
             if (progressProvider() < 0.001f) {
                 shouldRender = false
@@ -1375,7 +1315,6 @@ private fun AnimatedKeyboardLayer(
                 .fillMaxWidth()
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING, end = 16.dp, start = 16.dp)
                 .graphicsLayer {
-                    // ★ draw 階段讀取進度，唔會 trigger 外層 recompose
                     val currentP = progressProvider()
                     alpha = currentP
                     scaleX = 0.17f + 0.83f * currentP
@@ -1798,7 +1737,6 @@ fun LedgerContent(
                         expandFrom = Alignment.Top
                     ),
                     exit = fadeOut(
-                        // 稍微加快 fadeOut 嘅速度，等佢喺完全收縮前已經隱藏，感覺更自然
                         animationSpec = tween(200, easing = FastOutLinearInEasing)
                     ) + shrinkVertically(
                         animationSpec = tween(300, easing = FastOutSlowInEasing),
@@ -1810,7 +1748,6 @@ fun LedgerContent(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
                             animatedQuickInputs = animatedQuickInputs,
-                            // 移除咗 animatePlacement = !filterMode，唔再需要依賴呢個參數
                             onClick = onQuickInputClick
                         )
                         Spacer(Modifier.height(4.dp))
@@ -1932,8 +1869,6 @@ fun AnimatedRecordItem(
         label = "eHeight"
     )
 
-    // 入場動畫：三個 state 只在 300~500ms 內變化，唔係每幀
-    // 佢哋可以喺 composable 主體讀取，重組成本可以接受
     val entranceScale by animateFloatAsState(
         targetValue = if (appeared) 1f else 0.65f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
@@ -1950,7 +1885,6 @@ fun AnimatedRecordItem(
         label = "eY"
     )
 
-    // 刪除動畫：粒子進度每幀都變，絕不能喺 composable 主體讀取
     val particleProgress = remember { Animatable(0f) }
     LaunchedEffect(isDeleting) {
         if (isDeleting) {
@@ -1963,9 +1897,6 @@ fun AnimatedRecordItem(
             particleProgress.snapTo(0f)
         }
     }
-
-    // ★ 刪除咗原本嘅 `val prog = particleProgress.value`
-    //   呢句係致命傷，每幀都會 invalidate 整棵子樹
 
     val particleCount = 90
     val random = remember { Random(42) }
@@ -1996,21 +1927,16 @@ fun AnimatedRecordItem(
             .fillMaxWidth()
             .height(itemHeight)
     ) {
-        // ---- 主體：alpha / scale / translationY 全部喺 graphicsLayer lambda 內讀 ----
-        // graphicsLayer lambda 係 draw 階段執行，唔會 trigger recomposition
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
                     if (isDeleting) {
-                        // ★ 移入 graphicsLayer：draw 階段讀取，唔重組
                         val prog = particleProgress.value
                         alpha = (1f - prog * 1.05f).coerceIn(0f, 1f)
                         scaleX = 1f - prog * 0.25f
                         scaleY = (1f - prog).coerceIn(0f, 1f)
                     } else {
-                        // 入場值來自 animateFloatAsState（state 已喺 composition 讀取）
-                        // 呢度只係 assignment，唔會額外 trigger 重組
                         alpha = entranceAlpha
                         scaleX = entranceScale
                         scaleY = entranceScale
@@ -2021,8 +1947,6 @@ fun AnimatedRecordItem(
             content()
         }
 
-        // ---- 粒子特效：Canvas 本身嘅 draw lambda 就係繪製階段 ----
-        // particleProgress.value 喺呢度讀取完全冇問題
         if (isDeleting) {
             Canvas(modifier = Modifier.matchParentSize()) {
                 val prog = particleProgress.value
@@ -2055,7 +1979,6 @@ fun AnimatedRecordItem(
     }
 }
 
-// ★ CategoryTotalHint 改為只接收 visible，計時器已提升到 MainApp
 @Composable
 fun CategoryTotalHint(
     hint: AfterSaveHint,
@@ -2610,8 +2533,6 @@ fun LedgerKeyboardPanel(
                 }
                 val glowShape = RoundedCornerShape(14.dp)
 
-                // ★ 改用 drawWithContent，光環喺 draw 階段原地畫出
-                //   唔會因為 glowAlpha.value 每幀變而 recompose 整棵樹
                 Box(
                     Modifier
                         .weight(1f)
@@ -2622,12 +2543,10 @@ fun LedgerKeyboardPanel(
                             val a = glowAlpha.value
                             if (a > 0.01f) {
                                 val radius = CornerRadius(14.dp.toPx())
-                                // 半透明背景
                                 drawRoundRect(
                                     color = BRAND_PRIMARY_LIGHT.copy(alpha = a * 0.25f),
                                     cornerRadius = radius
                                 )
-                                // 發光邊框
                                 drawRoundRect(
                                     color = BRAND_PRIMARY.copy(alpha = a),
                                     cornerRadius = radius,
@@ -2735,7 +2654,6 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
-                // 類別選擇按鈕（保持不變）
                 var showCategoryMenu by remember { mutableStateOf(false) }
                 val currentStyle = CATEGORY_STYLES[state.category]
                 Box {
@@ -3033,7 +2951,6 @@ fun AnimatedAmount(
     }
 }
 
-// ★ DayHeader 改：今年唔顯示年份、冇「x筆」、金額整數
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
@@ -3051,7 +2968,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (info != null) {
-                // ★ 今年唔顯示年份
                 val dateText = if (info.year == currentYear)
                     "${info.month}月${info.day}日"
                 else
@@ -3204,8 +3120,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-// ★ AnimatedQuickChip 改用外部 animatedNames map 記住已播過
-//   並加入 animatePlacement 參數，父卡片收縮時可停用位置動畫
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FlowRowScope.AnimatedQuickChip(
@@ -3213,7 +3127,6 @@ private fun FlowRowScope.AnimatedQuickChip(
     iconUrl: String,
     index: Int,
     animatedNames: MutableMap<String, Boolean>,
-    // 移除咗 animatePlacement: Boolean 參數
     onClick: () -> Unit
 ) {
     val alreadyAnimated = animatedNames.containsKey(name)
@@ -3253,7 +3166,6 @@ private fun FlowRowScope.AnimatedQuickChip(
             animationSpec = tween(200, easing = FastOutLinearInEasing)
         ),
         modifier = Modifier.weight(1f)
-        // 移除咗 .then(if (animatePlacement) Modifier.animatePlacement() else Modifier)
     ) {
         QuickInputChip(
             name = name,
@@ -3270,7 +3182,6 @@ fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     animatedQuickInputs: MutableMap<String, Boolean>,
-    // 移除咗 animatePlacement: Boolean = true 參數
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -3284,13 +3195,11 @@ fun QuickInputSection(
             .background(SURFACE_CARD, RoundedCornerShape(18.dp))
             .heightIn(max = 180.dp)
     ) {
-        // 移除咗 LookaheadScope，完全交俾外層 AnimatedVisibility 做遮罩裁切 (Clipping)
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(14.dp),
-            // 移除咗 animateContentSize()，防止同 shrinkVertically 互相拉扯
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
