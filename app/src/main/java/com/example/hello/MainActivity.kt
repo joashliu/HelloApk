@@ -3046,11 +3046,10 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    // 記錄上一次嘅字串狀態
     var prevText by remember { mutableStateOf(text) }
     val isClearing = prevText.length > 1 && text == "0"
     
-    // ★ 核心邏輯：判斷是否為「第一隻數字輸入」或「刪除剩返0」
+    // ★ 智能偵測：由 0 變非 0，或者刪剩得返 0，就觸發 Pop 動畫
     val isPlaceholderChange = (prevText == "0" && text.length == 1 && text != "0") ||
                               (prevText.length == 1 && text == "0" && prevText != "0")
 
@@ -3069,7 +3068,7 @@ fun AnimatedAmount(
                         targetState = c,
                         transitionSpec = {
                             if (isPlaceholderChange) {
-                                // 第一個數字：改為 Q 彈放大彈出效果 (Pop)
+                                // 第一隻數字：高級 Q 彈放大彈出 (Pop)
                                 (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
                                 (scaleOut(tween(150), targetScale = 0.5f) + fadeOut(tween(150)))
                             } else {
@@ -3087,7 +3086,6 @@ fun AnimatedAmount(
         }
     }
 }
-
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
@@ -3258,9 +3256,106 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope 嚟解鎖 weight 拉伸功能
+fun AnimatedStretchingFlowRow(
+    items: List<Pair<String, Int>>,
+    modifier: Modifier = Modifier,
+    horizontalSpacing: Dp = 8.dp,
+    verticalSpacing: Dp = 8.dp,
+    itemContent: @Composable (Pair<String, Int>) -> Unit
+) {
+    val hSpacingPx = with(LocalDensity.current) { horizontalSpacing.roundToPx() }
+    val vSpacingPx = with(LocalDensity.current) { verticalSpacing.roundToPx() }
+
+    // 用嚟記住每個項目的位置，實現完美平滑過渡 (FLIP)
+    val offsets = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
+    val coroutineScope = rememberCoroutineScope()
+
+    androidx.compose.ui.layout.Layout(
+        content = { items.forEach { item -> itemContent(item) } },
+        modifier = modifier
+    ) { measurables, constraints ->
+        if (measurables.isEmpty()) return@Layout layout(0, 0) {}
+        
+        val looseConstraints = constraints.copy(minWidth = 0)
+        val intrinsicPairs = measurables.map { it to it.measure(looseConstraints) }
+        
+        val rows = mutableListOf<MutableList<Pair<androidx.compose.ui.layout.Measurable, androidx.compose.ui.layout.Placeable>>>()
+        var currentRow = mutableListOf<Pair<androidx.compose.ui.layout.Measurable, androidx.compose.ui.layout.Placeable>>()
+        var currentWidth = 0
+        
+        // 1. 測量文字長度並自動換行
+        intrinsicPairs.forEach { pair ->
+            val w = pair.second.width
+            if (currentRow.isEmpty()) {
+                currentRow.add(pair)
+                currentWidth = w
+            } else {
+                if (currentWidth + hSpacingPx + w > constraints.maxWidth) {
+                    rows.add(currentRow)
+                    currentRow = mutableListOf(pair)
+                    currentWidth = w
+                } else {
+                    currentRow.add(pair)
+                    currentWidth += hSpacingPx + w
+                }
+            }
+        }
+        if (currentRow.isNotEmpty()) rows.add(currentRow)
+        
+        val finalPlaceables = mutableListOf<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>()
+        var y = 0
+        
+        // 2. 將同行空間平均分配，拉長組件做到左右齊平
+        rows.forEach { row ->
+            val rowIntrinsicWidth = row.sumOf { it.second.width } + (row.size - 1) * hSpacingPx
+            val extraSpace = constraints.maxWidth - rowIntrinsicWidth
+            val extraPerItem = if (extraSpace > 0) extraSpace / row.size else 0
+            var remainder = if (extraSpace > 0) extraSpace % row.size else 0
+            
+            var x = 0
+            var rowMaxHeight = 0
+            
+            row.forEach { (measurable, intrinsicPlaceable) ->
+                val extra = extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
+                val targetWidth = intrinsicPlaceable.width + extra
+                
+                val finalPlaceable = measurable.measure(
+                    constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
+                )
+                
+                finalPlaceables.add(finalPlaceable to IntOffset(x, y))
+                
+                x += targetWidth + hSpacingPx
+                rowMaxHeight = maxOf(rowMaxHeight, finalPlaceable.height)
+            }
+            y += rowMaxHeight + vSpacingPx
+        }
+        
+        val totalHeight = maxOf(0, y - vSpacingPx)
+        
+        // 3. 處理平滑移位動畫
+        layout(constraints.maxWidth, totalHeight) {
+            finalPlaceables.forEachIndexed { index, (placeable, targetOffset) ->
+                val key = items[index].first
+                val animatable = offsets.getOrPut(key) { Animatable(targetOffset, IntOffset.VectorConverter) }
+                
+                if (animatable.targetValue != targetOffset) {
+                    coroutineScope.launch {
+                        animatable.animateTo(
+                            targetOffset,
+                            spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                        )
+                    }
+                }
+                placeable.place(animatable.value)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnimatedQuickChip(
     name: String,
     iconUrl: String,
     index: Int,
@@ -3287,8 +3382,6 @@ fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope 嚟解鎖 weight 
 
     Box(
         modifier = modifier
-            // 加入尺寸動畫，盡量減低 FlowRow 冇移位動畫帶嚟嘅生硬感
-            .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
             .graphicsLayer {
                 val p = animProgress.value
                 alpha = p
@@ -3300,14 +3393,13 @@ fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope 嚟解鎖 weight 
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            // 填滿 weight 所分配嘅空間，文字會自動置中
-            modifier = Modifier.fillMaxWidth(), 
+            modifier = Modifier.fillMaxWidth(), // 自動跟隨自訂引擎分配嘅闊度
             onClick = onClick
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3318,7 +3410,6 @@ fun QuickInputSection(
     if (topNotes.isEmpty()) return
     val items = topNotes.take(42)
     
-    // 每頁大概放 14 個，確保通常只會排 3-4 行，唔會太擁擠
     val itemsPerPage = 14
     val pages = items.chunked(itemsPerPage)
     val pagerState = rememberPagerState(pageCount = { pages.size })
@@ -3330,7 +3421,6 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            // 高度自動順滑撐開，唔會露半截
             .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
         HorizontalPager(
@@ -3338,29 +3428,27 @@ fun QuickInputSection(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top 
         ) { page ->
-            FlowRow(
+            // ★ 套用我哋獨家研發嘅自訂流式引擎！
+            AnimatedStretchingFlowRow(
+                items = pages[page],
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 14.dp)
                     .padding(bottom = if (pages.size > 1) 16.dp else 0.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                pages[page].forEach { (name, _) ->
-                    val originalIndex = items.indexOfFirst { it.first == name }
-                    
-                    key(name) {
-                        AnimatedQuickChip(
-                            name = name,
-                            iconUrl = noteIconMap[name] ?: "",
-                            index = maxOf(0, originalIndex),
-                            animatedNames = animatedQuickInputs,
-                            onClick = { onClick(name) },
-                            // ★ 終極核心：weight(1f) 會令同一行嘅 Clips 互相妥協拉伸，完美用盡一行闊度兼左右平齊！
-                            modifier = Modifier.weight(1f) 
-                        )
-                    }
-                }
+                horizontalSpacing = 8.dp,
+                verticalSpacing = 8.dp
+            ) { item ->
+                val name = item.first
+                val originalIndex = items.indexOfFirst { it.first == name }
+                
+                AnimatedQuickChip(
+                    name = name,
+                    iconUrl = noteIconMap[name] ?: "",
+                    index = maxOf(0, originalIndex),
+                    animatedNames = animatedQuickInputs,
+                    onClick = { onClick(name) },
+                    modifier = Modifier.fillMaxWidth() 
+                )
             }
         }
         
