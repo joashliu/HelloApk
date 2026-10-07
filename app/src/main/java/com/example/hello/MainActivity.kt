@@ -1538,7 +1538,9 @@ fun LedgerContent(
         label = "containerCorner"
     )
     val containerColor by animateColorAsState(
-        targetValue = if (filterMode) SURFACE_CARD else Color.Transparent,
+        // ★ 放棄使用 Color.Transparent，改用透明嘅白色
+        // 噉樣喺漸變嘅過程入面，就唔會再經過灰黑色導致「黑一黑」
+        targetValue = if (filterMode) SURFACE_CARD else SURFACE_CARD.copy(alpha = 0f),
         animationSpec = tween(440, easing = FastOutSlowInEasing),
         label = "containerColor"
     )
@@ -1600,12 +1602,12 @@ fun LedgerContent(
 
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
-                        // ★ 完全摒棄 Surface 卡片，改用 Box 配合動態 containerColor
-                        // 背景色會同西選模式嘅外層容器完美同步漸變，徹底消滅所有陰影！
+                        // ★ 將背景強制設定為 SURFACE_CARD (白色)
+                        // 唔再跟隨外層容器變透明，時刻保持白底
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(containerColor) 
+                                .background(SURFACE_CARD) 
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
