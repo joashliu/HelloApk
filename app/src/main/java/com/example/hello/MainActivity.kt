@@ -2860,86 +2860,108 @@ fun TopStats(
     val animBalance by animateFloatAsState(balance.toFloat(), spec, label = "bAmt")
     val animCount by animateFloatAsState((filteredCount ?: 0).toFloat(), spec, label = "cAmt")
 
-    val incomeW by animateFloatAsState(if (showIncome) 1f else 0.0001f, spec, label = "iW")
-    val expenseW by animateFloatAsState(if (showExpense) 1f else 0.0001f, spec, label = "eW")
-    val balanceW by animateFloatAsState(if (showBalance) 1f else 0.0001f, spec, label = "bW")
-    val countW by animateFloatAsState(if (showCount) 1f else 0.0001f, spec, label = "cW")
+    // 目標值改為 0f，實現真正消失
+    val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
+    val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
+    val balanceW by animateFloatAsState(if (showBalance) 1f else 0f, spec, label = "bW")
+    val countW by animateFloatAsState(if (showCount) 1f else 0f, spec, label = "cW")
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier.weight(incomeW).clipToBounds(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        // 當需要顯示，或者動畫未完全縮到 0 嘅時候，先至保留喺畫面架構入面
+        if (showIncome || incomeW > 0.001f) {
+            Box(
+                modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        // 加入 maxLines 同 softWrap 防止換行
+                        Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        formatAmountNoDecimal(animIncome.toDouble()),
+                        color = COLOR_INCOME,
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    formatAmountNoDecimal(animIncome.toDouble()),
-                    color = COLOR_INCOME,
-                    fontSize = STAT_AMOUNT_FONT_SIZE,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
-        Box(
-            modifier = Modifier.weight(expenseW).clipToBounds(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        
+        if (showExpense || expenseW > 0.001f) {
+            Box(
+                modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        formatAmountNoDecimal(animExpense.toDouble()),
+                        color = COLOR_EXPENSE,
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    formatAmountNoDecimal(animExpense.toDouble()),
-                    color = COLOR_EXPENSE,
-                    fontSize = STAT_AMOUNT_FONT_SIZE,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
-        Box(
-            modifier = Modifier.weight(balanceW).clipToBounds(),
-            contentAlignment = Alignment.Center
-        ) {
-            val balColor = if (animBalance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        
+        if (showBalance || balanceW > 0.001f) {
+            Box(
+                modifier = Modifier.weight(balanceW.coerceAtLeast(0.001f)).clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                val balColor = if (animBalance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+                Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        formatAmountNoDecimal(animBalance.toDouble()),
+                        color = balColor,
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    formatAmountNoDecimal(animBalance.toDouble()),
-                    color = balColor,
-                    fontSize = STAT_AMOUNT_FONT_SIZE,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
-        Box(
-            modifier = Modifier.weight(countW).clipToBounds(),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "${animCount.roundToInt()}",
-                    fontSize = 22.sp,
-                    color = BRAND_PRIMARY,
-                    fontWeight = FontWeight.Bold
-                )
+        
+        if (showCount || countW > 0.001f) {
+            Box(
+                modifier = Modifier.weight(countW.coerceAtLeast(0.001f)).clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("筆數", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${animCount.roundToInt()}",
+                        fontSize = 22.sp,
+                        color = BRAND_PRIMARY,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
         }
     }
