@@ -1600,15 +1600,12 @@ fun LedgerContent(
 
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
-                        // ★ 改良設計：移除容易產生渲染 Bug 嘅 shadow
-                        // ★ 改為使用無陰影嘅圓角懸浮卡片，加入極微細嘅邊框 (BorderStroke) 提升精緻度
-                        Surface(
+                        // ★ 完全摒棄 Surface 卡片，改用 Box 配合動態 containerColor
+                        // 背景色會同西選模式嘅外層容器完美同步漸變，徹底消滅所有陰影！
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp), // 左右留少少空位，營造輕盈懸浮感
-                            shape = RoundedCornerShape(14.dp),
-                            color = SURFACE_ELEVATED, 
-                            border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.7f)) // 柔和邊框
+                                .background(containerColor) 
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
@@ -1872,8 +1869,7 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Transparent)
-            .padding(bottom = 6.dp)
+            // 刪除咗原本嘅 .padding(bottom = 6.dp)，防止項目滾動時漏光產生黑影
             .onGloballyPositioned { coords ->
                 rootTop = coords.boundsInRoot().top
             }
