@@ -41,6 +41,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -3306,11 +3308,39 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    val items = topNotes.take(16) // 你可以將 16 改大啲，例如 32，因為依家可以向橫掃！
+    val items = topNotes.take(32) // 放寬到 32 個，因為依家可以向橫掃開新頁！
 
-    // ★ 自動計算高度：每行 38dp，最多 4 行，加上間距同上下 Padding (28dp)
-    val rowCount = minOf(4, maxOf(1, items.size))
-    val gridHeight = (rowCount * 38 + (rowCount - 1) * 8 + 28).dp
+    // ★ 核心算法：將一維陣列轉換為「左至右、上至下」嘅分頁矩陣
+    val itemsPerRow = 4 // 畫面每行顯示 4 個
+    val maxRows = 4     // 最多顯示 4 行
+    
+    // 動態計算需要幾多行 (最少 1 行，最多 4 行)
+    val visualRows = minOf(maxRows, maxOf(1, (items.size + itemsPerRow - 1) / itemsPerRow))
+    val pageSize = visualRows * itemsPerRow
+    
+    // 重新洗牌後嘅名單
+    val transposedItems = mutableListOf<Pair<String, Int>?>()
+    val numPages = maxOf(1, (items.size + pageSize - 1) / pageSize)
+    
+    for (p in 0 until numPages) {
+        val pageStart = p * pageSize
+        val pageItemsCount = minOf(items.size - pageStart, pageSize)
+        val colsInPage = minOf(itemsPerRow, pageItemsCount)
+        
+        for (c in 0 until colsInPage) {
+            for (r in 0 until visualRows) {
+                val localIndex = r * itemsPerRow + c
+                if (localIndex < pageItemsCount) {
+                    transposedItems.add(items[pageStart + localIndex])
+                } else {
+                    transposedItems.add(null) // 補齊空格，保持矩陣工整
+                }
+            }
+        }
+    }
+
+    // 動態高度計算：根據實際行數計算高度，唔會留白
+    val gridHeight = (visualRows * 38 + (visualRows - 1) * 8 + 28).dp
 
     Box(
         Modifier
@@ -3320,9 +3350,9 @@ fun QuickInputSection(
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
     ) {
-        // ★ 升級為 LazyHorizontalGrid：完美支援最多 4 行，超過自動向橫生長(開新頁)！
+        // ★ 使用 LazyHorizontalGrid 配合洗牌算法，完美實現分頁橫掃 + 平滑換位
         LazyHorizontalGrid(
-            rows = GridCells.Fixed(rowCount),
+            rows = GridCells.Fixed(visualRows),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(gridHeight)
@@ -3331,23 +3361,32 @@ fun QuickInputSection(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
-            // 繼續使用 items 配合手動 index，確保動畫流暢同時避開任何 Import 衝突 Bug
-            items(items, key = { item -> item.first }) { (name, _) ->
-                val index = items.indexOfFirst { it.first == name }
-                Box(
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        placementSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
-                    )
-                ) {
-                    AnimatedQuickChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        index = maxOf(0, index),
-                        animatedNames = animatedQuickInputs,
-                        onClick = { onClick(name) }
-                    )
+            itemsIndexed(
+                items = transposedItems,
+                // 為每個格仔綁定唯一 ID，確保動畫對位精準
+                key = { index, item -> item?.first ?: "empty_$index" }
+            ) { _, item ->
+                if (item != null) {
+                    val name = item.first
+                    val originalIndex = items.indexOfFirst { it.first == name }
+                    Box(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            placementSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                        )
+                    ) {
+                        AnimatedQuickChip(
+                            name = name,
+                            iconUrl = noteIconMap[name] ?: "",
+                            index = maxOf(0, originalIndex),
+                            animatedNames = animatedQuickInputs,
+                            onClick = { onClick(name) }
+                        )
+                    }
+                } else {
+                    // 隱形佔位符，撐起矩陣結構
+                    Spacer(Modifier.fillMaxSize())
                 }
             }
         }
