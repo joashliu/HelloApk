@@ -3131,32 +3131,35 @@ private fun FlowRowScope.AnimatedQuickChip(
     onClick: () -> Unit
 ) {
     val alreadyAnimated = animatedNames.containsKey(name)
-    var visible by remember { mutableStateOf(alreadyAnimated) }
+
+    // 純視覺動畫：佈局空間由始至終都佔住，FlowRow 永遠唔會重排
+    val animProgress = remember { Animatable(if (alreadyAnimated) 1f else 0f) }
+
     LaunchedEffect(name) {
         if (!animatedNames.containsKey(name)) {
             animatedNames[name] = true
             delay((index * 24L).coerceAtMost(260L))
-            visible = true
+            animProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = 0.85f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
         }
     }
 
-    // 只用 fade + scale，唔改尺寸 → 唔會觸發 FlowRow 重排 → 唔會上下跳
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(260, easing = LinearOutSlowInEasing)) +
-                scaleIn(
-                    initialScale = 0.92f,
-                    animationSpec = spring(
-                        dampingRatio = 0.85f,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ),
-        exit = fadeOut(tween(160, easing = FastOutLinearInEasing)) +
-                scaleOut(
-                    targetScale = 0.92f,
-                    animationSpec = tween(160, easing = FastOutLinearInEasing)
-                ),
-        modifier = Modifier.weight(1f)
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .graphicsLayer {
+                val p = animProgress.value
+                alpha = p
+                // 微微放大效果，視覺上自然
+                scaleX = 0.92f + 0.08f * p
+                scaleY = 0.92f + 0.08f * p
+                transformOrigin = TransformOrigin.Center
+            }
     ) {
         QuickInputChip(
             name = name,
@@ -3183,9 +3186,11 @@ fun QuickInputSection(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
-            .clip(RoundedCornerShape(18.dp))   // 收縮時內容被裁切，唔會突出
+            .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            .heightIn(max = 180.dp)
+            // 關鍵：requiredHeightIn 忽略父容器嘅高度約束
+            // 即使外層 AnimatedVisibility 收縮，內部佈局都完全唔受影響
+            .requiredHeightIn(max = 180.dp)
     ) {
         FlowRow(
             modifier = Modifier
