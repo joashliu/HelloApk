@@ -1099,6 +1099,7 @@ private fun BoxScope.KeyboardAndFabLayer(
                 start = 16.dp, end = 86.dp,
                 bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
             )
+            .height(56.dp) // ★ 加入呢行：強制高度同 FAB 一致，確保完美水平置中對齊
             .graphicsLayer {
                 val p = progressProvider()
                 val fabAlpha = if (showKeyboard) {
