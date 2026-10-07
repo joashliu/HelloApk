@@ -2863,10 +2863,11 @@ fun TopStats(
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 4.dp),
+        // 稍微增加上下 Padding，由 4.dp 加到 6.dp，令整體 TopStats 加高少少
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 第一槽位：收入 (根據闊度加入淡入及微縮放，避免文字擠壓變形)
+        // 第一槽位：收入
         if (showIncome || incomeW > 0.001f) {
             Box(
                 modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -2883,7 +2884,8 @@ fun TopStats(
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(16.dp)) {
+                    // 標題行高度由 16.dp 增加至 22.dp，防止中文字被截斷
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                         Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
@@ -2918,7 +2920,8 @@ fun TopStats(
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(16.dp)) {
+                    // 標題行高度由 16.dp 增加至 22.dp
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                         Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
@@ -2936,7 +2939,7 @@ fun TopStats(
             }
         }
 
-        // 第三槽位：餘額 / 筆數切換 (永遠佔據 1f 比例，使用老虎機垂直滑動動畫互相取代)
+        // 第三槽位：餘額 / 筆數切換
         Box(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
@@ -2945,11 +2948,9 @@ fun TopStats(
                 targetState = isFilterMode,
                 transitionSpec = {
                     if (targetState) {
-                        // 進入西選：筆數由下至上推入，餘額向上推走
                         (slideInVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
                         (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(300)))
                     } else {
-                        // 離開西選：餘額由上至下推入，筆數向下推走
                         (slideInVertically(tween(420, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
                         (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
                     }
@@ -2957,10 +2958,10 @@ fun TopStats(
                 label = "balanceCountAnim"
             ) { isFilter ->
                 if (!isFilter) {
-                    // 顯示餘額
                     val balColor = if (animBalance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
                     Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(16.dp)) {
+                        // 標題行高度由 16.dp 增加至 22.dp
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                             Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
@@ -2976,10 +2977,9 @@ fun TopStats(
                         )
                     }
                 } else {
-                    // 顯示筆數
                     Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(16.dp)) {
-                            // 保持與餘額一樣嘅高度 (16.dp) 確保動畫切換嗰陣唔會上下跳動
+                        // 標題行高度由 16.dp 增加至 22.dp
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                             Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                         Spacer(Modifier.height(4.dp))
