@@ -51,6 +51,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -3305,7 +3306,11 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    val items = topNotes.take(16)
+    val items = topNotes.take(16) // 你可以將 16 改大啲，例如 32，因為依家可以向橫掃！
+
+    // ★ 自動計算高度：每行 38dp，最多 4 行，加上間距同上下 Padding (28dp)
+    val rowCount = minOf(4, maxOf(1, items.size))
+    val gridHeight = (rowCount * 38 + (rowCount - 1) * 8 + 28).dp
 
     Box(
         Modifier
@@ -3315,13 +3320,20 @@ fun QuickInputSection(
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
     ) {
-        // ★ 升級為 LazyRow 橫向捲動，完美支援 animateItem 平滑換位！
-        LazyRow(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+        // ★ 升級為 LazyHorizontalGrid：完美支援最多 4 行，超過自動向橫生長(開新頁)！
+        LazyHorizontalGrid(
+            rows = GridCells.Fixed(rowCount),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(gridHeight)
+                .padding(vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
-            itemsIndexed(items, key = { _, item -> item.first }) { index, (name, _) ->
+            // 繼續使用 items 配合手動 index，確保動畫流暢同時避開任何 Import 衝突 Bug
+            items(items, key = { item -> item.first }) { (name, _) ->
+                val index = items.indexOfFirst { it.first == name }
                 Box(
                     modifier = Modifier.animateItem(
                         fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -3332,7 +3344,7 @@ fun QuickInputSection(
                     AnimatedQuickChip(
                         name = name,
                         iconUrl = noteIconMap[name] ?: "",
-                        index = index,
+                        index = maxOf(0, index),
                         animatedNames = animatedQuickInputs,
                         onClick = { onClick(name) }
                     )
@@ -3341,7 +3353,6 @@ fun QuickInputSection(
         }
     }
 }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarFilterChip(
