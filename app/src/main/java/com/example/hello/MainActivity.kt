@@ -1487,10 +1487,27 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
+    // 記住入西選前嘅滾動位置
+    var preFilterIndex by remember { mutableIntStateOf(-1) }
+    var preFilterOffset by remember { mutableIntStateOf(0) }
+
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
             try { listState.requestScrollToItem(0) }
             catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
+        }
+    }
+
+    // 當離開西選模式嗰陣，瞬間跳返去記低咗嘅位置
+    LaunchedEffect(filterMode) {
+        if (!filterMode && preFilterIndex >= 0) {
+            try { 
+                listState.requestScrollToItem(preFilterIndex, preFilterOffset) 
+            } catch (_: Exception) {
+                try { listState.scrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) {}
+            }
+            // 還原後重置
+            preFilterIndex = -1
         }
     }
 
@@ -1555,7 +1572,14 @@ fun LedgerContent(
                                 onExpand = onExpandChange,
                                 onCopy = { onCopyClick(r) },
                                 onEdit = { onEditClick(r) },
-                                onFilter = { onFilterByName(r.note) },
+                                onFilter = {
+                                    // 點擊篩選前，如果本身未喺西選模式，就記低當前畫面嘅位置
+                                    if (!filterMode) {
+                                        preFilterIndex = listState.firstVisibleItemIndex
+                                        preFilterOffset = listState.firstVisibleItemScrollOffset
+                                    }
+                                    onFilterByName(r.note)
+                                },
                                 onDelete = { onDeleteClick(r) },
                                 onChangeIcon = { onChangeIconClick(r) },
                                 hideCategory = true
@@ -1608,7 +1632,14 @@ fun LedgerContent(
                                     onExpand = onExpandChange,
                                     onCopy = { onCopyClick(r) },
                                     onEdit = { onEditClick(r) },
-                                    onFilter = { onFilterByName(r.note) },
+                                    onFilter = {
+                                        // 點擊篩選前，如果本身未喺西選模式，就記低當前畫面嘅位置
+                                        if (!filterMode) {
+                                            preFilterIndex = listState.firstVisibleItemIndex
+                                            preFilterOffset = listState.firstVisibleItemScrollOffset
+                                        }
+                                        onFilterByName(r.note)
+                                    },
                                     onDelete = { onDeleteClick(r) },
                                     onChangeIcon = { onChangeIconClick(r) }
                                 )
@@ -1624,12 +1655,11 @@ fun LedgerContent(
     }
 
     Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        // ★★★ 將頂部 Row 移出 AnimatedContent，令 TopStats 可以獨立平滑動畫
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp)
-                .padding(top = 4.dp, bottom = 0.dp), // 將 padding 拆開兩行，解決編譯錯誤
+                .padding(top = 4.dp, bottom = 0.dp), // 將 padding 拆開解決編譯錯誤
             verticalAlignment = Alignment.CenterVertically
         ) {
             AnimatedVisibility(
@@ -1655,7 +1685,7 @@ fun LedgerContent(
                 )
             }
 
-            // 顯示未來項目按鈕 (眼仔)
+            // 眼仔常駐按鈕
             IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                 Icon(
                     if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
