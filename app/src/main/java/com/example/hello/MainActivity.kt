@@ -1600,12 +1600,15 @@ fun LedgerContent(
 
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
+                        // ★ 改良設計：移除容易產生渲染 Bug 嘅 shadow
+                        // ★ 改為使用無陰影嘅圓角懸浮卡片，加入極微細嘅邊框 (BorderStroke) 提升精緻度
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .shadow(elevation = 2.dp, shape = RoundedCornerShape(24.dp)),
-                            shape = RoundedCornerShape(24.dp),
-                            color = SURFACE_CARD
+                                .padding(horizontal = 8.dp), // 左右留少少空位，營造輕盈懸浮感
+                            shape = RoundedCornerShape(14.dp),
+                            color = SURFACE_ELEVATED, 
+                            border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.7f)) // 柔和邊框
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
@@ -3079,8 +3082,8 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(SURFACE_ELEVATED)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            // ★ 移除咗原本寫死嘅 .background(SURFACE_ELEVATED)，交畀外層 Surface 統一控制
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
