@@ -54,6 +54,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -3255,13 +3257,15 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AnimatedQuickChip( // 移除咗 FlowRowScope 限制
+fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope，解鎖 weight 拉伸功能
     name: String,
     iconUrl: String,
     index: Int,
     animatedNames: MutableMap<String, Boolean>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val alreadyAnimated = animatedNames.containsKey(name)
     val animProgress = remember { Animatable(if (alreadyAnimated) 1f else 0f) }
@@ -3281,7 +3285,7 @@ private fun AnimatedQuickChip( // 移除咗 FlowRowScope 限制
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .graphicsLayer {
                 val p = animProgress.value
                 alpha = p
@@ -3293,13 +3297,13 @@ private fun AnimatedQuickChip( // 移除咗 FlowRowScope 限制
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            modifier = Modifier, // 移除 fillMaxWidth 等佢根據內容自然長度
+            modifier = Modifier.fillMaxWidth(), // 充滿 Box 空間
             onClick = onClick
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3308,39 +3312,12 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    val items = topNotes.take(32) // 放寬到 32 個，因為依家可以向橫掃開新頁！
-
-    // ★ 核心算法：將一維陣列轉換為「左至右、上至下」嘅分頁矩陣
-    val itemsPerRow = 4 // 畫面每行顯示 4 個
-    val maxRows = 4     // 最多顯示 4 行
+    val items = topNotes.take(36) // 放寬到 36 個，支援 3 頁滑動
+    val itemsPerPage = 12 // 每頁放 12 個，確保最多只會有大約 4 行
+    val pages = items.chunked(itemsPerPage)
     
-    // 動態計算需要幾多行 (最少 1 行，最多 4 行)
-    val visualRows = minOf(maxRows, maxOf(1, (items.size + itemsPerRow - 1) / itemsPerRow))
-    val pageSize = visualRows * itemsPerRow
-    
-    // 重新洗牌後嘅名單
-    val transposedItems = mutableListOf<Pair<String, Int>?>()
-    val numPages = maxOf(1, (items.size + pageSize - 1) / pageSize)
-    
-    for (p in 0 until numPages) {
-        val pageStart = p * pageSize
-        val pageItemsCount = minOf(items.size - pageStart, pageSize)
-        val colsInPage = minOf(itemsPerRow, pageItemsCount)
-        
-        for (c in 0 until colsInPage) {
-            for (r in 0 until visualRows) {
-                val localIndex = r * itemsPerRow + c
-                if (localIndex < pageItemsCount) {
-                    transposedItems.add(items[pageStart + localIndex])
-                } else {
-                    transposedItems.add(null) // 補齊空格，保持矩陣工整
-                }
-            }
-        }
-    }
-
-    // 動態高度計算：根據實際行數計算高度，唔會留白
-    val gridHeight = (visualRows * 38 + (visualRows - 1) * 8 + 28).dp
+    // 初始化橫向分頁器狀態
+    val pagerState = rememberPagerState(pageCount = { pages.size })
 
     Box(
         Modifier
@@ -3349,44 +3326,54 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
+            // 自動適應每頁高度，平滑切換
+            .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
-        // ★ 使用 LazyHorizontalGrid 配合洗牌算法，完美實現分頁橫掃 + 平滑換位
-        LazyHorizontalGrid(
-            rows = GridCells.Fixed(visualRows),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(gridHeight)
-                .padding(vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp)
-        ) {
-            itemsIndexed(
-                items = transposedItems,
-                // 為每個格仔綁定唯一 ID，確保動畫對位精準
-                key = { index, item -> item?.first ?: "empty_$index" }
-            ) { _, item ->
-                if (item != null) {
-                    val name = item.first
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top
+        ) { page ->
+            // ★ 使用 FlowRow 實現「左至右、排滿自動落下一行」
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 14.dp)
+                    .padding(bottom = if (pages.size > 1) 16.dp else 0.dp), // 為分頁點點留白
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pages[page].forEach { (name, _) ->
                     val originalIndex = items.indexOfFirst { it.first == name }
+                    AnimatedQuickChip(
+                        name = name,
+                        iconUrl = noteIconMap[name] ?: "",
+                        index = maxOf(0, originalIndex),
+                        animatedNames = animatedQuickInputs,
+                        onClick = { onClick(name) },
+                        // ★ 核心：設定 weight(1f)，系統會自動拉伸所有 Clip 填滿空隙，達成 100% 左右對齊！
+                        modifier = Modifier.weight(1f) 
+                    )
+                }
+            }
+        }
+        
+        // 底部加入分頁指示器 (點點)
+        if (pages.size > 1) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                repeat(pages.size) { i ->
+                    val isSelected = pagerState.currentPage == i
                     Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            placementSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
-                        )
-                    ) {
-                        AnimatedQuickChip(
-                            name = name,
-                            iconUrl = noteIconMap[name] ?: "",
-                            index = maxOf(0, originalIndex),
-                            animatedNames = animatedQuickInputs,
-                            onClick = { onClick(name) }
-                        )
-                    }
-                } else {
-                    // 隱形佔位符，撐起矩陣結構
-                    Spacer(Modifier.fillMaxSize())
+                        Modifier
+                            .size(if (isSelected) 6.dp else 4.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR)
+                    )
                 }
             }
         }
