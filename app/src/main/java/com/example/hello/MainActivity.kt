@@ -720,6 +720,11 @@ fun MainApp() {
         showUndoToast = false
         recentlyDeletedRecord = null
         deletingRecordId = null
+        
+        // ★ 加入呢兩行，令復原嗰陣觸發「新增項目」嘅平滑推擠動畫
+        justAddedId = target.id
+        scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
+        
         try { db.collection("records").document(target.id).set(target) } catch (_: Exception) {}
     }
 
@@ -3035,9 +3040,15 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    var prevLen by remember { mutableIntStateOf(text.length) }
-    val isClearing = prevLen > 1 && text == "0"
-    LaunchedEffect(text) { prevLen = text.length }
+    // 記錄上一次嘅字串狀態
+    var prevText by remember { mutableStateOf(text) }
+    val isClearing = prevText.length > 1 && text == "0"
+    
+    // ★ 核心邏輯：判斷是否為「第一隻數字輸入」或「刪除剩返0」
+    val isPlaceholderChange = (prevText == "0" && text.length == 1 && text != "0") ||
+                              (prevText.length == 1 && text == "0" && prevText != "0")
+
+    LaunchedEffect(text) { prevText = text }
 
     Row(
         modifier = modifier.animateContentSize(),
@@ -3051,8 +3062,15 @@ fun AnimatedAmount(
                     AnimatedContent(
                         targetState = c,
                         transitionSpec = {
-                            (slideInVertically { it } + fadeIn()) togetherWith
-                                    (slideOutVertically { -it } + fadeOut())
+                            if (isPlaceholderChange) {
+                                // 第一個數字：改為 Q 彈放大彈出效果 (Pop)
+                                (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
+                                (scaleOut(tween(150), targetScale = 0.5f) + fadeOut(tween(150)))
+                            } else {
+                                // 之後嘅數字：保留你滿意嘅老虎機滾動
+                                (slideInVertically { it } + fadeIn()) togetherWith
+                                (slideOutVertically { -it } + fadeOut())
+                            }
                         },
                         label = "d_$idx"
                     ) { ch ->
@@ -3233,9 +3251,8 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FlowRowScope.AnimatedQuickChip(
+private fun AnimatedQuickChip( // 移除咗 FlowRowScope 限制
     name: String,
     iconUrl: String,
     index: Int,
@@ -3243,7 +3260,6 @@ private fun FlowRowScope.AnimatedQuickChip(
     onClick: () -> Unit
 ) {
     val alreadyAnimated = animatedNames.containsKey(name)
-
     val animProgress = remember { Animatable(if (alreadyAnimated) 1f else 0f) }
 
     LaunchedEffect(name) {
@@ -3262,7 +3278,6 @@ private fun FlowRowScope.AnimatedQuickChip(
 
     Box(
         modifier = Modifier
-            .weight(1f)
             .graphicsLayer {
                 val p = animProgress.value
                 alpha = p
@@ -3274,13 +3289,13 @@ private fun FlowRowScope.AnimatedQuickChip(
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier, // 移除 fillMaxWidth 等佢根據內容自然長度
             onClick = onClick
         )
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3298,18 +3313,21 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            .requiredHeightIn(max = 180.dp)
     ) {
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(14.dp),
+        // ★ 升級為 LazyRow 橫向捲動，完美支援 animateItem 平滑換位！
+        LazyRow(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp)
         ) {
-            items.forEachIndexed { index, (name, _) ->
-                key(name) {
+            itemsIndexed(items, key = { _, item -> item.first }) { index, (name, _) ->
+                Box(
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        placementSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                    )
+                ) {
                     AnimatedQuickChip(
                         name = name,
                         iconUrl = noteIconMap[name] ?: "",
