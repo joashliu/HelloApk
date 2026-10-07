@@ -1731,9 +1731,9 @@ fun LedgerContent(
                 AnimatedVisibility(
                     visible = !filterMode && topNotes.isNotEmpty(),
                     enter = fadeIn(
-                        animationSpec = tween(300, easing = LinearOutSlowInEasing)
+                        animationSpec = tween(280, easing = LinearOutSlowInEasing)
                     ) + expandVertically(
-                        animationSpec = tween(350, easing = FastOutSlowInEasing),
+                        animationSpec = tween(340, easing = FastOutSlowInEasing),
                         expandFrom = Alignment.Top
                     ),
                     exit = fadeOut(
@@ -1743,7 +1743,8 @@ fun LedgerContent(
                         shrinkTowards = Alignment.Top
                     )
                 ) {
-                    Column {
+                    // clipToBounds：收縮時，內部 chips 溢出內容被乾淨裁切，唔會突出邊界
+                    Column(Modifier.clipToBounds()) {
                         QuickInputSection(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
@@ -3134,37 +3135,27 @@ private fun FlowRowScope.AnimatedQuickChip(
     LaunchedEffect(name) {
         if (!animatedNames.containsKey(name)) {
             animatedNames[name] = true
-            delay((index * 28L).coerceAtMost(320L))
+            delay((index * 24L).coerceAtMost(260L))
             visible = true
         }
     }
 
+    // 只用 fade + scale，唔改尺寸 → 唔會觸發 FlowRow 重排 → 唔會上下跳
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(
-            animationSpec = tween(280, easing = LinearOutSlowInEasing)
-        ) + scaleIn(
-            initialScale = 0.85f,
-            animationSpec = spring(
-                dampingRatio = 0.72f,
-                stiffness = Spring.StiffnessMediumLow
-            )
-        ) + expandHorizontally(
-            expandFrom = Alignment.CenterHorizontally,
-            animationSpec = spring(
-                dampingRatio = 0.82f,
-                stiffness = Spring.StiffnessMediumLow
-            )
-        ),
-        exit = fadeOut(
-            animationSpec = tween(180, easing = FastOutLinearInEasing)
-        ) + scaleOut(
-            targetScale = 0.85f,
-            animationSpec = tween(180, easing = FastOutLinearInEasing)
-        ) + shrinkHorizontally(
-            shrinkTowards = Alignment.CenterHorizontally,
-            animationSpec = tween(200, easing = FastOutLinearInEasing)
-        ),
+        enter = fadeIn(tween(260, easing = LinearOutSlowInEasing)) +
+                scaleIn(
+                    initialScale = 0.92f,
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ),
+        exit = fadeOut(tween(160, easing = FastOutLinearInEasing)) +
+                scaleOut(
+                    targetScale = 0.92f,
+                    animationSpec = tween(160, easing = FastOutLinearInEasing)
+                ),
         modifier = Modifier.weight(1f)
     ) {
         QuickInputChip(
@@ -3191,8 +3182,9 @@ fun QuickInputSection(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp)
-            .shadow(2.dp, RoundedCornerShape(18.dp))
-            .background(SURFACE_CARD, RoundedCornerShape(18.dp))
+            .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
+            .clip(RoundedCornerShape(18.dp))   // 收縮時內容被裁切，唔會突出
+            .background(SURFACE_CARD)
             .heightIn(max = 180.dp)
     ) {
         FlowRow(
