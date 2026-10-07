@@ -1644,51 +1644,53 @@ fun LedgerContent(
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             dayRecords.forEachIndexed { idx, r ->
-                                AnimatedRecordItem(
-                                    animateOnMount = r.id == justAddedId,
-                                    isDeleting = r.id == deletingRecordId
-                                ) {
-                                    SwipeableRecordItem(
-                                        backgroundColor = SURFACE_CARD, 
-                                        record = r,
-                                        expandedId = expandedId,
-                                        onExpand = onExpandChange,
-                                        onCopy = { onCopyClick(r) },
-                                        onEdit = { onEditClick(r) },
-                                        onFilter = {
-                                            if (!filterMode) {
-                                                preFilterIndex = listState.firstVisibleItemIndex
-                                                preFilterOffset = listState.firstVisibleItemScrollOffset
-                                            }
-                                            onFilterByName(r.note)
-                                        },
-                                        onDelete = { onDeleteClick(r) },
-                                        onChangeIcon = { onChangeIconClick(r) }
-                                    )
-                                }
-                                
-                                if (afterSaveHint?.recordId == r.id) {
-                                    CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
-                                }
+                                // ★ 解決 BUG 嘅核心：為每個項目綁定唯一 ID，禁止 Compose 認錯人
+                                key(r.id) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        AnimatedRecordItem(
+                                            animateOnMount = r.id == justAddedId,
+                                            isDeleting = r.id == deletingRecordId
+                                        ) {
+                                            SwipeableRecordItem(
+                                                backgroundColor = SURFACE_CARD, 
+                                                record = r,
+                                                expandedId = expandedId,
+                                                onExpand = onExpandChange,
+                                                onCopy = { onCopyClick(r) },
+                                                onEdit = { onEditClick(r) },
+                                                onFilter = {
+                                                    if (!filterMode) {
+                                                        preFilterIndex = listState.firstVisibleItemIndex
+                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                    }
+                                                    onFilterByName(r.note)
+                                                },
+                                                onDelete = { onDeleteClick(r) },
+                                                onChangeIcon = { onChangeIconClick(r) }
+                                            )
+                                        }
+                                        
+                                        if (afterSaveHint?.recordId == r.id) {
+                                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                        }
 
-                                // 加入極精緻嘅淡色分割線
-                                if (idx < dayRecords.lastIndex) {
-                                    AnimatedVisibility(
-                                        visible = deletingRecordId != r.id,
-                                        enter = fadeIn(tween(200)),
-                                        exit = fadeOut(tween(200))
-                                    ) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                            color = DIVIDER_COLOR.copy(alpha = 0.4f),
-                                            thickness = 0.5.dp
-                                        )
+                                        if (idx < dayRecords.lastIndex) {
+                                            AnimatedVisibility(
+                                                visible = deletingRecordId != r.id,
+                                                enter = fadeIn(tween(200)),
+                                                exit = fadeOut(tween(200))
+                                            ) {
+                                                HorizontalDivider(
+                                                    modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                                    color = DIVIDER_COLOR.copy(alpha = 0.4f),
+                                                    thickness = 0.5.dp
+                                                )
+                                            }
+                                        }
                                     }
-                                }
+                                } // key 結尾
                             }
                         }
-                    }
-                }
                 
                 // 卡片之間留白
                 item(key = "spacer_$dateKey") {
@@ -1926,90 +1928,74 @@ fun AnimatedRecordItem(
     var appeared by remember { mutableStateOf(!animateOnMount) }
     LaunchedEffect(animateOnMount) {
         if (animateOnMount) {
-            delay(16)
+            delay(30) // 輕微延遲等 0 高度渲染完成，確保動畫順利觸發
             appeared = true
         }
     }
 
+    // ★ 核心改良：當新增項目時高度從 0 展開，刪除時高度縮回 0，自然推擠其他項目
+    val targetHeight = if (isDeleting) 0.dp else if (animateOnMount && !appeared) 0.dp else 72.dp
     val itemHeight by animateDpAsState(
-        targetValue = if (isDeleting) 0.dp else 72.dp,
-        animationSpec = tween(550, easing = FastOutSlowInEasing),
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy, // 帶有微回彈嘅順滑感
+            stiffness = Spring.StiffnessMediumLow
+        ),
         label = "eHeight"
     )
 
+    val targetScale = if (isDeleting) 0.85f else if (animateOnMount && !appeared) 0.85f else 1f
     val entranceScale by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0.65f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        targetValue = targetScale,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
         label = "eScale"
     )
+
+    val targetAlpha = if (isDeleting) 0f else if (animateOnMount && !appeared) 0f else 1f
     val entranceAlpha by animateFloatAsState(
-        targetValue = if (appeared) 1f else 0f,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        targetValue = targetAlpha,
+        animationSpec = tween(if (isDeleting) 200 else 300, easing = FastOutSlowInEasing),
         label = "eAlpha"
     )
+
+    val targetTranslateY = if (animateOnMount && !appeared) 40f else 0f
     val entranceTranslationY by animateFloatAsState(
-        targetValue = if (appeared) 0f else 80f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+        targetValue = targetTranslateY,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
         label = "eY"
     )
 
     val particleProgress = remember { Animatable(0f) }
     LaunchedEffect(isDeleting) {
         if (isDeleting) {
-            particleProgress.snapTo(0f)
-            particleProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(550, easing = FastOutSlowInEasing)
-            )
-        } else {
-            particleProgress.snapTo(0f)
+            particleProgress.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
         }
     }
-
-    val particleCount = 90
+    
+    val particleCount = 60
     val random = remember { Random(42) }
     val particles = remember {
-        List(particleCount) {
-            Triple(
-                random.nextFloat(),
-                random.nextFloat(),
-                (random.nextFloat() - 0.5f) * 280f
-            )
-        }
+        List(particleCount) { Triple(random.nextFloat(), random.nextFloat(), (random.nextFloat() - 0.5f) * 280f) }
     }
     val particleColors = remember {
-        listOf(
-            BRAND_PRIMARY,
-            BRAND_PRIMARY_DARK,
-            Color(0xFF818CF8),
-            Color(0xFFA5B4FC),
-            Color(0xFFC7D2FE),
-            Color(0xFFFBBF24),
-            Color(0xFFF59E0B),
-            Color(0xFF34D399)
-        )
+        listOf(BRAND_PRIMARY, BRAND_PRIMARY_DARK, Color(0xFF818CF8), Color(0xFFFBBF24), Color(0xFF34D399))
     }
 
     Box(
         Modifier
             .fillMaxWidth()
             .height(itemHeight)
+            .clipToBounds() // 確保高度收縮時，內容會被完美裁切，唔會溢出
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(72.dp) // 鎖死內部高度，保證內容排版絕對唔會變形
                 .graphicsLayer {
-                    if (isDeleting) {
-                        val prog = particleProgress.value
-                        alpha = (1f - prog * 1.05f).coerceIn(0f, 1f)
-                        scaleX = 1f - prog * 0.25f
-                        scaleY = (1f - prog).coerceIn(0f, 1f)
-                    } else {
-                        alpha = entranceAlpha
-                        scaleX = entranceScale
-                        scaleY = entranceScale
-                        translationY = entranceTranslationY
-                    }
+                    alpha = entranceAlpha
+                    scaleX = entranceScale
+                    scaleY = entranceScale
+                    translationY = entranceTranslationY
                 }
         ) {
             content()
@@ -2019,25 +2005,19 @@ fun AnimatedRecordItem(
             Canvas(modifier = Modifier.matchParentSize()) {
                 val prog = particleProgress.value
                 if (prog <= 0f) return@Canvas
-
                 val w = size.width
-                val h = size.height
+                val h = 72.dp.toPx()
                 particles.forEachIndexed { idx, (rx, ry, angle) ->
                     val startX = rx * w
                     val startY = ry * h
-                    val dist = prog * 280f
+                    val dist = prog * 300f
                     val rad = Math.toRadians(angle.toDouble())
                     val px = startX + dist * kotlin.math.cos(rad).toFloat()
-                    val py = startY + dist * kotlin.math.sin(rad).toFloat() - prog * 80f
+                    val py = startY + dist * kotlin.math.sin(rad).toFloat() - prog * 100f
                     val pAlpha = (1f - prog).coerceIn(0f, 1f)
                     val pRadius = (1.6.dp.toPx() * (1f - prog * 0.4f)).coerceAtLeast(0.5f)
                     drawCircle(
-                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.15f),
-                        radius = pRadius * 2.0f,
-                        center = Offset(px, py)
-                    )
-                    drawCircle(
-                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha * 0.95f),
+                        color = particleColors[idx % particleColors.size].copy(alpha = pAlpha),
                         radius = pRadius,
                         center = Offset(px, py)
                     )
