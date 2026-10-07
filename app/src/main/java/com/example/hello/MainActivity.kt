@@ -1587,43 +1587,51 @@ fun LedgerContent(
 
     val listContent: LazyListScope.() -> Unit = {
         if (isExactNoteFilter) {
+            // 單一名稱搜尋模式：每個項目獨立成一張卡片
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
                 Box(
                     modifier = Modifier
-                        .padding(top = if (idx == 0) 6.dp else 0.dp)
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
                         .animateItem(
                             fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
                             fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
                             placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
                         )
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        AnimatedRecordItem(
-                            animateOnMount = r.id == justAddedId,
-                            isDeleting = r.id == deletingRecordId
-                        ) {
-                            SwipeableRecordItem(
-                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                record = r,
-                                expandedId = expandedId,
-                                onExpand = onExpandChange,
-                                onCopy = { onCopyClick(r) },
-                                onEdit = { onEditClick(r) },
-                                onFilter = {
-                                    // 點擊篩選前，如果本身未喺西選模式，就記低當前畫面嘅位置
-                                    if (!filterMode) {
-                                        preFilterIndex = listState.firstVisibleItemIndex
-                                        preFilterOffset = listState.firstVisibleItemScrollOffset
-                                    }
-                                    onFilterByName(r.note)
-                                },
-                                onDelete = { onDeleteClick(r) },
-                                onChangeIcon = { onChangeIconClick(r) },
-                                hideCategory = true
-                            )
-                        }
-                        if (afterSaveHint?.recordId == r.id) {
-                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        color = SURFACE_CARD,
+                        shadowElevation = 1.dp,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            AnimatedRecordItem(
+                                animateOnMount = r.id == justAddedId,
+                                isDeleting = r.id == deletingRecordId
+                            ) {
+                                SwipeableRecordItem(
+                                    backgroundColor = Color.Transparent, // 卡片已經有白底
+                                    record = r,
+                                    expandedId = expandedId,
+                                    onExpand = onExpandChange,
+                                    onCopy = { onCopyClick(r) },
+                                    onEdit = { onEditClick(r) },
+                                    onFilter = {
+                                        if (!filterMode) {
+                                            preFilterIndex = listState.firstVisibleItemIndex
+                                            preFilterOffset = listState.firstVisibleItemScrollOffset
+                                        }
+                                        onFilterByName(r.note)
+                                    },
+                                    onDelete = { onDeleteClick(r) },
+                                    onChangeIcon = { onChangeIconClick(r) },
+                                    hideCategory = true
+                                )
+                            }
+                            if (afterSaveHint?.recordId == r.id) {
+                                CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                            }
                         }
                     }
                 }
@@ -1635,57 +1643,88 @@ fun LedgerContent(
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
+                // 1. 頂部日期標題 (維持背景漸變無縫融合)
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
-                        // ★ 將背景強制設定為 SURFACE_CARD (白色)
-                        // 唔再跟隨外層容器變透明，時刻保持白底
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(SURFACE_CARD) 
+                                .background(containerColor) 
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
                     }
                 }
 
-                itemsIndexed(items = dayRecords, key = { _, r -> r.id }) { idx, r ->
-                    Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
-                        )
+                // 2. 將整日嘅記錄放入一個超靚嘅大圓角卡片入面
+                item(key = "group_$dateKey") {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .animateItem(
+                                fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                            ),
+                        shape = RoundedCornerShape(20.dp), // 20.dp 特大圓角營造現代感
+                        color = SURFACE_CARD,
+                        shadowElevation = 1.dp, // 輕微懸浮感
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            AnimatedRecordItem(
-                                animateOnMount = r.id == justAddedId,
-                                isDeleting = r.id == deletingRecordId
-                            ) {
-                                SwipeableRecordItem(
-                                    backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                    record = r,
-                                    expandedId = expandedId,
-                                    onExpand = onExpandChange,
-                                    onCopy = { onCopyClick(r) },
-                                    onEdit = { onEditClick(r) },
-                                    onFilter = {
-                                        // 點擊篩選前，如果本身未喺西選模式，就記低當前畫面嘅位置
-                                        if (!filterMode) {
-                                            preFilterIndex = listState.firstVisibleItemIndex
-                                            preFilterOffset = listState.firstVisibleItemScrollOffset
-                                        }
-                                        onFilterByName(r.note)
-                                    },
-                                    onDelete = { onDeleteClick(r) },
-                                    onChangeIcon = { onChangeIconClick(r) }
-                                )
-                            }
-                            if (afterSaveHint?.recordId == r.id) {
-                                CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                            dayRecords.forEachIndexed { idx, r ->
+                                AnimatedRecordItem(
+                                    animateOnMount = r.id == justAddedId,
+                                    isDeleting = r.id == deletingRecordId
+                                ) {
+                                    SwipeableRecordItem(
+                                        // 放棄梅花間竹色，統一用純白底色，更加高級
+                                        backgroundColor = SURFACE_CARD, 
+                                        record = r,
+                                        expandedId = expandedId,
+                                        onExpand = onExpandChange,
+                                        onCopy = { onCopyClick(r) },
+                                        onEdit = { onEditClick(r) },
+                                        onFilter = {
+                                            if (!filterMode) {
+                                                preFilterIndex = listState.firstVisibleItemIndex
+                                                preFilterOffset = listState.firstVisibleItemScrollOffset
+                                            }
+                                            onFilterByName(r.note)
+                                        },
+                                        onDelete = { onDeleteClick(r) },
+                                        onChangeIcon = { onChangeIconClick(r) }
+                                    )
+                                }
+                                
+                                if (afterSaveHint?.recordId == r.id) {
+                                    CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                }
+
+                                // 3. 卡片內部加入極精緻嘅淡色分割線 (最後一項唔加)
+                                if (idx < dayRecords.lastIndex) {
+                                    AnimatedVisibility(
+                                        visible = deletingRecordId != r.id,
+                                        enter = fadeIn(tween(200)),
+                                        exit = fadeOut(tween(200))
+                                    ) {
+                                        HorizontalDivider(
+                                            // 縮排 68.dp 令分割線同文字對齊，避開左邊圖標
+                                            modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                            color = DIVIDER_COLOR.copy(alpha = 0.4f),
+                                            thickness = 0.5.dp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
+                }
+                
+                // 4. 每日卡片之間留有呼吸空間
+                item(key = "spacer_$dateKey") {
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
         }
