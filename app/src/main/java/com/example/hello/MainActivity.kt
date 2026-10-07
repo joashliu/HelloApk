@@ -3296,13 +3296,14 @@ private fun AnimatedQuickChip(
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(), // 充滿網格空間
+            // ★ 移除 fillMaxWidth()，令 Clip 嘅闊度完全根據「文字內容」自然伸展
+            modifier = Modifier, 
             onClick = onClick
         )
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
@@ -3311,19 +3312,12 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    val items = topNotes.take(36)
+    val items = topNotes.take(42) // 放寬數量，因為依家可以橫掃
     
-    // 預設每頁放 12 個 (普通手機 Adaptive minSize=88.dp 通常會分 3 直行，3x4=12)
-    val itemsPerPage = 12
+    // 每頁大概放 14 個，確保通常只會排 3-4 行，唔會太擁擠
+    val itemsPerPage = 14
     val pages = items.chunked(itemsPerPage)
     val pagerState = rememberPagerState(pageCount = { pages.size })
-
-    // 動態計算高度，防止項目太少時留白太多
-    val maxItemsInAnyPage = pages.maxOfOrNull { it.size } ?: 1
-    val estimatedCols = 3
-    val estimatedRows = minOf(4, (maxItemsInAnyPage + estimatedCols - 1) / estimatedCols)
-    val paddingBottom = if (pages.size > 1) 16 else 0
-    val gridHeight = (estimatedRows * 38 + maxOf(0, estimatedRows - 1) * 8 + 28 + paddingBottom).dp
 
     Box(
         Modifier
@@ -3332,41 +3326,34 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
+            // ★ 廢除寫死嘅高度！改用 animateContentSize，等佢根據內容行數自動順滑撐開，徹底解決「露半截」Bug
             .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.Top // 確保每頁由頂部開始排
         ) { page ->
-            // ★ 升級為 LazyVerticalGrid：完美結合「左至右排滿換行」、「自適應左右貼邊對齊」同埋「animateItem平滑位移」！
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 88.dp), // 智能判斷行數，保證唔會夾硬縮細
+            // ★ 轉回 FlowRow，完美支援「按文字長短決定闊度」及「自動換行」
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(gridHeight)
                     .padding(horizontal = 14.dp, vertical = 14.dp)
-                    .padding(bottom = paddingBottom.dp),
+                    .padding(bottom = if (pages.size > 1) 16.dp else 0.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                userScrollEnabled = false // 禁止上下滑動，交畀外層 Pager 左右滑動
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(pages[page], key = { it.first }) { (name, _) ->
+                pages[page].forEach { (name, _) ->
                     val originalIndex = items.indexOfFirst { it.first == name }
-                    Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            placementSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
-                        )
-                    ) {
+                    
+                    // ★ 使用 key(name) 包住，協助系統喺重新排序時認得元件，減少閃爍感
+                    key(name) {
                         AnimatedQuickChip(
                             name = name,
                             iconUrl = noteIconMap[name] ?: "",
                             index = maxOf(0, originalIndex),
                             animatedNames = animatedQuickInputs,
-                            onClick = { onClick(name) },
-                            modifier = Modifier.fillMaxWidth()
+                            onClick = { onClick(name) }
                         )
                     }
                 }
