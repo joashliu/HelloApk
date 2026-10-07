@@ -3258,8 +3258,9 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AnimatedQuickChip(
+fun FlowRowScope.AnimatedQuickChip( // ★ 加入 FlowRowScope 嚟解鎖 weight 拉伸功能
     name: String,
     iconUrl: String,
     index: Int,
@@ -3286,6 +3287,8 @@ private fun AnimatedQuickChip(
 
     Box(
         modifier = modifier
+            // 加入尺寸動畫，盡量減低 FlowRow 冇移位動畫帶嚟嘅生硬感
+            .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
             .graphicsLayer {
                 val p = animProgress.value
                 alpha = p
@@ -3297,8 +3300,8 @@ private fun AnimatedQuickChip(
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            // ★ 移除 fillMaxWidth()，令 Clip 嘅闊度完全根據「文字內容」自然伸展
-            modifier = Modifier, 
+            // 填滿 weight 所分配嘅空間，文字會自動置中
+            modifier = Modifier.fillMaxWidth(), 
             onClick = onClick
         )
     }
@@ -3313,7 +3316,7 @@ fun QuickInputSection(
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
-    val items = topNotes.take(42) // 放寬數量，因為依家可以橫掃
+    val items = topNotes.take(42)
     
     // 每頁大概放 14 個，確保通常只會排 3-4 行，唔會太擁擠
     val itemsPerPage = 14
@@ -3327,15 +3330,14 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            // ★ 廢除寫死嘅高度！改用 animateContentSize，等佢根據內容行數自動順滑撐開，徹底解決「露半截」Bug
+            // 高度自動順滑撐開，唔會露半截
             .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top // 確保每頁由頂部開始排
+            verticalAlignment = Alignment.Top 
         ) { page ->
-            // ★ 轉回 FlowRow，完美支援「按文字長短決定闊度」及「自動換行」
             FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3347,14 +3349,15 @@ fun QuickInputSection(
                 pages[page].forEach { (name, _) ->
                     val originalIndex = items.indexOfFirst { it.first == name }
                     
-                    // ★ 使用 key(name) 包住，協助系統喺重新排序時認得元件，減少閃爍感
                     key(name) {
                         AnimatedQuickChip(
                             name = name,
                             iconUrl = noteIconMap[name] ?: "",
                             index = maxOf(0, originalIndex),
                             animatedNames = animatedQuickInputs,
-                            onClick = { onClick(name) }
+                            onClick = { onClick(name) },
+                            // ★ 終極核心：weight(1f) 會令同一行嘅 Clips 互相妥協拉伸，完美用盡一行闊度兼左右平齊！
+                            modifier = Modifier.weight(1f) 
                         )
                     }
                 }
