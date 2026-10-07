@@ -833,39 +833,73 @@ fun MainApp() {
 
         AnimatedVisibility(
             visible = showUndoToast,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
+            // 1. 改用帶有 Q 彈感嘅 Spring 動畫，令 Toast 彈出嚟嗰陣更加生動自然
+            enter = slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeIn(tween(250)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(250, easing = FastOutSlowInEasing)
+            ) + fadeOut(tween(200)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
+                .padding(horizontal = 20.dp) // 統一左右留白
         ) {
-            val blurModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Modifier.graphicsLayer {
-                    renderEffect = android.graphics.RenderEffect.createBlurEffect(
-                        30f, 30f, android.graphics.Shader.TileMode.CLAMP
-                    ).asComposeRenderEffect()
-                }
-            } else Modifier
-
-            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                Box(modifier = Modifier.matchParentSize().then(blurModifier))
-
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0x991E293B),
-                    border = BorderStroke(1.dp, Color(0x4DFFFFFF)),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier.fillMaxWidth()
+            // 2. 採用現代化嘅藥丸形狀 (CircleShape) 及高級深色實底，捨棄效能差嘅 Blur
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF1E293B), // 高級深石板灰
+                shadowElevation = 10.dp,
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 12.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("已刪除項目", color = Color.White, fontSize = 14.sp)
-                        TextButton(onClick = { restoreDeletedRecord() }) {
-                            Text("復原", color = BRAND_PRIMARY_LIGHT, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    // 左半部分：圖標 + 文字
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // 3. 加入圓底小圖標，視覺提示更清晰
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF334155)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "刪除",
+                                tint = Color(0xFFF87171), // 柔和嘅紅色提示
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
+                        Spacer(Modifier.width(12.dp))
+                        Text("記錄已刪除", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // 右半部分：獨立嘅小藥丸復原按鈕
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { restoreDeletedRecord() }
+                            .background(Color(0xFF312E81)) // 採用深邃嘅品牌主色做底
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "復原",
+                            color = BRAND_PRIMARY_LIGHT,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                     }
                 }
             }
