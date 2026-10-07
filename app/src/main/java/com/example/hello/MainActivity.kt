@@ -833,7 +833,6 @@ fun MainApp() {
 
         AnimatedVisibility(
             visible = showUndoToast,
-            // 1. 改用帶有 Q 彈感嘅 Spring 動畫，令 Toast 彈出嚟嗰陣更加生動自然
             enter = slideInVertically(
                 initialOffsetY = { it },
                 animationSpec = spring(
@@ -848,12 +847,11 @@ fun MainApp() {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
-                .padding(horizontal = 20.dp) // 統一左右留白
+                .padding(horizontal = 20.dp)
         ) {
-            // 2. 採用現代化嘅藥丸形狀 (CircleShape) 及高級深色實底，捨棄效能差嘅 Blur
             Surface(
                 shape = CircleShape,
-                color = Color(0xFF1E293B), // 高級深石板灰
+                color = Color(0xFF1E293B),
                 shadowElevation = 10.dp,
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
@@ -864,9 +862,7 @@ fun MainApp() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // 左半部分：圖標 + 文字
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 3. 加入圓底小圖標，視覺提示更清晰
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
@@ -877,7 +873,7 @@ fun MainApp() {
                             Icon(
                                 Icons.Default.Delete,
                                 contentDescription = "刪除",
-                                tint = Color(0xFFF87171), // 柔和嘅紅色提示
+                                tint = Color(0xFFF87171),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -885,12 +881,11 @@ fun MainApp() {
                         Text("記錄已刪除", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
 
-                    // 右半部分：獨立嘅小藥丸復原按鈕
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
                             .clickable { restoreDeletedRecord() }
-                            .background(Color(0xFF312E81)) // 採用深邃嘅品牌主色做底
+                            .background(Color(0xFF312E81))
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -1099,7 +1094,7 @@ private fun BoxScope.KeyboardAndFabLayer(
                 start = 16.dp, end = 86.dp,
                 bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
             )
-            .height(56.dp) // ★ 加入呢行：強制高度同 FAB 一致，確保完美水平置中對齊
+            .height(56.dp)
             .graphicsLayer {
                 val p = progressProvider()
                 val fabAlpha = if (showKeyboard) {
@@ -1522,7 +1517,6 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
-    // 記住入西選前嘅滾動位置
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
 
@@ -1533,7 +1527,6 @@ fun LedgerContent(
         }
     }
 
-    // 當離開西選模式嗰陣，瞬間跳返去記低咗嘅位置
     LaunchedEffect(filterMode) {
         if (!filterMode && preFilterIndex >= 0) {
             try { 
@@ -1613,20 +1606,18 @@ fun LedgerContent(
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
 
-                // 日期標題
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(SURFACE_CARD) // 強制白底，防止閃黑
+                                .background(SURFACE_CARD) 
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
                     }
                 }
 
-                // 將全日記錄放入大圓角卡片
                 item(key = "group_$dateKey") {
                     Surface(
                         modifier = Modifier
@@ -1644,7 +1635,6 @@ fun LedgerContent(
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             dayRecords.forEachIndexed { idx, r ->
-                                // ★ 解決 BUG 嘅核心：為每個項目綁定唯一 ID，禁止 Compose 認錯人
                                 key(r.id) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
                                         AnimatedRecordItem(
@@ -1688,11 +1678,12 @@ fun LedgerContent(
                                             }
                                         }
                                     }
-                                } // key 結尾
+                                }
                             }
                         }
+                    }
+                }
                 
-                // 卡片之間留白
                 item(key = "spacer_$dateKey") {
                     Spacer(modifier = Modifier.height(10.dp))
                 }
@@ -1705,7 +1696,7 @@ fun LedgerContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp)
-                .padding(top = 4.dp, bottom = 0.dp), // 拆開 padding 解決編譯問題
+                .padding(top = 4.dp, bottom = 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AnimatedVisibility(
@@ -1731,7 +1722,6 @@ fun LedgerContent(
                 )
             }
 
-            // 眼仔常駐按鈕
             IconButton(onClick = { onShowFutureChange(!showFuture) }) {
                 Icon(
                     if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
@@ -1824,7 +1814,6 @@ fun LedgerContent(
             }
         }
 
-        // 乾淨嘅列表容器，冇多餘外框
         Box(
             Modifier
                 .weight(1f)
@@ -1904,7 +1893,6 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            // 刪除咗原本嘅 .padding(bottom = 6.dp)，防止項目滾動時漏光產生黑影
             .onGloballyPositioned { coords ->
                 rootTop = coords.boundsInRoot().top
             }
@@ -1928,17 +1916,16 @@ fun AnimatedRecordItem(
     var appeared by remember { mutableStateOf(!animateOnMount) }
     LaunchedEffect(animateOnMount) {
         if (animateOnMount) {
-            delay(30) // 輕微延遲等 0 高度渲染完成，確保動畫順利觸發
+            delay(30)
             appeared = true
         }
     }
 
-    // ★ 核心改良：當新增項目時高度從 0 展開，刪除時高度縮回 0，自然推擠其他項目
     val targetHeight = if (isDeleting) 0.dp else if (animateOnMount && !appeared) 0.dp else 72.dp
     val itemHeight by animateDpAsState(
         targetValue = targetHeight,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy, // 帶有微回彈嘅順滑感
+            dampingRatio = Spring.DampingRatioLowBouncy,
             stiffness = Spring.StiffnessMediumLow
         ),
         label = "eHeight"
@@ -1985,12 +1972,12 @@ fun AnimatedRecordItem(
         Modifier
             .fillMaxWidth()
             .height(itemHeight)
-            .clipToBounds() // 確保高度收縮時，內容會被完美裁切，唔會溢出
+            .clipToBounds()
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp) // 鎖死內部高度，保證內容排版絕對唔會變形
+                .height(72.dp)
                 .graphicsLayer {
                     alpha = entranceAlpha
                     scaleX = entranceScale
@@ -2902,7 +2889,6 @@ fun TopStats(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 第一槽位：收入
         if (showIncome || incomeW > 0.001f) {
             Box(
                 modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -2937,7 +2923,6 @@ fun TopStats(
             }
         }
 
-        // 第二槽位：支出
         if (showExpense || expenseW > 0.001f) {
             Box(
                 modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -2972,7 +2957,6 @@ fun TopStats(
             }
         }
 
-        // 第三槽位：餘額 / 筆數切換
         Box(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
@@ -2988,7 +2972,6 @@ fun TopStats(
                         (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
                     }
                 },
-                // ★ 關鍵修改：加入置中對齊，消除因為闊度改變而引起嘅打斜飛移位問題
                 contentAlignment = Alignment.Center, 
                 label = "balanceCountAnim"
             ) { isFilter ->
@@ -3095,12 +3078,9 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 左邊：現代化排版嘅日期
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (info != null) {
                 val monthStr = if (info.year == currentYear) "${info.month}月" else "${info.year}年${info.month}月"
-
-                // 特大號日子數字，增強視覺層次
                 Text(
                     text = "${info.day}",
                     fontSize = 24.sp,
@@ -3109,7 +3089,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                 )
                 Spacer(Modifier.width(8.dp))
                 
-                // 月份同星期上下排列
                 Column(verticalArrangement = Arrangement.Center) {
                     Text(
                         text = monthStr,
@@ -3125,7 +3104,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                     )
                 }
 
-                // 「今日/琴日」精緻標籤
                 if (info.dayTag != null) {
                     Spacer(Modifier.width(12.dp))
                     Box(
@@ -3152,8 +3130,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                 )
             }
         }
-
-        // 右邊：收入與支出
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (income > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3346,8 +3322,6 @@ fun QuickInputSection(
         }
     }
 }
-
-// ===== 月曆 =====
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
