@@ -1251,26 +1251,24 @@ private fun AnimatedFabLayer(
     modifier: Modifier = Modifier
 ) {
     val p = progressProvider()
-    
+
     Box(
         modifier = modifier
             .graphicsLayer {
                 val currentP = progressProvider()
 
-                // ★ 修正 2：精準計算飛行軌跡，令佢完美降落喺金額卡片右側空位
-                val fabX = androidx.compose.ui.unit.lerp(20.dp, 32.dp, currentP).toPx()
-                val fabY = androidx.compose.ui.unit.lerp(92.dp, 388.dp, currentP).toPx()
-                val fabSize = androidx.compose.ui.unit.lerp(56.dp, 36.dp, currentP).toPx()
+                // ★ 1. 精準對齊：計算過鍵盤列嘅高度同 Padding，Y=378 剛好對正輸入框垂直中心！X=18 對準右側 Spacer
+                val fabX = androidx.compose.ui.unit.lerp(20.dp, 18.dp, currentP).toPx()
+                val fabY = androidx.compose.ui.unit.lerp(92.dp, 378.dp, currentP).toPx()
 
                 translationX = -fabX
                 translationY = -fabY
-                val scale = fabSize / 56.dp.toPx()
-                scaleX = scale
-                scaleY = scale
+
+                // ★ 2. 移除縮放 (Scale)：令整個觸控範圍同圖標都保持 100% 原有大細，唔會縮水
                 transformOrigin = TransformOrigin(1f, 1f)
-                
-                // 變身做清除掣嗰陣順滑消除陰影
-                shadowElevation = androidx.compose.ui.unit.lerp(6.dp, 0.dp, currentP).toPx()
+
+                // 陰影喺起飛前 20% 極速消失，無縫銜接
+                shadowElevation = androidx.compose.ui.unit.lerp(6.dp, 0.dp, (currentP * 5f).coerceIn(0f, 1f)).toPx()
                 shape = CircleShape
                 clip = true
             }
@@ -1283,21 +1281,25 @@ private fun AnimatedFabLayer(
     ) {
         androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
             val currentP = progressProvider()
-            val fabColor = androidx.compose.ui.graphics.lerp(BRAND_PRIMARY, Color.Transparent, currentP)
+            // ★ 3. 藍色圓框「裸飛」魔法：喺起飛嘅首 30% 過程極速變透明消失
+            // 噉樣移動途中就淨係會見到個交叉飛過去，唔會有一嚿藍色嘢跟住
+            val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
+            val fabColor = BRAND_PRIMARY.copy(alpha = bgAlpha)
             drawCircle(color = fabColor)
         }
 
-        // ★ 修正 3：真正套用圖標顏色變換 (白 -> 灰)，確保喺白色底上面清楚可見
-        val tintColor = androidx.compose.ui.graphics.lerp(Color.White, TEXT_SECONDARY, p)
+        // 圖標顏色過渡 (白 -> 柔和灰)
+        val tintColor = androidx.compose.ui.graphics.lerp(Color.White, TEXT_TERTIARY, p)
         Icon(
             Icons.Default.Add,
             contentDescription = "Clear",
             tint = tintColor,
             modifier = Modifier
                 .align(Alignment.Center)
+                // ★ 4. 圖標大細鎖定 24.dp：因為外層 Box 冇縮細，呢個加號/交叉會維持同 FAB 一模一樣大
                 .size(24.dp)
                 .graphicsLayer {
-                    rotationZ = progressProvider() * -405f
+                    rotationZ = p * -405f
                 }
         )
     }
