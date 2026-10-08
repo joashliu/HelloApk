@@ -1257,17 +1257,19 @@ private fun AnimatedFabLayer(
             .graphicsLayer {
                 val currentP = progressProvider()
 
-                // ★ 1. 精準對齊：計算過鍵盤列嘅高度同 Padding，Y=378 剛好對正輸入框垂直中心！X=18 對準右側 Spacer
-                val fabX = androidx.compose.ui.unit.lerp(20.dp, 18.dp, currentP).toPx()
-                val fabY = androidx.compose.ui.unit.lerp(92.dp, 378.dp, currentP).toPx()
+                // ★ 終極精準定位：
+                // Y = 388.dp 完美對準輸入框垂直正中心 (修正咗之前漏計嘅 10.dp 縫隙)
+                // X = 24.dp 完美對準輸入框右側 44.dp 空白區域嘅水平正中心
+                val fabX = androidx.compose.ui.unit.lerp(20.dp, 24.dp, currentP).toPx()
+                val fabY = androidx.compose.ui.unit.lerp(92.dp, 388.dp, currentP).toPx()
 
                 translationX = -fabX
                 translationY = -fabY
 
-                // ★ 2. 移除縮放 (Scale)：令整個觸控範圍同圖標都保持 100% 原有大細，唔會縮水
+                // 移除縮放，保持 100% 原有大細
                 transformOrigin = TransformOrigin(1f, 1f)
 
-                // 陰影喺起飛前 20% 極速消失，無縫銜接
+                // 陰影極速消失
                 shadowElevation = androidx.compose.ui.unit.lerp(6.dp, 0.dp, (currentP * 5f).coerceIn(0f, 1f)).toPx()
                 shape = CircleShape
                 clip = true
@@ -1281,8 +1283,7 @@ private fun AnimatedFabLayer(
     ) {
         androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
             val currentP = progressProvider()
-            // ★ 3. 藍色圓框「裸飛」魔法：喺起飛嘅首 30% 過程極速變透明消失
-            // 噉樣移動途中就淨係會見到個交叉飛過去，唔會有一嚿藍色嘢跟住
+            // 藍色圓框「裸飛」魔法：極速變透明消失
             val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
             val fabColor = BRAND_PRIMARY.copy(alpha = bgAlpha)
             drawCircle(color = fabColor)
@@ -1296,7 +1297,7 @@ private fun AnimatedFabLayer(
             tint = tintColor,
             modifier = Modifier
                 .align(Alignment.Center)
-                // ★ 4. 圖標大細鎖定 24.dp：因為外層 Box 冇縮細，呢個加號/交叉會維持同 FAB 一模一樣大
+                // 鎖定圖標大細，同加號一模一樣大
                 .size(24.dp)
                 .graphicsLayer {
                     rotationZ = p * -405f
@@ -1304,7 +1305,6 @@ private fun AnimatedFabLayer(
         )
     }
 }
-
 @Composable
 private fun AnimatedKeyboardLayer(
     showKeyboard: Boolean,
