@@ -3399,8 +3399,48 @@ fun QuickInputSection(
     if (topNotes.isEmpty()) return
     val items = topNotes.take(42)
     
-    val itemsPerPage = 14
-    val pages = items.chunked(itemsPerPage)
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    // 計算每行可用嘅真實闊度：螢幕闊度 - 外框邊距(24) - 內框邊距(28)
+    val availableWidth = configuration.screenWidthDp - 52
+    
+    // ★ 智能預判分頁算法：確保每頁絕對唔會超過 4 行
+    val pages = remember(items, availableWidth) {
+        val result = mutableListOf<List<Pair<String, Int>>>()
+        var currentPage = mutableListOf<Pair<String, Int>>()
+        var currentRowCount = 1
+        var currentRowWidth = 0
+        
+        for (item in items) {
+            val name = item.first
+            // 精準估算闊度：基礎邊距圖標留白(約50dp) + 每個字元大約(14dp)
+            val estimatedItemWidth = 50 + (name.length * 14)
+            
+            if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
+                // 放唔落，需要換行
+                if (currentRowCount >= 4) {
+                    // 第 4 行已經滿咗，強制封裝當前頁，將新 Clip 放入新一頁
+                    result.add(currentPage)
+                    currentPage = mutableListOf(item)
+                    currentRowCount = 1
+                    currentRowWidth = estimatedItemWidth + 8
+                } else {
+                    // 仲未過 4 行，正常落下一行
+                    currentRowCount++
+                    currentPage.add(item)
+                    currentRowWidth = estimatedItemWidth + 8
+                }
+            } else {
+                // 放得落同一行，繼續加
+                currentPage.add(item)
+                currentRowWidth += estimatedItemWidth + 8
+            }
+        }
+        if (currentPage.isNotEmpty()) {
+            result.add(currentPage)
+        }
+        result
+    }
+    
     val pagerState = rememberPagerState(pageCount = { pages.size })
 
     Box(
@@ -3417,7 +3457,6 @@ fun QuickInputSection(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top 
         ) { page ->
-            // ★ 套用我哋獨家研發嘅自訂流式引擎！
             AnimatedStretchingFlowRow(
                 items = pages[page],
                 modifier = Modifier
