@@ -3030,40 +3030,47 @@ fun AnimatedAmount(
     modifier: Modifier = Modifier,
 ) {
     var prevText by remember { mutableStateOf(text) }
-    val isClearing = prevText.length > 1 && text == "0"
-    
-    // ★ 智能偵測：由 0 變非 0，或者刪剩得返 0，就觸發 Pop 動畫
-    val isPlaceholderChange = (prevText == "0" && text.length == 1 && text != "0") ||
-                              (prevText.length == 1 && text == "0" && prevText != "0")
+
+    // 智能判斷 1：第一隻字輸入 (由 0 變非 0，或刪淨 0)
+    val isFirstCharPop = (prevText == "0" && text.length == 1 && text != "0") ||
+                         (prevText.length == 1 && text == "0" && prevText != "0")
+
+    // 智能判斷 2：一般鍵盤打字 (長度加減 1，且字首相同)
+    val isTyping = (text.length == prevText.length + 1 && text.startsWith(prevText)) ||
+                   (prevText.length == text.length + 1 && prevText.startsWith(text)) ||
+                   (text == prevText)
+
+    // 智能判斷 3：點擊 Clips 大規模替換數值
+    val isReplacing = !isFirstCharPop && !isTyping
 
     LaunchedEffect(text) { prevText = text }
 
     Row(
-        modifier = modifier.animateContentSize(),
+        modifier = modifier.animateContentSize(spring(stiffness = Spring.StiffnessMediumLow)),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (isClearing) {
-            Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight)
-        } else {
-            text.forEachIndexed { idx, c ->
-                key(idx) {
-                    AnimatedContent(
-                        targetState = c,
-                        transitionSpec = {
-                            if (isPlaceholderChange) {
-                                // 第一隻數字：高級 Q 彈放大彈出 (Pop)
-                                (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
-                                (scaleOut(tween(150), targetScale = 0.5f) + fadeOut(tween(150)))
-                            } else {
-                                // 之後嘅數字：保留你滿意嘅老虎機滾動
-                                (slideInVertically { it } + fadeIn()) togetherWith
-                                (slideOutVertically { -it } + fadeOut())
-                            }
-                        },
-                        label = "d_$idx"
-                    ) { ch ->
-                        Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight)
-                    }
+        text.forEachIndexed { idx, c ->
+            key(idx) {
+                AnimatedContent(
+                    targetState = c,
+                    transitionSpec = {
+                        if (isReplacing) {
+                            // ★ 解決打斜飛核心：大規模替換時，停用上下滾動，改為純粹嘅「交叉淡化」
+                            // 配合外圍 animateContentSize，做到極致絲滑嘅寬度伸縮，完全消滅打斜感！
+                            fadeIn(tween(250, easing = LinearEasing)) togetherWith fadeOut(tween(250, easing = LinearEasing))
+                        } else if (isFirstCharPop) {
+                            // 保留第一隻字嘅 Q 彈放大彈出
+                            (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
+                            (scaleOut(tween(150), targetScale = 0.5f) + fadeOut(tween(150)))
+                        } else {
+                            // 保留一般打字嘅老虎機滾動
+                            (slideInVertically { it } + fadeIn()) togetherWith
+                            (slideOutVertically { -it } + fadeOut())
+                        }
+                    },
+                    label = "d_$idx"
+                ) { ch ->
+                    Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight)
                 }
             }
         }
