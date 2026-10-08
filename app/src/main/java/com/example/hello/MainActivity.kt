@@ -3055,9 +3055,8 @@ fun AnimatedAmount(
                     targetState = c,
                     transitionSpec = {
                         if (isReplacing) {
-                            // ★ 解決打斜飛核心：大規模替換時，停用上下滾動，改為純粹嘅「交叉淡化」
-                            // 配合外圍 animateContentSize，做到極致絲滑嘅寬度伸縮，完全消滅打斜感！
-                            fadeIn(tween(250, easing = LinearEasing)) togetherWith fadeOut(tween(250, easing = LinearEasing))
+                            // ★ 點擊 Clips 時完全唔播放動畫 (時間設為 0)，瞬間切換
+                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                         } else if (isFirstCharPop) {
                             // 保留第一隻字嘅 Q 彈放大彈出
                             (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
