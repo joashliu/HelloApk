@@ -566,10 +566,10 @@ fun MainApp() {
             if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
         }
     }
-    val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY } } }
-    val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY } } }
-    val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount } } }
-    val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount } } }
+    val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
+    val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
+    val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
+    val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
     val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
 
     val isExactNoteFilter by remember {
@@ -1597,8 +1597,9 @@ fun LedgerContent(
             val dataToIterate = filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
 
             dataToIterate.forEach { (dateKey, dayRecords) ->
-                val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY) it.amount else 0.0 }
-                val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY) it.amount else 0.0 }
+                // ★ 加入 it.id != deletingRecordId，即時扣除準備刪除嘅項目
+                val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
+                val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
 
                 stickyHeader(key = "header_$dateKey") {
                     FadingStickyHeader {
