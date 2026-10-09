@@ -2163,7 +2163,13 @@ fun SwipeableRecordItem(
                     onDragCancel = { isDragging = false; targetOffset = 0f; onExpand(null) },
                     onHorizontalDrag = { c, d ->
                         c.consume()
-                        targetOffset = (targetOffset + d).coerceIn(maxLeft, maxRight)
+                        // ★ 移除原先硬生生嘅 coerceIn，改為計算阻力 (橡皮筋反彈效果)
+                        val dampFactor = when {
+                            targetOffset < maxLeft && d < 0 -> 0.35f // 向左拉到底後繼續拉，得返 35% 滑動靈敏度
+                            targetOffset > maxRight && d > 0 -> 0.35f // 向右拉到底後繼續拉，得返 35% 滑動靈敏度
+                            else -> 1f // 正常範圍內，保持 100% 跟手
+                        }
+                        targetOffset += d * dampFactor
                     })
             }
             .clickable(
