@@ -2150,24 +2150,41 @@ fun SwipeableRecordItem(
                     onDragEnd = {
                         isDragging = false
                         val dist = targetOffset - startOffset
+                        
+                        // ★ 判斷當前項目有冇圖標
+                        val hasIcon = record.iconUrl.isNotBlank()
+                        var shouldTriggerIconAction = false
+
                         val newOffset = when {
                             startOffset == maxLeft && dist > 15f -> 0f
                             startOffset == maxRight && dist < -15f -> 0f
                             targetOffset < maxLeft * 0.65f -> maxLeft
-                            targetOffset > maxRight * 0.65f -> maxRight
+                            targetOffset > maxRight * 0.65f -> {
+                                if (hasIcon) {
+                                    maxRight // 已經有圖標，照舊停喺度 show 個掣出嚟
+                                } else {
+                                    shouldTriggerIconAction = true
+                                    0f // 冇圖標就即刻收返埋張卡片
+                                }
+                            }
                             else -> 0f
                         }
+                        
                         targetOffset = newOffset
                         if (newOffset == 0f) onExpand(null)
+                        
+                        // ★ 彈返去原位嘅同時，直接執行「改圖標」功能
+                        if (shouldTriggerIconAction) {
+                            onChangeIcon()
+                        }
                     },
                     onDragCancel = { isDragging = false; targetOffset = 0f; onExpand(null) },
                     onHorizontalDrag = { c, d ->
                         c.consume()
-                        // ★ 移除原先硬生生嘅 coerceIn，改為計算阻力 (橡皮筋反彈效果)
                         val dampFactor = when {
-                            targetOffset < maxLeft && d < 0 -> 0.35f // 向左拉到底後繼續拉，得返 35% 滑動靈敏度
-                            targetOffset > maxRight && d > 0 -> 0.35f // 向右拉到底後繼續拉，得返 35% 滑動靈敏度
-                            else -> 1f // 正常範圍內，保持 100% 跟手
+                            targetOffset < maxLeft && d < 0 -> 0.35f
+                            targetOffset > maxRight && d > 0 -> 0.35f
+                            else -> 1f
                         }
                         targetOffset += d * dampFactor
                     })
