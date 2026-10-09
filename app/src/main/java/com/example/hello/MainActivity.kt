@@ -860,49 +860,56 @@ fun MainApp() {
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
                 .padding(horizontal = 20.dp)
         ) {
+            // ★ 改用磨砂玻璃風格 (Glassmorphism)
             Surface(
                 shape = CircleShape,
-                color = Color(0xFF1E293B),
-                shadowElevation = 10.dp,
+                color = Color(0xE6FFFFFF), // 90% 不透明度嘅純白，帶出半透明質感
+                border = BorderStroke(1.dp, Color.White), // 加一條純白邊框做玻璃邊緣反光
+                shadowElevation = 12.dp, // 稍微加大陰影令立體感更強
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 12.dp, end = 8.dp),
+                        .padding(start = 8.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF334155)),
+                                .background(Color.White), // 垃圾桶底色改為純白
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.Delete,
                                 contentDescription = "刪除",
                                 tint = Color(0xFFF87171),
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                         Spacer(Modifier.width(12.dp))
-                        Text("記錄已刪除", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            "記錄已刪除", 
+                            color = TEXT_PRIMARY, // 文字改做深灰色，對比白色底
+                            fontSize = 15.sp, 
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
 
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
                             .clickable { restoreDeletedRecord() }
-                            .background(Color(0xFF312E81))
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .background(BRAND_PRIMARY.copy(alpha = 0.12f)) // 復原按鈕改用超淡嘅主題紫色
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             "復原",
-                            color = BRAND_PRIMARY_LIGHT,
+                            color = BRAND_PRIMARY_DARK, // 復原字體用深主題色
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
