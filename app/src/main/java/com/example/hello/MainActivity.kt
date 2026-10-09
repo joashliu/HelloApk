@@ -460,12 +460,19 @@ fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): In
     }
 }
 
+// ★ 修改參數為 Provider，避免拖慢整個列表
 @Composable
 fun FanMenuOverlay(
-    progress: Float,
-    center: Offset,
-    currentTouch: Offset
+    progressProvider: () -> Float,
+    centerProvider: () -> Offset,
+    touchProvider: () -> Offset
 ) {
+    val progress = progressProvider()
+    if (progress <= 0.001f) return // 進度係 0 就唔好畫，慳資源
+
+    val center = centerProvider()
+    val currentTouch = touchProvider()
+
     val density = LocalDensity.current
     val minRadiusPx = with(density) { 40.dp.toPx() }
     val hoveredIndex = getHoveredActionIndex(center, currentTouch, minRadiusPx)
@@ -1611,25 +1618,32 @@ fun LedgerContent(
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
 
-    // ★ Fan Menu 全局狀態
+   // ★ Fan Menu 全局狀態
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
-    // ★ 加入呢行：用嚟記住退出動畫期間，邊個項目係主體
-    var fadingFanRecordId by remember { mutableStateOf<String?>(null) } 
-    
+    var fadingFanRecordId by remember { mutableStateOf<String?>(null) }
     var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
     var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
+    val scope = rememberCoroutineScope() // ★ 加入 scope 用嚟延遲執行動作
 
-    val fanMenuProgress by animateFloatAsState(
+    // ★ 移除 by，變成 State 物件，防止每次數值改變都拖垮整個畫面
+    val fanMenuProgress = animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
         label = "fanMenuProgress"
     )
 
-    // 統一定義 Fan Menu 嘅事件回調，方便下面重複使用
+    // ★ 獨立處理退出模糊嘅時機
+    LaunchedEffect(activeFanRecord) {
+        if (activeFanRecord == null) {
+            delay(300) // 等收起動畫播完先解除模糊
+            fadingFanRecordId = null
+        }
+    }
+
     val handleFanStart = { r: Record, offset: Offset ->
         activeFanRecord = r
-        fadingFanRecordId = r.id // ★ 記低目前長按緊嘅項目 ID
+        fadingFanRecordId = r.id
         fanMenuCenter = offset
         fanMenuTouch = offset
     }
@@ -1642,17 +1656,21 @@ fun LedgerContent(
         activeFanRecord = null 
         
         if (targetRecord != null && hovered != null) {
-            when (hovered) {
-                0 -> onCopyClick(targetRecord)
-                1 -> onEditClick(targetRecord)
-                2 -> {
-                    if (!filterMode) {
-                        preFilterIndex = listState.firstVisibleItemIndex
-                        preFilterOffset = listState.firstVisibleItemScrollOffset
+            // ★ 放手後延遲 120ms 先執行動作，確保 UI 收起動畫可以流暢起步，唔會被卡死
+            scope.launch {
+                delay(120)
+                when (hovered) {
+                    0 -> onCopyClick(targetRecord)
+                    1 -> onEditClick(targetRecord)
+                    2 -> {
+                        if (!filterMode) {
+                            preFilterIndex = listState.firstVisibleItemIndex
+                            preFilterOffset = listState.firstVisibleItemScrollOffset
+                        }
+                        onFilterByName(targetRecord.note)
                     }
-                    onFilterByName(targetRecord.note)
+                    3 -> onDeleteClick(targetRecord)
                 }
-                3 -> onDeleteClick(targetRecord)
             }
         }
     }
@@ -1737,10 +1755,10 @@ fun LedgerContent(
                                     onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                     onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                     onFanMenuEnd = { handleFanEnd() },
-                                    isFanMenuActive = activeFanRecord != null || fanMenuProgress > 0f,
-                                                // ★ 改用 fadingFanRecordId 來判定，確保放手後選中項目唔會變模糊
-                                                isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && fadingFanRecordId != r.id,
-                                                isActiveItem = activeFanRecord?.id == r.id
+                                    // ★ 兩個 SwipeableRecordItem 都要改成咁樣
+                                                isFanMenuActive = activeFanRecord != null || fadingFanRecordId != null,
+                                                isOtherItem = (activeFanRecord != null || fadingFanRecordId != null) && fadingFanRecordId != r.id,
+                                                isActiveItem = fadingFanRecordId == r.id
                                 )
                             }
                             if (afterSaveHint?.recordId == r.id) {
@@ -1811,10 +1829,10 @@ fun LedgerContent(
                                                 onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                                 onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                                 onFanMenuEnd = { handleFanEnd() },
-                                                isFanMenuActive = activeFanRecord != null || fanMenuProgress > 0f,
-                                                // ★ 改用 fadingFanRecordId 來判定，確保放手後選中項目唔會變模糊
-                                                isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && fadingFanRecordId != r.id,
-                                                isActiveItem = activeFanRecord?.id == r.id
+                                                // ★ 兩個 SwipeableRecordItem 都要改成咁樣
+                                                isFanMenuActive = activeFanRecord != null || fadingFanRecordId != null,
+                                                isOtherItem = (activeFanRecord != null || fadingFanRecordId != null) && fadingFanRecordId != r.id,
+                                                isActiveItem = fadingFanRecordId == r.id
                                             )
                                         }
                                         
