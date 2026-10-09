@@ -1550,6 +1550,14 @@ fun LedgerContent(
         }
     }
 
+    // ★ 加入呢段：記住最後顯示嘅類別，防止動畫途中突然變成 null
+    var cachedCategory by remember { mutableStateOf("飲食") }
+    LaunchedEffect(singleCategory) {
+        if (singleCategory != null) {
+            cachedCategory = singleCategory!!
+        }
+    }
+
     val listContent: LazyListScope.() -> Unit = {
         if (isExactNoteFilter) {
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
@@ -1701,16 +1709,20 @@ fun LedgerContent(
                 .padding(top = 4.dp, bottom = 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // ★ 將判斷抽返出嚟
+            val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
+
             AnimatedVisibility(
-                visible = filterMode && isSingleCategoryFilter && singleCategory != null,
-                enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
-                        expandHorizontally(tween(260, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
-                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) +
-                        shrinkHorizontally(tween(200, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+                visible = showCategoryChip,
+                // ★ 延長動畫時間至 320ms，配合 FastOutSlowInEasing 會有完美嘅絲滑推擠感
+                enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+                        expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
+                exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+                        shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
             ) {
-                if (singleCategory != null) {
-                    CategoryStatChip(singleCategory!!)
-                }
+                // ★ 移除原本嘅 if (singleCategory != null) 判斷
+                // 直接使用緩存嘅 cachedCategory。咁樣動畫收縮期間，個 UI 仲會原好無缺咁留喺度，唔會中途閃退跳動
+                CategoryStatChip(cachedCategory)
             }
 
             Box(modifier = Modifier.weight(1f)) {
