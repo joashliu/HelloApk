@@ -2180,7 +2180,14 @@ fun SwipeableRecordItem(
             }
     ) {
         Row(
-            Modifier.matchParentSize().padding(end = 8.dp),
+            Modifier
+                .matchParentSize()
+                // ★ 加入 offset：當拉動距離少於 maxLeft (即係向左過度拉伸)，按鈕 Row 跟住向左移
+                .offset { 
+                    val overscroll = if (offsetX < maxLeft) (offsetX - maxLeft).roundToInt() else 0
+                    IntOffset(overscroll, 0) 
+                }
+                .padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2211,7 +2218,14 @@ fun SwipeableRecordItem(
         }
 
         Row(
-            Modifier.matchParentSize().padding(start = 8.dp),
+            Modifier
+                .matchParentSize()
+                // ★ 加入 offset：當拉動距離大於 maxRight (即係向右過度拉伸)，按鈕 Row 跟住向右移
+                .offset { 
+                    val overscroll = if (offsetX > maxRight) (offsetX - maxRight).roundToInt() else 0
+                    IntOffset(overscroll, 0) 
+                }
+                .padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
             verticalAlignment = Alignment.CenterVertically
         ) {
