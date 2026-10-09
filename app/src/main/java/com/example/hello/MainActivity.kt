@@ -3079,8 +3079,25 @@ fun AnimatedAmount(
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val incomeText = remember(income) { formatAmountNoDecimal(income) }
-    val expenseText = remember(expense) { formatAmountNoDecimal(expense) }
+    
+    // 加入數字滾動過渡動畫
+    val animIncome by animateFloatAsState(
+        targetValue = income.toFloat(),
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "dayIncomeAmt"
+    )
+    val animExpense by animateFloatAsState(
+        targetValue = expense.toFloat(),
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "dayExpenseAmt"
+    )
+
+    val incomeText = formatAmountNoDecimal(animIncome.toDouble())
+    val expenseText = formatAmountNoDecimal(animExpense.toDouble())
+
+    // 防止數值清零時 UI 立刻隱藏，導致動畫硬切
+    val showIncome = income > 0 || animIncome > 0.5f
+    val showExpense = expense > 0 || animExpense > 0.5f
 
     Row(
         Modifier
@@ -3142,15 +3159,15 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (income > 0) {
+            if (showIncome) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(2.dp))
                     Text(incomeText, fontSize = 14.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
                 }
             }
-            if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
-            if (expense > 0) {
+            if (showIncome && showExpense) Spacer(Modifier.width(10.dp))
+            if (showExpense) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.TrendingDown, null, tint = TEXT_PRIMARY, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(2.dp))
