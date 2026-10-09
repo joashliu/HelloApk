@@ -1611,7 +1611,11 @@ fun LedgerContent(
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
 
+    // ★ Fan Menu 全局狀態
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
+    // ★ 加入呢行：用嚟記住退出動畫期間，邊個項目係主體
+    var fadingFanRecordId by remember { mutableStateOf<String?>(null) } 
+    
     var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
     var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
@@ -1622,8 +1626,10 @@ fun LedgerContent(
         label = "fanMenuProgress"
     )
 
+    // 統一定義 Fan Menu 嘅事件回調，方便下面重複使用
     val handleFanStart = { r: Record, offset: Offset ->
         activeFanRecord = r
+        fadingFanRecordId = r.id // ★ 記低目前長按緊嘅項目 ID
         fanMenuCenter = offset
         fanMenuTouch = offset
     }
@@ -1732,8 +1738,9 @@ fun LedgerContent(
                                     onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                     onFanMenuEnd = { handleFanEnd() },
                                     isFanMenuActive = activeFanRecord != null || fanMenuProgress > 0f,
-                                    isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && activeFanRecord?.id != r.id,
-                                    isActiveItem = activeFanRecord?.id == r.id
+                                                // ★ 改用 fadingFanRecordId 來判定，確保放手後選中項目唔會變模糊
+                                                isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && fadingFanRecordId != r.id,
+                                                isActiveItem = activeFanRecord?.id == r.id
                                 )
                             }
                             if (afterSaveHint?.recordId == r.id) {
@@ -1805,7 +1812,8 @@ fun LedgerContent(
                                                 onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                                 onFanMenuEnd = { handleFanEnd() },
                                                 isFanMenuActive = activeFanRecord != null || fanMenuProgress > 0f,
-                                                isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && activeFanRecord?.id != r.id,
+                                                // ★ 改用 fadingFanRecordId 來判定，確保放手後選中項目唔會變模糊
+                                                isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && fadingFanRecordId != r.id,
                                                 isActiveItem = activeFanRecord?.id == r.id
                                             )
                                         }
