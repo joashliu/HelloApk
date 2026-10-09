@@ -1,8 +1,5 @@
 package com.example.hello
 
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.graphics.drawscope.Stroke
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.ContentValues
@@ -32,6 +29,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -53,7 +51,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -63,13 +60,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -111,6 +112,7 @@ import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.imageLoader
@@ -442,6 +444,106 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
+fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): Int? {
+    val dx = touch.x - center.x
+    val dy = touch.y - center.y
+    val dist = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+    if (dist < minRadiusPx) return null
+
+    val angle = kotlin.math.atan2(dy.toDouble(), dx.toDouble()) * 180 / Math.PI
+    return when {
+        angle in -170.0..-130.0 -> 0 
+        angle in -130.0..-90.0 -> 1  
+        angle in -90.0..-50.0 -> 2   
+        angle in -50.0..-10.0 -> 3   
+        else -> null
+    }
+}
+
+@Composable
+fun FanMenuOverlay(
+    progress: Float,
+    center: Offset,
+    currentTouch: Offset
+) {
+    val density = LocalDensity.current
+    val minRadiusPx = with(density) { 40.dp.toPx() }
+    val hoveredIndex = getHoveredActionIndex(center, currentTouch, minRadiusPx)
+    val haptic = LocalHapticFeedback.current
+    var previousHovered by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(hoveredIndex) {
+        if (hoveredIndex != null && hoveredIndex != previousHovered) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+        previousHovered = hoveredIndex
+    }
+
+    val radiusPx = with(density) { 105.dp.toPx() }
+    val actions = listOf(
+        Triple(Icons.Default.ContentCopy, "複製", Color(0xFF64748B)),
+        Triple(Icons.Default.Edit, "編輯", Color(0xFF3B82F6)),
+        Triple(Icons.Default.FilterList, "篩選", Color(0xFF8B5CF6)),
+        Triple(Icons.Default.Delete, "刪除", COLOR_EXPENSE)
+    )
+
+    Box(Modifier.fillMaxSize()) {
+        actions.forEachIndexed { i, action ->
+            val angle = -150f + i * 40f
+            val angleRad = Math.toRadians(angle.toDouble())
+
+            val currentRadius = radiusPx * progress
+            val cx = center.x + currentRadius * kotlin.math.cos(angleRad).toFloat()
+            val cy = center.y + currentRadius * kotlin.math.sin(angleRad).toFloat()
+
+            val isHovered = hoveredIndex == i
+            val btnScale = if (isHovered) 1.25f else 1f
+            val btnAlpha = progress.coerceIn(0f, 1f)
+
+            Box(
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            (cx - with(density) { 24.dp.toPx() }).roundToInt(),
+                            (cy - with(density) { 24.dp.toPx() }).roundToInt()
+                        )
+                    }
+                    .size(48.dp)
+                    .graphicsLayer {
+                        scaleX = btnScale * progress
+                        scaleY = btnScale * progress
+                        alpha = btnAlpha
+                    }
+                    .shadow(if (isHovered) 12.dp else 6.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(action.third)
+                    .padding(12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(action.first, action.second, tint = Color.White, modifier = Modifier.size(24.dp))
+                
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isHovered,
+                    enter = fadeIn() + slideInVertically { 20 },
+                    exit = fadeOut() + slideOutVertically { 20 },
+                    modifier = Modifier.offset(y = (-38).dp)
+                ) {
+                    Text(
+                        text = action.second,
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(Color(0x99000000), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -566,6 +668,7 @@ fun MainApp() {
             if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
         }
     }
+    
     val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
     val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
     val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
@@ -727,7 +830,6 @@ fun MainApp() {
         recentlyDeletedRecord = null
         deletingRecordId = null
         
-        // ★ 加入呢兩行，令復原嗰陣觸發「新增項目」嘅平滑推擠動畫
         justAddedId = target.id
         scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
         
@@ -860,12 +962,11 @@ fun MainApp() {
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
                 .padding(horizontal = 20.dp)
         ) {
-            // ★ 改用磨砂玻璃風格 (Glassmorphism)
             Surface(
                 shape = CircleShape,
-                color = Color(0xE6FFFFFF), // 90% 不透明度嘅純白，帶出半透明質感
-                border = BorderStroke(1.dp, Color.White), // 加一條純白邊框做玻璃邊緣反光
-                shadowElevation = 12.dp, // 稍微加大陰影令立體感更強
+                color = Color(0xE6FFFFFF), 
+                border = BorderStroke(1.dp, Color.White),
+                shadowElevation = 12.dp,
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Row(
@@ -880,7 +981,7 @@ fun MainApp() {
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(Color.White), // 垃圾桶底色改為純白
+                                .background(Color.White),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -893,7 +994,7 @@ fun MainApp() {
                         Spacer(Modifier.width(12.dp))
                         Text(
                             "記錄已刪除", 
-                            color = TEXT_PRIMARY, // 文字改做深灰色，對比白色底
+                            color = TEXT_PRIMARY,
                             fontSize = 15.sp, 
                             fontWeight = FontWeight.SemiBold
                         )
@@ -903,13 +1004,13 @@ fun MainApp() {
                         modifier = Modifier
                             .clip(CircleShape)
                             .clickable { restoreDeletedRecord() }
-                            .background(BRAND_PRIMARY.copy(alpha = 0.12f)) // 復原按鈕改用超淡嘅主題紫色
+                            .background(BRAND_PRIMARY.copy(alpha = 0.12f))
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             "復原",
-                            color = BRAND_PRIMARY_DARK, // 復原字體用深主題色
+                            color = BRAND_PRIMARY_DARK,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
@@ -1243,7 +1344,6 @@ private fun BoxScope.KeyboardAndFabLayer(
         modifier = Modifier.align(Alignment.BottomCenter)
     )
 
-    // ★ 修正 4：再畫 FAB，咁樣 FAB 飛入去嗰陣就會喺鍵盤最上層，可以完美點擊
     AnimatedFabLayer(
         progressProvider = progressProvider,
         onFabTap = onFabTap,
@@ -1264,19 +1364,13 @@ private fun AnimatedFabLayer(
             .graphicsLayer {
                 val currentP = progressProvider()
 
-                // ★ 終極精準定位：
-                // Y = 388.dp 完美對準輸入框垂直正中心 (修正咗之前漏計嘅 10.dp 縫隙)
-                // X = 24.dp 完美對準輸入框右側 44.dp 空白區域嘅水平正中心
                 val fabX = androidx.compose.ui.unit.lerp(20.dp, 24.dp, currentP).toPx()
                 val fabY = androidx.compose.ui.unit.lerp(92.dp, 388.dp, currentP).toPx()
 
                 translationX = -fabX
                 translationY = -fabY
 
-                // 移除縮放，保持 100% 原有大細
                 transformOrigin = TransformOrigin(1f, 1f)
-
-                // 陰影極速消失
                 shadowElevation = androidx.compose.ui.unit.lerp(6.dp, 0.dp, (currentP * 5f).coerceIn(0f, 1f)).toPx()
                 shape = CircleShape
                 clip = true
@@ -1290,13 +1384,11 @@ private fun AnimatedFabLayer(
     ) {
         androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
             val currentP = progressProvider()
-            // 藍色圓框「裸飛」魔法：極速變透明消失
             val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
             val fabColor = BRAND_PRIMARY.copy(alpha = bgAlpha)
             drawCircle(color = fabColor)
         }
 
-        // 圖標顏色過渡 (白 -> 柔和灰)
         val tintColor = androidx.compose.ui.graphics.lerp(Color.White, TEXT_TERTIARY, p)
         Icon(
             Icons.Default.Add,
@@ -1304,7 +1396,6 @@ private fun AnimatedFabLayer(
             tint = tintColor,
             modifier = Modifier
                 .align(Alignment.Center)
-                // 鎖定圖標大細，同加號一模一樣大
                 .size(24.dp)
                 .graphicsLayer {
                     rotationZ = p * -405f
@@ -1343,7 +1434,6 @@ private fun AnimatedKeyboardLayer(
         Box(
             modifier = modifier
                 .fillMaxWidth()
-                // ★ 修正 1：將底部邊距改為 20.dp，令鍵盤貼近畫面底部，視覺更優雅
                 .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
                 .graphicsLayer {
                     val currentP = progressProvider()
@@ -1521,6 +1611,46 @@ fun LedgerContent(
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
 
+    var activeFanRecord by remember { mutableStateOf<Record?>(null) }
+    var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
+    var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current
+
+    val fanMenuProgress by animateFloatAsState(
+        targetValue = if (activeFanRecord != null) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
+        label = "fanMenuProgress"
+    )
+
+    val handleFanStart = { r: Record, offset: Offset ->
+        activeFanRecord = r
+        fanMenuCenter = offset
+        fanMenuTouch = offset
+    }
+    val handleFanDrag = { dragAmount: Offset ->
+        fanMenuTouch += dragAmount
+    }
+    val handleFanEnd = {
+        val hovered = getHoveredActionIndex(fanMenuCenter, fanMenuTouch, with(density) { 40.dp.toPx() })
+        val targetRecord = activeFanRecord
+        activeFanRecord = null 
+        
+        if (targetRecord != null && hovered != null) {
+            when (hovered) {
+                0 -> onCopyClick(targetRecord)
+                1 -> onEditClick(targetRecord)
+                2 -> {
+                    if (!filterMode) {
+                        preFilterIndex = listState.firstVisibleItemIndex
+                        preFilterOffset = listState.firstVisibleItemScrollOffset
+                    }
+                    onFilterByName(targetRecord.note)
+                }
+                3 -> onDeleteClick(targetRecord)
+            }
+        }
+    }
+
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
             try { listState.requestScrollToItem(0) }
@@ -1550,7 +1680,6 @@ fun LedgerContent(
         }
     }
 
-    // ★ 加入呢段：記住最後顯示嘅類別，防止動畫途中突然變成 null
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) {
         if (singleCategory != null) {
@@ -1598,7 +1727,13 @@ fun LedgerContent(
                                     },
                                     onDelete = { onDeleteClick(r) },
                                     onChangeIcon = { onChangeIconClick(r) },
-                                    hideCategory = true
+                                    hideCategory = true,
+                                    onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                    onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                    onFanMenuEnd = { handleFanEnd() },
+                                    isFanMenuActive = activeFanRecord != null || fanMenuProgress > 0f,
+                                    isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && activeFanRecord?.id != r.id,
+                                    isActiveItem = activeFanRecord?.id == r.id
                                 )
                             }
                             if (afterSaveHint?.recordId == r.id) {
@@ -1612,7 +1747,6 @@ fun LedgerContent(
             val dataToIterate = filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
 
             dataToIterate.forEach { (dateKey, dayRecords) ->
-                // ★ 加入 it.id != deletingRecordId，即時扣除準備刪除嘅項目
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
 
@@ -1666,7 +1800,13 @@ fun LedgerContent(
                                                     onFilterByName(r.note)
                                                 },
                                                 onDelete = { onDeleteClick(r) },
-                                                onChangeIcon = { onChangeIconClick(r) }
+                                                onChangeIcon = { onChangeIconClick(r) },
+                                                onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                                onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                                onFanMenuEnd = { handleFanEnd() },
+                                                isFanMenuActive = activeFanRecord != null || fanMenuProgress > 0f,
+                                                isOtherItem = (activeFanRecord != null || fanMenuProgress > 0f) && activeFanRecord?.id != r.id,
+                                                isActiveItem = activeFanRecord?.id == r.id
                                             )
                                         }
                                         
@@ -1701,173 +1841,177 @@ fun LedgerContent(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp)
-                .padding(top = 4.dp, bottom = 0.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // ★ 將判斷抽返出嚟
-            val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
-
-            AnimatedVisibility(
-                visible = showCategoryChip,
-                // ★ 延長動畫時間至 320ms，配合 FastOutSlowInEasing 會有完美嘅絲滑推擠感
-                enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
-                        expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
-                exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
-                        shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
+                    .padding(top = 4.dp, bottom = 0.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // ★ 移除原本嘅 if (singleCategory != null) 判斷
-                // 直接使用緩存嘅 cachedCategory。咁樣動畫收縮期間，個 UI 仲會原好無缺咁留喺度，唔會中途閃退跳動
-                CategoryStatChip(cachedCategory)
-            }
+                val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
 
-            Box(modifier = Modifier.weight(1f)) {
-                TopStats(
-                    hasIncome = hasIncome,
-                    hasExpense = hasExpense,
-                    income = totalIncome,
-                    expense = totalExpense,
-                    isFilterMode = filterMode,
-                    filteredCount = if (filterMode) filtered.size else null
-                )
-            }
-
-            IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                Icon(
-                    if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                    "顯示未來項目",
-                    tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-                )
-            }
-        }
-
-        AnimatedContent(
-            targetState = filterMode,
-            transitionSpec = {
-                (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith
-                (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(
-                    clip = true,
-                    sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
-                )
-            },
-            label = "bottomArea"
-        ) { isFilterMode ->
-            if (isFilterMode) {
-                Column(
-                    Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
+                AnimatedVisibility(
+                    visible = showCategoryChip,
+                    enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+                            expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
+                    exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+                            shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
                 ) {
-                    Spacer(Modifier.height(4.dp))
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 72.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        userScrollEnabled = false
+                    CategoryStatChip(cachedCategory)
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    TopStats(
+                        hasIncome = hasIncome,
+                        hasExpense = hasExpense,
+                        income = totalIncome,
+                        expense = totalExpense,
+                        isFilterMode = filterMode,
+                        filteredCount = if (filterMode) filtered.size else null
+                    )
+                }
+
+                IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+                    Icon(
+                        if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        "顯示未來項目",
+                        tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                    )
+                }
+            }
+
+            AnimatedContent(
+                targetState = filterMode,
+                transitionSpec = {
+                    (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith
+                    (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(
+                        clip = true,
+                        sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
+                    )
+                },
+                label = "bottomArea"
+            ) { isFilterMode ->
+                if (isFilterMode) {
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
                     ) {
-                        item(key = "__all__") {
-                            AnimatedFilterChip(
-                                modifier = Modifier.fillMaxWidth(),
-                                selected = filterCategory == null,
-                                label = "全部",
-                                fillWidth = true,
-                                onClick = { onFilterCategoryChange(null) }
-                            )
-                        }
-                        items(items = visibleCategories, key = { it }) { cat ->
-                            AnimatedFilterChip(
-                                modifier = Modifier.animateItem().fillMaxWidth(),
-                                selected = filterCategory == cat,
-                                label = cat,
-                                fillWidth = true,
-                                onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    if (availableMonths.isNotEmpty()) {
-                        FlowRow(
+                        Spacer(Modifier.height(4.dp))
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 72.dp),
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            userScrollEnabled = false
                         ) {
-                            AnimatedFilterChip(
-                                selected = filterMonth == null,
-                                label = "全年",
-                                fillWidth = false,
-                                onClick = { onFilterMonthChange(null) }
-                            )
-                            availableMonths.forEach { m ->
+                            item(key = "__all__") {
                                 AnimatedFilterChip(
-                                    selected = filterMonth == m,
-                                    label = formatMonthLabel(m),
-                                    fillWidth = false,
-                                    onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selected = filterCategory == null,
+                                    label = "全部",
+                                    fillWidth = true,
+                                    onClick = { onFilterCategoryChange(null) }
+                                )
+                            }
+                            items(items = visibleCategories, key = { it }) { cat ->
+                                AnimatedFilterChip(
+                                    modifier = Modifier.animateItem().fillMaxWidth(),
+                                    selected = filterCategory == cat,
+                                    label = cat,
+                                    fillWidth = true,
+                                    onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
                                 )
                             }
                         }
+                        Spacer(Modifier.height(8.dp))
+                        if (availableMonths.isNotEmpty()) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                AnimatedFilterChip(
+                                    selected = filterMonth == null,
+                                    label = "全年",
+                                    fillWidth = false,
+                                    onClick = { onFilterMonthChange(null) }
+                                )
+                                availableMonths.forEach { m ->
+                                    AnimatedFilterChip(
+                                        selected = filterMonth == m,
+                                        label = formatMonthLabel(m),
+                                        fillWidth = false,
+                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
                     }
-                    Spacer(Modifier.height(6.dp))
-                }
-            } else {
-                Column(Modifier.fillMaxWidth()) {
-                    if (topNotes.isNotEmpty()) {
+                } else {
+                    Column(Modifier.fillMaxWidth()) {
+                        if (topNotes.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            QuickInputSection(
+                                topNotes = topNotes,
+                                noteIconMap = noteIconMap,
+                                animatedQuickInputs = animatedQuickInputs,
+                                onClick = onQuickInputClick
+                            )
+                        }
                         Spacer(Modifier.height(4.dp))
-                        QuickInputSection(
-                            topNotes = topNotes,
-                            noteIconMap = noteIconMap,
-                            animatedQuickInputs = animatedQuickInputs,
-                            onClick = onQuickInputClick
-                        )
                     }
-                    Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (loading) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BRAND_PRIMARY)
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 0.dp, end = 0.dp, top = 0.dp,
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
+                        )
+                    ) {
+                        if (filtered.isEmpty() && !showKeyboard) {
+                            item(key = "__empty__") {
+                                Box(
+                                    Modifier.fillParentMaxWidth().padding(top = 80.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
+                                        color = TEXT_SECONDARY
+                                    )
+                                }
+                            }
+                        } else {
+                            listContent()
+                        }
+                    }
                 }
             }
         }
-
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-        ) {
-            if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = BRAND_PRIMARY)
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        start = 0.dp, end = 0.dp, top = 0.dp,
-                        bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
-                    )
-                ) {
-                    if (filtered.isEmpty() && !showKeyboard) {
-                        item(key = "__empty__") {
-                            Box(
-                                Modifier.fillParentMaxWidth().padding(top = 80.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
-                                    color = TEXT_SECONDARY
-                                )
-                            }
-                        }
-                    } else {
-                        listContent()
-                    }
-                }
-            }
+        if (fanMenuProgress > 0f) {
+            FanMenuOverlay(
+                progress = fanMenuProgress,
+                center = fanMenuCenter,
+                currentTouch = fanMenuTouch
+            )
         }
     }
 }
 
-// ===== 其他組件保持不變 =====
 
 @Composable
 fun CategoryStatChip(category: String) {
@@ -2105,6 +2249,12 @@ fun SwipeableRecordItem(
     onCopy: () -> Unit, onEdit: () -> Unit,
     onFilter: () -> Unit, onDelete: () -> Unit, onChangeIcon: () -> Unit,
     hideCategory: Boolean = false,
+    onFanMenuStart: (Offset) -> Unit = {},
+    onFanMenuDrag: (Offset) -> Unit = {},
+    onFanMenuEnd: () -> Unit = {},
+    isFanMenuActive: Boolean = false,
+    isOtherItem: Boolean = false,
+    isActiveItem: Boolean = false
 ) {
     val density = LocalDensity.current
     val bw = 56.dp; val bh = 44.dp; val gap = 6.dp
@@ -2118,6 +2268,19 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
+    var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) } 
+
+    val blurRadius by animateDpAsState(if (isOtherItem) 8.dp else 0.dp, tween(300), label = "blur")
+    val itemAlpha by animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha")
+    val itemScale by animateFloatAsState(
+        targetValue = when {
+            isActiveItem -> 1.03f 
+            isOtherItem -> 0.95f  
+            else -> 1f
+        },
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+        label = "scale"
+    )
 
     LaunchedEffect(expandedId) { if (expandedId != record.id && targetOffset != 0f) targetOffset = 0f }
     val offsetX by animateFloatAsState(targetOffset,
@@ -2139,7 +2302,15 @@ fun SwipeableRecordItem(
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
+            .zIndex(if (isActiveItem) 10f else 0f)
+            .graphicsLayer {
+                scaleX = itemScale
+                scaleY = itemScale
+                alpha = itemAlpha
+            }
+            .blur(blurRadius)
             .background(backgroundColor)
+            .onGloballyPositioned { itemGlobalPosition = it.boundsInRoot().topLeft }
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -2150,8 +2321,6 @@ fun SwipeableRecordItem(
                     onDragEnd = {
                         isDragging = false
                         val dist = targetOffset - startOffset
-                        
-                        // ★ 判斷當前項目有冇圖標
                         val hasIcon = record.iconUrl.isNotBlank()
                         var shouldTriggerIconAction = false
 
@@ -2161,10 +2330,10 @@ fun SwipeableRecordItem(
                             targetOffset < maxLeft * 0.65f -> maxLeft
                             targetOffset > maxRight * 0.65f -> {
                                 if (hasIcon) {
-                                    maxRight // 已經有圖標，照舊停喺度 show 個掣出嚟
+                                    maxRight 
                                 } else {
                                     shouldTriggerIconAction = true
-                                    0f // 冇圖標就即刻收返埋張卡片
+                                    0f 
                                 }
                             }
                             else -> 0f
@@ -2173,7 +2342,6 @@ fun SwipeableRecordItem(
                         targetOffset = newOffset
                         if (newOffset == 0f) onExpand(null)
                         
-                        // ★ 彈返去原位嘅同時，直接執行「改圖標」功能
                         if (shouldTriggerIconAction) {
                             onChangeIcon()
                         }
@@ -2182,12 +2350,25 @@ fun SwipeableRecordItem(
                     onHorizontalDrag = { c, d ->
                         c.consume()
                         val dampFactor = when {
-                            targetOffset < maxLeft && d < 0 -> 0.35f
-                            targetOffset > maxRight && d > 0 -> 0.35f
-                            else -> 1f
+                            targetOffset < maxLeft && d < 0 -> 0.35f 
+                            targetOffset > maxRight && d > 0 -> 0.35f 
+                            else -> 1f 
                         }
                         targetOffset += d * dampFactor
                     })
+            }
+            .pointerInput("longPress_${record.id}") {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { localOffset ->
+                        onFanMenuStart(itemGlobalPosition + localOffset)
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onFanMenuDrag(dragAmount)
+                    },
+                    onDragEnd = { onFanMenuEnd() },
+                    onDragCancel = { onFanMenuEnd() }
+                )
             }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -2199,7 +2380,6 @@ fun SwipeableRecordItem(
         Row(
             Modifier
                 .matchParentSize()
-                // ★ 加入 offset：當拉動距離少於 maxLeft (即係向左過度拉伸)，按鈕 Row 跟住向左移
                 .offset { 
                     val overscroll = if (offsetX < maxLeft) (offsetX - maxLeft).roundToInt() else 0
                     IntOffset(overscroll, 0) 
@@ -2237,7 +2417,6 @@ fun SwipeableRecordItem(
         Row(
             Modifier
                 .matchParentSize()
-                // ★ 加入 offset：當拉動距離大於 maxRight (即係向右過度拉伸)，按鈕 Row 跟住向右移
                 .offset { 
                     val overscroll = if (offsetX > maxRight) (offsetX - maxRight).roundToInt() else 0
                     IntOffset(overscroll, 0) 
@@ -3088,16 +3267,13 @@ fun AnimatedAmount(
 ) {
     var prevText by remember { mutableStateOf(text) }
 
-    // 智能判斷 1：第一隻字輸入 (由 0 變非 0，或刪淨 0)
     val isFirstCharPop = (prevText == "0" && text.length == 1 && text != "0") ||
                          (prevText.length == 1 && text == "0" && prevText != "0")
 
-    // 智能判斷 2：一般鍵盤打字 (長度加減 1，且字首相同)
     val isTyping = (text.length == prevText.length + 1 && text.startsWith(prevText)) ||
                    (prevText.length == text.length + 1 && prevText.startsWith(text)) ||
                    (text == prevText)
 
-    // 智能判斷 3：點擊 Clips 大規模替換數值
     val isReplacing = !isFirstCharPop && !isTyping
 
     LaunchedEffect(text) { prevText = text }
@@ -3112,14 +3288,11 @@ fun AnimatedAmount(
                     targetState = c,
                     transitionSpec = {
                         if (isReplacing) {
-                            // ★ 點擊 Clips 時完全唔播放動畫 (時間設為 0)，瞬間切換
                             fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                         } else if (isFirstCharPop) {
-                            // 保留第一隻字嘅 Q 彈放大彈出
                             (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
                             (scaleOut(tween(150), targetScale = 0.5f) + fadeOut(tween(150)))
                         } else {
-                            // 保留一般打字嘅老虎機滾動
                             (slideInVertically { it } + fadeIn()) togetherWith
                             (slideOutVertically { -it } + fadeOut())
                         }
@@ -3137,7 +3310,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
     
-    // 加入數字滾動過渡動畫
     val animIncome by animateFloatAsState(
         targetValue = income.toFloat(),
         animationSpec = tween(420, easing = FastOutSlowInEasing),
@@ -3152,7 +3324,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val incomeText = formatAmountNoDecimal(animIncome.toDouble())
     val expenseText = formatAmountNoDecimal(animExpense.toDouble())
 
-    // 防止數值清零時 UI 立刻隱藏，導致動畫硬切
     val showIncome = income > 0 || animIncome > 0.5f
     val showExpense = expense > 0 || animExpense > 0.5f
 
@@ -3300,7 +3471,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         shadowElevation = 1.dp
     ) {
         Row(
-            // ★ 核心修復：移除咗 .fillMaxWidth()，等佢真正根據文字長度自然收縮！
             Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
@@ -3339,14 +3509,12 @@ fun AnimatedStretchingFlowRow(
     ) { measurables, constraints ->
         if (measurables.isEmpty()) return@Layout layout(0, 0) {}
         
-        // ★ 核心閃退修復：改用 maxIntrinsicWidth 量度，唔消耗 measure() 次數！
         val rows = mutableListOf<MutableList<Pair<androidx.compose.ui.layout.Measurable, Int>>>()
         var currentRow = mutableListOf<Pair<androidx.compose.ui.layout.Measurable, Int>>()
         var currentWidth = 0
         
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
         
-        // 1. 預先計算每個組件需要嘅闊度，然後決定點樣換行
         measurables.forEach { measurable ->
             val intrinsicW = measurable.maxIntrinsicWidth(constraints.maxHeight)
             if (currentRow.isEmpty()) {
@@ -3368,7 +3536,6 @@ fun AnimatedStretchingFlowRow(
         val finalPlaceables = mutableListOf<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>()
         var y = 0
         
-        // 2. 將同行嘅剩餘空間平均分配俾各個 Clips，達到完美左右平齊
         rows.forEach { row ->
             val rowIntrinsicWidth = row.sumOf { it.second } + (row.size - 1) * hSpacingPx
             val extraSpace = safeMaxWidth - rowIntrinsicWidth
@@ -3382,7 +3549,6 @@ fun AnimatedStretchingFlowRow(
                 val extra = extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
                 val targetWidth = intrinsicW + extra
                 
-                // ★ 呢度先至真正執行全個過程唯一一次嘅 measure()，保證唔會再閃退！
                 val placeable = measurable.measure(
                     constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
                 )
@@ -3397,7 +3563,6 @@ fun AnimatedStretchingFlowRow(
         
         val totalHeight = maxOf(0, y - vSpacingPx)
         
-        // 3. FLIP 動畫移位：記住位置並觸發流暢飛行動畫
         layout(safeMaxWidth, totalHeight) {
             finalPlaceables.forEachIndexed { index, (placeable, targetOffset) ->
                 val key = items[index].first
@@ -3456,7 +3621,7 @@ private fun AnimatedQuickChip(
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(), // 自動跟隨自訂引擎分配嘅闊度
+            modifier = Modifier.fillMaxWidth(), 
             onClick = onClick
         )
     }
@@ -3474,10 +3639,8 @@ fun QuickInputSection(
     val items = topNotes.take(42)
     
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    // 計算每行可用嘅真實闊度：螢幕闊度 - 外框邊距(24) - 內框邊距(28)
     val availableWidth = configuration.screenWidthDp - 52
     
-    // ★ 智能預判分頁算法：確保每頁絕對唔會超過 4 行
     val pages = remember(items, availableWidth) {
         val result = mutableListOf<List<Pair<String, Int>>>()
         var currentPage = mutableListOf<Pair<String, Int>>()
@@ -3486,25 +3649,20 @@ fun QuickInputSection(
         
         for (item in items) {
             val name = item.first
-            // 精準估算闊度：基礎邊距圖標留白(約50dp) + 每個字元大約(14dp)
             val estimatedItemWidth = 50 + (name.length * 14)
             
             if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
-                // 放唔落，需要換行
                 if (currentRowCount >= 4) {
-                    // 第 4 行已經滿咗，強制封裝當前頁，將新 Clip 放入新一頁
                     result.add(currentPage)
                     currentPage = mutableListOf(item)
                     currentRowCount = 1
                     currentRowWidth = estimatedItemWidth + 8
                 } else {
-                    // 仲未過 4 行，正常落下一行
                     currentRowCount++
                     currentPage.add(item)
                     currentRowWidth = estimatedItemWidth + 8
                 }
             } else {
-                // 放得落同一行，繼續加
                 currentPage.add(item)
                 currentRowWidth += estimatedItemWidth + 8
             }
@@ -3554,7 +3712,6 @@ fun QuickInputSection(
             }
         }
         
-        // 底部加入分頁指示器 (點點)
         if (pages.size > 1) {
             Row(
                 Modifier
