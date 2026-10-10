@@ -2027,15 +2027,17 @@ fun LedgerContent(
                     }
                 }
             }
-        }
+        } // <-- 收埋 Column(Modifier.fillMaxSize().background(SURFACE_BG))
+
         FanMenuOverlay(
             progressProvider = { fanMenuProgress.value },
             centerProvider = { fanMenuCenter },
             touchProvider = { fanMenuTouch }
-            )
-        }
-    }
-}
+        )
+    } // <-- 收埋最外層嘅 Box(Modifier.fillMaxSize())
+} // <-- 收埋成個 LedgerContent 函數
+
+// (下面緊接嘅應該係 @Composable fun CategoryStatChip(category: String) ... )
 
 
 @Composable
