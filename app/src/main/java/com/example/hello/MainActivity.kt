@@ -108,28 +108,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.imageLoader
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -465,254 +454,6 @@ fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): In
     }
 }
 
-// ============================================================
-// ===== ViewModel + Flow：所有 derivedStateOf 搬嚟呢度 =====
-// ============================================================
-
-data class FilterState(
-    val modeOn: Boolean = false,
-    val category: String? = null,
-    val month: String? = null,
-    val search: TextFieldValue = TextFieldValue(""),
-    val showFuture: Boolean = false
-)
-
-data class LedgerUiState(
-    val loading: Boolean = true,
-    val records: List<Record> = emptyList(),
-    val filtered: List<Record> = emptyList(),
-    val ledgerRecords: List<Record> = emptyList(),
-    val groupedByDate: List<Pair<String, List<Record>>> = emptyList(),
-    val topNotes: List<Pair<String, Int>> = emptyList(),
-    val noteIconMap: Map<String, String> = emptyMap(),
-    val hasIncome: Boolean = false,
-    val hasExpense: Boolean = false,
-    val totalIncome: Double = 0.0,
-    val totalExpense: Double = 0.0,
-    val isExactNoteFilter: Boolean = false,
-    val allNoteNames: List<String> = emptyList(),
-    val noteCategoryMap: Map<String, String> = emptyMap(),
-    val availableMonths: List<String> = emptyList(),
-    val visibleCategories: List<String> = emptyList(),
-    val recentAmountByNote: Map<String, Double> = emptyMap()
-)
-
-class LedgerViewModel : ViewModel() {
-
-    private val db: FirebaseFirestore = Firebase.firestore
-
-    private val _records = MutableStateFlow<List<Record>>(emptyList())
-    private val _loading = MutableStateFlow(true)
-    private val _filters = MutableStateFlow(FilterState())
-    private val _deletingRecordId = MutableStateFlow<String?>(null)
-
-    val deletingRecordId: StateFlow<String?> = _deletingRecordId.asStateFlow()
-    val filterState: StateFlow<FilterState> = _filters.asStateFlow()
-
-    private var listener: ListenerRegistration? = null
-    private val recordsBuffer = mutableListOf<Record>()
-
-    init {
-        listener = db.collection("records")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                if (err != null || snap == null) {
-                    _loading.value = false
-                    return@addSnapshotListener
-                }
-                // 增量更新
-                snap.documentChanges.forEach { change ->
-                    val r = change.document.toObject(Record::class.java)
-                        ?.copy(id = change.document.id) ?: return@forEach
-                    when (change.type) {
-                        DocumentChange.Type.ADDED -> {
-                            val insertIdx = recordsBuffer.indexOfFirst { it.timestamp < r.timestamp }
-                            if (insertIdx >= 0) recordsBuffer.add(insertIdx, r) else recordsBuffer.add(r)
-                        }
-                        DocumentChange.Type.MODIFIED -> {
-                            val idx = recordsBuffer.indexOfFirst { it.id == r.id }
-                            if (idx >= 0) recordsBuffer[idx] = r
-                        }
-                        DocumentChange.Type.REMOVED -> {
-                            recordsBuffer.removeAll { it.id == r.id }
-                        }
-                    }
-                }
-                _records.value = recordsBuffer.toList()
-                _loading.value = false
-            }
-    }
-
-    override fun onCleared() {
-        listener?.remove()
-        listener = null
-        super.onCleared()
-    }
-
-    // ---- Filter setters ----
-    fun setFilterModeOn(v: Boolean) { _filters.value = _filters.value.copy(modeOn = v) }
-    fun setFilterCategory(v: String?) { _filters.value = _filters.value.copy(category = v) }
-    fun setFilterMonth(v: String?) { _filters.value = _filters.value.copy(month = v) }
-    fun setFilterSearch(v: TextFieldValue) { _filters.value = _filters.value.copy(search = v) }
-    fun setShowFuture(v: Boolean) { _filters.value = _filters.value.copy(showFuture = v) }
-    fun setDeletingRecordId(v: String?) { _deletingRecordId.value = v }
-
-    // ---- 主要 UI 狀態 ----
-    val uiState: StateFlow<LedgerUiState> = combine(
-        _records,
-        _filters,
-        _loading,
-        _deletingRecordId
-    ) { records, filters, loading, deletingId ->
-        computeState(records, filters, loading, deletingId)
-    }
-        .flowOn(Dispatchers.Default)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = LedgerUiState()
-        )
-
-    // ---- 純函數：全部計算喺 Dispatchers.Default 執行 ----
-    private fun computeState(
-        records: List<Record>,
-        filters: FilterState,
-        loading: Boolean,
-        deletingId: String?
-    ): LedgerUiState {
-        val now = System.currentTimeMillis()
-
-        // allNoteNames
-        val allNoteNames = records.asSequence()
-            .map { it.note }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .toList()
-
-        // noteCategoryMap
-        val noteCategoryMap = records.asSequence()
-            .filter { it.note.isNotBlank() }
-            .groupBy { it.note }
-            .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
-
-        // filtered
-        val filtered: List<Record> = if (!filters.modeOn) {
-            records
-        } else {
-            val q = filters.search.text
-            val hasExactNoteMatch = q.isNotBlank() && records.any { it.note == q }
-            val hasExactCategoryMatch = q.isNotBlank() && CATEGORIES.any { it == q }
-            records.filter { r ->
-                val catOk = filters.category == null || r.category == filters.category
-                val monthOk = filters.month == null ||
-                    monthKeyFromTimestamp(r.timestamp) == filters.month
-                val searchOk = if (q.isBlank()) true else when {
-                    hasExactNoteMatch -> r.note == q
-                    hasExactCategoryMatch -> r.category == q
-                    else -> r.note.contains(q, true) || r.category.contains(q, true)
-                }
-                catOk && monthOk && searchOk
-            }
-        }
-
-        // ledgerRecords
-        val ledgerRecords = if (filters.showFuture) filtered
-            else filtered.filter { it.timestamp <= now + 60_000 }
-
-        // 統計
-        var hasIncome = false
-        var hasExpense = false
-        var totalIncome = 0.0
-        var totalExpense = 0.0
-        for (r in ledgerRecords) {
-            if (r.id == deletingId) continue
-            if (r.category == INCOME_CATEGORY) {
-                hasIncome = true
-                totalIncome += r.amount
-            } else {
-                hasExpense = true
-                totalExpense += r.amount
-            }
-        }
-
-        // groupedByDate
-        val groupedByDate = ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
-
-        // isExactNoteFilter
-        val isExactNoteFilter = filters.modeOn &&
-            ledgerRecords.isNotEmpty() &&
-            ledgerRecords.map { it.note }.distinct().size == 1
-
-        // topNotes
-        val topNotes = records.asSequence()
-            .filter { it.note.isNotBlank() }
-            .groupBy { it.note }
-            .map { (note, list) ->
-                note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) }
-            }
-            .sortedBy { it.second }
-            .take(20)
-            .map { it.first to 0 }
-
-        // recentAmountByNote
-        val recentAmountByNote = records.asSequence()
-            .filter { it.note.isNotBlank() }
-            .groupBy { it.note }
-            .mapValues { (_, list) ->
-                list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0
-            }
-
-        // noteIconMap
-        val noteIconMap = records.asSequence()
-            .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
-            .groupBy { it.note }
-            .mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
-
-        // availableMonths
-        val availableMonths = records.asSequence()
-            .map { monthKeyFromTimestamp(it.timestamp) }
-            .distinct()
-            .sorted()
-            .toList()
-
-        // visibleCategories
-        val baseForCats = if (filters.month == null) records
-            else records.filter { monthKeyFromTimestamp(it.timestamp) == filters.month }
-        val hasIncForCats = baseForCats.any { it.category == INCOME_CATEGORY }
-        val expenseCats = baseForCats.asSequence()
-            .filter { it.category != INCOME_CATEGORY }
-            .groupBy { it.category }
-            .mapValues { (_, list) -> list.sumOf { it.amount } }
-            .toList()
-            .sortedByDescending { it.second }
-            .map { it.first }
-        val visibleCategories = buildList {
-            if (hasIncForCats) add(INCOME_CATEGORY)
-            addAll(expenseCats)
-        }
-
-        return LedgerUiState(
-            loading = loading,
-            records = records,
-            filtered = filtered,
-            ledgerRecords = ledgerRecords,
-            groupedByDate = groupedByDate,
-            topNotes = topNotes,
-            noteIconMap = noteIconMap,
-            hasIncome = hasIncome,
-            hasExpense = hasExpense,
-            totalIncome = totalIncome,
-            totalExpense = totalExpense,
-            isExactNoteFilter = isExactNoteFilter,
-            allNoteNames = allNoteNames,
-            noteCategoryMap = noteCategoryMap,
-            availableMonths = availableMonths,
-            visibleCategories = visibleCategories,
-            recentAmountByNote = recentAmountByNote
-        )
-    }
-}
-
 @Composable
 fun FanMenuOverlay(
     progressProvider: () -> Float,
@@ -815,7 +556,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainApp(viewModel: LedgerViewModel = viewModel()) {
+fun MainApp() {
     val db = Firebase.firestore
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -823,38 +564,14 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
 
     val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
 
-    // ===== 從 ViewModel 讀取（取代所有 derivedStateOf） =====
-    val uiState by viewModel.uiState.collectAsState()
-    val filterState by viewModel.filterState.collectAsState()
-    val deletingRecordId by viewModel.deletingRecordId.collectAsState()
-
-    val records = uiState.records
-    val filtered = uiState.filtered
-    val ledgerRecords = uiState.ledgerRecords
-    val groupedByDate = uiState.groupedByDate
-    val topNotes = uiState.topNotes
-    val noteIconMap = uiState.noteIconMap
-    val hasIncome = uiState.hasIncome
-    val hasExpense = uiState.hasExpense
-    val totalIncome = uiState.totalIncome
-    val totalExpense = uiState.totalExpense
-    val isExactNoteFilter = uiState.isExactNoteFilter
-    val allNoteNames = uiState.allNoteNames
-    val noteCategoryMap = uiState.noteCategoryMap
-    val availableMonths = uiState.availableMonths
-    val visibleCategories = uiState.visibleCategories
-    val recentAmountByNote = uiState.recentAmountByNote
-    val loading = uiState.loading
-
-    val filterModeOn = filterState.modeOn
-    val filterCategory = filterState.category
-    val filterMonth = filterState.month
-    val filterSearch = filterState.search
-    val showFuture = filterState.showFuture
-
-    // ===== UI-only 狀態（保留喺 composable） =====
+    val records = remember { mutableStateListOf<Record>() }
+    var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
+    var filterModeOn by remember { mutableStateOf(false) }
+    var filterCategory by remember { mutableStateOf<String?>(null) }
+    var filterMonth by remember { mutableStateOf<String?>(null) }
+    var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSearchHasFocus by remember { mutableStateOf(false) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
@@ -877,6 +594,7 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
     }
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
+    var showFuture by remember { mutableStateOf(false) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
@@ -913,7 +631,100 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
 
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
+    var deletingRecordId by remember { mutableStateOf<String?>(null) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
+
+    val allNoteNames by remember {
+        derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
+    }
+    val noteCategoryMap by remember {
+        derivedStateOf {
+            records.filter { it.note.isNotBlank() }
+                .groupBy { it.note }
+                .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
+        }
+    }
+
+    val filtered by remember {
+        derivedStateOf {
+            val q = filterSearch.text
+            val hasExactNoteMatch = q.isNotBlank() && records.any { it.note == q }
+            val hasExactCategoryMatch = q.isNotBlank() && CATEGORIES.any { it == q }
+            records.toList().filter { r ->
+                val catOk = filterCategory == null || r.category == filterCategory
+                val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
+                val searchOk = if (q.isBlank()) true else when {
+                    hasExactNoteMatch -> r.note == q
+                    hasExactCategoryMatch -> r.category == q
+                    else -> r.note.contains(q, true) || r.category.contains(q, true)
+                }
+                catOk && monthOk && searchOk
+            }
+        }
+    }
+    val ledgerRecords by remember {
+        derivedStateOf {
+            val base = if (filterModeOn) filtered else records.toList()
+            if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
+        }
+    }
+
+    val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
+    val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
+    val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
+    val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
+    val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
+
+    val isExactNoteFilter by remember {
+        derivedStateOf {
+            filterModeOn &&
+                ledgerRecords.isNotEmpty() &&
+                ledgerRecords.map { it.note }.distinct().size == 1
+        }
+    }
+
+    val topNotes by remember {
+        derivedStateOf {
+            val now = System.currentTimeMillis()
+            records.toList().filter { it.note.isNotBlank() }
+                .groupBy { it.note }
+                .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
+                .sortedBy { it.second }
+                .take(20)
+                .map { it.first to 0 }
+        }
+    }
+
+    val recentAmountByNote by remember {
+        derivedStateOf {
+            val now = System.currentTimeMillis()
+            records.toList().filter { it.note.isNotBlank() }
+                .groupBy { it.note }
+                .mapValues { (_, list) -> list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0 }
+        }
+    }
+
+    val noteIconMap by remember {
+        derivedStateOf {
+            records.toList().filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+                .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
+        }
+    }
+    val availableMonths by remember {
+        derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() }
+    }
+    val visibleCategories by remember {
+        derivedStateOf {
+            val base = if (filterMonth == null) records.toList()
+                       else records.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
+            val hasIncome = base.any { it.category == INCOME_CATEGORY }
+            val expenseCats = base.filter { it.category != INCOME_CATEGORY }
+                .groupBy { it.category }
+                .mapValues { (_, list) -> list.sumOf { it.amount } }
+                .toList().sortedByDescending { it.second }.map { it.first }
+            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+        }
+    }
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
@@ -936,6 +747,33 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
             }
         }
         pendingCameraUri = null; iconTargetRecord = null
+    }
+
+    // ===== 效能優化：增量更新 =====
+    DisposableEffect(Unit) {
+        val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, err ->
+                loading = false
+                if (err != null || snap == null) return@addSnapshotListener
+                snap.documentChanges.forEach { change ->
+                    val r = change.document.toObject(Record::class.java)
+                        ?.copy(id = change.document.id) ?: return@forEach
+                    when (change.type) {
+                        DocumentChange.Type.ADDED -> {
+                            val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
+                            if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
+                        }
+                        DocumentChange.Type.MODIFIED -> {
+                            val idx = records.indexOfFirst { it.id == r.id }
+                            if (idx >= 0) records[idx] = r
+                        }
+                        DocumentChange.Type.REMOVED -> {
+                            records.removeAll { it.id == r.id }
+                        }
+                    }
+                }
+            }
+        onDispose { listener.remove() }
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
@@ -981,7 +819,7 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
 
     fun deleteRecordWithUndo(r: Record) {
         deleteJob?.cancel()
-        viewModel.setDeletingRecordId(r.id)
+        deletingRecordId = r.id
         recentlyDeletedRecord = r
         showUndoToast = true
         deleteJob = scope.launch {
@@ -991,7 +829,7 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
             if (recentlyDeletedRecord?.id == r.id) {
                 showUndoToast = false
                 recentlyDeletedRecord = null
-                if (deletingRecordId == r.id) viewModel.setDeletingRecordId(null)
+                if (deletingRecordId == r.id) deletingRecordId = null
             }
         }
     }
@@ -1001,7 +839,7 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
         deleteJob?.cancel(); deleteJob = null
         showUndoToast = false
         recentlyDeletedRecord = null
-        viewModel.setDeletingRecordId(null)
+        deletingRecordId = null
 
         justAddedId = target.id
         scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
@@ -1040,17 +878,13 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
     }
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
-    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) {
-        viewModel.setFilterModeOn(false)
-    }
+    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filterModeOn && currentPage == 0) {
             delay(300)
             try {
                 filterSearchFocusRequester.requestFocus()
-                viewModel.setFilterSearch(
-                    filterSearch.copy(selection = TextRange(0, filterSearch.text.length))
-                )
+                filterSearch = filterSearch.copy(selection = TextRange(0, filterSearch.text.length))
             } catch (_: Exception) {}
         }
     }
@@ -1065,8 +899,8 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
                 hasIncome = hasIncome, hasExpense = hasExpense,
                 totalIncome = totalIncome, totalExpense = totalExpense,
                 filterMode = filterModeOn, filterCategory = filterCategory,
-                onFilterCategoryChange = { viewModel.setFilterCategory(it) },
-                filterMonth = filterMonth, onFilterMonthChange = { viewModel.setFilterMonth(it) },
+                onFilterCategoryChange = { filterCategory = it },
+                filterMonth = filterMonth, onFilterMonthChange = { filterMonth = it },
                 availableMonths = availableMonths,
                 visibleCategories = visibleCategories,
                 expandedId = expandedId, onExpandChange = { expandedId = it },
@@ -1080,10 +914,8 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
                 onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                 onFilterByName = { name ->
-                    viewModel.setFilterCategory(null)
-                    viewModel.setFilterMonth(null)
-                    viewModel.setFilterSearch(TextFieldValue(name))
-                    viewModel.setFilterModeOn(true)
+                    filterCategory = null; filterMonth = null
+                    filterSearch = TextFieldValue(name); filterModeOn = true
                 },
                 showKeyboard = showKeyboard, keyboardState = keyboardState,
                 onKeyboardStateChange = { keyboardState = it },
@@ -1091,7 +923,7 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
                 onKeyboardConfirm = { saveFromKeyboard() },
                 onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onKeyboardPickCategory = { },
-                showFuture = showFuture, onShowFutureChange = { viewModel.setShowFuture(it) },
+                showFuture = showFuture, onShowFutureChange = { showFuture = it },
                 allNoteNames = allNoteNames,
                 noteCategoryMap = noteCategoryMap,
                 scrollToTopTrigger = scrollToTopTrigger,
@@ -1115,10 +947,8 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
                 onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
                 onFilterClick = { r ->
                     currentPage = 0
-                    viewModel.setFilterCategory(null)
-                    viewModel.setFilterMonth(null)
-                    viewModel.setFilterSearch(TextFieldValue(r.note))
-                    viewModel.setFilterModeOn(true)
+                    filterCategory = null; filterMonth = null
+                    filterSearch = TextFieldValue(r.note); filterModeOn = true
                 },
                 onDeleteClick = { deleteRecordWithUndo(it) },
                 onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
@@ -1226,16 +1056,16 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
             currentPage = currentPage,
             filterModeOn = filterModeOn,
             filterSearch = filterSearch,
-            onFilterSearchChange = { viewModel.setFilterSearch(it) },
+            onFilterSearchChange = { filterSearch = it },
             filterSearchHasFocus = filterSearchHasFocus,
             onFilterSearchFocusChange = { filterSearchHasFocus = it },
             filterSearchFocusRequester = filterSearchFocusRequester,
             onFilterButtonTap = {
                 if (currentPage != 0) {
                     currentPage = 0
-                    viewModel.setFilterModeOn(true)
+                    filterModeOn = true
                 } else if (!filterModeOn) {
-                    viewModel.setFilterModeOn(true)
+                    filterModeOn = true
                 } else {
                     filterSelectAllTrigger++
                 }
@@ -1244,7 +1074,7 @@ fun MainApp(viewModel: LedgerViewModel = viewModel()) {
                 if (showKeyboard) {
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
                 } else {
-                    if (filterModeOn) viewModel.setFilterModeOn(false)
+                    if (filterModeOn) filterModeOn = false
                     if (currentPage != 0) currentPage = 0
                     openKeyboardForNew()
                 }
@@ -1948,7 +1778,7 @@ fun LedgerContent(
                 }
             }
         } else {
-            // 直接使用傳入嘅 groupedByDate
+            // 直接使用傳入嘅 groupedByDate，避免重複 groupBy
             groupedByDate.forEach { (dateKey, dayRecords) ->
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
@@ -2336,7 +2166,7 @@ fun AnimatedRecordItem(
         }
     }
 
-    // 粒子只在刪除時創建
+    // ===== 效能優化：粒子只在刪除時創建 =====
     val particles = remember(isDeleting) {
         if (!isDeleting) emptyList()
         else {
@@ -2492,6 +2322,7 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) }
 
+    // ===== 效能優化：移除 blur，改用 alpha（Android 12+ 的 blur 開銷大） =====
     val itemAlpha by animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha")
     val itemScale by animateFloatAsState(
         targetValue = when {
@@ -3472,8 +3303,10 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
+    // ===== 效能優化：減少逐字符 AnimatedContent 開銷 =====
+    val displayText = remember(text) { text }
     Text(
-        text = text,
+        text = displayText,
         color = color,
         fontSize = fontSize,
         fontWeight = fontWeight,
@@ -4902,6 +4735,7 @@ fun CompareContent(
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
+    // ===== 效能優化：預先建立 category -> month -> sum 的緩存 =====
     val categoryMonthSum = remember(records) {
         val map = HashMap<String, HashMap<String, Double>>()
         records.forEach { r ->
