@@ -956,6 +956,9 @@ fun MainApp() {
                 onAddClick = { currentPage = 0; openKeyboardForNew() },
                 deletingRecordId = deletingRecordId
             )
+        } // 呢個係 when (currentPage) 嘅結尾
+
+        // ★★★ 補返呢個右括號！用嚟收埋上面嗰個帶有 blur 效果嘅 Box ★★★
         }
 
         AnimatedVisibility(
