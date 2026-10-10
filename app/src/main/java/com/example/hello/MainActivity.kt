@@ -886,9 +886,16 @@ fun MainApp() {
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        when (currentPage) {
-            0 -> LedgerContent(
-                loading = loading, filtered = ledgerRecords,
+        
+        // ★ 加入呢個 Box，將 keyboardAnimProgress 轉化為 0 到 16.dp 嘅模糊半徑
+        Box(
+            Modifier
+                .fillMaxSize()
+                .blur((keyboardAnimProgress.value * 16).dp)
+        ) {
+            when (currentPage) {
+                0 -> LedgerContent(
+                    loading = loading, filtered = ledgerRecords,
                 groupedByDate = groupedByDate,
                 topNotes = topNotes, noteIconMap = noteIconMap,
                 hasIncome = hasIncome, hasExpense = hasExpense,
