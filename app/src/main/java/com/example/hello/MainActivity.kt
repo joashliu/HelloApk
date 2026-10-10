@@ -1900,15 +1900,7 @@ fun LedgerContent(
             ) {
                 val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
 
-                AnimatedVisibility(
-                    visible = showCategoryChip,
-                    enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
-                            expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
-                    exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
-                            shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
-                ) {
-                    CategoryStatChip(cachedCategory)
-                }
+                // 已經刪除咗原本呢度嘅 AnimatedVisibility { CategoryStatChip(...) } 
 
                 Box(modifier = Modifier.weight(1f)) {
                     TopStats(
@@ -1917,7 +1909,10 @@ fun LedgerContent(
                         income = totalIncome,
                         expense = totalExpense,
                         isFilterMode = filterMode,
-                        filteredCount = if (filterMode) filtered.size else null
+                        filteredCount = if (filterMode) filtered.size else null,
+                        // 🔥 傳入類別參數，交由 TopStats 內部排版
+                        showCategory = showCategoryChip,
+                        categoryName = cachedCategory
                     )
                 }
 
@@ -3191,6 +3186,9 @@ fun TopStats(
     expense: Double,
     isFilterMode: Boolean = false,
     filteredCount: Int? = null,
+    // 新增呢兩個參數
+    showCategory: Boolean = false,
+    categoryName: String = ""
 ) {
     val balance = income - expense
     val showIncome = hasIncome || (!hasIncome && !hasExpense)
@@ -3205,11 +3203,31 @@ fun TopStats(
 
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
+    // 新增類別嘅權重動畫
+    val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 🔥 新增：類別 Block，使用權重等分空間
+        if (showCategory || catW > 0.001f) {
+            Box(
+                modifier = Modifier.weight(catW.coerceAtLeast(0.001f)).clipToBounds(),
+                contentAlignment = Alignment.Center
+            ) {
+                val alphaScale = catW.coerceIn(0f, 1f)
+                Box(Modifier.graphicsLayer {
+                    alpha = alphaScale
+                    scaleX = 0.85f + 0.15f * alphaScale
+                    scaleY = 0.85f + 0.15f * alphaScale
+                }) {
+                    CategoryStatChip(category = categoryName)
+                }
+            }
+        }
+
+        // 收入 Block
         if (showIncome || incomeW > 0.001f) {
             Box(
                 modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3244,6 +3262,7 @@ fun TopStats(
             }
         }
 
+        // 支出 Block
         if (showExpense || expenseW > 0.001f) {
             Box(
                 modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3278,6 +3297,7 @@ fun TopStats(
             }
         }
 
+        // 餘額 / 筆數 Block
         Box(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
