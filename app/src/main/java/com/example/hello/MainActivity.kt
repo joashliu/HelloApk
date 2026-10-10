@@ -1438,17 +1438,24 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // ★ 將 56.dp 加大至 120.dp，需要滑動更多距離先會縮減一行
-    val rowThresholdPx = remember(density) { with(density) { 180.dp.toPx() } }
+    // ★ 140.dp 係一個非常舒服嘅手感數值，你都可以按喜好改做 120 - 180
+    val rowThresholdPx = remember(density) { with(density) { 140.dp.toPx() } }
+    // 估算每個消失咗嘅 Item 大約佔 72dp，用嚟計算絕對滾動距離
+    val estimatedItemHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
+    
     val quickInputMaxRows by remember {
         derivedStateOf {
-            if (listState.firstVisibleItemIndex > 0) {
-                1 
-            } else {
-                val offset = listState.firstVisibleItemScrollOffset
-                (4 - (offset / rowThresholdPx).toInt()).coerceIn(1, 4) 
-            }
+            val index = listState.firstVisibleItemIndex
+            val offset = listState.firstVisibleItemScrollOffset
+            
+            // ★ 完美解決跳行問題：
+            // 將消失咗嘅 Item 數量轉換為估算像素，加上目前偏移量，得出一個「永遠平滑增加」嘅絕對滾動距離
+            val totalScroll = (index * estimatedItemHeightPx) + offset
+            
+            // 根據真實滾動距離，每 140dp 減一行，絕不跳級
+            (4 - (totalScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
         }
+    }
     }
 
     val fanMenuProgress = animateFloatAsState(
