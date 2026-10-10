@@ -1494,6 +1494,17 @@ fun LedgerContent(
         }
     }
 
+    // ★ 新增呢段：當鍵盤打開嗰陣，自動平滑滾動返去最頂
+    LaunchedEffect(showKeyboard) {
+        if (showKeyboard) {
+            try { 
+                // 用 animateScrollToItem 會有流暢嘅滑動效果
+                // 配合埋你個 quickInputMaxRows，張卡片會喺滾動期間優雅咁展開返 4 行！
+                listState.animateScrollToItem(0) 
+            } catch (_: Exception) {}
+        }
+    }
+
     LaunchedEffect(filterMode) {
         if (!filterMode && preFilterIndex >= 0) {
             try { listState.requestScrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) { try { listState.scrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) {} }
