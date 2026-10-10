@@ -35,12 +35,9 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -59,12 +56,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -79,6 +73,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -86,8 +81,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onPlaced
-import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -108,6 +102,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
@@ -117,14 +112,13 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.imageLoader
 import com.google.firebase.Firebase
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -452,10 +446,10 @@ fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): In
 
     val angle = kotlin.math.atan2(dy.toDouble(), dx.toDouble()) * 180 / Math.PI
     return when {
-        angle in -170.0..-130.0 -> 0 
-        angle in -130.0..-90.0 -> 1  
-        angle in -90.0..-50.0 -> 2   
-        angle in -50.0..-10.0 -> 3   
+        angle in -170.0..-130.0 -> 0
+        angle in -130.0..-90.0 -> 1
+        angle in -90.0..-50.0 -> 2
+        angle in -50.0..-10.0 -> 3
         else -> null
     }
 }
@@ -527,7 +521,7 @@ fun FanMenuOverlay(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(action.first, action.second, tint = Color.White, modifier = Modifier.size(24.dp))
-                
+
                 androidx.compose.animation.AnimatedVisibility(
                     visible = isHovered,
                     enter = fadeIn() + slideInVertically { 20 },
@@ -674,7 +668,7 @@ fun MainApp() {
             if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
         }
     }
-    
+
     val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
     val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
     val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
@@ -755,16 +749,27 @@ fun MainApp() {
         pendingCameraUri = null; iconTargetRecord = null
     }
 
+    // ===== 效能優化：增量更新 =====
     DisposableEffect(Unit) {
         val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
                 loading = false
-                if (err != null) return@addSnapshotListener
-                if (snap != null) {
-                    records.clear()
-                    snap.documents.forEach { doc ->
-                        val r = doc.toObject(Record::class.java)
-                        if (r != null) records.add(r.copy(id = doc.id))
+                if (err != null || snap == null) return@addSnapshotListener
+                snap.documentChanges.forEach { change ->
+                    val r = change.document.toObject(Record::class.java)
+                        ?.copy(id = change.document.id) ?: return@forEach
+                    when (change.type) {
+                        DocumentChange.Type.ADDED -> {
+                            val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
+                            if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
+                        }
+                        DocumentChange.Type.MODIFIED -> {
+                            val idx = records.indexOfFirst { it.id == r.id }
+                            if (idx >= 0) records[idx] = r
+                        }
+                        DocumentChange.Type.REMOVED -> {
+                            records.removeAll { it.id == r.id }
+                        }
                     }
                 }
             }
@@ -835,10 +840,10 @@ fun MainApp() {
         showUndoToast = false
         recentlyDeletedRecord = null
         deletingRecordId = null
-        
+
         justAddedId = target.id
         scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
-        
+
         try { db.collection("records").document(target.id).set(target) } catch (_: Exception) {}
     }
 
@@ -885,7 +890,7 @@ fun MainApp() {
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        
+
         when (currentPage) {
             0 -> LedgerContent(
                 loading = loading, filtered = ledgerRecords,
@@ -972,7 +977,7 @@ fun MainApp() {
         ) {
             Surface(
                 shape = CircleShape,
-                color = Color(0xE6FFFFFF), 
+                color = Color(0xE6FFFFFF),
                 border = BorderStroke(1.dp, Color.White),
                 shadowElevation = 12.dp,
                 modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -1001,9 +1006,9 @@ fun MainApp() {
                         }
                         Spacer(Modifier.width(12.dp))
                         Text(
-                            "記錄已刪除", 
+                            "記錄已刪除",
                             color = TEXT_PRIMARY,
-                            fontSize = 15.sp, 
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -1365,21 +1370,19 @@ private fun AnimatedFabLayer(
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val p = progressProvider()
-
     Box(
         modifier = modifier
             .graphicsLayer {
                 val currentP = progressProvider()
 
-                val fabX = androidx.compose.ui.unit.lerp(20.dp, 24.dp, currentP).toPx()
-                val fabY = androidx.compose.ui.unit.lerp(92.dp, 388.dp, currentP).toPx()
+                val fabX = lerp(20.dp, 24.dp, currentP).toPx()
+                val fabY = lerp(92.dp, 388.dp, currentP).toPx()
 
                 translationX = -fabX
                 translationY = -fabY
 
                 transformOrigin = TransformOrigin(1f, 1f)
-                shadowElevation = androidx.compose.ui.unit.lerp(6.dp, 0.dp, (currentP * 5f).coerceIn(0f, 1f)).toPx()
+                shadowElevation = lerp(6.dp, 0.dp, (currentP * 5f).coerceIn(0f, 1f)).toPx()
                 shape = CircleShape
                 clip = true
             }
@@ -1390,14 +1393,13 @@ private fun AnimatedFabLayer(
             ) { onFabTap() },
         contentAlignment = Alignment.Center
     ) {
-        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+        Canvas(Modifier.matchParentSize()) {
             val currentP = progressProvider()
             val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
-            val fabColor = BRAND_PRIMARY.copy(alpha = bgAlpha)
-            drawCircle(color = fabColor)
+            drawCircle(color = BRAND_PRIMARY.copy(alpha = bgAlpha))
         }
 
-        val tintColor = androidx.compose.ui.graphics.lerp(Color.White, TEXT_TERTIARY, p)
+        val tintColor = lerp(Color.White, TEXT_TERTIARY, progressProvider())
         Icon(
             Icons.Default.Add,
             contentDescription = "Clear",
@@ -1406,11 +1408,12 @@ private fun AnimatedFabLayer(
                 .align(Alignment.Center)
                 .size(24.dp)
                 .graphicsLayer {
-                    rotationZ = p * -405f
+                    rotationZ = progressProvider() * -405f
                 }
         )
     }
 }
+
 @Composable
 private fun AnimatedKeyboardLayer(
     showKeyboard: Boolean,
@@ -1431,7 +1434,7 @@ private fun AnimatedKeyboardLayer(
         if (showKeyboard) {
             shouldRender = true
         } else {
-            kotlinx.coroutines.delay(500)
+            delay(500)
             if (progressProvider() < 0.001f) {
                 shouldRender = false
             }
@@ -1628,7 +1631,7 @@ fun LedgerContent(
 
     val rowThresholdPx = remember(density) { with(density) { 140.dp.toPx() } }
     val estimatedItemHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
-    
+
     val quickInputMaxRows by remember {
         derivedStateOf {
             val index = listState.firstVisibleItemIndex
@@ -1655,8 +1658,8 @@ fun LedgerContent(
     val handleFanEnd = {
         val hovered = getHoveredActionIndex(fanMenuCenter, fanMenuTouch, with(density) { 40.dp.toPx() })
         val targetRecord = activeFanRecord
-        activeFanRecord = null 
-        
+        activeFanRecord = null
+
         if (targetRecord != null && hovered != null) {
             scope.launch {
                 delay(120)
@@ -1691,8 +1694,8 @@ fun LedgerContent(
 
     LaunchedEffect(filterMode) {
         if (!filterMode && preFilterIndex >= 0) {
-            try { 
-                listState.requestScrollToItem(preFilterIndex, preFilterOffset) 
+            try {
+                listState.requestScrollToItem(preFilterIndex, preFilterOffset)
             } catch (_: Exception) {
                 try { listState.scrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) {}
             }
@@ -1743,7 +1746,7 @@ fun LedgerContent(
                                 isDeleting = r.id == deletingRecordId
                             ) {
                                 SwipeableRecordItem(
-                                    backgroundColor = Color.Transparent, 
+                                    backgroundColor = Color.Transparent,
                                     record = r,
                                     expandedId = expandedId,
                                     onExpand = onExpandChange,
@@ -1775,9 +1778,8 @@ fun LedgerContent(
                 }
             }
         } else {
-            val dataToIterate = filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
-
-            dataToIterate.forEach { (dateKey, dayRecords) ->
+            // 直接使用傳入嘅 groupedByDate，避免重複 groupBy
+            groupedByDate.forEach { (dateKey, dayRecords) ->
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
 
@@ -1786,7 +1788,7 @@ fun LedgerContent(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(SURFACE_CARD) 
+                                .background(SURFACE_CARD)
                         ) {
                             DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
@@ -1817,7 +1819,7 @@ fun LedgerContent(
                                             isDeleting = r.id == deletingRecordId
                                         ) {
                                             SwipeableRecordItem(
-                                                backgroundColor = SURFACE_CARD, 
+                                                backgroundColor = SURFACE_CARD,
                                                 record = r,
                                                 expandedId = expandedId,
                                                 onExpand = onExpandChange,
@@ -1840,7 +1842,7 @@ fun LedgerContent(
                                                 isActiveItem = activeFanRecord?.id == r.id
                                             )
                                         }
-                                        
+
                                         if (afterSaveHint?.recordId == r.id) {
                                             CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
                                         }
@@ -1864,7 +1866,7 @@ fun LedgerContent(
                         }
                     }
                 }
-                
+
                 item(key = "spacer_$dateKey") {
                     Spacer(modifier = Modifier.height(10.dp))
                 }
@@ -2163,11 +2165,14 @@ fun AnimatedRecordItem(
             particleProgress.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
         }
     }
-    
-    val particleCount = 60
-    val random = remember { Random(42) }
-    val particles = remember {
-        List(particleCount) { Triple(random.nextFloat(), random.nextFloat(), (random.nextFloat() - 0.5f) * 280f) }
+
+    // ===== 效能優化：粒子只在刪除時創建 =====
+    val particles = remember(isDeleting) {
+        if (!isDeleting) emptyList()
+        else {
+            val random = Random(42)
+            List(60) { Triple(random.nextFloat(), random.nextFloat(), (random.nextFloat() - 0.5f) * 280f) }
+        }
     }
     val particleColors = remember {
         listOf(BRAND_PRIMARY, BRAND_PRIMARY_DARK, Color(0xFF818CF8), Color(0xFFFBBF24), Color(0xFF34D399))
@@ -2193,7 +2198,7 @@ fun AnimatedRecordItem(
             content()
         }
 
-        if (isDeleting) {
+        if (isDeleting && particles.isNotEmpty()) {
             Canvas(modifier = Modifier.matchParentSize()) {
                 val prog = particleProgress.value
                 if (prog <= 0f) return@Canvas
@@ -2315,14 +2320,14 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) } 
+    var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) }
 
-    val blurRadius by animateDpAsState(if (isOtherItem) 8.dp else 0.dp, tween(300), label = "blur")
+    // ===== 效能優化：移除 blur，改用 alpha（Android 12+ 的 blur 開銷大） =====
     val itemAlpha by animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha")
     val itemScale by animateFloatAsState(
         targetValue = when {
-            isActiveItem -> 1.03f 
-            isOtherItem -> 0.95f  
+            isActiveItem -> 1.03f
+            isOtherItem -> 0.95f
             else -> 1f
         },
         animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
@@ -2355,7 +2360,6 @@ fun SwipeableRecordItem(
                 scaleY = itemScale
                 alpha = itemAlpha
             }
-            .blur(blurRadius)
             .background(backgroundColor)
             .onGloballyPositioned { itemGlobalPosition = it.boundsInRoot().topLeft }
             .pointerInput(record.id) {
@@ -2377,18 +2381,18 @@ fun SwipeableRecordItem(
                             targetOffset < maxLeft * 0.65f -> maxLeft
                             targetOffset > maxRight * 0.65f -> {
                                 if (hasIcon) {
-                                    maxRight 
+                                    maxRight
                                 } else {
                                     shouldTriggerIconAction = true
-                                    0f 
+                                    0f
                                 }
                             }
                             else -> 0f
                         }
-                        
+
                         targetOffset = newOffset
                         if (newOffset == 0f) onExpand(null)
-                        
+
                         if (shouldTriggerIconAction) {
                             onChangeIcon()
                         }
@@ -2397,9 +2401,9 @@ fun SwipeableRecordItem(
                     onHorizontalDrag = { c, d ->
                         c.consume()
                         val dampFactor = when {
-                            targetOffset < maxLeft && d < 0 -> 0.35f 
-                            targetOffset > maxRight && d > 0 -> 0.35f 
-                            else -> 1f 
+                            targetOffset < maxLeft && d < 0 -> 0.35f
+                            targetOffset > maxRight && d > 0 -> 0.35f
+                            else -> 1f
                         }
                         targetOffset += d * dampFactor
                     })
@@ -2427,9 +2431,9 @@ fun SwipeableRecordItem(
         Row(
             Modifier
                 .matchParentSize()
-                .offset { 
+                .offset {
                     val overscroll = if (offsetX < maxLeft) (offsetX - maxLeft).roundToInt() else 0
-                    IntOffset(overscroll, 0) 
+                    IntOffset(overscroll, 0)
                 }
                 .padding(end = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.End),
@@ -2464,9 +2468,9 @@ fun SwipeableRecordItem(
         Row(
             Modifier
                 .matchParentSize()
-                .offset { 
+                .offset {
                     val overscroll = if (offsetX > maxRight) (offsetX - maxRight).roundToInt() else 0
-                    IntOffset(overscroll, 0) 
+                    IntOffset(overscroll, 0)
                 }
                 .padding(start = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(gap, Alignment.Start),
@@ -3249,7 +3253,7 @@ fun TopStats(
                         (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
                     }
                 },
-                contentAlignment = Alignment.Center, 
+                contentAlignment = Alignment.Center,
                 label = "balanceCountAnim"
             ) { isFilter ->
                 if (!isFilter) {
@@ -3292,19 +3296,6 @@ fun TopStats(
 }
 
 @Composable
-fun StatCard(icon: ImageVector, label: String, amountText: String, gradStart: Color, gradEnd: Color) {
-    Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = gradStart, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(label, fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-        }
-        Spacer(Modifier.height(4.dp))
-        AnimatedAmount(amountText, gradEnd, STAT_AMOUNT_FONT_SIZE, FontWeight.Bold)
-    }
-}
-
-@Composable
 fun AnimatedAmount(
     text: String,
     color: Color,
@@ -3312,52 +3303,22 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    var prevText by remember { mutableStateOf(text) }
-
-    val isFirstCharPop = (prevText == "0" && text.length == 1 && text != "0") ||
-                         (prevText.length == 1 && text == "0" && prevText != "0")
-
-    val isTyping = (text.length == prevText.length + 1 && text.startsWith(prevText)) ||
-                   (prevText.length == text.length + 1 && prevText.startsWith(text)) ||
-                   (text == prevText)
-
-    val isReplacing = !isFirstCharPop && !isTyping
-
-    LaunchedEffect(text) { prevText = text }
-
-    Row(
-        modifier = modifier.animateContentSize(spring(stiffness = Spring.StiffnessMediumLow)),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        text.forEachIndexed { idx, c ->
-            key(idx) {
-                AnimatedContent(
-                    targetState = c,
-                    transitionSpec = {
-                        if (isReplacing) {
-                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        } else if (isFirstCharPop) {
-                            (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow), initialScale = 0.5f) + fadeIn(tween(200))) togetherWith
-                            (scaleOut(tween(150), targetScale = 0.5f) + fadeOut(tween(150)))
-                        } else {
-                            (slideInVertically { it } + fadeIn()) togetherWith
-                            (slideOutVertically { -it } + fadeOut())
-                        }
-                    },
-                    label = "d_$idx"
-                ) { ch ->
-                    Text(ch.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight)
-                }
-            }
-        }
-    }
+    // ===== 效能優化：減少逐字符 AnimatedContent 開銷 =====
+    val displayText = remember(text) { text }
+    Text(
+        text = displayText,
+        color = color,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        modifier = modifier
+    )
 }
 
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    
+
     val animIncome by animateFloatAsState(
         targetValue = income.toFloat(),
         animationSpec = tween(420, easing = FastOutSlowInEasing),
@@ -3392,7 +3353,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                     color = TEXT_PRIMARY
                 )
                 Spacer(Modifier.width(8.dp))
-                
+
                 Column(verticalArrangement = Arrangement.Center) {
                     Text(
                         text = monthStr,
@@ -3556,13 +3517,13 @@ fun AnimatedStretchingFlowRow(
         modifier = modifier
     ) { measurables, constraints ->
         if (measurables.isEmpty()) return@Layout layout(0, 0) {}
-        
+
         val rows = mutableListOf<MutableList<Pair<androidx.compose.ui.layout.Measurable, Int>>>()
         var currentRow = mutableListOf<Pair<androidx.compose.ui.layout.Measurable, Int>>()
         var currentWidth = 0
-        
+
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
-        
+
         measurables.forEach { measurable ->
             val intrinsicW = measurable.maxIntrinsicWidth(constraints.maxHeight)
             if (currentRow.isEmpty()) {
@@ -3580,42 +3541,42 @@ fun AnimatedStretchingFlowRow(
             }
         }
         if (currentRow.isNotEmpty()) rows.add(currentRow)
-        
+
         val finalPlaceables = mutableListOf<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>()
         var y = 0
-        
+
         rows.forEach { row ->
             val rowIntrinsicWidth = row.sumOf { it.second } + (row.size - 1) * hSpacingPx
             val extraSpace = safeMaxWidth - rowIntrinsicWidth
             val extraPerItem = if (extraSpace > 0) extraSpace / row.size else 0
             var remainder = if (extraSpace > 0) extraSpace % row.size else 0
-            
+
             var x = 0
             var rowMaxHeight = 0
-            
+
             row.forEach { (measurable, intrinsicW) ->
                 val extra = extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
                 val targetWidth = intrinsicW + extra
-                
+
                 val placeable = measurable.measure(
                     constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
                 )
-                
+
                 finalPlaceables.add(placeable to IntOffset(x, y))
-                
+
                 x += targetWidth + hSpacingPx
                 rowMaxHeight = maxOf(rowMaxHeight, placeable.height)
             }
             y += rowMaxHeight + vSpacingPx
         }
-        
+
         val totalHeight = maxOf(0, y - vSpacingPx)
-        
+
         layout(safeMaxWidth, totalHeight) {
             finalPlaceables.forEachIndexed { index, (placeable, targetOffset) ->
                 val key = items[index].first
                 val animatable = offsets.getOrPut(key) { Animatable(targetOffset, IntOffset.VectorConverter) }
-                
+
                 if (animatable.targetValue != targetOffset) {
                     coroutineScope.launch {
                         animatable.animateTo(
@@ -3669,7 +3630,7 @@ private fun AnimatedQuickChip(
         QuickInputChip(
             name = name,
             iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(), 
+            modifier = Modifier.fillMaxWidth(),
             onClick = onClick
         )
     }
@@ -3686,20 +3647,20 @@ fun QuickInputSection(
 ) {
     if (topNotes.isEmpty()) return
     val items = topNotes.take(42)
-    
-    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+
+    val configuration = LocalConfiguration.current
     val availableWidth = configuration.screenWidthDp - 52
-    
+
     val pages = remember(items, availableWidth, maxRowsPerPage) {
         val result = mutableListOf<List<Pair<String, Int>>>()
         var currentPage = mutableListOf<Pair<String, Int>>()
         var currentRowCount = 1
         var currentRowWidth = 0
-        
+
         for (item in items) {
             val name = item.first
             val estimatedItemWidth = 50 + (name.length * 14)
-            
+
             if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
                 if (currentRowCount >= maxRowsPerPage) {
                     result.add(currentPage)
@@ -3721,7 +3682,7 @@ fun QuickInputSection(
         }
         result
     }
-    
+
     val pagerState = rememberPagerState(pageCount = { pages.size })
 
     Box(
@@ -3736,7 +3697,7 @@ fun QuickInputSection(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Top 
+            verticalAlignment = Alignment.Top
         ) { page ->
             AnimatedStretchingFlowRow(
                 items = pages[page],
@@ -3749,18 +3710,18 @@ fun QuickInputSection(
             ) { item ->
                 val name = item.first
                 val originalIndex = items.indexOfFirst { it.first == name }
-                
+
                 AnimatedQuickChip(
                     name = name,
                     iconUrl = noteIconMap[name] ?: "",
                     index = maxOf(0, originalIndex),
                     animatedNames = animatedQuickInputs,
                     onClick = { onClick(name) },
-                    modifier = Modifier.fillMaxWidth() 
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
-        
+
         if (pages.size > 1) {
             Row(
                 Modifier
@@ -3781,6 +3742,7 @@ fun QuickInputSection(
         }
     }
 }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarFilterChip(
@@ -4773,29 +4735,42 @@ fun CompareContent(
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
-    val sortedCategories = remember(records, selectedMonthB) {
+    // ===== 效能優化：預先建立 category -> month -> sum 的緩存 =====
+    val categoryMonthSum = remember(records) {
+        val map = HashMap<String, HashMap<String, Double>>()
+        records.forEach { r ->
+            val inner = map.getOrPut(r.category) { HashMap() }
+            val key = monthKeyFromTimestamp(r.timestamp)
+            inner[key] = (inner[key] ?: 0.0) + r.amount
+        }
+        map
+    }
+    fun sumLocal(cat: String, month: String): Double =
+        categoryMonthSum[cat]?.get(month) ?: 0.0
+
+    val sortedCategories = remember(records, selectedMonthB, categoryMonthSum) {
         val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
-            sumByCategoryAndMonth(records, cat, selectedMonthB)
+            sumLocal(cat, selectedMonthB)
         }
         listOf(INCOME_CATEGORY) + expenses
     }
 
-    val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB) {
+    val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB, categoryMonthSum) {
         sortedCategories.filter { cat ->
-            val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
-            val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+            val amtA = sumLocal(cat, selectedMonthA)
+            val amtB = sumLocal(cat, selectedMonthB)
             amtA != 0.0 || amtB != 0.0
         }
     }
 
-    val incomeA = remember(records, selectedMonthA) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthA) }
-    val incomeB = remember(records, selectedMonthB) { sumByCategoryAndMonth(records, INCOME_CATEGORY, selectedMonthB) }
+    val incomeA = remember(records, selectedMonthA, categoryMonthSum) { sumLocal(INCOME_CATEGORY, selectedMonthA) }
+    val incomeB = remember(records, selectedMonthB, categoryMonthSum) { sumLocal(INCOME_CATEGORY, selectedMonthB) }
 
-    val totalExpenseA = remember(records, selectedMonthA) {
-        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthA) }
+    val totalExpenseA = remember(records, selectedMonthA, categoryMonthSum) {
+        EXPENSE_CATEGORIES.sumOf { sumLocal(it, selectedMonthA) }
     }
-    val totalExpenseB = remember(records, selectedMonthB) {
-        EXPENSE_CATEGORIES.sumOf { sumByCategoryAndMonth(records, it, selectedMonthB) }
+    val totalExpenseB = remember(records, selectedMonthB, categoryMonthSum) {
+        EXPENSE_CATEGORIES.sumOf { sumLocal(it, selectedMonthB) }
     }
     val balanceA = incomeA - totalExpenseA
     val balanceB = incomeB - totalExpenseB
@@ -4810,11 +4785,9 @@ fun CompareContent(
         }
     }
 
-    val histogramData = remember(records, monthlyKeysThisYear) {
+    val histogramData = remember(records, monthlyKeysThisYear, categoryMonthSum) {
         EXPENSE_CATEGORIES.associateWith { cat ->
-            monthlyKeysThisYear.map { key ->
-                sumByCategoryAndMonth(records, cat, key)
-            }
+            monthlyKeysThisYear.map { key -> sumLocal(cat, key) }
         }
     }
 
@@ -4915,8 +4888,8 @@ fun CompareContent(
                                         items = displayCategories,
                                         key = { _, cat -> cat }
                                     ) { idx, cat ->
-                                        val amtA = sumByCategoryAndMonth(records, cat, selectedMonthA)
-                                        val amtB = sumByCategoryAndMonth(records, cat, selectedMonthB)
+                                        val amtA = sumLocal(cat, selectedMonthA)
+                                        val amtB = sumLocal(cat, selectedMonthB)
                                         val style = CATEGORY_STYLES[cat]
                                         val isIncome = cat == INCOME_CATEGORY
 
