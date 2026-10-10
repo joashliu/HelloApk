@@ -549,6 +549,7 @@ fun FanMenuOverlay(
     }
 }
 
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -566,7 +567,9 @@ fun MainApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+
     val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
+
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
@@ -623,8 +626,12 @@ fun MainApp() {
     val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
     val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
 
-    var compareMonthA by remember { mutableStateOf(prefs.getString("compare_month_a", defaultMonthA) ?: defaultMonthA) }
-    var compareMonthB by remember { mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB) }
+    var compareMonthA by remember {
+        mutableStateOf(prefs.getString("compare_month_a", defaultMonthA) ?: defaultMonthA)
+    }
+    var compareMonthB by remember {
+        mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB)
+    }
     fun setCompareMonthA(v: String) { compareMonthA = v; prefs.edit().putString("compare_month_a", v).apply() }
     fun setCompareMonthB(v: String) { compareMonthB = v; prefs.edit().putString("compare_month_b", v).apply() }
 
@@ -633,7 +640,9 @@ fun MainApp() {
     var deletingRecordId by remember { mutableStateOf<String?>(null) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
-    val allNoteNames by remember { derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() } }
+    val allNoteNames by remember {
+        derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
+    }
     val noteCategoryMap by remember {
         derivedStateOf {
             records.filter { it.note.isNotBlank() }
@@ -674,7 +683,9 @@ fun MainApp() {
 
     val isExactNoteFilter by remember {
         derivedStateOf {
-            filterModeOn && ledgerRecords.isNotEmpty() && ledgerRecords.map { it.note }.distinct().size == 1
+            filterModeOn &&
+                ledgerRecords.isNotEmpty() &&
+                ledgerRecords.map { it.note }.distinct().size == 1
         }
     }
 
@@ -705,7 +716,9 @@ fun MainApp() {
                 .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
         }
     }
-    val availableMonths by remember { derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() } }
+    val availableMonths by remember {
+        derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() }
+    }
     val visibleCategories by remember {
         derivedStateOf {
             val base = if (filterMonth == null) records.toList()
@@ -759,28 +772,45 @@ fun MainApp() {
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
-        val amtText = amount?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: ""
+        val amtText = amount?.let {
+            if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
+        } ?: ""
         if (!showKeyboard) {
-            keyboardState = KeyboardState(noteText = note, amountText = amtText, selectAmountOnInput = amount != null)
+            keyboardState = KeyboardState(
+                noteText = note,
+                amountText = amtText,
+                selectAmountOnInput = amount != null
+            )
             showKeyboard = true
         } else {
-            keyboardState = keyboardState.copy(noteText = note, amountText = amtText.ifBlank { keyboardState.amountText }, selectAmountOnInput = amount != null)
+            keyboardState = keyboardState.copy(
+                noteText = note,
+                amountText = amtText.ifBlank { keyboardState.amountText },
+                selectAmountOnInput = amount != null
+            )
         }
         if (note.isNotBlank()) nameFlashTrigger++
     }
 
     fun openKeyboardForCopy(r: Record) {
-        keyboardState = KeyboardState(amountText = r.amount.toString(), noteText = r.note, category = r.category, selectAmountOnInput = true)
+        keyboardState = KeyboardState(
+            amountText = r.amount.toString(), noteText = r.note,
+            category = r.category, selectAmountOnInput = true)
         showKeyboard = true
     }
 
     fun openKeyboardForEdit(r: Record) {
         val amt = if (r.amount % 1.0 == 0.0) r.amount.toInt().toString() else r.amount.toString()
-        keyboardState = KeyboardState(amountText = amt, noteText = r.note, category = r.category, editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
+        keyboardState = KeyboardState(
+            amountText = amt, noteText = r.note, category = r.category,
+            editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
 
-    fun dismissKeyboard() { showKeyboard = false; keyboardState = KeyboardState() }
+    fun dismissKeyboard() {
+        showKeyboard = false
+        keyboardState = KeyboardState()
+    }
 
     fun deleteRecordWithUndo(r: Record) {
         deleteJob?.cancel()
@@ -805,8 +835,10 @@ fun MainApp() {
         showUndoToast = false
         recentlyDeletedRecord = null
         deletingRecordId = null
+        
         justAddedId = target.id
         scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
+        
         try { db.collection("records").document(target.id).set(target) } catch (_: Exception) {}
     }
 
@@ -820,14 +852,19 @@ fun MainApp() {
         val ts = keyboardState.timestamp
         val monthKey = monthKeyFromTimestamp(ts)
         if (editId != null) {
-            db.collection("records").document(editId).update(mapOf("amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
+            db.collection("records").document(editId).update(mapOf(
+                "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
         } else {
-            val inherited = records.filter { it.note == note && it.note.isNotBlank() }.maxByOrNull { it.timestamp }?.iconUrl ?: ""
+            val inherited = records.filter { it.note == note && it.note.isNotBlank() }
+                .maxByOrNull { it.timestamp }?.iconUrl ?: ""
             val newId = db.collection("records").document().id
             justAddedId = newId
-            val totalThisMonth = records.filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }.sumOf { it.amount } + amt
+            val totalThisMonth = records
+                .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
+                .sumOf { it.amount } + amt
             afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
-            db.collection("records").document(newId).set(Record(amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
+            db.collection("records").document(newId).set(Record(
+                amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
             scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
         }
         showKeyboard = false
@@ -848,27 +885,49 @@ fun MainApp() {
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        
         when (currentPage) {
             0 -> LedgerContent(
                 loading = loading, filtered = ledgerRecords,
-                groupedByDate = groupedByDate, topNotes = topNotes, noteIconMap = noteIconMap,
+                groupedByDate = groupedByDate,
+                topNotes = topNotes, noteIconMap = noteIconMap,
                 hasIncome = hasIncome, hasExpense = hasExpense,
                 totalIncome = totalIncome, totalExpense = totalExpense,
-                filterMode = filterModeOn, filterCategory = filterCategory, onFilterCategoryChange = { filterCategory = it },
+                filterMode = filterModeOn, filterCategory = filterCategory,
+                onFilterCategoryChange = { filterCategory = it },
                 filterMonth = filterMonth, onFilterMonthChange = { filterMonth = it },
-                availableMonths = availableMonths, visibleCategories = visibleCategories,
+                availableMonths = availableMonths,
+                visibleCategories = visibleCategories,
                 expandedId = expandedId, onExpandChange = { expandedId = it },
                 isExactNoteFilter = isExactNoteFilter,
-                onQuickInputClick = { name -> val amt = recentAmountByNote[name]; openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null) },
-                onCopyClick = { openKeyboardForCopy(it) }, onEditClick = { openKeyboardForEdit(it) },
-                onDeleteClick = { deleteRecordWithUndo(it) }, onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onFilterByName = { name -> filterCategory = null; filterMonth = null; filterSearch = TextFieldValue(name); filterModeOn = true },
-                showKeyboard = showKeyboard, keyboardState = keyboardState, onKeyboardStateChange = { keyboardState = it },
-                onKeyboardDismiss = { dismissKeyboard() }, onKeyboardConfirm = { saveFromKeyboard() }, onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
-                onKeyboardPickCategory = { }, showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                allNoteNames = allNoteNames, noteCategoryMap = noteCategoryMap, scrollToTopTrigger = scrollToTopTrigger,
-                nameFlashTrigger = nameFlashTrigger, justAddedId = justAddedId, deletingRecordId = deletingRecordId,
-                afterSaveHint = afterSaveHint, afterSaveHintVisible = afterSaveHintVisible, animatedQuickInputs = animatedQuickInputs,
+                onQuickInputClick = { name ->
+                    val amt = recentAmountByNote[name]
+                    openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
+                },
+                onCopyClick = { openKeyboardForCopy(it) },
+                onEditClick = { openKeyboardForEdit(it) },
+                onDeleteClick = { deleteRecordWithUndo(it) },
+                onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+                onFilterByName = { name ->
+                    filterCategory = null; filterMonth = null
+                    filterSearch = TextFieldValue(name); filterModeOn = true
+                },
+                showKeyboard = showKeyboard, keyboardState = keyboardState,
+                onKeyboardStateChange = { keyboardState = it },
+                onKeyboardDismiss = { dismissKeyboard() },
+                onKeyboardConfirm = { saveFromKeyboard() },
+                onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
+                onKeyboardPickCategory = { },
+                showFuture = showFuture, onShowFutureChange = { showFuture = it },
+                allNoteNames = allNoteNames,
+                noteCategoryMap = noteCategoryMap,
+                scrollToTopTrigger = scrollToTopTrigger,
+                nameFlashTrigger = nameFlashTrigger,
+                justAddedId = justAddedId,
+                deletingRecordId = deletingRecordId,
+                afterSaveHint = afterSaveHint,
+                afterSaveHintVisible = afterSaveHintVisible,
+                animatedQuickInputs = animatedQuickInputs,
                 keyboardProgressProvider = { keyboardAnimProgress.value }
             )
             1 -> CompareContent(
@@ -879,10 +938,17 @@ fun MainApp() {
             )
             2 -> CalendarContent(
                 records = records,
-                onCopyClick = { r -> currentPage = 0; openKeyboardForCopy(r) }, onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
-                onFilterClick = { r -> currentPage = 0; filterCategory = null; filterMonth = null; filterSearch = TextFieldValue(r.note); filterModeOn = true },
-                onDeleteClick = { deleteRecordWithUndo(it) }, onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onAddClick = { currentPage = 0; openKeyboardForNew() }, deletingRecordId = deletingRecordId
+                onCopyClick = { r -> currentPage = 0; openKeyboardForCopy(r) },
+                onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
+                onFilterClick = { r ->
+                    currentPage = 0
+                    filterCategory = null; filterMonth = null
+                    filterSearch = TextFieldValue(r.note); filterModeOn = true
+                },
+                onDeleteClick = { deleteRecordWithUndo(it) },
+                onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+                onAddClick = { currentPage = 0; openKeyboardForNew() },
+                deletingRecordId = deletingRecordId
             )
         }
 
@@ -890,38 +956,72 @@ fun MainApp() {
             visible = showUndoToast,
             enter = slideInVertically(
                 initialOffsetY = { it },
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
             ) + fadeIn(tween(250)),
-            exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(250, easing = FastOutSlowInEasing)) + fadeOut(tween(200)),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(250, easing = FastOutSlowInEasing)
+            ) + fadeOut(tween(200)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
                 .padding(horizontal = 20.dp)
         ) {
             Surface(
-                shape = CircleShape, color = Color(0xE6FFFFFF),
-                border = BorderStroke(1.dp, Color.White), shadowElevation = 12.dp,
+                shape = CircleShape,
+                color = Color(0xE6FFFFFF), 
+                border = BorderStroke(1.dp, Color.White),
+                shadowElevation = 12.dp,
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 8.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White),
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color.White),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Delete, "刪除", tint = Color(0xFFF87171), modifier = Modifier.size(20.dp))
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "刪除",
+                                tint = Color(0xFFF87171),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         Spacer(Modifier.width(12.dp))
-                        Text("記錄已刪除", color = TEXT_PRIMARY, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "記錄已刪除", 
+                            color = TEXT_PRIMARY,
+                            fontSize = 15.sp, 
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
+
                     Box(
-                        modifier = Modifier.clip(CircleShape).clickable { restoreDeletedRecord() }.background(BRAND_PRIMARY.copy(alpha = 0.12f)).padding(horizontal = 16.dp, vertical = 10.dp),
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { restoreDeletedRecord() }
+                            .background(BRAND_PRIMARY.copy(alpha = 0.12f))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("復原", color = BRAND_PRIMARY_DARK, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            "復原",
+                            color = BRAND_PRIMARY_DARK,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
                     }
                 }
             }
@@ -929,32 +1029,59 @@ fun MainApp() {
 
         androidx.compose.animation.AnimatedVisibility(
             visible = if (currentPage != 0) true else !showKeyboard,
-            enter = fadeIn(tween(220)), exit = fadeOut(tween(200)),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = NAV_BOTTOM_PADDING)
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = NAV_BOTTOM_PADDING)
         ) {
             FloatingNavBar(
-                items = listOf(NavItem("記帳", Icons.Default.Receipt), NavItem("比較", Icons.Default.CompareArrows), NavItem("月曆", Icons.Default.CalendarMonth)),
-                selectedIndex = currentPage, onIndexChange = { currentPage = it }, modifier = Modifier
-            )
+                items = listOf(
+                    NavItem("記帳", Icons.Default.Receipt),
+                    NavItem("比較", Icons.Default.CompareArrows),
+                    NavItem("月曆", Icons.Default.CalendarMonth)),
+                selectedIndex = currentPage,
+                onIndexChange = { currentPage = it },
+                modifier = Modifier)
         }
 
         KeyboardAndFabLayer(
-            showKeyboard = showKeyboard, progressProvider = { keyboardAnimProgress.value }, currentPage = currentPage,
-            filterModeOn = filterModeOn, filterSearch = filterSearch, onFilterSearchChange = { filterSearch = it },
-            filterSearchHasFocus = filterSearchHasFocus, onFilterSearchFocusChange = { filterSearchHasFocus = it },
+            showKeyboard = showKeyboard,
+            progressProvider = { keyboardAnimProgress.value },
+            currentPage = currentPage,
+            filterModeOn = filterModeOn,
+            filterSearch = filterSearch,
+            onFilterSearchChange = { filterSearch = it },
+            filterSearchHasFocus = filterSearchHasFocus,
+            onFilterSearchFocusChange = { filterSearchHasFocus = it },
             filterSearchFocusRequester = filterSearchFocusRequester,
             onFilterButtonTap = {
-                if (currentPage != 0) { currentPage = 0; filterModeOn = true }
-                else if (!filterModeOn) { filterModeOn = true }
-                else { filterSelectAllTrigger++ }
+                if (currentPage != 0) {
+                    currentPage = 0
+                    filterModeOn = true
+                } else if (!filterModeOn) {
+                    filterModeOn = true
+                } else {
+                    filterSelectAllTrigger++
+                }
             },
             onFabTap = {
-                if (showKeyboard) { keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false) }
-                else { if (filterModeOn) filterModeOn = false; if (currentPage != 0) currentPage = 0; openKeyboardForNew() }
+                if (showKeyboard) {
+                    keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
+                } else {
+                    if (filterModeOn) filterModeOn = false
+                    if (currentPage != 0) currentPage = 0
+                    openKeyboardForNew()
+                }
             },
-            keyboardState = keyboardState, onKeyboardStateChange = { keyboardState = it }, onKeyboardDismiss = { dismissKeyboard() },
-            onKeyboardConfirm = { saveFromKeyboard() }, onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
-            allNoteNames = allNoteNames, noteCategoryMap = noteCategoryMap, nameFlashTrigger = nameFlashTrigger
+            keyboardState = keyboardState,
+            onKeyboardStateChange = { keyboardState = it },
+            onKeyboardDismiss = { dismissKeyboard() },
+            onKeyboardConfirm = { saveFromKeyboard() },
+            onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
+            allNoteNames = allNoteNames,
+            noteCategoryMap = noteCategoryMap,
+            nameFlashTrigger = nameFlashTrigger
         )
 
         if (uploading) {
@@ -974,7 +1101,8 @@ fun MainApp() {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
         AlertDialog(
-            onDismissRequest = { showIconSourceDialog = false; iconTargetRecord = null }, title = { Text("圖標設定") },
+            onDismissRequest = { showIconSourceDialog = false; iconTargetRecord = null },
+            title = { Text("圖標設定") },
             text = {
                 Column {
                     IconSourceOption(Icons.Default.PhotoLibrary, "從相冊揀") {
@@ -985,16 +1113,32 @@ fun MainApp() {
                         showIconSourceDialog = false
                         try {
                             val uri = createTempImageUri(context)
-                            if (uri != null) { pendingCameraUri = uri; takePictureLauncher.launch(uri) }
-                            else { Toast.makeText(context, "開啟相機失敗", Toast.LENGTH_SHORT).show(); iconTargetRecord = null }
-                        } catch (e: Exception) { Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show(); iconTargetRecord = null }
+                            if (uri != null) {
+                                pendingCameraUri = uri
+                                takePictureLauncher.launch(uri)
+                            } else {
+                                Toast.makeText(context, "開啟相機失敗", Toast.LENGTH_SHORT).show()
+                                iconTargetRecord = null
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show()
+                            iconTargetRecord = null
+                        }
                     }
-                    IconSourceOption(Icons.Default.Link, "貼上網址") { showIconSourceDialog = false; urlInput = ""; showUrlInputDialog = true }
+                    IconSourceOption(Icons.Default.Link, "貼上網址") {
+                        showIconSourceDialog = false; urlInput = ""; showUrlInputDialog = true
+                    }
                     if (hasIcon) {
                         HorizontalDivider(Modifier.padding(vertical = 4.dp))
                         IconSourceOption(Icons.Default.Delete, "刪除圖標", tint = COLOR_EXPENSE) {
                             showIconSourceDialog = false
-                            if (target != null) { scope.launch { uploading = true; removeIconFromSameName(context, db, target.note); uploading = false } }
+                            if (target != null) {
+                                scope.launch {
+                                    uploading = true
+                                    removeIconFromSameName(context, db, target.note)
+                                    uploading = false
+                                }
+                            }
                             iconTargetRecord = null
                         }
                     }
@@ -1006,14 +1150,23 @@ fun MainApp() {
 
     if (showUrlInputDialog) {
         AlertDialog(
-            onDismissRequest = { showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null }, title = { Text("輸入圖片網址") },
+            onDismissRequest = { showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null },
+            title = { Text("輸入圖片網址") },
             text = {
                 Column {
                     Text("貼上 PNG / JPG / WebP 圖片連結", style = MaterialTheme.typography.bodySmall, color = TEXT_SECONDARY)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = urlInput, onValueChange = { urlInput = it }, label = { Text("URL") }, placeholder = { Text("https://...") },
-                        singleLine = true, shape = RoundedCornerShape(14.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = BRAND_PRIMARY, unfocusedBorderColor = DIVIDER_COLOR),
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        label = { Text("URL") },
+                        placeholder = { Text("https://...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = BRAND_PRIMARY,
+                            unfocusedBorderColor = DIVIDER_COLOR
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -1023,12 +1176,17 @@ fun MainApp() {
                     val url = urlInput.trim()
                     val target = iconTargetRecord
                     val valid = url.startsWith("http://") || url.startsWith("https://")
-                    if (target != null && url.isNotBlank() && valid) { scope.launch { uploading = true; applyUrlToSameName(context, db, target.note, url); uploading = false } }
-                    else if (!valid) { Toast.makeText(context, "網址要 http:// 或 https:// 開頭", Toast.LENGTH_SHORT).show() }
+                    if (target != null && url.isNotBlank() && valid) {
+                        scope.launch { uploading = true; applyUrlToSameName(context, db, target.note, url); uploading = false }
+                    } else if (!valid) {
+                        Toast.makeText(context, "網址要 http:// 或 https:// 開頭", Toast.LENGTH_SHORT).show()
+                    }
                     showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null
                 }) { Text("確定") }
             },
-            dismissButton = { TextButton(onClick = { showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null }) { Text("取消") } }
+            dismissButton = {
+                TextButton(onClick = { showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null }) { Text("取消") }
+            }
         )
     }
 }
@@ -1412,23 +1570,53 @@ fun FloatingNavBar(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
-    loading: Boolean, filtered: List<Record>, groupedByDate: List<Pair<String, List<Record>>>,
-    topNotes: List<Pair<String, Int>>, noteIconMap: Map<String, String>,
-    hasIncome: Boolean, hasExpense: Boolean, totalIncome: Double, totalExpense: Double,
-    filterMode: Boolean, filterCategory: String?, onFilterCategoryChange: (String?) -> Unit,
-    filterMonth: String?, onFilterMonthChange: (String?) -> Unit, availableMonths: List<String>, visibleCategories: List<String>,
-    expandedId: String?, onExpandChange: (String?) -> Unit, isExactNoteFilter: Boolean,
-    onQuickInputClick: (String) -> Unit, onCopyClick: (Record) -> Unit, onEditClick: (Record) -> Unit,
-    onDeleteClick: (Record) -> Unit, onChangeIconClick: (Record) -> Unit, onFilterByName: (String) -> Unit,
-    showKeyboard: Boolean, keyboardState: KeyboardState, onKeyboardStateChange: (KeyboardState) -> Unit,
-    onKeyboardDismiss: () -> Unit, onKeyboardConfirm: () -> Unit, onKeyboardNext: () -> Unit,
-    onKeyboardPickCategory: () -> Unit, showFuture: Boolean, onShowFutureChange: (Boolean) -> Unit,
-    allNoteNames: List<String>, noteCategoryMap: Map<String, String>, scrollToTopTrigger: Int,
-    nameFlashTrigger: Int, justAddedId: String?, deletingRecordId: String?,
-    afterSaveHint: AfterSaveHint?, afterSaveHintVisible: Boolean, animatedQuickInputs: MutableMap<String, Boolean>,
+    loading: Boolean,
+    filtered: List<Record>,
+    groupedByDate: List<Pair<String, List<Record>>>,
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    hasIncome: Boolean,
+    hasExpense: Boolean,
+    totalIncome: Double,
+    totalExpense: Double,
+    filterMode: Boolean,
+    filterCategory: String?,
+    onFilterCategoryChange: (String?) -> Unit,
+    filterMonth: String?,
+    onFilterMonthChange: (String?) -> Unit,
+    availableMonths: List<String>,
+    visibleCategories: List<String>,
+    expandedId: String?,
+    onExpandChange: (String?) -> Unit,
+    isExactNoteFilter: Boolean,
+    onQuickInputClick: (String) -> Unit,
+    onCopyClick: (Record) -> Unit,
+    onEditClick: (Record) -> Unit,
+    onDeleteClick: (Record) -> Unit,
+    onChangeIconClick: (Record) -> Unit,
+    onFilterByName: (String) -> Unit,
+    showKeyboard: Boolean,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    onKeyboardPickCategory: () -> Unit,
+    showFuture: Boolean,
+    onShowFutureChange: (Boolean) -> Unit,
+    allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
+    scrollToTopTrigger: Int,
+    nameFlashTrigger: Int,
+    justAddedId: String?,
+    deletingRecordId: String?,
+    afterSaveHint: AfterSaveHint?,
+    afterSaveHintVisible: Boolean,
+    animatedQuickInputs: MutableMap<String, Boolean>,
     keyboardProgressProvider: () -> Float
 ) {
     val listState = rememberLazyListState()
+
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
 
@@ -1438,24 +1626,16 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // ★ 140.dp 係一個非常舒服嘅手感數值，你都可以按喜好改做 120 - 180
     val rowThresholdPx = remember(density) { with(density) { 140.dp.toPx() } }
-    // 估算每個消失咗嘅 Item 大約佔 72dp，用嚟計算絕對滾動距離
     val estimatedItemHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
     
     val quickInputMaxRows by remember {
         derivedStateOf {
             val index = listState.firstVisibleItemIndex
             val offset = listState.firstVisibleItemScrollOffset
-            
-            // ★ 完美解決跳行問題：
-            // 將消失咗嘅 Item 數量轉換為估算像素，加上目前偏移量，得出一個「永遠平滑增加」嘅絕對滾動距離
             val totalScroll = (index * estimatedItemHeightPx) + offset
-            
-            // 根據真實滾動距離，每 140dp 減一行，絕不跳級
             (4 - (totalScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
         }
-    }
     }
 
     val fanMenuProgress = animateFloatAsState(
@@ -1498,89 +1678,185 @@ fun LedgerContent(
 
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
-            try { listState.requestScrollToItem(0) } catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
+            try { listState.requestScrollToItem(0) }
+            catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
         }
     }
 
-    // ★ 新增呢段：當鍵盤打開嗰陣，自動平滑滾動返去最頂
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
-            try { 
-                // 用 animateScrollToItem 會有流暢嘅滑動效果
-                // 配合埋你個 quickInputMaxRows，張卡片會喺滾動期間優雅咁展開返 4 行！
-                listState.animateScrollToItem(0) 
-            } catch (_: Exception) {}
+            try { listState.animateScrollToItem(0) } catch (_: Exception) {}
         }
     }
 
     LaunchedEffect(filterMode) {
         if (!filterMode && preFilterIndex >= 0) {
-            try { listState.requestScrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) { try { listState.scrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) {} }
+            try { 
+                listState.requestScrollToItem(preFilterIndex, preFilterOffset) 
+            } catch (_: Exception) {
+                try { listState.scrollToItem(preFilterIndex, preFilterOffset) } catch (_: Exception) {}
+            }
             preFilterIndex = -1
         }
     }
 
     val isSingleCategoryFilter by remember(filterMode, filtered) {
-        derivedStateOf { filterMode && filtered.isNotEmpty() && filtered.map { it.category }.distinct().size == 1 }
+        derivedStateOf {
+            filterMode && filtered.isNotEmpty() && filtered.map { it.category }.distinct().size == 1
+        }
     }
     val singleCategory by remember(isSingleCategoryFilter, filtered) {
-        derivedStateOf { if (isSingleCategoryFilter) filtered.firstOrNull()?.category else null }
+        derivedStateOf {
+            if (isSingleCategoryFilter) filtered.firstOrNull()?.category else null
+        }
     }
 
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) {
-        if (singleCategory != null) { cachedCategory = singleCategory!! }
+        if (singleCategory != null) {
+            cachedCategory = singleCategory!!
+        }
     }
 
     val listContent: LazyListScope.() -> Unit = {
         if (isExactNoteFilter) {
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp).animateItem(fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow), fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow), placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy))) {
-                    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = SURFACE_CARD, shadowElevation = 1.dp, border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))) {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .animateItem(
+                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                        )
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        color = SURFACE_CARD,
+                        shadowElevation = 1.dp,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+                    ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            AnimatedRecordItem(animateOnMount = r.id == justAddedId, isDeleting = r.id == deletingRecordId) {
+                            AnimatedRecordItem(
+                                animateOnMount = r.id == justAddedId,
+                                isDeleting = r.id == deletingRecordId
+                            ) {
                                 SwipeableRecordItem(
-                                    backgroundColor = Color.Transparent, record = r, expandedId = expandedId, onExpand = onExpandChange,
-                                    onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
-                                    onFilter = { if (!filterMode) { preFilterIndex = listState.firstVisibleItemIndex; preFilterOffset = listState.firstVisibleItemScrollOffset }; onFilterByName(r.note) },
-                                    onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) }, hideCategory = true,
-                                    onFanMenuStart = { offset -> handleFanStart(r, offset) }, onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
-                                    onFanMenuEnd = { handleFanEnd() }, isFanMenuActive = activeFanRecord != null,
-                                    isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id, isActiveItem = activeFanRecord?.id == r.id
+                                    backgroundColor = Color.Transparent, 
+                                    record = r,
+                                    expandedId = expandedId,
+                                    onExpand = onExpandChange,
+                                    onCopy = { onCopyClick(r) },
+                                    onEdit = { onEditClick(r) },
+                                    onFilter = {
+                                        if (!filterMode) {
+                                            preFilterIndex = listState.firstVisibleItemIndex
+                                            preFilterOffset = listState.firstVisibleItemScrollOffset
+                                        }
+                                        onFilterByName(r.note)
+                                    },
+                                    onDelete = { onDeleteClick(r) },
+                                    onChangeIcon = { onChangeIconClick(r) },
+                                    hideCategory = true,
+                                    onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                    onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                    onFanMenuEnd = { handleFanEnd() },
+                                    isFanMenuActive = activeFanRecord != null,
+                                    isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                    isActiveItem = activeFanRecord?.id == r.id
                                 )
                             }
-                            if (afterSaveHint?.recordId == r.id) { CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible) }
+                            if (afterSaveHint?.recordId == r.id) {
+                                CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                            }
                         }
                     }
                 }
             }
         } else {
             val dataToIterate = filtered.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList()
+
             dataToIterate.forEach { (dateKey, dayRecords) ->
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
 
-                stickyHeader(key = "header_$dateKey") { FadingStickyHeader { Box(modifier = Modifier.fillMaxWidth().background(SURFACE_CARD)) { DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense) } } }
+                stickyHeader(key = "header_$dateKey") {
+                    FadingStickyHeader {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SURFACE_CARD) 
+                        ) {
+                            DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
+                        }
+                    }
+                }
+
                 item(key = "group_$dateKey") {
-                    Surface(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp).animateItem(fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow), fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow), placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)), shape = RoundedCornerShape(20.dp), color = SURFACE_CARD, shadowElevation = 1.dp, border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .animateItem(
+                                fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                            ),
+                        shape = RoundedCornerShape(20.dp),
+                        color = SURFACE_CARD,
+                        shadowElevation = 1.dp,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+                    ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             dayRecords.forEachIndexed { idx, r ->
                                 key(r.id) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
-                                        AnimatedRecordItem(animateOnMount = r.id == justAddedId, isDeleting = r.id == deletingRecordId) {
+                                        AnimatedRecordItem(
+                                            animateOnMount = r.id == justAddedId,
+                                            isDeleting = r.id == deletingRecordId
+                                        ) {
                                             SwipeableRecordItem(
-                                                backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId, onExpand = onExpandChange,
-                                                onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
-                                                onFilter = { if (!filterMode) { preFilterIndex = listState.firstVisibleItemIndex; preFilterOffset = listState.firstVisibleItemScrollOffset }; onFilterByName(r.note) },
-                                                onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
-                                                onFanMenuStart = { offset -> handleFanStart(r, offset) }, onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
-                                                onFanMenuEnd = { handleFanEnd() }, isFanMenuActive = activeFanRecord != null,
-                                                isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id, isActiveItem = activeFanRecord?.id == r.id
+                                                backgroundColor = SURFACE_CARD, 
+                                                record = r,
+                                                expandedId = expandedId,
+                                                onExpand = onExpandChange,
+                                                onCopy = { onCopyClick(r) },
+                                                onEdit = { onEditClick(r) },
+                                                onFilter = {
+                                                    if (!filterMode) {
+                                                        preFilterIndex = listState.firstVisibleItemIndex
+                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                    }
+                                                    onFilterByName(r.note)
+                                                },
+                                                onDelete = { onDeleteClick(r) },
+                                                onChangeIcon = { onChangeIconClick(r) },
+                                                onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                                onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                                onFanMenuEnd = { handleFanEnd() },
+                                                isFanMenuActive = activeFanRecord != null,
+                                                isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                                isActiveItem = activeFanRecord?.id == r.id
                                             )
                                         }
-                                        if (afterSaveHint?.recordId == r.id) { CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible) }
+                                        
+                                        if (afterSaveHint?.recordId == r.id) {
+                                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                        }
+
                                         if (idx < dayRecords.lastIndex) {
-                                            AnimatedVisibility(visible = deletingRecordId != r.id, enter = fadeIn(tween(200)), exit = fadeOut(tween(200))) { HorizontalDivider(modifier = Modifier.padding(start = 68.dp, end = 16.dp), color = DIVIDER_COLOR.copy(alpha = 0.4f), thickness = 0.5.dp) }
+                                            AnimatedVisibility(
+                                                visible = deletingRecordId != r.id,
+                                                enter = fadeIn(tween(200)),
+                                                exit = fadeOut(tween(200))
+                                            ) {
+                                                HorizontalDivider(
+                                                    modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                                    color = DIVIDER_COLOR.copy(alpha = 0.4f),
+                                                    thickness = 0.5.dp
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1588,24 +1864,53 @@ fun LedgerContent(
                         }
                     }
                 }
-                item(key = "spacer_$dateKey") { Spacer(modifier = Modifier.height(10.dp)) }
+                
+                item(key = "spacer_$dateKey") {
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
             }
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).padding(top = 4.dp, bottom = 0.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
+                    .padding(top = 4.dp, bottom = 0.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
+
                 AnimatedVisibility(
                     visible = showCategoryChip,
-                    enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) + expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
-                    exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) + shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
-                ) { CategoryStatChip(cachedCategory) }
-                Box(modifier = Modifier.weight(1f)) {
-                    TopStats(hasIncome = hasIncome, hasExpense = hasExpense, income = totalIncome, expense = totalExpense, isFilterMode = filterMode, filteredCount = if (filterMode) filtered.size else null)
+                    enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+                            expandHorizontally(tween(320, easing = FastOutSlowInEasing), expandFrom = Alignment.Start),
+                    exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+                            shrinkHorizontally(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Start)
+                ) {
+                    CategoryStatChip(cachedCategory)
                 }
-                IconButton(onClick = { onShowFutureChange(!showFuture) }) { Icon(if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff, "顯示未來項目", tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY) }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    TopStats(
+                        hasIncome = hasIncome,
+                        hasExpense = hasExpense,
+                        income = totalIncome,
+                        expense = totalExpense,
+                        isFilterMode = filterMode,
+                        filteredCount = if (filterMode) filtered.size else null
+                    )
+                }
+
+                IconButton(onClick = { onShowFutureChange(!showFuture) }) {
+                    Icon(
+                        if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        "顯示未來項目",
+                        tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                    )
+                }
             }
 
             AnimatedContent(
@@ -1618,20 +1923,60 @@ fun LedgerContent(
                     )
                 },
                 label = "bottomArea",
-                modifier = Modifier.zIndex(1f) // ★ 1. 加入呢行：強制將卡片區拉到最上層
+                modifier = Modifier.zIndex(1f)
             ) { isFilterMode ->
                 if (isFilterMode) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
+                    ) {
                         Spacer(Modifier.height(4.dp))
-                        LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 72.dp), modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp), userScrollEnabled = false) {
-                            item(key = "__all__") { AnimatedFilterChip(modifier = Modifier.fillMaxWidth(), selected = filterCategory == null, label = "全部", fillWidth = true, onClick = { onFilterCategoryChange(null) }) }
-                            items(items = visibleCategories, key = { it }) { cat -> AnimatedFilterChip(modifier = Modifier.animateItem().fillMaxWidth(), selected = filterCategory == cat, label = cat, fillWidth = true, onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }) }
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 72.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            userScrollEnabled = false
+                        ) {
+                            item(key = "__all__") {
+                                AnimatedFilterChip(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selected = filterCategory == null,
+                                    label = "全部",
+                                    fillWidth = true,
+                                    onClick = { onFilterCategoryChange(null) }
+                                )
+                            }
+                            items(items = visibleCategories, key = { it }) { cat ->
+                                AnimatedFilterChip(
+                                    modifier = Modifier.animateItem().fillMaxWidth(),
+                                    selected = filterCategory == cat,
+                                    label = cat,
+                                    fillWidth = true,
+                                    onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
+                                )
+                            }
                         }
                         Spacer(Modifier.height(8.dp))
                         if (availableMonths.isNotEmpty()) {
-                            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                AnimatedFilterChip(selected = filterMonth == null, label = "全年", fillWidth = false, onClick = { onFilterMonthChange(null) })
-                                availableMonths.forEach { m -> AnimatedFilterChip(selected = filterMonth == m, label = formatMonthLabel(m), fillWidth = false, onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }) }
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                AnimatedFilterChip(
+                                    selected = filterMonth == null,
+                                    label = "全年",
+                                    fillWidth = false,
+                                    onClick = { onFilterMonthChange(null) }
+                                )
+                                availableMonths.forEach { m ->
+                                    AnimatedFilterChip(
+                                        selected = filterMonth == m,
+                                        label = formatMonthLabel(m),
+                                        fillWidth = false,
+                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                    )
+                                }
                             }
                         }
                         Spacer(Modifier.height(6.dp))
@@ -1640,7 +1985,13 @@ fun LedgerContent(
                     Column(Modifier.fillMaxWidth()) {
                         if (topNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
-                            QuickInputSection(topNotes = topNotes, noteIconMap = noteIconMap, animatedQuickInputs = animatedQuickInputs, maxRowsPerPage = quickInputMaxRows, onClick = onQuickInputClick)
+                            QuickInputSection(
+                                topNotes = topNotes,
+                                noteIconMap = noteIconMap,
+                                animatedQuickInputs = animatedQuickInputs,
+                                maxRowsPerPage = quickInputMaxRows,
+                                onClick = onQuickInputClick
+                            )
                         }
                         Spacer(Modifier.height(4.dp))
                     }
@@ -1651,7 +2002,7 @@ fun LedgerContent(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .clipToBounds() // ★ 2. 加入呢行：好似鎅刀咁，將超出 Box 範圍嘅模糊邊緣切走
+                    .clipToBounds()
                     .graphicsLayer {
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
@@ -1662,19 +2013,39 @@ fun LedgerContent(
                                     blurRadius, blurRadius, android.graphics.Shader.TileMode.CLAMP
                                 ).asComposeRenderEffect()
                             }
-                        } else { renderEffect = null }
+                        } else {
+                            renderEffect = null
+                        }
                     }
             ) {
                 if (loading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = BRAND_PRIMARY) }
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = BRAND_PRIMARY)
+                    }
                 } else {
                     LazyColumn(
-                        state = listState, modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 0.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 0.dp, end = 0.dp, top = 0.dp,
+                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
+                        )
                     ) {
                         if (filtered.isEmpty() && !showKeyboard) {
-                            item(key = "__empty__") { Box(Modifier.fillParentMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) { Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY) } }
-                        } else { listContent() }
+                            item(key = "__empty__") {
+                                Box(
+                                    Modifier.fillParentMaxWidth().padding(top = 80.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
+                                        color = TEXT_SECONDARY
+                                    )
+                                }
+                            }
+                        } else {
+                            listContent()
+                        }
                     }
                 }
             }
@@ -1682,10 +2053,12 @@ fun LedgerContent(
 
         FanMenuOverlay(
             progressProvider = { fanMenuProgress.value },
-            centerProvider = { fanMenuCenter }, touchProvider = { fanMenuTouch }
+            centerProvider = { fanMenuCenter },
+            touchProvider = { fanMenuTouch }
         )
     }
 }
+
 
 @Composable
 fun CategoryStatChip(category: String) {
@@ -1976,13 +2349,13 @@ fun SwipeableRecordItem(
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .zIndex(if (isActiveItem) 10f else 0f) // ✅ 修正為直接調用 zIndex
+            .zIndex(if (isActiveItem) 10f else 0f)
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
                 alpha = itemAlpha
             }
-            .blur(blurRadius) // ✅ 修正為直接調用 blur
+            .blur(blurRadius)
             .background(backgroundColor)
             .onGloballyPositioned { itemGlobalPosition = it.boundsInRoot().topLeft }
             .pointerInput(record.id) {
@@ -2979,6 +3352,7 @@ fun AnimatedAmount(
         }
     }
 }
+
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
