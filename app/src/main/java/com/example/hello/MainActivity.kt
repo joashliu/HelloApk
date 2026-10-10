@@ -1626,7 +1626,8 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    val fanMenuProgress by animateFloatAsState(
+    // ★ 移除 by，改用 = ，將佢變成 State<Float> 物件
+    val fanMenuProgress = animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
         label = "fanMenuProgress"
