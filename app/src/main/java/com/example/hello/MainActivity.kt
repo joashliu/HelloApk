@@ -1630,7 +1630,6 @@ fun LedgerContent(
 
    // ★ Fan Menu 全局狀態
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
-    var fadingFanRecordId by remember { mutableStateOf<String?>(null) }
     var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
     var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
@@ -1643,17 +1642,8 @@ fun LedgerContent(
         label = "fanMenuProgress"
     )
 
-    // ★ 獨立處理退出模糊嘅時機
-    LaunchedEffect(activeFanRecord) {
-        if (activeFanRecord == null) {
-            delay(300) // 等收起動畫播完先解除模糊
-            fadingFanRecordId = null
-        }
-    }
-
     val handleFanStart = { r: Record, offset: Offset ->
         activeFanRecord = r
-        fadingFanRecordId = r.id
         fanMenuCenter = offset
         fanMenuTouch = offset
     }
@@ -1765,10 +1755,9 @@ fun LedgerContent(
                                     onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                     onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                     onFanMenuEnd = { handleFanEnd() },
-                                    // ★ 兩個 SwipeableRecordItem 都要改成咁樣
-                                                isFanMenuActive = activeFanRecord != null || fadingFanRecordId != null,
-                                                isOtherItem = (activeFanRecord != null || fadingFanRecordId != null) && fadingFanRecordId != r.id,
-                                                isActiveItem = fadingFanRecordId == r.id
+                                    isFanMenuActive = activeFanRecord != null,
+                                    isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                    isActiveItem = activeFanRecord?.id == r.id
                                 )
                             }
                             if (afterSaveHint?.recordId == r.id) {
@@ -1840,9 +1829,9 @@ fun LedgerContent(
                                                 onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                                 onFanMenuEnd = { handleFanEnd() },
                                                 // ★ 兩個 SwipeableRecordItem 都要改成咁樣
-                                                isFanMenuActive = activeFanRecord != null || fadingFanRecordId != null,
-                                                isOtherItem = (activeFanRecord != null || fadingFanRecordId != null) && fadingFanRecordId != r.id,
-                                                isActiveItem = fadingFanRecordId == r.id
+                                                isFanMenuActive = activeFanRecord != null,
+                                                isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                                isActiveItem = activeFanRecord?.id == r.id
                                             )
                                         }
                                         
