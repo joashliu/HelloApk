@@ -2028,11 +2028,10 @@ fun LedgerContent(
                 }
             }
         }
-        if (fanMenuProgress > 0f) {
-            FanMenuOverlay(
-                progress = fanMenuProgress,
-                center = fanMenuCenter,
-                currentTouch = fanMenuTouch
+        FanMenuOverlay(
+            progressProvider = { fanMenuProgress.value },
+            centerProvider = { fanMenuCenter },
+            touchProvider = { fanMenuTouch }
             )
         }
     }
