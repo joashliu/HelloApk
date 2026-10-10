@@ -1602,8 +1602,15 @@ fun LedgerContent(
 
             AnimatedContent(
                 targetState = filterMode,
-                transitionSpec = { (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }) },
-                label = "bottomArea"
+                transitionSpec = {
+                    (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith
+                    (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(
+                        clip = true,
+                        sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
+                    )
+                },
+                label = "bottomArea",
+                modifier = Modifier.zIndex(1f) // ★ 1. 加入呢行：強制將卡片區拉到最上層
             ) { isFilterMode ->
                 if (isFilterMode) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
@@ -1633,14 +1640,19 @@ fun LedgerContent(
             }
 
             Box(
-                Modifier.weight(1f).fillMaxWidth()
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clipToBounds() // ★ 2. 加入呢行：好似鎅刀咁，將超出 Box 範圍嘅模糊邊緣切走
                     .graphicsLayer {
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
                         if (p > 0.01f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             val blurRadius = p * 48f
                             if (blurRadius > 0.1f) {
-                                renderEffect = android.graphics.RenderEffect.createBlurEffect(blurRadius, blurRadius, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
+                                renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                                    blurRadius, blurRadius, android.graphics.Shader.TileMode.CLAMP
+                                ).asComposeRenderEffect()
                             }
                         } else { renderEffect = null }
                     }
