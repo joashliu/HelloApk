@@ -27,9 +27,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -460,7 +460,6 @@ fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): In
     }
 }
 
-// ★ 修改參數為 Provider，避免拖慢整個列表
 @Composable
 fun FanMenuOverlay(
     progressProvider: () -> Float,
@@ -468,7 +467,7 @@ fun FanMenuOverlay(
     touchProvider: () -> Offset
 ) {
     val progress = progressProvider()
-    if (progress <= 0.001f) return // 進度係 0 就唔好畫，慳資源
+    if (progress <= 0.001f) return
 
     val center = centerProvider()
     val currentTouch = touchProvider()
@@ -887,15 +886,9 @@ fun MainApp() {
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         
-        // ★ 加入呢個 Box，將 keyboardAnimProgress 轉化為 0 到 16.dp 嘅模糊半徑
-        Box(
-            Modifier
-                .fillMaxSize()
-                .blur((keyboardAnimProgress.value * 16).dp)
-        ) {
-            when (currentPage) {
-                0 -> LedgerContent(
-                    loading = loading, filtered = ledgerRecords,
+        when (currentPage) {
+            0 -> LedgerContent(
+                loading = loading, filtered = ledgerRecords,
                 groupedByDate = groupedByDate,
                 topNotes = topNotes, noteIconMap = noteIconMap,
                 hasIncome = hasIncome, hasExpense = hasExpense,
@@ -934,7 +927,8 @@ fun MainApp() {
                 deletingRecordId = deletingRecordId,
                 afterSaveHint = afterSaveHint,
                 afterSaveHintVisible = afterSaveHintVisible,
-                animatedQuickInputs = animatedQuickInputs
+                animatedQuickInputs = animatedQuickInputs,
+                keyboardProgressProvider = { keyboardAnimProgress.value }
             )
             1 -> CompareContent(
                 records = records, availableMonths = availableMonths,
@@ -956,9 +950,6 @@ fun MainApp() {
                 onAddClick = { currentPage = 0; openKeyboardForNew() },
                 deletingRecordId = deletingRecordId
             )
-        } // 呢個係 when (currentPage) 嘅結尾
-
-        // ★★★ 補返呢個右括號！用嚟收埋上面嗰個帶有 blur 效果嘅 Box ★★★
         }
 
         AnimatedVisibility(
@@ -1622,21 +1613,20 @@ fun LedgerContent(
     afterSaveHint: AfterSaveHint?,
     afterSaveHintVisible: Boolean,
     animatedQuickInputs: MutableMap<String, Boolean>,
+    keyboardProgressProvider: () -> Float
 ) {
     val listState = rememberLazyListState()
 
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
 
-   // ★ Fan Menu 全局狀態
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
     var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
-    val scope = rememberCoroutineScope() // ★ 加入 scope 用嚟延遲執行動作
+    val scope = rememberCoroutineScope()
 
-    // ★ 移除 by，變成 State 物件，防止每次數值改變都拖垮整個畫面
-    val fanMenuProgress = animateFloatAsState(
+    val fanMenuProgress by animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
         label = "fanMenuProgress"
@@ -1656,7 +1646,6 @@ fun LedgerContent(
         activeFanRecord = null 
         
         if (targetRecord != null && hovered != null) {
-            // ★ 放手後延遲 120ms 先執行動作，確保 UI 收起動畫可以流暢起步，唔會被卡死
             scope.launch {
                 delay(120)
                 when (hovered) {
@@ -1828,7 +1817,6 @@ fun LedgerContent(
                                                 onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                                 onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                                 onFanMenuEnd = { handleFanEnd() },
-                                                // ★ 兩個 SwipeableRecordItem 都要改成咁樣
                                                 isFanMenuActive = activeFanRecord != null,
                                                 isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
                                                 isActiveItem = activeFanRecord?.id == r.id
@@ -1994,6 +1982,20 @@ fun LedgerContent(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .graphicsLayer {
+                        val p = keyboardProgressProvider()
+                        alpha = 1f - (p * 0.4f)
+                        if (p > 0.01f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val blurRadius = p * 48f
+                            if (blurRadius > 0.1f) {
+                                renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                                    blurRadius, blurRadius, android.graphics.Shader.TileMode.CLAMP
+                                ).asComposeRenderEffect()
+                            }
+                        } else {
+                            renderEffect = null
+                        }
+                    }
             ) {
                 if (loading) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2026,17 +2028,15 @@ fun LedgerContent(
                     }
                 }
             }
-        } // <-- 收埋 Column(Modifier.fillMaxSize().background(SURFACE_BG))
+        }
 
         FanMenuOverlay(
             progressProvider = { fanMenuProgress.value },
             centerProvider = { fanMenuCenter },
             touchProvider = { fanMenuTouch }
         )
-    } // <-- 收埋最外層嘅 Box(Modifier.fillMaxSize())
-} // <-- 收埋成個 LedgerContent 函數
-
-// (下面緊接嘅應該係 @Composable fun CategoryStatChip(category: String) ... )
+    }
+}
 
 
 @Composable
