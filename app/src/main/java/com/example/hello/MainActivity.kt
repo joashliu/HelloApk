@@ -1439,7 +1439,7 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
 
     // ★ 將 56.dp 加大至 120.dp，需要滑動更多距離先會縮減一行
-    val rowThresholdPx = remember(density) { with(density) { 120.dp.toPx() } }
+    val rowThresholdPx = remember(density) { with(density) { 180.dp.toPx() } }
     val quickInputMaxRows by remember {
         derivedStateOf {
             if (listState.firstVisibleItemIndex > 0) {
