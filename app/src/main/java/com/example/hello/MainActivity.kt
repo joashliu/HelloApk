@@ -1944,7 +1944,15 @@ fun LedgerContent(
             ) { isFilterMode ->
                 if (isFilterMode) {
                     Column(
-                        Modifier.padding(horizontal = 16.dp, vertical = 0.dp)
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 0.dp)
+                            // 加入 animateContentSize，當行數改變導致高度縮放時，會有平滑嘅過渡動畫
+                            .animateContentSize(
+                                animationSpec = spring(
+                                    dampingRatio = 0.85f, // 微微嘅回彈感，令過渡更自然
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            )
                     ) {
                         Spacer(Modifier.height(4.dp))
                         LazyVerticalGrid(
