@@ -645,23 +645,36 @@ fun MainApp() {
         }
     }
 
-    val filtered by remember {
-        derivedStateOf {
-            val q = filterSearch.text
-            val hasExactNoteMatch = q.isNotBlank() && records.any { it.note == q }
-            val hasExactCategoryMatch = q.isNotBlank() && CATEGORIES.any { it == q }
+    // 新增：先獨立抽出「文字搜尋/精確匹配」過濾後嘅結果
+val searchFilteredRecords by remember {
+    derivedStateOf {
+        val q = filterSearch.text
+        if (q.isBlank()) {
+            records.toList()
+        } else {
+            val hasExactNoteMatch = records.any { it.note == q }
+            val hasExactCategoryMatch = CATEGORIES.any { it == q }
             records.toList().filter { r ->
-                val catOk = filterCategory == null || r.category == filterCategory
-                val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
-                val searchOk = if (q.isBlank()) true else when {
+                when {
                     hasExactNoteMatch -> r.note == q
                     hasExactCategoryMatch -> r.category == q
                     else -> r.note.contains(q, true) || r.category.contains(q, true)
                 }
-                catOk && monthOk && searchOk
             }
         }
     }
+}
+
+// 修改：最終列表 filtered 喺 searchFilteredRecords 基礎上再套用類別同月份過濾
+val filtered by remember {
+    derivedStateOf {
+        searchFilteredRecords.filter { r ->
+            val catOk = filterCategory == null || r.category == filterCategory
+            val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
+            catOk && monthOk
+        }
+    }
+}
     val ledgerRecords by remember {
         derivedStateOf {
             val base = if (filterModeOn) filtered else records.toList()
@@ -711,20 +724,22 @@ fun MainApp() {
         }
     }
     val availableMonths by remember {
-        derivedStateOf { records.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() }
+    derivedStateOf { 
+        searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() 
     }
+}
     val visibleCategories by remember {
-        derivedStateOf {
-            val base = if (filterMonth == null) records.toList()
-                       else records.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
-            val hasIncome = base.any { it.category == INCOME_CATEGORY }
-            val expenseCats = base.filter { it.category != INCOME_CATEGORY }
-                .groupBy { it.category }
-                .mapValues { (_, list) -> list.sumOf { it.amount } }
-                .toList().sortedByDescending { it.second }.map { it.first }
-            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
-        }
+    derivedStateOf {
+        val base = if (filterMonth == null) searchFilteredRecords
+                   else searchFilteredRecords.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
+        val hasIncome = base.any { it.category == INCOME_CATEGORY }
+        val expenseCats = base.filter { it.category != INCOME_CATEGORY }
+            .groupBy { it.category }
+            .mapValues { (_, list) -> list.sumOf { it.amount } }
+            .toList().sortedByDescending { it.second }.map { it.first }
+        (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
     }
+}
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
