@@ -1945,13 +1945,13 @@ fun SwipeableRecordItem(
         modifier = modifier
             .fillMaxWidth()
             .wrapContentHeight()
-            .androidx.compose.ui.zIndex(if (isActiveItem) 10f else 0f)
+            .zIndex(if (isActiveItem) 10f else 0f) // ✅ 修正為直接調用 zIndex
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
                 alpha = itemAlpha
             }
-            .blur(blurRadius)
+            .blur(blurRadius) // ✅ 修正為直接調用 blur
             .background(backgroundColor)
             .onGloballyPositioned { itemGlobalPosition = it.boundsInRoot().topLeft }
             .pointerInput(record.id) {
