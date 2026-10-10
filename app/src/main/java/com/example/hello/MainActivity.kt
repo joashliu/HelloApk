@@ -1940,16 +1940,25 @@ fun LedgerContent(
                     )
                 },
                 label = "bottomArea",
-                modifier = Modifier.zIndex(1f)
+                modifier = Modifier
+                    .zIndex(1f)
+                    // 🔥 加喺 AnimatedContent 外圍，確保整個容器高度改變時，平滑推擠下方列表
+                    .animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = 0.85f,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        alignment = Alignment.TopCenter
+                    )
             ) { isFilterMode ->
                 if (isFilterMode) {
                     Column(
                         Modifier
                             .padding(horizontal = 16.dp, vertical = 0.dp)
-                            // 加入 animateContentSize，當行數改變導致高度縮放時，會有平滑嘅過渡動畫
+                            // 🔥 確保過濾面板內部高度改變平滑
                             .animateContentSize(
                                 animationSpec = spring(
-                                    dampingRatio = 0.85f, // 微微嘅回彈感，令過渡更自然
+                                    dampingRatio = 0.85f,
                                     stiffness = Spring.StiffnessMediumLow
                                 )
                             )
@@ -1984,7 +1993,15 @@ fun LedgerContent(
                         Spacer(Modifier.height(8.dp))
                         if (availableMonths.isNotEmpty()) {
                             FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    // 🔥 加喺 FlowRow，確保月份晶片換行或減少行數時高度流暢縮放
+                                    .animateContentSize(
+                                        animationSpec = spring(
+                                            dampingRatio = 0.85f,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    ),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
