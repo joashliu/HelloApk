@@ -2615,7 +2615,6 @@ fun DayDetailPanel(
     onFanMenuEnd: () -> Unit = {},
     activeFanRecord: Record? = null
 ) {
-    // 移除了內部嘅 visible 狀態同 animateContentSize，動畫交畀外層控制
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -2633,99 +2632,89 @@ fun DayDetailPanel(
         Column(Modifier.fillMaxWidth()) {
             val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
             val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-            
-            // ... (下方原本嘅 Row 同 records 列表代碼保持不變)
             Row(
                 Modifier
                     .fillMaxWidth()
                     .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        formatDateHeader(dateKey),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (income > 0) {
                             Text(
-                                formatDateHeader(dateKey),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TEXT_PRIMARY
+                                "收 $${formatAmountNoDecimal(income)}",
+                                fontSize = 12.sp, color = COLOR_INCOME,
+                                fontWeight = FontWeight.Bold
                             )
-                            Spacer(Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (income > 0) {
-                                    Text(
-                                        "收 $${formatAmountNoDecimal(income)}",
-                                        fontSize = 12.sp, color = COLOR_INCOME,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
-                                if (expense > 0) {
-                                    Text(
-                                        "支 $${formatAmountNoDecimal(expense)}",
-                                        fontSize = 12.sp, color = COLOR_EXPENSE,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
                         }
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
+                        if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+                        if (expense > 0) {
+                            Text(
+                                "支 $${formatAmountNoDecimal(expense)}",
+                                fontSize = 12.sp, color = COLOR_EXPENSE,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
-                    HorizontalDivider(color = DIVIDER_COLOR)
-
-                    val sortedRecords = records.sortedByDescending { it.timestamp }
-                    
-                    sortedRecords.forEachIndexed { idx, r ->
-                        key(r.id) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                AnimatedRecordItem(
-                                    animateOnMount = false,
-                                    isDeleting = r.id == deletingRecordId
-                                ) {
-                                    SwipeableRecordItem(
-                                        backgroundColor = SURFACE_CARD,
-                                        record = r,
-                                        expandedId = expandedId,
-                                        onExpand = onExpandChange,
-                                        onCopy = { onCopy(r) },
-                                        onEdit = { onEdit(r) },
-                                        onFilter = { onFilter(r) },
-                                        onDelete = { onDelete(r) },
-                                        onChangeIcon = { onChangeIcon(r) },
-                                        onFanMenuStart = { offset -> onFanMenuStart(r, offset) },
-                                        onFanMenuDrag = { dragAmount -> onFanMenuDrag(dragAmount) },
-                                        onFanMenuEnd = { onFanMenuEnd() },
-                                        isFanMenuActive = activeFanRecord != null,
-                                        isOtherItem = activeFanRecord != null && activeFanRecord.id != r.id,
-                                        isActiveItem = activeFanRecord?.id == r.id
-                                    )
-                                }
-                                
-                                if (idx < sortedRecords.lastIndex) {
-                                    AnimatedVisibility(
-                                        visible = deletingRecordId != r.id,
-                                        enter = fadeIn(tween(200)),
-                                        exit = fadeOut(tween(200))
-                                    ) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                            color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                                            thickness = 0.8.dp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(6.dp))
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
                 }
             }
+            HorizontalDivider(color = DIVIDER_COLOR)
+
+            val sortedRecords = records.sortedByDescending { it.timestamp }
+            
+            sortedRecords.forEachIndexed { idx, r ->
+                key(r.id) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        AnimatedRecordItem(
+                            animateOnMount = false,
+                            isDeleting = r.id == deletingRecordId
+                        ) {
+                            SwipeableRecordItem(
+                                backgroundColor = SURFACE_CARD,
+                                record = r,
+                                expandedId = expandedId,
+                                onExpand = onExpandChange,
+                                onCopy = { onCopy(r) },
+                                onEdit = { onEdit(r) },
+                                onFilter = { onFilter(r) },
+                                onDelete = { onDelete(r) },
+                                onChangeIcon = { onChangeIcon(r) },
+                                onFanMenuStart = { offset -> onFanMenuStart(r, offset) },
+                                onFanMenuDrag = { dragAmount -> onFanMenuDrag(dragAmount) },
+                                onFanMenuEnd = { onFanMenuEnd() },
+                                isFanMenuActive = activeFanRecord != null,
+                                isOtherItem = activeFanRecord != null && activeFanRecord.id != r.id,
+                                isActiveItem = activeFanRecord?.id == r.id
+                            )
+                        }
+                        
+                        if (idx < sortedRecords.lastIndex) {
+                            AnimatedVisibility(
+                                visible = deletingRecordId != r.id,
+                                enter = fadeIn(tween(200)),
+                                exit = fadeOut(tween(200))
+                            ) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                    color = DIVIDER_COLOR.copy(alpha = 0.8f),
+                                    thickness = 0.8.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
@@ -4590,10 +4579,10 @@ fun CalendarContent(
                                     ) + fadeOut(tween(200))
                                 ) {
                                     Column(Modifier.fillMaxWidth()) {
-                                        // 🔥 拉開格仔同當日明細之間嘅距離
+                                        // 拉開格仔同當日明細之間嘅距離
                                         Spacer(Modifier.height(8.dp))
 
-                                        // 🔥 加返三角形指示器，精確指向被選中嘅格仔
+                                        // 加返三角形指示器
                                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                                             val cellWidth = maxWidth / 7
                                             TrianglePointer(
@@ -4607,7 +4596,6 @@ fun CalendarContent(
                                             Locale.US, "%04d-%02d-%02d",
                                             year, month, selectedDay ?: 1
                                         )
-                                        
                                         DayDetailPanel(
                                             dateKey = dateKey,
                                             records = recordsByDay[selectedDay] ?: emptyList(),
