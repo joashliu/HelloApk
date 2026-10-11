@@ -1768,13 +1768,17 @@ fun LedgerContent(
     }
 
     LaunchedEffect(showFuture) {
-        // 放棄 scroll 滾動動畫，改為瞬間置頂。
-        // 噉樣可以將位移動畫嘅主導權交返畀 animateItem，完美呈現「推落去/縮返上」嘅手風琴展開效果！
         try { 
-            listState.requestScrollToItem(0) 
-        } catch (_: Exception) {
-            try { listState.scrollToItem(0) } catch (_: Exception) {}
-        }
+            if (showFuture) {
+                // 顯示未來項目時：新項目會喺最頂部出現。
+                // 用 animateScrollToItem 平滑向上捲動，製造出完美流暢嘅「向上展開」滑動視覺！
+                listState.animateScrollToItem(0) 
+            } else {
+                // 隱藏未來項目時：最頂部項目消失。
+                // 瞬間對齊新嘅第 0 項，將「向上擠壓補位」嘅流暢動畫全權交返畀 animateItem 處理！
+                listState.scrollToItem(0) 
+            }
+        } catch (_: Exception) {}
     }
     
     LaunchedEffect(filterMode) {
