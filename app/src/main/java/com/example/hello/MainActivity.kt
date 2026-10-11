@@ -1808,8 +1808,6 @@ fun LedgerContent(
         val groupDeleteSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
         val groupFade = tween<Float>(350, easing = FastOutSlowInEasing)
 
-        // 🌟 徹底廢除 if (isExactNoteFilter) 的分支切換，永遠保持統一嘅群組排版。
-        // 噉樣系統先可以完美追蹤卡片軌跡，實現 100% 無縫嘅「瞬間平滑滑動」！
         groupedByDate.forEach { (dateKey, dayRecords) ->
             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
@@ -1852,7 +1850,6 @@ fun LedgerContent(
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                                 .clip(RoundedCornerShape(20.dp))
-                                // 當群組內有項目消失時，卡片高度會完美平滑收縮
                                 .animateContentSize(animationSpec = groupDeleteSpring)
                         ) {
                             dayRecords.forEachIndexed { idx, r ->
@@ -1873,6 +1870,10 @@ fun LedgerContent(
                                                     onFilterByName(r.note)
                                                 },
                                                 onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
+                                                
+                                                // 👇 確保篩選單一項目時自動隱藏類別
+                                                hideCategory = isExactNoteFilter,
+                                                
                                                 onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                                 onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                                 onFanMenuEnd = { handleFanEnd() },
@@ -2055,9 +2056,10 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
+                        // 🌟 魔法錨點
                         item(key = "magic_top_anchor") {
                             Spacer(Modifier.height(1.dp).animateItem(
-                                placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                                placementSpec = spring(dampingRatio = 0.75f, stiffness = 300f)
                             ))
                         }
 
