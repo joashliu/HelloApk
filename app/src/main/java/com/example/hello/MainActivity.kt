@@ -1768,10 +1768,10 @@ fun LedgerContent(
     }
 
     LaunchedEffect(showFuture) {
+        // 放棄 scroll 滾動動畫，改為瞬間置頂。
+        // 噉樣可以將位移動畫嘅主導權交返畀 animateItem，完美呈現「推落去/縮返上」嘅手風琴展開效果！
         try { 
-            // 同樣套用聰明滾動
-            if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
-            listState.animateScrollToItem(0) 
+            listState.requestScrollToItem(0) 
         } catch (_: Exception) {
             try { listState.scrollToItem(0) } catch (_: Exception) {}
         }
@@ -1807,19 +1807,25 @@ fun LedgerContent(
     }
 
     val listContent: LazyListScope.() -> Unit = {
+        // 定義極致流暢嘅統一動畫參數
+        val itemAnimSpec = spring<IntOffset>(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+        val fadeSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
+
         if (isExactNoteFilter) {
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                         .animateItem(
-                            fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                            placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                            fadeInSpec = fadeSpec,
+                            fadeOutSpec = fadeSpec,
+                            placementSpec = itemAnimSpec
                         )
                 ) {
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().animateContentSize(
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                        ),
                         shape = RoundedCornerShape(20.dp),
                         color = SURFACE_CARD,
                         shadowElevation = 1.dp,
@@ -1868,13 +1874,22 @@ fun LedgerContent(
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
 
                 stickyHeader(key = "header_$dateKey") {
-                    FadingStickyHeader {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(SURFACE_CARD)
-                        ) {
-                            DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
+                    // 補齊：標題都要有 animateItem，等佢可以平滑噉將下面嘅項目推落去
+                    Box(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = fadeSpec,
+                            fadeOutSpec = fadeSpec,
+                            placementSpec = itemAnimSpec
+                        )
+                    ) {
+                        FadingStickyHeader {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(SURFACE_CARD)
+                            ) {
+                                DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
+                            }
                         }
                     }
                 }
@@ -1885,9 +1900,13 @@ fun LedgerContent(
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 2.dp)
                             .animateItem(
-                                fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                                fadeOutSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                                placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                                fadeInSpec = fadeSpec,
+                                fadeOutSpec = fadeSpec,
+                                placementSpec = itemAnimSpec
+                            )
+                            // 補齊：加入 animateContentSize 令到同一日內增減記錄時，高度變化更順滑
+                            .animateContentSize(
+                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
                             ),
                         shape = RoundedCornerShape(20.dp),
                         color = SURFACE_CARD,
@@ -1952,7 +1971,16 @@ fun LedgerContent(
                 }
 
                 item(key = "spacer_$dateKey") {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // 補齊：間距都要有 animateItem，否則間距會瞬間出現導致跳掣
+                    Spacer(
+                        modifier = Modifier
+                            .height(10.dp)
+                            .animateItem(
+                                fadeInSpec = fadeSpec,
+                                fadeOutSpec = fadeSpec,
+                                placementSpec = itemAnimSpec
+                            )
+                    )
                 }
             }
         }
