@@ -3227,11 +3227,7 @@ fun TopStats(
 
     val spec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
 
-    val animIncome by animateFloatAsState(income.toFloat(), spec, label = "iAmt")
-    val animExpense by animateFloatAsState(expense.toFloat(), spec, label = "eAmt")
-    val animBalance by animateFloatAsState(balance.toFloat(), spec, label = "bAmt")
-    val animCount by animateFloatAsState((filteredCount ?: 0).toFloat(), spec, label = "cAmt")
-
+    // 保留排版闊度動畫
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
     val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
@@ -3281,13 +3277,12 @@ fun TopStats(
                         Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        formatAmountNoDecimal(animIncome.toDouble()),
+                    // 🔥 替換成 AnimatedAmount，傳入最終數值
+                    AnimatedAmount(
+                        text = formatAmountNoDecimal(income),
                         color = COLOR_INCOME,
                         fontSize = STAT_AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -3315,13 +3310,12 @@ fun TopStats(
                         Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        formatAmountNoDecimal(animExpense.toDouble()),
+                    // 🔥 替換成 AnimatedAmount
+                    AnimatedAmount(
+                        text = formatAmountNoDecimal(expense),
                         color = COLOR_EXPENSE,
                         fontSize = STAT_AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -3346,7 +3340,7 @@ fun TopStats(
                 label = "balanceCountAnim"
             ) { isFilter ->
                 if (!isFilter) {
-                    val balColor = if (animBalance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+                    val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
                     Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                             Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
@@ -3354,13 +3348,12 @@ fun TopStats(
                             Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                         Spacer(Modifier.height(4.dp))
-                        Text(
-                            formatAmountNoDecimal(animBalance.toDouble()),
+                        // 🔥 替換成 AnimatedAmount
+                        AnimatedAmount(
+                            text = formatAmountNoDecimal(balance),
                             color = balColor,
                             fontSize = STAT_AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 } else {
@@ -3369,13 +3362,12 @@ fun TopStats(
                             Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                         Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${animCount.roundToInt()}",
+                        // 🔥 替換成 AnimatedAmount
+                        AnimatedAmount(
+                            text = "${filteredCount ?: 0}",
                             fontSize = STAT_AMOUNT_FONT_SIZE,
                             color = BRAND_PRIMARY,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -3392,14 +3384,33 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    val displayText = remember(text) { text }
-    Text(
-        text = displayText,
-        color = color,
-        fontSize = fontSize,
-        fontWeight = fontWeight,
-        modifier = modifier
-    )
+    // 使用 Row 將字串逐個字元拆開渲染
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        for (i in text.indices) {
+            val c = text[i]
+            // key(i) 確保輸入或者數值長度改變時，相同位置嘅字元會獨立執行動畫
+            key(i) {
+                AnimatedContent(
+                    targetState = c,
+                    transitionSpec = {
+                        // 新字元由下向上滑入，舊字元由下向上滑出
+                        (slideInVertically(spring(stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(220))) togetherWith
+                        (slideOutVertically(spring(stiffness = Spring.StiffnessMediumLow)) { -it } + fadeOut(tween(220))) using SizeTransform(clip = false)
+                    },
+                    label = "digit_$i"
+                ) { char ->
+                    Text(
+                        text = char.toString(),
+                        color = color,
+                        fontSize = fontSize,
+                        fontWeight = fontWeight,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -3407,22 +3418,11 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
     val info = remember(dateKey) { parseDateHeader(dateKey) }
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
 
-    val animIncome by animateFloatAsState(
-        targetValue = income.toFloat(),
-        animationSpec = tween(420, easing = FastOutSlowInEasing),
-        label = "dayIncomeAmt"
-    )
-    val animExpense by animateFloatAsState(
-        targetValue = expense.toFloat(),
-        animationSpec = tween(420, easing = FastOutSlowInEasing),
-        label = "dayExpenseAmt"
-    )
+    val incomeText = formatAmountNoDecimal(income)
+    val expenseText = formatAmountNoDecimal(expense)
 
-    val incomeText = formatAmountNoDecimal(animIncome.toDouble())
-    val expenseText = formatAmountNoDecimal(animExpense.toDouble())
-
-    val showIncome = income > 0 || animIncome > 0.5f
-    val showExpense = expense > 0 || animExpense > 0.5f
+    val showIncome = income > 0.0
+    val showExpense = expense > 0.0
 
     Row(
         Modifier
@@ -3488,7 +3488,8 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(2.dp))
-                    Text(incomeText, fontSize = 14.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
+                    // 🔥 替換成 AnimatedAmount
+                    AnimatedAmount(text = incomeText, fontSize = 14.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
                 }
             }
             if (showIncome && showExpense) Spacer(Modifier.width(10.dp))
@@ -3496,7 +3497,8 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.TrendingDown, null, tint = TEXT_PRIMARY, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(2.dp))
-                    Text(expenseText, fontSize = 14.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.ExtraBold)
+                    // 🔥 替換成 AnimatedAmount
+                    AnimatedAmount(text = expenseText, fontSize = 14.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.ExtraBold)
                 }
             }
         }
