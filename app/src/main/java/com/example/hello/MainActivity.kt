@@ -645,36 +645,35 @@ fun MainApp() {
         }
     }
 
-    // 新增：先獨立抽出「文字搜尋/精確匹配」過濾後嘅結果
-val searchFilteredRecords by remember {
-    derivedStateOf {
-        val q = filterSearch.text
-        if (q.isBlank()) {
-            records.toList()
-        } else {
-            val hasExactNoteMatch = records.any { it.note == q }
-            val hasExactCategoryMatch = CATEGORIES.any { it == q }
-            records.toList().filter { r ->
-                when {
-                    hasExactNoteMatch -> r.note == q
-                    hasExactCategoryMatch -> r.category == q
-                    else -> r.note.contains(q, true) || r.category.contains(q, true)
+    val searchFilteredRecords by remember {
+        derivedStateOf {
+            val q = filterSearch.text
+            if (q.isBlank()) {
+                records.toList()
+            } else {
+                val hasExactNoteMatch = records.any { it.note == q }
+                val hasExactCategoryMatch = CATEGORIES.any { it == q }
+                records.toList().filter { r ->
+                    when {
+                        hasExactNoteMatch -> r.note == q
+                        hasExactCategoryMatch -> r.category == q
+                        else -> r.note.contains(q, true) || r.category.contains(q, true)
+                    }
                 }
             }
         }
     }
-}
 
-// 修改：最終列表 filtered 喺 searchFilteredRecords 基礎上再套用類別同月份過濾
-val filtered by remember {
-    derivedStateOf {
-        searchFilteredRecords.filter { r ->
-            val catOk = filterCategory == null || r.category == filterCategory
-            val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
-            catOk && monthOk
+    val filtered by remember {
+        derivedStateOf {
+            searchFilteredRecords.filter { r ->
+                val catOk = filterCategory == null || r.category == filterCategory
+                val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
+                catOk && monthOk
+            }
         }
     }
-}
+    
     val ledgerRecords by remember {
         derivedStateOf {
             val base = if (filterModeOn) filtered else records.toList()
@@ -724,22 +723,22 @@ val filtered by remember {
         }
     }
     val availableMonths by remember {
-    derivedStateOf { 
-        searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() 
+        derivedStateOf { 
+            searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() 
+        }
     }
-}
     val visibleCategories by remember {
-    derivedStateOf {
-        val base = if (filterMonth == null) searchFilteredRecords
-                   else searchFilteredRecords.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
-        val hasIncome = base.any { it.category == INCOME_CATEGORY }
-        val expenseCats = base.filter { it.category != INCOME_CATEGORY }
-            .groupBy { it.category }
-            .mapValues { (_, list) -> list.sumOf { it.amount } }
-            .toList().sortedByDescending { it.second }.map { it.first }
-        (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+        derivedStateOf {
+            val base = if (filterMonth == null) searchFilteredRecords
+                       else searchFilteredRecords.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
+            val hasIncome = base.any { it.category == INCOME_CATEGORY }
+            val expenseCats = base.filter { it.category != INCOME_CATEGORY }
+                .groupBy { it.category }
+                .mapValues { (_, list) -> list.sumOf { it.amount } }
+                .toList().sortedByDescending { it.second }.map { it.first }
+            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+        }
     }
-}
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
@@ -1793,7 +1792,6 @@ fun LedgerContent(
                 }
             }
         } else {
-            // 直接使用傳入嘅 groupedByDate，避免重複 groupBy
             groupedByDate.forEach { (dateKey, dayRecords) ->
                 val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
@@ -1870,10 +1868,8 @@ fun LedgerContent(
                                             ) {
                                                 HorizontalDivider(
                                                     modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                    // 🔥 提高不透明度，顏色會顯得深啲實啲
-                                                    color = DIVIDER_COLOR.copy(alpha = 0.8f), 
-                                                    // 🔥 稍微加粗少少（由 0.5.dp 改為 0.8.dp 或 1.dp），令線條更清晰
-                                                    thickness = 0.8.dp 
+                                                    color = DIVIDER_COLOR.copy(alpha = 0.8f),
+                                                    thickness = 0.8.dp
                                                 )
                                             }
                                         }
@@ -1902,8 +1898,6 @@ fun LedgerContent(
             ) {
                 val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
 
-                // 已經刪除咗原本呢度嘅 AnimatedVisibility { CategoryStatChip(...) } 
-
                 Box(modifier = Modifier.weight(1f)) {
                     TopStats(
                         hasIncome = hasIncome,
@@ -1912,7 +1906,6 @@ fun LedgerContent(
                         expense = totalExpense,
                         isFilterMode = filterMode,
                         filteredCount = if (filterMode) filtered.size else null,
-                        // 🔥 傳入類別參數，交由 TopStats 內部排版
                         showCategory = showCategoryChip,
                         categoryName = cachedCategory
                     )
@@ -1939,7 +1932,6 @@ fun LedgerContent(
                 label = "bottomArea",
                 modifier = Modifier
                     .zIndex(1f)
-                    // 🔥 加喺 AnimatedContent 外圍，確保整個容器高度改變時，平滑推擠下方列表
                     .animateContentSize(
                         animationSpec = spring(
                             dampingRatio = 0.85f,
@@ -1952,7 +1944,6 @@ fun LedgerContent(
                     Column(
                         Modifier
                             .padding(horizontal = 16.dp, vertical = 0.dp)
-                            // 🔥 確保過濾面板內部高度改變平滑
                             .animateContentSize(
                                 animationSpec = spring(
                                     dampingRatio = 0.85f,
@@ -1992,7 +1983,6 @@ fun LedgerContent(
                             FlowRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    // 🔥 加喺 FlowRow，確保月份晶片換行或減少行數時高度流暢縮放
                                     .animateContentSize(
                                         animationSpec = spring(
                                             dampingRatio = 0.85f,
@@ -2111,8 +2101,8 @@ fun CategoryStatChip(category: String) {
             fontSize = 11.sp, 
             color = TEXT_SECONDARY, 
             fontWeight = FontWeight.Medium,
-            maxLines = 1,          // 🔥 防止被擠壓時變多行
-            softWrap = false       // 🔥 禁止自動換行
+            maxLines = 1,
+            softWrap = false
         )
         Spacer(Modifier.height(2.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2133,8 +2123,8 @@ fun CategoryStatChip(category: String) {
                 fontSize = 20.sp,
                 color = TEXT_PRIMARY,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,          // 🔥 防止被擠壓時變多行
-                softWrap = false       // 🔥 禁止自動換行
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -2619,7 +2609,11 @@ fun DayDetailPanel(
     onDelete: (Record) -> Unit,
     onChangeIcon: (Record) -> Unit,
     onDismiss: () -> Unit,
-    deletingRecordId: String? = null
+    deletingRecordId: String? = null,
+    onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
+    onFanMenuDrag: (Offset) -> Unit = {},
+    onFanMenuEnd: () -> Unit = {},
+    activeFanRecord: Record? = null
 ) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -2628,8 +2622,9 @@ fun DayDetailPanel(
         if (visible) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                shadowElevation = 6.dp,
+                shape = RoundedCornerShape(20.dp),
+                shadowElevation = 1.dp,
+                border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f)),
                 color = SURFACE_CARD
             ) {
                 Column(Modifier.fillMaxWidth()) {
@@ -2673,7 +2668,6 @@ fun DayDetailPanel(
                     }
                     HorizontalDivider(color = DIVIDER_COLOR)
 
-                    // 先將排序好嘅列表存起，方便之後攞 lastIndex
                     val sortedRecords = records.sortedByDescending { it.timestamp }
                     
                     sortedRecords.forEachIndexed { idx, r ->
@@ -2684,7 +2678,6 @@ fun DayDetailPanel(
                                     isDeleting = r.id == deletingRecordId
                                 ) {
                                     SwipeableRecordItem(
-                                        // 🔥 統一背景顏色為 SURFACE_CARD
                                         backgroundColor = SURFACE_CARD,
                                         record = r,
                                         expandedId = expandedId,
@@ -2693,11 +2686,16 @@ fun DayDetailPanel(
                                         onEdit = { onEdit(r) },
                                         onFilter = { onFilter(r) },
                                         onDelete = { onDelete(r) },
-                                        onChangeIcon = { onChangeIcon(r) }
+                                        onChangeIcon = { onChangeIcon(r) },
+                                        onFanMenuStart = { offset -> onFanMenuStart(r, offset) },
+                                        onFanMenuDrag = { dragAmount -> onFanMenuDrag(dragAmount) },
+                                        onFanMenuEnd = { onFanMenuEnd() },
+                                        isFanMenuActive = activeFanRecord != null,
+                                        isOtherItem = activeFanRecord != null && activeFanRecord.id != r.id,
+                                        isActiveItem = activeFanRecord?.id == r.id
                                     )
                                 }
                                 
-                                // 🔥 加入同記賬頁面一模一樣嘅分隔線（除咗最後一個項目）
                                 if (idx < sortedRecords.lastIndex) {
                                     AnimatedVisibility(
                                         visible = deletingRecordId != r.id,
@@ -3220,7 +3218,6 @@ fun TopStats(
     expense: Double,
     isFilterMode: Boolean = false,
     filteredCount: Int? = null,
-    // 新增呢兩個參數
     showCategory: Boolean = false,
     categoryName: String = ""
 ) {
@@ -3237,14 +3234,12 @@ fun TopStats(
 
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
-    // 新增類別嘅權重動畫
     val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 🔥 類別 Block
         if (showCategory || catW > 0.001f) {
             Box(
                 modifier = Modifier.weight(catW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3252,7 +3247,7 @@ fun TopStats(
             ) {
                 val alphaScale = catW.coerceIn(0f, 1f)
                 Box(Modifier
-                    .wrapContentWidth(unbounded = true) // 🔥 終極殺手鐧：無視外部寬度擠壓，保持原本尺寸測量
+                    .wrapContentWidth(unbounded = true)
                     .graphicsLayer {
                         alpha = alphaScale
                         scaleX = 0.85f + 0.15f * alphaScale
@@ -3264,7 +3259,6 @@ fun TopStats(
             }
         }
 
-        // 收入 Block
         if (showIncome || incomeW > 0.001f) {
             Box(
                 modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3299,7 +3293,6 @@ fun TopStats(
             }
         }
 
-        // 支出 Block
         if (showExpense || expenseW > 0.001f) {
             Box(
                 modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3334,7 +3327,6 @@ fun TopStats(
             }
         }
 
-        // 餘額 / 筆數 Block
         Box(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
@@ -3400,7 +3392,6 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    // ===== 效能優化：減少逐字符 AnimatedContent 開銷 =====
     val displayText = remember(text) { text }
     Text(
         text = displayText,
@@ -3748,7 +3739,6 @@ fun QuickInputSection(
     val configuration = LocalConfiguration.current
     val availableWidth = configuration.screenWidthDp - 52
 
-    // 1. 先固定計算出所有行（不受 maxRowsPerPage 影響，確保每一行嘅內容永遠一致）
     val allFixedRows = remember(items, availableWidth) {
         val rows = mutableListOf<List<Pair<String, Int>>>()
         var currentRow = mutableListOf<Pair<String, Int>>()
@@ -3759,12 +3749,10 @@ fun QuickInputSection(
             val estimatedItemWidth = 50 + (name.length * 14)
 
             if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
-                // 滿一行，將當前行推入列表，開新一行
                 rows.add(currentRow)
                 currentRow = mutableListOf(item)
                 currentRowWidth = estimatedItemWidth + 8
             } else {
-                // 未滿，繼續加落當前行
                 currentRow.add(item)
                 currentRowWidth += estimatedItemWidth + 8
             }
@@ -3775,12 +3763,10 @@ fun QuickInputSection(
         rows
     }
 
-    // 2. 根據目前允許嘅 maxRowsPerPage，將固定好嘅行進行分頁 (Chunk)
     val pages = remember(allFixedRows, maxRowsPerPage) {
         if (allFixedRows.isEmpty()) {
             emptyList()
         } else {
-            // 直接將行數按 maxRowsPerPage 切割，然後將每一頁入面嘅多行攤平 (flatten) 做一個 List
             allFixedRows.chunked(maxRowsPerPage).map { pageRows ->
                 pageRows.flatten()
             }
@@ -4208,6 +4194,44 @@ fun CalendarContent(
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
 
     val scrollState = rememberScrollState()
+    
+    var activeFanRecord by remember { mutableStateOf<Record?>(null) }
+    var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
+    var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+
+    val fanMenuProgress = animateFloatAsState(
+        targetValue = if (activeFanRecord != null) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
+        label = "fanMenuProgress"
+    )
+
+    val handleFanStart = { r: Record, offset: Offset ->
+        activeFanRecord = r
+        fanMenuCenter = offset
+        fanMenuTouch = offset
+    }
+    val handleFanDrag = { dragAmount: Offset ->
+        fanMenuTouch += dragAmount
+    }
+    val handleFanEnd = {
+        val hovered = getHoveredActionIndex(fanMenuCenter, fanMenuTouch, with(density) { 40.dp.toPx() })
+        val targetRecord = activeFanRecord
+        activeFanRecord = null
+
+        if (targetRecord != null && hovered != null) {
+            scope.launch {
+                delay(120)
+                when (hovered) {
+                    0 -> onCopyClick(targetRecord)
+                    1 -> onEditClick(targetRecord)
+                    2 -> onFilterClick(targetRecord)
+                    3 -> onDeleteClick(targetRecord)
+                }
+            }
+        }
+    }
 
     val curCal = remember(currentMonthKey) {
         val parts = currentMonthKey.split("-")
@@ -4543,14 +4567,6 @@ fun CalendarContent(
                                 )
 
                                 if (isThisRowSelected && selectedDay != null && selectedColIdx != null) {
-                                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                        val cellWidth = maxWidth / 7
-                                        TrianglePointer(
-                                            colIndex = selectedColIdx!!,
-                                            cellWidth = cellWidth,
-                                            color = SURFACE_CARD
-                                        )
-                                    }
                                     val dateKey = String.format(
                                         Locale.US, "%04d-%02d-%02d",
                                         year, month, selectedDay
@@ -4571,7 +4587,11 @@ fun CalendarContent(
                                             selectedColIdx = null
                                             detailExpandedId = null
                                         },
-                                        deletingRecordId = deletingRecordId
+                                        deletingRecordId = deletingRecordId,
+                                        onFanMenuStart = handleFanStart,
+                                        onFanMenuDrag = handleFanDrag,
+                                        onFanMenuEnd = handleFanEnd,
+                                        activeFanRecord = activeFanRecord
                                     )
                                     Spacer(Modifier.height(8.dp))
                                 } else {
@@ -4583,6 +4603,12 @@ fun CalendarContent(
                 }
             }
         }
+        
+        FanMenuOverlay(
+            progressProvider = { fanMenuProgress.value },
+            centerProvider = { fanMenuCenter },
+            touchProvider = { fanMenuTouch }
+        )
     }
 }
 
