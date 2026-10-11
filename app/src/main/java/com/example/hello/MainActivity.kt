@@ -3725,10 +3725,10 @@ fun QuickInputSection(
     val configuration = LocalConfiguration.current
     val availableWidth = configuration.screenWidthDp - 52
 
-    val pages = remember(items, availableWidth, maxRowsPerPage) {
-        val result = mutableListOf<List<Pair<String, Int>>>()
-        var currentPage = mutableListOf<Pair<String, Int>>()
-        var currentRowCount = 1
+    // 1. 先固定計算出所有行（不受 maxRowsPerPage 影響，確保每一行嘅內容永遠一致）
+    val allFixedRows = remember(items, availableWidth) {
+        val rows = mutableListOf<List<Pair<String, Int>>>()
+        var currentRow = mutableListOf<Pair<String, Int>>()
         var currentRowWidth = 0
 
         for (item in items) {
@@ -3736,25 +3736,32 @@ fun QuickInputSection(
             val estimatedItemWidth = 50 + (name.length * 14)
 
             if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
-                if (currentRowCount >= maxRowsPerPage) {
-                    result.add(currentPage)
-                    currentPage = mutableListOf(item)
-                    currentRowCount = 1
-                    currentRowWidth = estimatedItemWidth + 8
-                } else {
-                    currentRowCount++
-                    currentPage.add(item)
-                    currentRowWidth = estimatedItemWidth + 8
-                }
+                // 滿一行，將當前行推入列表，開新一行
+                rows.add(currentRow)
+                currentRow = mutableListOf(item)
+                currentRowWidth = estimatedItemWidth + 8
             } else {
-                currentPage.add(item)
+                // 未滿，繼續加落當前行
+                currentRow.add(item)
                 currentRowWidth += estimatedItemWidth + 8
             }
         }
-        if (currentPage.isNotEmpty()) {
-            result.add(currentPage)
+        if (currentRow.isNotEmpty()) {
+            rows.add(currentRow)
         }
-        result
+        rows
+    }
+
+    // 2. 根據目前允許嘅 maxRowsPerPage，將固定好嘅行進行分頁 (Chunk)
+    val pages = remember(allFixedRows, maxRowsPerPage) {
+        if (allFixedRows.isEmpty()) {
+            emptyList()
+        } else {
+            // 直接將行數按 maxRowsPerPage 切割，然後將每一頁入面嘅多行攤平 (flatten) 做一個 List
+            allFixedRows.chunked(maxRowsPerPage).map { pageRows ->
+                pageRows.flatten()
+            }
+        }
     }
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
