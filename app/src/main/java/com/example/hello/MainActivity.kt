@@ -2104,7 +2104,14 @@ fun CategoryStatChip(category: String) {
         Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("類別", fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+        Text(
+            "類別", 
+            fontSize = 11.sp, 
+            color = TEXT_SECONDARY, 
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,          // 🔥 防止被擠壓時變多行
+            softWrap = false       // 🔥 禁止自動換行
+        )
         Spacer(Modifier.height(2.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (style != null) {
@@ -2123,7 +2130,9 @@ fun CategoryStatChip(category: String) {
                 category,
                 fontSize = 20.sp,
                 color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,          // 🔥 防止被擠壓時變多行
+                softWrap = false       // 🔥 禁止自動換行
             )
         }
     }
@@ -3210,18 +3219,21 @@ fun TopStats(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 🔥 新增：類別 Block，使用權重等分空間
+        // 🔥 類別 Block
         if (showCategory || catW > 0.001f) {
             Box(
                 modifier = Modifier.weight(catW.coerceAtLeast(0.001f)).clipToBounds(),
                 contentAlignment = Alignment.Center
             ) {
                 val alphaScale = catW.coerceIn(0f, 1f)
-                Box(Modifier.graphicsLayer {
-                    alpha = alphaScale
-                    scaleX = 0.85f + 0.15f * alphaScale
-                    scaleY = 0.85f + 0.15f * alphaScale
-                }) {
+                Box(Modifier
+                    .wrapContentWidth(unbounded = true) // 🔥 終極殺手鐧：無視外部寬度擠壓，保持原本尺寸測量
+                    .graphicsLayer {
+                        alpha = alphaScale
+                        scaleX = 0.85f + 0.15f * alphaScale
+                        scaleY = 0.85f + 0.15f * alphaScale
+                    }
+                ) {
                     CategoryStatChip(category = categoryName)
                 }
             }
