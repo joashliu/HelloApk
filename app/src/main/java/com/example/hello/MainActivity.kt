@@ -798,10 +798,16 @@ fun MainApp() {
         val amtText = amount?.let {
             if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
         } ?: ""
+
+        // 檢查最近一筆記錄（時間最大嗰筆）係咪旅遊類別
+        val latestCategory = records.maxByOrNull { it.timestamp }?.category
+        val defaultCategory = if (latestCategory == "旅遊") "旅遊" else "飲食"
+
         if (!showKeyboard) {
             keyboardState = KeyboardState(
                 noteText = note,
                 amountText = amtText,
+                category = defaultCategory, // 自動套用預設類別
                 selectAmountOnInput = amount != null
             )
             showKeyboard = true
@@ -809,6 +815,7 @@ fun MainApp() {
             keyboardState = keyboardState.copy(
                 noteText = note,
                 amountText = amtText.ifBlank { keyboardState.amountText },
+                category = defaultCategory, // 自動套用預設類別
                 selectAmountOnInput = amount != null
             )
         }
