@@ -1796,49 +1796,50 @@ fun LedgerContent(
 
         if (isExactNoteFilter) {
             itemsIndexed(items = filtered, key = { _, r -> r.id }) { idx, r ->
-                Box(
+                // 使用 Column 取代原本嘅 Box + Surface，徹底解決四角陰影渲染 Bug
+                Column(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                         .animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)
+                        .shadow(
+                            elevation = 8.dp,
+                            shape = RoundedCornerShape(20.dp),
+                            ambientColor = Color(0x04000000), // 極淡環境光，消除硬黑邊
+                            spotColor = Color(0x0A000000),   // 柔和主光源
+                            clip = false
+                        )
+                        .background(SURFACE_CARD, RoundedCornerShape(20.dp))
+                        .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(20.dp))
+                        .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy))
                 ) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().animateContentSize(
-                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        color = SURFACE_CARD,
-                        shadowElevation = 1.dp,
-                        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+                    AnimatedRecordItem(
+                        animateOnMount = r.id == justAddedId,
+                        isDeleting = r.id == deletingRecordId
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            AnimatedRecordItem(
-                                animateOnMount = r.id == justAddedId,
-                                isDeleting = r.id == deletingRecordId
-                            ) {
-                                SwipeableRecordItem(
-                                    backgroundColor = Color.Transparent, record = r, expandedId = expandedId,
-                                    onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
-                                    onFilter = {
-                                        if (!filterMode) {
-                                            preFilterIndex = listState.firstVisibleItemIndex
-                                            preFilterOffset = listState.firstVisibleItemScrollOffset
-                                        }
-                                        onFilterByName(r.note)
-                                    },
-                                    onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
-                                    hideCategory = true,
-                                    onFanMenuStart = { offset -> handleFanStart(r, offset) },
-                                    onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
-                                    onFanMenuEnd = { handleFanEnd() },
-                                    isFanMenuActive = activeFanRecord != null,
-                                    isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
-                                    isActiveItem = activeFanRecord?.id == r.id
-                                )
-                            }
-                            if (afterSaveHint?.recordId == r.id) {
-                                CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
-                            }
-                        }
+                        SwipeableRecordItem(
+                            backgroundColor = Color.Transparent, record = r, expandedId = expandedId,
+                            onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
+                            onFilter = {
+                                if (!filterMode) {
+                                    preFilterIndex = listState.firstVisibleItemIndex
+                                    preFilterOffset = listState.firstVisibleItemScrollOffset
+                                }
+                                onFilterByName(r.note)
+                            },
+                            onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
+                            hideCategory = true,
+                            onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                            onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                            onFanMenuEnd = { handleFanEnd() },
+                            isFanMenuActive = activeFanRecord != null,
+                            isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                            isActiveItem = activeFanRecord?.id == r.id
+                        )
+                    }
+                    if (afterSaveHint?.recordId == r.id) {
+                        CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
                     }
                 }
             }
@@ -1858,59 +1859,63 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey") {
-                    Surface(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
                             .animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)
-                            .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)),
-                        shape = RoundedCornerShape(20.dp),
-                        color = SURFACE_CARD,
-                        shadowElevation = 1.dp,
-                        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+                            .shadow(
+                                elevation = 8.dp,
+                                shape = RoundedCornerShape(20.dp),
+                                ambientColor = Color(0x04000000),
+                                spotColor = Color(0x0A000000),
+                                clip = false
+                            )
+                            .background(SURFACE_CARD, RoundedCornerShape(20.dp))
+                            .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy))
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            dayRecords.forEachIndexed { idx, r ->
-                                key(r.id) {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        AnimatedRecordItem(
-                                            animateOnMount = r.id == justAddedId,
-                                            isDeleting = r.id == deletingRecordId
+                        dayRecords.forEachIndexed { idx, r ->
+                            key(r.id) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    AnimatedRecordItem(
+                                        animateOnMount = r.id == justAddedId,
+                                        isDeleting = r.id == deletingRecordId
+                                    ) {
+                                        SwipeableRecordItem(
+                                            backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
+                                            onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
+                                            onFilter = {
+                                                if (!filterMode) {
+                                                    preFilterIndex = listState.firstVisibleItemIndex
+                                                    preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                }
+                                                onFilterByName(r.note)
+                                            },
+                                            onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
+                                            onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                            onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                            onFanMenuEnd = { handleFanEnd() },
+                                            isFanMenuActive = activeFanRecord != null,
+                                            isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                            isActiveItem = activeFanRecord?.id == r.id
+                                        )
+                                    }
+
+                                    if (afterSaveHint?.recordId == r.id) {
+                                        CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                    }
+
+                                    if (idx < dayRecords.lastIndex) {
+                                        AnimatedVisibility(
+                                            visible = deletingRecordId != r.id,
+                                            enter = fadeIn(tween(200)), exit = fadeOut(tween(200))
                                         ) {
-                                            SwipeableRecordItem(
-                                                backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
-                                                onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
-                                                onFilter = {
-                                                    if (!filterMode) {
-                                                        preFilterIndex = listState.firstVisibleItemIndex
-                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
-                                                    }
-                                                    onFilterByName(r.note)
-                                                },
-                                                onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
-                                                onFanMenuStart = { offset -> handleFanStart(r, offset) },
-                                                onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
-                                                onFanMenuEnd = { handleFanEnd() },
-                                                isFanMenuActive = activeFanRecord != null,
-                                                isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
-                                                isActiveItem = activeFanRecord?.id == r.id
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                                color = DIVIDER_COLOR.copy(alpha = 0.8f), thickness = 0.8.dp
                                             )
-                                        }
-
-                                        if (afterSaveHint?.recordId == r.id) {
-                                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
-                                        }
-
-                                        if (idx < dayRecords.lastIndex) {
-                                            AnimatedVisibility(
-                                                visible = deletingRecordId != r.id,
-                                                enter = fadeIn(tween(200)), exit = fadeOut(tween(200))
-                                            ) {
-                                                HorizontalDivider(
-                                                    modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                    color = DIVIDER_COLOR.copy(alpha = 0.8f), thickness = 0.8.dp
-                                                )
-                                            }
                                         }
                                     }
                                 }
@@ -1925,7 +1930,6 @@ fun LedgerContent(
             }
         }
     }
-
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
             Row(
@@ -2617,23 +2621,24 @@ fun DayDetailPanel(
     onFanMenuEnd: () -> Unit = {},
     activeFanRecord: Record? = null
 ) {
-    Surface(
+    // 拋棄 Surface，精確控制陰影渲染
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            // 🔥 使用自訂柔和陰影取代 Surface 嘅預設 elevation，徹底消除四隻角嘅黑影
             .shadow(
                 elevation = 8.dp,
                 shape = RoundedCornerShape(20.dp),
-                ambientColor = Color(0x08000000), // 極淡嘅環境光陰影
-                spotColor = Color(0x15000000)     // 柔和嘅主光源陰影
-            ),
-        shape = RoundedCornerShape(20.dp),
-        color = SURFACE_CARD,
-        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+                ambientColor = Color(0x04000000),
+                spotColor = Color(0x0A000000),
+                clip = false
+            )
+            .background(SURFACE_CARD, RoundedCornerShape(20.dp))
+            .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(20.dp))
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-            val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+        val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+        val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+        
             Row(
                 Modifier
                     .fillMaxWidth()
