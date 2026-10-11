@@ -784,7 +784,19 @@ fun MainApp() {
                         }
                         DocumentChange.Type.MODIFIED -> {
                             val idx = records.indexOfFirst { it.id == r.id }
-                            if (idx >= 0) records[idx] = r
+                            if (idx >= 0) {
+                                val oldRecord = records[idx]
+                                // 💡 修正排序 Bug：如果時間有變，就要重新排過位
+                                if (oldRecord.timestamp == r.timestamp) {
+                                    // 時間冇變，直接原地更新內容（金額、名稱等），維持動畫順暢
+                                    records[idx] = r
+                                } else {
+                                    // 時間變咗，先抽走舊記錄，再插返入啱嘅時間排序位置
+                                    records.removeAt(idx)
+                                    val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
+                                    if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
+                                }
+                            }
                         }
                         DocumentChange.Type.REMOVED -> {
                             records.removeAll { it.id == r.id }
