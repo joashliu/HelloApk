@@ -2674,21 +2674,24 @@ fun DayDetailPanel(
                     HorizontalDivider(color = DIVIDER_COLOR)
 
                     records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-                        AnimatedRecordItem(
-                            animateOnMount = false,
-                            isDeleting = r.id == deletingRecordId
-                        ) {
-                            SwipeableRecordItem(
-                                backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                record = r,
-                                expandedId = expandedId,
-                                onExpand = onExpandChange,
-                                onCopy = { onCopy(r) },
-                                onEdit = { onEdit(r) },
-                                onFilter = { onFilter(r) },
-                                onDelete = { onDelete(r) },
-                                onChangeIcon = { onChangeIcon(r) }
-                            )
+                        // 🔥 關鍵：加入 key(r.id) 將狀態與資料 ID 綁定
+                        key(r.id) {
+                            AnimatedRecordItem(
+                                animateOnMount = false,
+                                isDeleting = r.id == deletingRecordId
+                            ) {
+                                SwipeableRecordItem(
+                                    backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
+                                    record = r,
+                                    expandedId = expandedId,
+                                    onExpand = onExpandChange,
+                                    onCopy = { onCopy(r) },
+                                    onEdit = { onEdit(r) },
+                                    onFilter = { onFilter(r) },
+                                    onDelete = { onDelete(r) },
+                                    onChangeIcon = { onChangeIcon(r) }
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(6.dp))
