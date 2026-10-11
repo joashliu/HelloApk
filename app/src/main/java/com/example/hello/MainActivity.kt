@@ -209,7 +209,11 @@ data class KeyboardState(
     val editingNote: Boolean = false,
     val editingRecordId: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
-    val selectAmountOnInput: Boolean = false
+    val selectAmountOnInput: Boolean = false,
+    // 新增旅遊模式屬性
+    val currency: String = "HKD",
+    val exchangeRateText: String = "0.052",
+    val focusedField: String = "amount" // "amount" 或 "rate"
 )
 
 data class AfterSaveHint(
@@ -862,34 +866,45 @@ fun MainApp() {
     }
 
     fun saveFromKeyboard() {
-        val amt = keyboardState.amountText.toDoubleOrNull() ?: return
-        if (amt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        val note = keyboardState.noteText
-        val category = keyboardState.category
-        val editId = keyboardState.editingRecordId
-        val ts = keyboardState.timestamp
-        val monthKey = monthKeyFromTimestamp(ts)
-        if (editId != null) {
-            db.collection("records").document(editId).update(mapOf(
-                "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
-        } else {
-            val inherited = records.filter { it.note == note && it.note.isNotBlank() }
-                .maxByOrNull { it.timestamp }?.iconUrl ?: ""
-            val newId = db.collection("records").document().id
-            justAddedId = newId
-            val totalThisMonth = records
-                .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
-                .sumOf { it.amount } + amt
-            afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
-            db.collection("records").document(newId).set(Record(
-                amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
-            scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
-        }
-        showKeyboard = false
-        keyboardState = KeyboardState()
-        scrollToTopTrigger++
+    val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
+    if (inputAmt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
+    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    
+    // 如果係旅遊類別而且揀咗 JPY，即時轉換成 HKD
+    val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
+        val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
+        inputAmt * rate
+    } else {
+        inputAmt
     }
+
+    val note = keyboardState.noteText
+    val category = keyboardState.category
+    val editId = keyboardState.editingRecordId
+    val ts = keyboardState.timestamp
+    val monthKey = monthKeyFromTimestamp(ts)
+    
+    if (editId != null) {
+        db.collection("records").document(editId).update(mapOf(
+            "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
+    } else {
+        val inherited = records.filter { it.note == note && it.note.isNotBlank() }
+            .maxByOrNull { it.timestamp }?.iconUrl ?: ""
+        val newId = db.collection("records").document().id
+        justAddedId = newId
+        val totalThisMonth = records
+            .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
+            .sumOf { it.amount } + amt
+        afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
+        db.collection("records").document(newId).set(Record(
+            amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
+        scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
+    }
+    
+    showKeyboard = false
+    keyboardState = KeyboardState()
+    scrollToTopTrigger++
+}
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
     BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
@@ -2838,6 +2853,146 @@ fun LedgerKeyboardPanel(
             }
 
             Spacer(Modifier.height(10.dp))
+
+            // 1. 放在 Date/Time Row 之後的 Spacer(Modifier.height(10.dp)) 下方：
+
+AnimatedVisibility(
+    visible = state.category == "旅遊",
+    enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+    exit = shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
+) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // HKD / JPY 切換器
+            Surface(shape = RoundedCornerShape(12.dp), color = SURFACE_ELEVATED) {
+                Row(Modifier.padding(4.dp)) {
+                    val isHKD = state.currency == "HKD"
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isHKD) BRAND_PRIMARY else Color.Transparent)
+                            .clickable { onStateChange(state.copy(currency = "HKD", focusedField = "amount")) }
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Text("HKD", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (isHKD) Color.White else TEXT_SECONDARY)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (!isHKD) BRAND_PRIMARY else Color.Transparent)
+                            .clickable { onStateChange(state.copy(currency = "JPY", focusedField = "amount")) }
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Text("JPY", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (!isHKD) Color.White else TEXT_SECONDARY)
+                    }
+                }
+            }
+
+            // 匯率輸入與預覽 (只限 JPY)
+            AnimatedVisibility(
+                visible = state.currency == "JPY",
+                enter = fadeIn() + slideInHorizontally { it / 2 },
+                exit = fadeOut() + slideOutHorizontally { it / 2 }
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("匯率 ", fontSize = 12.sp, color = TEXT_SECONDARY)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (state.focusedField == "rate") BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED)
+                            .border(1.dp, if (state.focusedField == "rate") BRAND_PRIMARY else Color.Transparent, RoundedCornerShape(8.dp))
+                            .clickable { onStateChange(state.copy(focusedField = "rate")) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = state.exchangeRateText.ifEmpty { "0" },
+                            fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BRAND_PRIMARY
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    val jpyAmt = state.amountText.toDoubleOrNull() ?: 0.0
+                    val rate = state.exchangeRateText.toDoubleOrNull() ?: 0.0
+                    val hkd = jpyAmt * rate
+                    Text("≈ $${formatAmount(hkd)}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                }
+            }
+        }
+    }
+}
+
+// 2. 更新金額顯示區，加入點擊切換焦點，以及貨幣符號
+Surface(Modifier.fillMaxWidth().height(76.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(16.dp))
+            .border(2.dp, if (state.focusedField == "amount" && state.currency == "JPY") BRAND_PRIMARY_LIGHT else Color.Transparent, RoundedCornerShape(16.dp))
+            .clickable { onStateChange(state.copy(focusedField = "amount")) }
+            .padding(start = 22.dp, end = 12.dp),
+        contentAlignment = Alignment.CenterEnd
+    ) {
+        // 左側顯示貨幣符號
+        Text(
+            text = if (state.category == "旅遊" && state.currency == "JPY") "¥" else "$",
+            fontSize = 24.sp,
+            color = TEXT_TERTIARY,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.CenterStart)
+        )
+
+        val showText = if (state.amountText.isEmpty()) "0" else state.amountText
+        AnimatedAmount(
+            text = showText,
+            color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
+            fontSize = 38.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(end = 44.dp)
+        )
+    }
+}
+
+// 3. 更新鍵盤邏輯，使其同時支援「金額」與「匯率」輸入
+KeyboardKey(key, {
+    when (key) {
+        "backspace" -> {
+            if (state.focusedField == "amount") {
+                val t = state.amountText
+                onStateChange(state.copy(amountText = if (t.isEmpty()) t else t.dropLast(1), selectAmountOnInput = false))
+            } else {
+                val t = state.exchangeRateText
+                onStateChange(state.copy(exchangeRateText = if (t.isEmpty()) t else t.dropLast(1)))
+            }
+        }
+        "." -> {
+            if (state.focusedField == "amount") {
+                val t = state.amountText
+                if (!t.contains(".")) onStateChange(state.copy(amountText = if (t.isEmpty()) "0." else "$t.", selectAmountOnInput = false))
+            } else {
+                val t = state.exchangeRateText
+                if (!t.contains(".")) onStateChange(state.copy(exchangeRateText = if (t.isEmpty()) "0." else "$t."))
+            }
+        }
+        else -> {
+            if (state.focusedField == "amount") {
+                val base = if (state.selectAmountOnInput) "" else state.amountText
+                val dotIdx = base.indexOf(".")
+                val newT = if (dotIdx >= 0) {
+                    if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base else "$base$key" 
+                } else {
+                    if (base.length >= 9) base else "$base$key"
+                }
+                onStateChange(state.copy(amountText = newT, selectAmountOnInput = false))
+            } else {
+                val t = state.exchangeRateText
+                onStateChange(state.copy(exchangeRateText = "$t$key"))
+            }
+        }
+    }
+}, Modifier.weight(1f).fillMaxHeight())
 
             Surface(Modifier.fillMaxWidth().height(76.dp), shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).padding(start = 22.dp, end = 12.dp),
