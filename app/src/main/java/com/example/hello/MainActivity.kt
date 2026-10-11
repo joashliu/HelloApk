@@ -3361,15 +3361,23 @@ fun TopStats(
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
     val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
 
+    // 🌟 預先計算第三區塊（餘額/筆數）嘅數值同顏色，畀數字滾動動畫平滑過渡
+    val thirdBlockText = if (isFilterMode) "${filteredCount ?: 0}" else formatAmountNoDecimal(balance)
+    val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+    val thirdBlockColor by animateColorAsState(
+        targetValue = if (isFilterMode) BRAND_PRIMARY else targetBalColor,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "3rdColor"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // 📌 核心修正：加入嚴格固定高度 (64.dp)，取代原本動態嘅 vertical padding。
-            // 噉樣無論入面切換咩內容，TopStat 嘅高度永遠都係一樣，絕對唔會再上下抖動。
             .height(64.dp)
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 1. 單一類別晶片
         if (showCategory || catW > 0.001f) {
             Box(
                 modifier = Modifier.weight(catW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3389,6 +3397,7 @@ fun TopStats(
             }
         }
 
+        // 2. 收入區塊
         if (showIncome || incomeW > 0.001f) {
             Box(
                 modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3411,16 +3420,20 @@ fun TopStats(
                         Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    AnimatedAmount(
-                        text = formatAmountNoDecimal(income),
-                        color = COLOR_INCOME,
-                        fontSize = STAT_AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // 💡 核心修正：加咗一個高度固定而且有 clipToBounds() 嘅 Box，數字滾動時一超出呢個高度就會被隱藏，完美解決重疊問題！
+                    Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(), contentAlignment = Alignment.Center) {
+                        AnimatedAmount(
+                            text = formatAmountNoDecimal(income),
+                            color = COLOR_INCOME,
+                            fontSize = STAT_AMOUNT_FONT_SIZE,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
 
+        // 3. 支出區塊
         if (showExpense || expenseW > 0.001f) {
             Box(
                 modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3443,35 +3456,36 @@ fun TopStats(
                         Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    AnimatedAmount(
-                        text = formatAmountNoDecimal(expense),
-                        color = COLOR_EXPENSE,
-                        fontSize = STAT_AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // 💡 核心修正：同樣用 Box 裁切，數字唔會飛上天花板
+                    Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(), contentAlignment = Alignment.Center) {
+                        AnimatedAmount(
+                            text = formatAmountNoDecimal(expense),
+                            color = COLOR_EXPENSE,
+                            fontSize = STAT_AMOUNT_FONT_SIZE,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
 
+        // 4. 餘額 / 筆數區塊 (第三格)
         Box(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-            
-            // 固定框架，唔再成個上下跳動
             Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 
-                // 1. 標題層：左右流暢切換
+                // 💡 標題層：採用微距上下滑動 + 漸隱漸現，並為「筆數」加入 Icon 保持排版對稱
                 AnimatedContent(
                     targetState = isFilterMode,
                     transitionSpec = {
                         if (targetState) {
-                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
-                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(300)))
+                            (slideInVertically(tween(350, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(250))) togetherWith
+                            (slideOutVertically(tween(350, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(250)))
                         } else {
-                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
-                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
+                            (slideInVertically(tween(350, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(250))) togetherWith
+                            (slideOutVertically(tween(350, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
                         }.using(SizeTransform(clip = false))
                     },
                     contentAlignment = Alignment.Center,
@@ -3479,12 +3493,14 @@ fun TopStats(
                 ) { isFilter ->
                     if (!isFilter) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
-                            Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.AccountBalanceWallet, null, tint = targetBalColor, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
+                            Icon(Icons.Default.FilterList, null, tint = BRAND_PRIMARY, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                     }
@@ -3492,36 +3508,14 @@ fun TopStats(
 
                 Spacer(Modifier.height(4.dp))
 
-                // 2. 數字層：左右流暢切換
-                AnimatedContent(
-                    targetState = isFilterMode,
-                    transitionSpec = {
-                        if (targetState) {
-                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
-                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(300)))
-                        } else {
-                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
-                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
-                        }.using(SizeTransform(clip = false))
-                    },
-                    contentAlignment = Alignment.Center,
-                    label = "amountAnim"
-                ) { isFilter ->
-                    if (!isFilter) {
-                        AnimatedAmount(
-                            text = formatAmountNoDecimal(balance),
-                            color = balColor,
-                            fontSize = STAT_AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        AnimatedAmount(
-                            text = "${filteredCount ?: 0}",
-                            fontSize = STAT_AMOUNT_FONT_SIZE,
-                            color = BRAND_PRIMARY,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                // 💡 數字層：放棄左右滑動，直接交返畀 AnimatedAmount 做原地無縫數字滾動！
+                Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(), contentAlignment = Alignment.Center) {
+                    AnimatedAmount(
+                        text = thirdBlockText,
+                        color = thirdBlockColor,
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
