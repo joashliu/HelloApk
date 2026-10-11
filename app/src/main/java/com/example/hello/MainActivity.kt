@@ -567,6 +567,7 @@ fun MainApp() {
     val haptic = LocalHapticFeedback.current
 
     val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
+    var lastSavedCategory by remember { mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食") }
 
     val records = remember { mutableStateListOf<Record>() }
     var loading by remember { mutableStateOf(true) }
@@ -799,15 +800,17 @@ fun MainApp() {
             if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
         } ?: ""
 
-        // 檢查最近一筆記錄（時間最大嗰筆）係咪旅遊類別
-        val latestCategory = records.maxByOrNull { it.timestamp }?.category
-        val defaultCategory = if (latestCategory == "旅遊") "旅遊" else "飲食"
+        // 直接讀取最新一次記帳嘅類別，保證百分百即時同步
+        val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        // 如果係旅遊，連貨幣都自動預設為 JPY
+        val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
 
         if (!showKeyboard) {
             keyboardState = KeyboardState(
                 noteText = note,
                 amountText = amtText,
-                category = defaultCategory, // 自動套用預設類別
+                category = defaultCategory,
+                currency = defaultCurrency,
                 selectAmountOnInput = amount != null
             )
             showKeyboard = true
@@ -815,7 +818,8 @@ fun MainApp() {
             keyboardState = keyboardState.copy(
                 noteText = note,
                 amountText = amtText.ifBlank { keyboardState.amountText },
-                category = defaultCategory, // 自動套用預設類別
+                category = defaultCategory,
+                currency = defaultCurrency,
                 selectAmountOnInput = amount != null
             )
         }
@@ -873,45 +877,49 @@ fun MainApp() {
     }
 
     fun saveFromKeyboard() {
-    val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
-    if (inputAmt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
-    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-    
-    // 如果係旅遊類別而且揀咗 JPY，即時轉換成 HKD
-    val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
-        val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
-        inputAmt * rate
-    } else {
-        inputAmt
-    }
+        val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
+        if (inputAmt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        
+        val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
+            val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
+            inputAmt * rate
+        } else {
+            inputAmt
+        }
 
-    val note = keyboardState.noteText
-    val category = keyboardState.category
-    val editId = keyboardState.editingRecordId
-    val ts = keyboardState.timestamp
-    val monthKey = monthKeyFromTimestamp(ts)
-    
-    if (editId != null) {
-        db.collection("records").document(editId).update(mapOf(
-            "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
-    } else {
-        val inherited = records.filter { it.note == note && it.note.isNotBlank() }
-            .maxByOrNull { it.timestamp }?.iconUrl ?: ""
-        val newId = db.collection("records").document().id
-        justAddedId = newId
-        val totalThisMonth = records
-            .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
-            .sumOf { it.amount } + amt
-        afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
-        db.collection("records").document(newId).set(Record(
-            amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
-        scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
+        val note = keyboardState.noteText
+        val category = keyboardState.category
+        
+        // 記錄本次儲存嘅類別，作為下次打開鍵盤嘅預設值，並寫入快取
+        lastSavedCategory = category
+        prefs.edit().putString("last_category", category).apply()
+
+        val editId = keyboardState.editingRecordId
+        val ts = keyboardState.timestamp
+        val monthKey = monthKeyFromTimestamp(ts)
+        
+        if (editId != null) {
+            db.collection("records").document(editId).update(mapOf(
+                "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
+        } else {
+            val inherited = records.filter { it.note == note && it.note.isNotBlank() }
+                .maxByOrNull { it.timestamp }?.iconUrl ?: ""
+            val newId = db.collection("records").document().id
+            justAddedId = newId
+            val totalThisMonth = records
+                .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
+                .sumOf { it.amount } + amt
+            afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
+            db.collection("records").document(newId).set(Record(
+                amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
+            scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
+        }
+        
+        showKeyboard = false
+        keyboardState = KeyboardState()
+        scrollToTopTrigger++
     }
-    
-    showKeyboard = false
-    keyboardState = KeyboardState()
-    scrollToTopTrigger++
-}
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
     BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
