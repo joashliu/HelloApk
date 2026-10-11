@@ -3457,42 +3457,64 @@ fun TopStats(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            AnimatedContent(
-                targetState = isFilterMode,
-                transitionSpec = {
-                    if (targetState) {
-                        (slideInVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
-                        (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(300)))
-                    } else {
-                        (slideInVertically(tween(420, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
-                        (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
-                    }.using(SizeTransform(clip = false)) // 📌 核心修正：加入 SizeTransform 確保淡入淡出時排版唔會互相推擠
-                },
-                contentAlignment = Alignment.Center,
-                label = "balanceCountAnim"
-            ) { isFilter ->
-                if (!isFilter) {
-                    val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-                    Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            val balColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+            
+            // 固定框架，唔再成個上下跳動
+            Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                
+                // 1. 標題層：左右流暢切換
+                AnimatedContent(
+                    targetState = isFilterMode,
+                    transitionSpec = {
+                        if (targetState) {
+                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
+                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(300)))
+                        } else {
+                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
+                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
+                        }.using(SizeTransform(clip = false))
+                    },
+                    contentAlignment = Alignment.Center,
+                    label = "labelAnim"
+                ) { isFilter ->
+                    if (!isFilter) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
                             Icon(Icons.Default.AccountBalanceWallet, null, tint = balColor, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
-                        Spacer(Modifier.height(4.dp))
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
+                            Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // 2. 數字層：左右流暢切換
+                AnimatedContent(
+                    targetState = isFilterMode,
+                    transitionSpec = {
+                        if (targetState) {
+                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
+                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(300)))
+                        } else {
+                            (slideInHorizontally(tween(400, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
+                            (slideOutHorizontally(tween(400, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
+                        }.using(SizeTransform(clip = false))
+                    },
+                    contentAlignment = Alignment.Center,
+                    label = "amountAnim"
+                ) { isFilter ->
+                    if (!isFilter) {
                         AnimatedAmount(
                             text = formatAmountNoDecimal(balance),
                             color = balColor,
                             fontSize = STAT_AMOUNT_FONT_SIZE,
                             fontWeight = FontWeight.Bold
                         )
-                    }
-                } else {
-                    Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(22.dp)) {
-                            Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
-                        }
-                        Spacer(Modifier.height(4.dp))
+                    } else {
                         AnimatedAmount(
                             text = "${filteredCount ?: 0}",
                             fontSize = STAT_AMOUNT_FONT_SIZE,
