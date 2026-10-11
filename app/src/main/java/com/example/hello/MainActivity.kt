@@ -2639,90 +2639,89 @@ fun DayDetailPanel(
         val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
         val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
         
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        formatDateHeader(dateKey),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TEXT_PRIMARY
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (income > 0) {
-                            Text(
-                                "收 $${formatAmountNoDecimal(income)}",
-                                fontSize = 12.sp, color = COLOR_INCOME,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
-                        if (expense > 0) {
-                            Text(
-                                "支 $${formatAmountNoDecimal(expense)}",
-                                fontSize = 12.sp, color = COLOR_EXPENSE,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    formatDateHeader(dateKey),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TEXT_PRIMARY
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (income > 0) {
+                        Text(
+                            "收 $${formatAmountNoDecimal(income)}",
+                            fontSize = 12.sp, color = COLOR_INCOME,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
-                }
-            }
-            HorizontalDivider(color = DIVIDER_COLOR)
-
-            val sortedRecords = records.sortedByDescending { it.timestamp }
-            
-            sortedRecords.forEachIndexed { idx, r ->
-                key(r.id) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        AnimatedRecordItem(
-                            animateOnMount = false,
-                            isDeleting = r.id == deletingRecordId
-                        ) {
-                            SwipeableRecordItem(
-                                backgroundColor = SURFACE_CARD,
-                                record = r,
-                                expandedId = expandedId,
-                                onExpand = onExpandChange,
-                                onCopy = { onCopy(r) },
-                                onEdit = { onEdit(r) },
-                                onFilter = { onFilter(r) },
-                                onDelete = { onDelete(r) },
-                                onChangeIcon = { onChangeIcon(r) },
-                                onFanMenuStart = { offset -> onFanMenuStart(r, offset) },
-                                onFanMenuDrag = { dragAmount -> onFanMenuDrag(dragAmount) },
-                                onFanMenuEnd = { onFanMenuEnd() },
-                                isFanMenuActive = activeFanRecord != null,
-                                isOtherItem = activeFanRecord != null && activeFanRecord.id != r.id,
-                                isActiveItem = activeFanRecord?.id == r.id
-                            )
-                        }
-                        
-                        if (idx < sortedRecords.lastIndex) {
-                            AnimatedVisibility(
-                                visible = deletingRecordId != r.id,
-                                enter = fadeIn(tween(200)),
-                                exit = fadeOut(tween(200))
-                            ) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                    color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                                    thickness = 0.8.dp
-                                )
-                            }
-                        }
+                    if (income > 0 && expense > 0) Spacer(Modifier.width(10.dp))
+                    if (expense > 0) {
+                        Text(
+                            "支 $${formatAmountNoDecimal(expense)}",
+                            fontSize = 12.sp, color = COLOR_EXPENSE,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
-            Spacer(Modifier.height(6.dp))
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
+            }
         }
+        HorizontalDivider(color = DIVIDER_COLOR)
+
+        val sortedRecords = records.sortedByDescending { it.timestamp }
+        
+        sortedRecords.forEachIndexed { idx, r ->
+            key(r.id) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    AnimatedRecordItem(
+                        animateOnMount = false,
+                        isDeleting = r.id == deletingRecordId
+                    ) {
+                        SwipeableRecordItem(
+                            backgroundColor = SURFACE_CARD,
+                            record = r,
+                            expandedId = expandedId,
+                            onExpand = onExpandChange,
+                            onCopy = { onCopy(r) },
+                            onEdit = { onEdit(r) },
+                            onFilter = { onFilter(r) },
+                            onDelete = { onDelete(r) },
+                            onChangeIcon = { onChangeIcon(r) },
+                            onFanMenuStart = { offset -> onFanMenuStart(r, offset) },
+                            onFanMenuDrag = { dragAmount -> onFanMenuDrag(dragAmount) },
+                            onFanMenuEnd = { onFanMenuEnd() },
+                            isFanMenuActive = activeFanRecord != null,
+                            isOtherItem = activeFanRecord != null && activeFanRecord.id != r.id,
+                            isActiveItem = activeFanRecord?.id == r.id
+                        )
+                    }
+                    
+                    if (idx < sortedRecords.lastIndex) {
+                        AnimatedVisibility(
+                            visible = deletingRecordId != r.id,
+                            enter = fadeIn(tween(200)),
+                            exit = fadeOut(tween(200))
+                        ) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                color = DIVIDER_COLOR.copy(alpha = 0.8f),
+                                thickness = 0.8.dp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
     }
 }
 
