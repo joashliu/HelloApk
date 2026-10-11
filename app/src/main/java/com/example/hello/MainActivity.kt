@@ -2673,24 +2673,44 @@ fun DayDetailPanel(
                     }
                     HorizontalDivider(color = DIVIDER_COLOR)
 
-                    records.sortedByDescending { it.timestamp }.forEachIndexed { idx, r ->
-                        // 🔥 關鍵：加入 key(r.id) 將狀態與資料 ID 綁定
+                    // 先將排序好嘅列表存起，方便之後攞 lastIndex
+                    val sortedRecords = records.sortedByDescending { it.timestamp }
+                    
+                    sortedRecords.forEachIndexed { idx, r ->
                         key(r.id) {
-                            AnimatedRecordItem(
-                                animateOnMount = false,
-                                isDeleting = r.id == deletingRecordId
-                            ) {
-                                SwipeableRecordItem(
-                                    backgroundColor = if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR,
-                                    record = r,
-                                    expandedId = expandedId,
-                                    onExpand = onExpandChange,
-                                    onCopy = { onCopy(r) },
-                                    onEdit = { onEdit(r) },
-                                    onFilter = { onFilter(r) },
-                                    onDelete = { onDelete(r) },
-                                    onChangeIcon = { onChangeIcon(r) }
-                                )
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                AnimatedRecordItem(
+                                    animateOnMount = false,
+                                    isDeleting = r.id == deletingRecordId
+                                ) {
+                                    SwipeableRecordItem(
+                                        // 🔥 統一背景顏色為 SURFACE_CARD
+                                        backgroundColor = SURFACE_CARD,
+                                        record = r,
+                                        expandedId = expandedId,
+                                        onExpand = onExpandChange,
+                                        onCopy = { onCopy(r) },
+                                        onEdit = { onEdit(r) },
+                                        onFilter = { onFilter(r) },
+                                        onDelete = { onDelete(r) },
+                                        onChangeIcon = { onChangeIcon(r) }
+                                    )
+                                }
+                                
+                                // 🔥 加入同記賬頁面一模一樣嘅分隔線（除咗最後一個項目）
+                                if (idx < sortedRecords.lastIndex) {
+                                    AnimatedVisibility(
+                                        visible = deletingRecordId != r.id,
+                                        enter = fadeIn(tween(200)),
+                                        exit = fadeOut(tween(200))
+                                    ) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                            color = DIVIDER_COLOR.copy(alpha = 0.8f),
+                                            thickness = 0.8.dp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
