@@ -1745,6 +1745,14 @@ fun LedgerContent(
         }
     }
 
+    LaunchedEffect(showFuture) {
+        try { 
+            listState.animateScrollToItem(0) 
+        } catch (_: Exception) {
+            try { listState.scrollToItem(0) } catch (_: Exception) {}
+        }
+    }
+    
     LaunchedEffect(filterMode) {
         if (!filterMode && preFilterIndex >= 0) {
             try {
