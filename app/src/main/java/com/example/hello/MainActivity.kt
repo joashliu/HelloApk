@@ -1673,15 +1673,24 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    val rowThresholdPx = remember(density) { with(density) { 140.dp.toPx() } }
-    val estimatedItemHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
+    // 縮短觸發收縮嘅滾動距離，令動畫更敏感順滑
+    val rowThresholdPx = remember(density) { with(density) { 90.dp.toPx() } }
+    // 預估日期 Header 嘅實際高度
+    val headerHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
 
     val quickInputMaxRows by remember {
         derivedStateOf {
-            val index = listState.firstVisibleItemIndex
-            val offset = listState.firstVisibleItemScrollOffset
-            val totalScroll = (index * estimatedItemHeightPx) + offset
-            (4 - (totalScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
+            val idx = listState.firstVisibleItemIndex
+            val off = listState.firstVisibleItemScrollOffset
+            
+            // 精確計算連續嘅滾動距離，確保數值永遠只會遞增，唔會反彈
+            val absScroll = when (idx) {
+                0 -> off.toFloat() // 仲轆緊第一個日期 Header
+                1 -> off.toFloat() + headerHeightPx // 轆緊第一日嘅記錄卡片
+                else -> 10000f // 已經轆過咗第一日嘅記錄，強制完全收縮做 1 行
+            }
+            
+            (4 - (absScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
         }
     }
 
