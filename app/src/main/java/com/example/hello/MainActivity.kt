@@ -1673,9 +1673,7 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // 縮短觸發收縮嘅滾動距離，令動畫更敏感順滑
     val rowThresholdPx = remember(density) { with(density) { 90.dp.toPx() } }
-    // 預估日期 Header 嘅實際高度
     val headerHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
 
     val quickInputMaxRows by remember {
@@ -1683,11 +1681,11 @@ fun LedgerContent(
             val idx = listState.firstVisibleItemIndex
             val off = listState.firstVisibleItemScrollOffset
             
-            // 精確計算連續嘅滾動距離，確保數值永遠只會遞增，唔會反彈
             val absScroll = when (idx) {
-                0 -> off.toFloat() // 仲轆緊第一個日期 Header
-                1 -> off.toFloat() + headerHeightPx // 轆緊第一日嘅記錄卡片
-                else -> 10000f // 已經轆過咗第一日嘅記錄，強制完全收縮做 1 行
+                0 -> 0f // Index 0 依家係魔法錨點，唔計滾動
+                1 -> off.toFloat() // Index 1 係第一個日期 Header
+                2 -> off.toFloat() + headerHeightPx // Index 2 係第一日嘅記錄卡片
+                else -> 10000f
             }
             
             (4 - (absScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
@@ -1735,7 +1733,6 @@ fun LedgerContent(
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
             try {
-                // 聰明滾動：如果太遠，先瞬間跳到附近，再平滑滾上去
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
             } catch (_: Exception) { 
@@ -1747,17 +1744,10 @@ fun LedgerContent(
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             try { 
-                // 聰明滾動：如果目前距離頂部太遠（超過 3 個項目）
-                if (listState.firstVisibleItemIndex > 3) {
-                    // 先無縫瞬間轉移（Snap）到附近嘅第 3 項
-                    listState.scrollToItem(3)
-                }
-                // 然後再播放平滑滾動去第 0 項嘅動畫，製造「流暢滑動」視覺假象
+                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0) 
             } catch (_: Exception) {
             } finally {
-                // 加個絕對保險：就算你關得極快導致動畫 Coroutine 被中斷
-                // 都會強制瞬間置頂，確保「無論關得幾快都一定喺頁頂」
                 try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
                         listState.scrollToItem(0)
@@ -1767,20 +1757,18 @@ fun LedgerContent(
         }
     }
 
+    // 🌟 修改：顯示未來項目時，利用魔法錨點加聰明滾動，展現最完美手風琴推擠動畫！
     LaunchedEffect(showFuture) {
         try { 
             if (showFuture) {
-                // 顯示未來項目時：新項目會喺最頂部出現。
-                // 用 animateScrollToItem 平滑向上捲動，製造出完美流暢嘅「向上展開」滑動視覺！
+                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0) 
             } else {
-                // 隱藏未來項目時：最頂部項目消失。
-                // 瞬間對齊新嘅第 0 項，將「向上擠壓補位」嘅流暢動畫全權交返畀 animateItem 處理！
-                listState.scrollToItem(0) 
+                if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
             }
         } catch (_: Exception) {}
     }
-    
+
     LaunchedEffect(filterMode) {
         if (!filterMode && preFilterIndex >= 0) {
             try {
@@ -1793,25 +1781,16 @@ fun LedgerContent(
     }
 
     val isSingleCategoryFilter by remember(filterMode, filtered) {
-        derivedStateOf {
-            filterMode && filtered.isNotEmpty() && filtered.map { it.category }.distinct().size == 1
-        }
+        derivedStateOf { filterMode && filtered.isNotEmpty() && filtered.map { it.category }.distinct().size == 1 }
     }
     val singleCategory by remember(isSingleCategoryFilter, filtered) {
-        derivedStateOf {
-            if (isSingleCategoryFilter) filtered.firstOrNull()?.category else null
-        }
+        derivedStateOf { if (isSingleCategoryFilter) filtered.firstOrNull()?.category else null }
     }
 
     var cachedCategory by remember { mutableStateOf("飲食") }
-    LaunchedEffect(singleCategory) {
-        if (singleCategory != null) {
-            cachedCategory = singleCategory!!
-        }
-    }
+    LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
 
     val listContent: LazyListScope.() -> Unit = {
-        // 定義極致流暢嘅統一動畫參數
         val itemAnimSpec = spring<IntOffset>(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
         val fadeSpec = spring<Float>(stiffness = Spring.StiffnessMediumLow)
 
@@ -1820,11 +1799,7 @@ fun LedgerContent(
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .animateItem(
-                            fadeInSpec = fadeSpec,
-                            fadeOutSpec = fadeSpec,
-                            placementSpec = itemAnimSpec
-                        )
+                        .animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxWidth().animateContentSize(
@@ -1841,12 +1816,8 @@ fun LedgerContent(
                                 isDeleting = r.id == deletingRecordId
                             ) {
                                 SwipeableRecordItem(
-                                    backgroundColor = Color.Transparent,
-                                    record = r,
-                                    expandedId = expandedId,
-                                    onExpand = onExpandChange,
-                                    onCopy = { onCopyClick(r) },
-                                    onEdit = { onEditClick(r) },
+                                    backgroundColor = Color.Transparent, record = r, expandedId = expandedId,
+                                    onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
                                     onFilter = {
                                         if (!filterMode) {
                                             preFilterIndex = listState.firstVisibleItemIndex
@@ -1854,8 +1825,7 @@ fun LedgerContent(
                                         }
                                         onFilterByName(r.note)
                                     },
-                                    onDelete = { onDeleteClick(r) },
-                                    onChangeIcon = { onChangeIconClick(r) },
+                                    onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
                                     hideCategory = true,
                                     onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                     onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
@@ -1878,20 +1848,9 @@ fun LedgerContent(
                 val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
 
                 stickyHeader(key = "header_$dateKey") {
-                    // 補齊：標題都要有 animateItem，等佢可以平滑噉將下面嘅項目推落去
-                    Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = fadeSpec,
-                            fadeOutSpec = fadeSpec,
-                            placementSpec = itemAnimSpec
-                        )
-                    ) {
+                    Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                         FadingStickyHeader {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(SURFACE_CARD)
-                            ) {
+                            Box(modifier = Modifier.fillMaxWidth().background(SURFACE_CARD)) {
                                 DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                             }
                         }
@@ -1903,15 +1862,8 @@ fun LedgerContent(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 2.dp)
-                            .animateItem(
-                                fadeInSpec = fadeSpec,
-                                fadeOutSpec = fadeSpec,
-                                placementSpec = itemAnimSpec
-                            )
-                            // 補齊：加入 animateContentSize 令到同一日內增減記錄時，高度變化更順滑
-                            .animateContentSize(
-                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
-                            ),
+                            .animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)
+                            .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)),
                         shape = RoundedCornerShape(20.dp),
                         color = SURFACE_CARD,
                         shadowElevation = 1.dp,
@@ -1926,12 +1878,8 @@ fun LedgerContent(
                                             isDeleting = r.id == deletingRecordId
                                         ) {
                                             SwipeableRecordItem(
-                                                backgroundColor = SURFACE_CARD,
-                                                record = r,
-                                                expandedId = expandedId,
-                                                onExpand = onExpandChange,
-                                                onCopy = { onCopyClick(r) },
-                                                onEdit = { onEditClick(r) },
+                                                backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
+                                                onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
                                                 onFilter = {
                                                     if (!filterMode) {
                                                         preFilterIndex = listState.firstVisibleItemIndex
@@ -1939,8 +1887,7 @@ fun LedgerContent(
                                                     }
                                                     onFilterByName(r.note)
                                                 },
-                                                onDelete = { onDeleteClick(r) },
-                                                onChangeIcon = { onChangeIconClick(r) },
+                                                onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
                                                 onFanMenuStart = { offset -> handleFanStart(r, offset) },
                                                 onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
                                                 onFanMenuEnd = { handleFanEnd() },
@@ -1957,13 +1904,11 @@ fun LedgerContent(
                                         if (idx < dayRecords.lastIndex) {
                                             AnimatedVisibility(
                                                 visible = deletingRecordId != r.id,
-                                                enter = fadeIn(tween(200)),
-                                                exit = fadeOut(tween(200))
+                                                enter = fadeIn(tween(200)), exit = fadeOut(tween(200))
                                             ) {
                                                 HorizontalDivider(
                                                     modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                    color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                                                    thickness = 0.8.dp
+                                                    color = DIVIDER_COLOR.copy(alpha = 0.8f), thickness = 0.8.dp
                                                 )
                                             }
                                         }
@@ -1975,16 +1920,7 @@ fun LedgerContent(
                 }
 
                 item(key = "spacer_$dateKey") {
-                    // 補齊：間距都要有 animateItem，否則間距會瞬間出現導致跳掣
-                    Spacer(
-                        modifier = Modifier
-                            .height(10.dp)
-                            .animateItem(
-                                fadeInSpec = fadeSpec,
-                                fadeOutSpec = fadeSpec,
-                                placementSpec = itemAnimSpec
-                            )
-                    )
+                    Spacer(modifier = Modifier.height(10.dp).animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec))
                 }
             }
         }
@@ -2003,14 +1939,9 @@ fun LedgerContent(
 
                 Box(modifier = Modifier.weight(1f)) {
                     TopStats(
-                        hasIncome = hasIncome,
-                        hasExpense = hasExpense,
-                        income = totalIncome,
-                        expense = totalExpense,
-                        isFilterMode = filterMode,
-                        filteredCount = if (filterMode) filtered.size else null,
-                        showCategory = showCategoryChip,
-                        categoryName = cachedCategory
+                        hasIncome = hasIncome, hasExpense = hasExpense, income = totalIncome, expense = totalExpense,
+                        isFilterMode = filterMode, filteredCount = if (filterMode) filtered.size else null,
+                        showCategory = showCategoryChip, categoryName = cachedCategory
                     )
                 }
 
@@ -2028,55 +1959,36 @@ fun LedgerContent(
                 transitionSpec = {
                     (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith
                     (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(
-                        clip = true,
-                        sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
+                        clip = true, sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
                     )
                 },
                 label = "bottomArea",
                 modifier = Modifier
                     .zIndex(1f)
-                    .animateContentSize(
-                        animationSpec = spring(
-                            dampingRatio = 0.85f,
-                            stiffness = Spring.StiffnessMediumLow
-                        ),
-                        alignment = Alignment.TopCenter
-                    )
+                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow), alignment = Alignment.TopCenter)
             ) { isFilterMode ->
                 if (isFilterMode) {
                     Column(
                         Modifier
                             .padding(horizontal = 16.dp, vertical = 0.dp)
-                            .animateContentSize(
-                                animationSpec = spring(
-                                    dampingRatio = 0.85f,
-                                    stiffness = Spring.StiffnessMediumLow
-                                )
-                            )
+                            .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
                     ) {
                         Spacer(Modifier.height(4.dp))
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = 72.dp),
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
                             userScrollEnabled = false
                         ) {
                             item(key = "__all__") {
                                 AnimatedFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部",
-                                    fillWidth = true,
+                                    modifier = Modifier.fillMaxWidth(), selected = filterCategory == null, label = "全部", fillWidth = true,
                                     onClick = { onFilterCategoryChange(null) }
                                 )
                             }
                             items(items = visibleCategories, key = { it }) { cat ->
                                 AnimatedFilterChip(
-                                    modifier = Modifier.animateItem().fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat,
-                                    fillWidth = true,
+                                    modifier = Modifier.animateItem().fillMaxWidth(), selected = filterCategory == cat, label = cat, fillWidth = true,
                                     onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
                                 )
                             }
@@ -2086,26 +1998,16 @@ fun LedgerContent(
                             FlowRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .animateContentSize(
-                                        animationSpec = spring(
-                                            dampingRatio = 0.85f,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                    ),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 AnimatedFilterChip(
-                                    selected = filterMonth == null,
-                                    label = "全年",
-                                    fillWidth = false,
+                                    selected = filterMonth == null, label = "全年", fillWidth = false,
                                     onClick = { onFilterMonthChange(null) }
                                 )
                                 availableMonths.forEach { m ->
                                     AnimatedFilterChip(
-                                        selected = filterMonth == m,
-                                        label = formatMonthLabel(m),
-                                        fillWidth = false,
+                                        selected = filterMonth == m, label = formatMonthLabel(m), fillWidth = false,
                                         onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
                                     )
                                 }
@@ -2118,11 +2020,8 @@ fun LedgerContent(
                         if (topNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
                             QuickInputSection(
-                                topNotes = topNotes,
-                                noteIconMap = noteIconMap,
-                                animatedQuickInputs = animatedQuickInputs,
-                                maxRowsPerPage = quickInputMaxRows,
-                                onClick = onQuickInputClick
+                                topNotes = topNotes, noteIconMap = noteIconMap, animatedQuickInputs = animatedQuickInputs,
+                                maxRowsPerPage = quickInputMaxRows, onClick = onQuickInputClick
                             )
                         }
                         Spacer(Modifier.height(4.dp))
@@ -2163,16 +2062,17 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
+                        // 🌟 魔法錨點：永遠喺 Index 0，確保頂部插入/刪除項目時唔會錯誤走位，完美配合 animateItem！
+                        item(key = "magic_top_anchor") {
+                            Spacer(Modifier.height(1.dp).animateItem(
+                                placementSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy)
+                            ))
+                        }
+
                         if (filtered.isEmpty() && !showKeyboard) {
                             item(key = "__empty__") {
-                                Box(
-                                    Modifier.fillParentMaxWidth().padding(top = 80.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
-                                        color = TEXT_SECONDARY
-                                    )
+                                Box(Modifier.fillParentMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
+                                    Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
                                 }
                             }
                         } else {
@@ -2185,8 +2085,7 @@ fun LedgerContent(
 
         FanMenuOverlay(
             progressProvider = { fanMenuProgress.value },
-            centerProvider = { fanMenuCenter },
-            touchProvider = { fanMenuTouch }
+            centerProvider = { fanMenuCenter }, touchProvider = { fanMenuTouch }
         )
     }
 }
