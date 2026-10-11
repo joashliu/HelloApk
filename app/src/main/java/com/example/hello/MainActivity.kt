@@ -3488,29 +3488,51 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold,
     modifier: Modifier = Modifier,
 ) {
-    // 使用 Row 將字串逐個字元拆開渲染
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        for (i in text.indices) {
-            val c = text[i]
-            // key(i) 確保輸入或者數值長度改變時，相同位置嘅字元會獨立執行動畫
+        // 預留足夠嘅字元空位 (25 個)，確保任何字元刪除時依然處於 Composition 內，從而順利播放完美退出動畫
+        for (i in 0 until 25) {
+            val char = text.getOrNull(i)
             key(i) {
                 AnimatedContent(
-                    targetState = c,
+                    targetState = char,
                     transitionSpec = {
-                        // 新字元由下向上滑入，舊字元由下向上滑出
-                        (slideInVertically(spring(stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(220))) togetherWith
-                        (slideOutVertically(spring(stiffness = Spring.StiffnessMediumLow)) { -it } + fadeOut(tween(220))) using SizeTransform(clip = false)
+                        val enterSpring = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
+                        val exitSpring = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
+                        val sizeSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
+
+                        if (targetState != null && initialState == null) {
+                            // 1. 新增輸入：由下向上彈出、放大並淡入
+                            (slideInVertically(enterSpring) { it / 2 } +
+                             fadeIn(tween(200)) +
+                             scaleIn(initialScale = 0.4f, animationSpec = enterSpring)) togetherWith
+                            fadeOut(tween(0))
+                        } else if (targetState == null && initialState != null) {
+                            // 2. 退格刪除：由上向下滑走、縮細並淡出
+                            fadeIn(tween(0)) togetherWith
+                            (slideOutVertically(exitSpring) { it / 2 } +
+                             fadeOut(tween(180)) +
+                             scaleOut(targetScale = 0.4f, animationSpec = exitSpring))
+                        } else {
+                            // 3. 數值變更（如轉換貨幣/結算變動）：上下平滑滾動交替（Odometer 效果）
+                            (slideInVertically(enterSpring) { it } + fadeIn(tween(220))) togetherWith
+                            (slideOutVertically(exitSpring) { -it } + fadeOut(tween(220)))
+                        }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
                     },
                     label = "digit_$i"
-                ) { char ->
-                    Text(
-                        text = char.toString(),
-                        color = color,
-                        fontSize = fontSize,
-                        fontWeight = fontWeight,
-                        maxLines = 1,
-                        softWrap = false
-                    )
+                ) { c ->
+                    if (c != null) {
+                        Text(
+                            text = c.toString(),
+                            color = color,
+                            fontSize = fontSize,
+                            fontWeight = fontWeight,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    } else {
+                        // 隱藏時寬度為 0，配合 SizeTransform 自動平滑擠出/縮入排版空間
+                        Spacer(Modifier.width(0.dp))
+                    }
                 }
             }
         }
