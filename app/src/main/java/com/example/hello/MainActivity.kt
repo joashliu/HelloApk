@@ -1931,7 +1931,7 @@ fun LedgerContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp)
+                    .padding(horizontal = 8.dp)
                     .padding(top = 4.dp, bottom = 0.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2801,7 +2801,7 @@ fun LedgerKeyboardPanel(
             Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(start = 14.dp, end = 14.dp, top = 16.dp, bottom = 16.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -3937,7 +3937,7 @@ fun QuickInputSection(
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
