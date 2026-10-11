@@ -3496,26 +3496,33 @@ fun AnimatedAmount(
                 AnimatedContent(
                     targetState = char,
                     transitionSpec = {
-                        val enterSpring = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
-                        val exitSpring = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
+                        // 位移動畫需要 IntOffset 類型
+                        val slideEnter = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
+                        val slideExit = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
+                        
+                        // 縮放動畫需要 Float 類型
+                        val floatEnter = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
+                        val floatExit = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
+                        
+                        // 排版大小動畫需要 IntSize 類型
                         val sizeSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
                         if (targetState != null && initialState == null) {
                             // 1. 新增輸入：由下向上彈出、放大並淡入
-                            (slideInVertically(enterSpring) { it / 2 } +
+                            (slideInVertically(slideEnter) { it / 2 } +
                              fadeIn(tween(200)) +
-                             scaleIn(initialScale = 0.4f, animationSpec = enterSpring)) togetherWith
+                             scaleIn(initialScale = 0.4f, animationSpec = floatEnter)) togetherWith
                             fadeOut(tween(0))
                         } else if (targetState == null && initialState != null) {
                             // 2. 退格刪除：由上向下滑走、縮細並淡出
                             fadeIn(tween(0)) togetherWith
-                            (slideOutVertically(exitSpring) { it / 2 } +
+                            (slideOutVertically(slideExit) { it / 2 } +
                              fadeOut(tween(180)) +
-                             scaleOut(targetScale = 0.4f, animationSpec = exitSpring))
+                             scaleOut(targetScale = 0.4f, animationSpec = floatExit))
                         } else {
                             // 3. 數值變更（如轉換貨幣/結算變動）：上下平滑滾動交替（Odometer 效果）
-                            (slideInVertically(enterSpring) { it } + fadeIn(tween(220))) togetherWith
-                            (slideOutVertically(exitSpring) { -it } + fadeOut(tween(220)))
+                            (slideInVertically(slideEnter) { it } + fadeIn(tween(220))) togetherWith
+                            (slideOutVertically(slideExit) { -it } + fadeOut(tween(220)))
                         }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
                     },
                     label = "digit_$i"
