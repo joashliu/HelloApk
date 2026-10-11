@@ -1870,8 +1870,10 @@ fun LedgerContent(
                                             ) {
                                                 HorizontalDivider(
                                                     modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                    color = DIVIDER_COLOR.copy(alpha = 0.4f),
-                                                    thickness = 0.5.dp
+                                                    // 🔥 提高不透明度，顏色會顯得深啲實啲
+                                                    color = DIVIDER_COLOR.copy(alpha = 0.8f), 
+                                                    // 🔥 稍微加粗少少（由 0.5.dp 改為 0.8.dp 或 1.dp），令線條更清晰
+                                                    thickness = 0.8.dp 
                                                 )
                                             }
                                         }
