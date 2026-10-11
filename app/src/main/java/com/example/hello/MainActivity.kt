@@ -1734,19 +1734,43 @@ fun LedgerContent(
 
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
-            try { listState.requestScrollToItem(0) }
-            catch (_: Exception) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
+            try {
+                // 聰明滾動：如果太遠，先瞬間跳到附近，再平滑滾上去
+                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
+                listState.animateScrollToItem(0)
+            } catch (_: Exception) { 
+                try { listState.scrollToItem(0) } catch (_: Exception) {} 
+            }
         }
     }
 
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
-            try { listState.animateScrollToItem(0) } catch (_: Exception) {}
+            try { 
+                // 聰明滾動：如果目前距離頂部太遠（超過 3 個項目）
+                if (listState.firstVisibleItemIndex > 3) {
+                    // 先無縫瞬間轉移（Snap）到附近嘅第 3 項
+                    listState.scrollToItem(3)
+                }
+                // 然後再播放平滑滾動去第 0 項嘅動畫，製造「流暢滑動」視覺假象
+                listState.animateScrollToItem(0) 
+            } catch (_: Exception) {
+            } finally {
+                // 加個絕對保險：就算你關得極快導致動畫 Coroutine 被中斷
+                // 都會強制瞬間置頂，確保「無論關得幾快都一定喺頁頂」
+                try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        listState.scrollToItem(0)
+                    }
+                } catch (_: Exception) {}
+            }
         }
     }
 
     LaunchedEffect(showFuture) {
         try { 
+            // 同樣套用聰明滾動
+            if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
             listState.animateScrollToItem(0) 
         } catch (_: Exception) {
             try { listState.scrollToItem(0) } catch (_: Exception) {}
