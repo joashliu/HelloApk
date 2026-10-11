@@ -2674,22 +2674,27 @@ fun DayDetailPanel(
                         isDeleting = r.id == deletingRecordId
                     ) {
                         SwipeableRecordItem(
-                            backgroundColor = SURFACE_CARD,
-                            record = r,
-                            expandedId = expandedId,
-                            onExpand = onExpandChange,
-                            onCopy = { onCopy(r) },
-                            onEdit = { onEdit(r) },
-                            onFilter = { onFilter(r) },
-                            onDelete = { onDelete(r) },
-                            onChangeIcon = { onChangeIcon(r) },
-                            onFanMenuStart = { offset -> onFanMenuStart(r, offset) },
-                            onFanMenuDrag = { dragAmount -> onFanMenuDrag(dragAmount) },
-                            onFanMenuEnd = { onFanMenuEnd() },
-                            isFanMenuActive = activeFanRecord != null,
-                            isOtherItem = activeFanRecord != null && activeFanRecord.id != r.id,
-                            isActiveItem = activeFanRecord?.id == r.id
-                        )
+                                                backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
+                                                onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
+                                                onFilter = {
+                                                    if (!filterMode) {
+                                                        preFilterIndex = listState.firstVisibleItemIndex
+                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                    }
+                                                    onFilterByName(r.note)
+                                                },
+                                                onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
+                                                
+                                                // 👇 加上呢行：當處於單一項目篩選模式時，自動隱藏類別名稱
+                                                hideCategory = isExactNoteFilter,
+                                                
+                                                onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                                onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                                onFanMenuEnd = { handleFanEnd() },
+                                                isFanMenuActive = activeFanRecord != null,
+                                                isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                                isActiveItem = activeFanRecord?.id == r.id
+                                            )
                     }
                     
                     if (idx < sortedRecords.lastIndex) {
