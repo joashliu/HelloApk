@@ -2615,21 +2615,32 @@ fun DayDetailPanel(
     onFanMenuEnd: () -> Unit = {},
     activeFanRecord: Record? = null
 ) {
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-
-    Box(Modifier.animateContentSize(tween(380, easing = FastOutSlowInEasing))) {
-        if (visible) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
+    // 移除了內部嘅 visible 狀態同 animateContentSize，動畫交畀外層控制
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 🔥 使用自訂柔和陰影取代 Surface 嘅預設 elevation，徹底消除四隻角嘅黑影
+            .shadow(
+                elevation = 8.dp,
                 shape = RoundedCornerShape(20.dp),
-                shadowElevation = 1.dp,
-                border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f)),
-                color = SURFACE_CARD
+                ambientColor = Color(0x08000000), // 極淡嘅環境光陰影
+                spotColor = Color(0x15000000)     // 柔和嘅主光源陰影
+            ),
+        shape = RoundedCornerShape(20.dp),
+        color = SURFACE_CARD,
+        border = BorderStroke(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f))
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+            val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+            
+            // ... (下方原本嘅 Row 同 records 列表代碼保持不變)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(Modifier.fillMaxWidth()) {
-                    val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-                    val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -4566,35 +4577,67 @@ fun CalendarContent(
                                     }
                                 )
 
-                                if (isThisRowSelected && selectedDay != null && selectedColIdx != null) {
-                                    val dateKey = String.format(
-                                        Locale.US, "%04d-%02d-%02d",
-                                        year, month, selectedDay
-                                    )
-                                    DayDetailPanel(
-                                        dateKey = dateKey,
-                                        records = recordsByDay[selectedDay] ?: emptyList(),
-                                        expandedId = detailExpandedId,
-                                        onExpandChange = { detailExpandedId = it },
-                                        onCopy = { onCopyClick(it) },
-                                        onEdit = { onEditClick(it) },
-                                        onFilter = { onFilterClick(it) },
-                                        onDelete = { onDeleteClick(it) },
-                                        onChangeIcon = { onChangeIconClick(it) },
-                                        onDismiss = {
-                                            selectedDay = null
-                                            selectedRowIdx = null
-                                            selectedColIdx = null
-                                            detailExpandedId = null
-                                        },
-                                        deletingRecordId = deletingRecordId,
-                                        onFanMenuStart = handleFanStart,
-                                        onFanMenuDrag = handleFanDrag,
-                                        onFanMenuEnd = handleFanEnd,
-                                        activeFanRecord = activeFanRecord
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                } else {
+                                // 🔥 使用 AnimatedVisibility 控制整個面板嘅平滑展開與收起
+                                AnimatedVisibility(
+                                    visible = isThisRowSelected && selectedDay != null && selectedColIdx != null,
+                                    enter = expandVertically(
+                                        animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
+                                        expandFrom = Alignment.Top
+                                    ) + fadeIn(tween(250)),
+                                    exit = shrinkVertically(
+                                        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
+                                        shrinkTowards = Alignment.Top
+                                    ) + fadeOut(tween(200))
+                                ) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        // 🔥 拉開格仔同當日明細之間嘅距離
+                                        Spacer(Modifier.height(8.dp))
+
+                                        // 🔥 加返三角形指示器，精確指向被選中嘅格仔
+                                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                            val cellWidth = maxWidth / 7
+                                            TrianglePointer(
+                                                colIndex = selectedColIdx ?: 0,
+                                                cellWidth = cellWidth,
+                                                color = SURFACE_CARD
+                                            )
+                                        }
+
+                                        val dateKey = String.format(
+                                            Locale.US, "%04d-%02d-%02d",
+                                            year, month, selectedDay ?: 1
+                                        )
+                                        
+                                        DayDetailPanel(
+                                            dateKey = dateKey,
+                                            records = recordsByDay[selectedDay] ?: emptyList(),
+                                            expandedId = detailExpandedId,
+                                            onExpandChange = { detailExpandedId = it },
+                                            onCopy = { onCopyClick(it) },
+                                            onEdit = { onEditClick(it) },
+                                            onFilter = { onFilterClick(it) },
+                                            onDelete = { onDeleteClick(it) },
+                                            onChangeIcon = { onChangeIconClick(it) },
+                                            onDismiss = {
+                                                selectedDay = null
+                                                selectedRowIdx = null
+                                                selectedColIdx = null
+                                                detailExpandedId = null
+                                            },
+                                            deletingRecordId = deletingRecordId,
+                                            onFanMenuStart = handleFanStart,
+                                            onFanMenuDrag = handleFanDrag,
+                                            onFanMenuEnd = handleFanEnd,
+                                            activeFanRecord = activeFanRecord
+                                        )
+                                        Spacer(Modifier.height(12.dp))
+                                    }
+                                }
+
+                                // 冇展開時保留基本嘅底邊距
+                                AnimatedVisibility(
+                                    visible = !(isThisRowSelected && selectedDay != null && selectedColIdx != null)
+                                ) {
                                     Spacer(Modifier.height(6.dp))
                                 }
                             }
