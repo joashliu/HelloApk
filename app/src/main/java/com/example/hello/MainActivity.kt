@@ -3357,13 +3357,17 @@ fun TopStats(
 
     val spec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
 
-    // 保留排版闊度動畫
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
     val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            // 📌 核心修正：加入嚴格固定高度 (64.dp)，取代原本動態嘅 vertical padding。
+            // 噉樣無論入面切換咩內容，TopStat 嘅高度永遠都係一樣，絕對唔會再上下抖動。
+            .height(64.dp)
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showCategory || catW > 0.001f) {
@@ -3407,7 +3411,6 @@ fun TopStats(
                         Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    // 🔥 替換成 AnimatedAmount，傳入最終數值
                     AnimatedAmount(
                         text = formatAmountNoDecimal(income),
                         color = COLOR_INCOME,
@@ -3440,7 +3443,6 @@ fun TopStats(
                         Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    // 🔥 替換成 AnimatedAmount
                     AnimatedAmount(
                         text = formatAmountNoDecimal(expense),
                         color = COLOR_EXPENSE,
@@ -3464,7 +3466,7 @@ fun TopStats(
                     } else {
                         (slideInVertically(tween(420, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(300))) togetherWith
                         (slideOutVertically(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(300)))
-                    }
+                    }.using(SizeTransform(clip = false)) // 📌 核心修正：加入 SizeTransform 確保淡入淡出時排版唔會互相推擠
                 },
                 contentAlignment = Alignment.Center,
                 label = "balanceCountAnim"
@@ -3478,7 +3480,6 @@ fun TopStats(
                             Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                         Spacer(Modifier.height(4.dp))
-                        // 🔥 替換成 AnimatedAmount
                         AnimatedAmount(
                             text = formatAmountNoDecimal(balance),
                             color = balColor,
@@ -3492,7 +3493,6 @@ fun TopStats(
                             Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                         }
                         Spacer(Modifier.height(4.dp))
-                        // 🔥 替換成 AnimatedAmount
                         AnimatedAmount(
                             text = "${filteredCount ?: 0}",
                             fontSize = STAT_AMOUNT_FONT_SIZE,
