@@ -688,7 +688,7 @@ class MainActivity : ComponentActivity() {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
-            // 只有一個動作按鈕：快速記帳（預填最近項目名）
+                        // 只有一個動作按鈕：按鈕顯示最近項目名
             if (first != null && first.note.isNotBlank()) {
                 val noteIntent = buildLaunchIntent(prefillNote = first.note)
                 val notePi = PendingIntent.getActivity(
@@ -699,7 +699,7 @@ class MainActivity : ComponentActivity() {
                 )
                 builder.addAction(
                     android.R.drawable.ic_menu_edit,
-                    "快速記帳",
+                    first.note,     // ← 顯示最近項目名
                     notePi
                 )
             }
