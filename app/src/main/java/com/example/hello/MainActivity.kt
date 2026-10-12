@@ -1242,12 +1242,38 @@ fun MainApp(
                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 88.dp)
                 .padding(horizontal = 20.dp)
         ) {
-            Surface(
-                shape = CircleShape,
-                color = Color(0xE6FFFFFF),
-                border = BorderStroke(1.dp, Color.White),
-                shadowElevation = 12.dp,
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = CircleShape,
+                        clip = false,
+                        ambientColor = Color(0x26000000),
+                        spotColor = Color(0x26000000)
+                    )
+                    .clip(CircleShape)
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0f to Color(0xF0FFFFFF),
+                                0.5f to Color(0xE0FFFFFF),
+                                1f to Color(0xC0FFFFFF)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 0.8.dp,
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0f to Color(0x80FFFFFF),
+                                0.5f to Color(0x33FFFFFF),
+                                1f to Color(0x14FFFFFF)
+                            )
+                        ),
+                        shape = CircleShape
+                    )
             ) {
                 Row(
                     modifier = Modifier
@@ -1884,14 +1910,33 @@ fun FloatingNavBar(
             .width(NAV_TAB_WIDTH * items.size)
             .height(NAV_HEIGHT)
             .shadow(
-                elevation = 12.dp,
+                elevation = 16.dp,
                 shape = RoundedCornerShape(NAV_HEIGHT / 2),
                 clip = false,
-                ambientColor = Color(0x33000000),
-                spotColor = Color(0x33000000)
+                ambientColor = Color(0x26000000),
+                spotColor = Color(0x26000000)
             )
             .clip(RoundedCornerShape(NAV_HEIGHT / 2))
-            .background(SURFACE_CARD)
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color(0xF0FFFFFF),
+                        0.5f to Color(0xE0FFFFFF),
+                        1f to Color(0xC0FFFFFF)
+                    )
+                )
+            )
+            .border(
+                width = 0.8.dp,
+                brush = Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0f to Color(0x80FFFFFF),
+                        0.5f to Color(0x33FFFFFF),
+                        1f to Color(0x14FFFFFF)
+                    )
+                ),
+                shape = RoundedCornerShape(NAV_HEIGHT / 2)
+            )
     ) {
         Box(Modifier.fillMaxSize().pointerInput(Unit) {
             awaitPointerEventScope {
@@ -1932,7 +1977,7 @@ fun FloatingNavBar(
                     .offset { IntOffset(animatedOffset.roundToInt(), 0) }
                     .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
                     .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
-                    .background(BRAND_PRIMARY_LIGHT)
+                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.9f))
             )
             Row(Modifier.fillMaxSize()) {
                 items.forEachIndexed { idx, item ->
@@ -2162,7 +2207,7 @@ fun LedgerContent(
                         exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
                     ) {
                         FadingStickyHeader {
-                            Box(modifier = Modifier.fillMaxWidth().background(SURFACE_CARD)) {
+                            Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
                                 DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                             }
                         }
