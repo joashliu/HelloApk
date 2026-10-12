@@ -4929,3 +4929,343 @@ fun IconViewAdaptive(
         }
     }
 }
+
+// ================================================================
+// 以下係之前缺失嘅 composable 定義，加返落 MainActivity.kt 尾即可
+// ================================================================
+
+@Composable
+fun IconSourceOption(
+    icon: ImageVector,
+    label: String,
+    tint: Color = TEXT_PRIMARY,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(14.dp))
+        Text(label, fontSize = 15.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+fun DayHeader(dateKey: String, income: Double, expense: Double) {
+    val info = parseDateHeader(dateKey)
+    val isWeekend = info?.isWeekend == true
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val wkChar = info?.weekdayChar ?: "?"
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(if (isWeekend) WEEKEND_BG else WEEKDAY_BG),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                wkChar,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isWeekend) WEEKEND_FG else WEEKDAY_FG
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            val dateText = if (info != null) {
+                "${info.year}年${info.month}月${info.day}日" +
+                        (info.dayTag?.let { " · $it" } ?: "")
+            } else dateKey
+            Text(
+                dateText,
+                fontSize = 13.sp,
+                color = TEXT_SECONDARY,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        if (income > 0.0) {
+            Text(
+                "收 ${formatAmountNoDecimal(income)}",
+                fontSize = 12.sp,
+                color = COLOR_INCOME,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        if (income > 0.0 && expense > 0.0) Spacer(Modifier.width(10.dp))
+        if (expense > 0.0) {
+            Text(
+                "支 ${formatAmountNoDecimal(expense)}",
+                fontSize = 12.sp,
+                color = COLOR_EXPENSE,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun TopStats(
+    hasIncome: Boolean,
+    hasExpense: Boolean,
+    income: Double,
+    expense: Double,
+    isFilterMode: Boolean = false,
+    filteredCount: Int? = null,
+    showCategory: Boolean = false,
+    categoryName: String = ""
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        if (showCategory) {
+            CategoryStatChip(categoryName)
+        } else {
+            if (hasIncome) {
+                Column {
+                    Text("收入", fontSize = STAT_LABEL_FONT_SIZE,
+                        color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "$${formatAmountNoDecimal(income)}",
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        color = COLOR_INCOME,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            if (hasExpense) {
+                Column {
+                    Text("支出", fontSize = STAT_LABEL_FONT_SIZE,
+                        color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "$${formatAmountNoDecimal(expense)}",
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        color = COLOR_EXPENSE,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            if (!hasIncome && !hasExpense) {
+                Text(
+                    if (isFilterMode && filteredCount != null) "篩選：$filteredCount 筆" else "未有記錄",
+                    fontSize = 13.sp, color = TEXT_SECONDARY
+                )
+            } else if (isFilterMode && filteredCount != null) {
+                Column {
+                    Text("篩選", fontSize = STAT_LABEL_FONT_SIZE,
+                        color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "$filteredCount 筆",
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        color = TEXT_PRIMARY,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun QuickInputSection(
+    topNotes: List<Pair<String, Int>>,
+    noteIconMap: Map<String, String>,
+    animatedQuickInputs: MutableMap<String, Boolean>,
+    maxRowsPerPage: Int,
+    onClick: (String) -> Unit
+) {
+    if (topNotes.isEmpty()) return
+    val columns = 4
+    val rows = maxRowsPerPage.coerceIn(1, 4)
+    val perPage = rows * columns
+    val pages = topNotes.chunked(perPage).ifEmpty { listOf(emptyList()) }
+    val pagerState = rememberPagerState(pageCount = { pages.size })
+    val rowHeight = 40.dp
+    val spacing = 6.dp
+    val totalHeight = rowHeight * rows + spacing * (rows - 1)
+
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth().height(totalHeight),
+            pageSpacing = 8.dp,
+            contentPadding = PaddingValues(horizontal = 16.dp)
+        ) { pageIdx ->
+            val pageItems = pages[pageIdx]
+            Column(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(spacing)
+            ) {
+                pageItems.chunked(columns).forEach { rowItems ->
+                    Row(
+                        Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(spacing)
+                    ) {
+                        rowItems.forEach { (name, _) ->
+                            QuickInputChip(
+                                name = name,
+                                iconUrl = noteIconMap[name] ?: "",
+                                onClick = { onClick(name) },
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                            )
+                        }
+                        repeat(columns - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+        if (pages.size > 1) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(pages.size.coerceAtMost(6)) { i ->
+                    Box(
+                        Modifier
+                            .padding(horizontal = 2.dp)
+                            .size(if (pagerState.currentPage == i) 6.dp else 4.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (pagerState.currentPage == i) BRAND_PRIMARY
+                                else TEXT_TERTIARY.copy(alpha = 0.4f)
+                            )
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickInputChip(
+    name: String,
+    iconUrl: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.clickable { onClick() },
+        shape = RoundedCornerShape(10.dp),
+        color = SURFACE_CARD,
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconView(iconUrl = iconUrl, name = name, size = 22.dp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                name,
+                fontSize = 12.sp,
+                color = TEXT_PRIMARY,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun AnimatedAmount(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        modifier = modifier,
+        maxLines = 1,
+        softWrap = false
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CalendarFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    label,
+                    textAlign = TextAlign.Center,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                )
+            }
+        },
+        shape = RoundedCornerShape(12.dp),
+        border = null,
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = BRAND_PRIMARY,
+            selectedLabelColor = Color.White,
+            containerColor = SURFACE_ELEVATED,
+            labelColor = Color.Black
+        ),
+        modifier = modifier
+    )
+}
+
+@Composable
+fun AnimatedInfoChip(
+    label: String,
+    valueText: String,
+    modifier: Modifier = Modifier,
+    valueFontSize: TextUnit = 16.sp,
+    valueColor: Color = TEXT_PRIMARY
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = SURFACE_ELEVATED
+    ) {
+        Column(
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(label, fontSize = 11.sp, color = TEXT_SECONDARY)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                valueText,
+                fontSize = valueFontSize,
+                fontWeight = FontWeight.Bold,
+                color = valueColor,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
+    }
+}
