@@ -1285,16 +1285,22 @@ private fun BoxScope.KeyboardAndFabLayer(
             .height(56.dp)
             .graphicsLayer {
                 val p = progressProvider()
-                val fabAlpha = if (showKeyboard) {
-                    (1f - ((p - 0.65f) / 0.35f).coerceIn(0f, 1f))
-                } else {
-                    (1f - (p / 0.35f).coerceIn(0f, 1f))
-                }
-                alpha = fabAlpha
+                
+                // 💡 動畫大升級：主動避讓機制 (Ducking)
+                // 只要鍵盤一開始展開 (p > 0)，篩選掣喺首 25% 嘅時間內就會快速淡出，確保完全唔會同半透明鍵盤重疊！
+                val rowAlpha = (1f - (p / 0.25f)).coerceIn(0f, 1f)
+                alpha = rowAlpha
+                
+                // 💡 加入微縮放同埋向下沉嘅物理滑動，營造被鍵盤「推落去」嘅自然空間感
+                val scale = 0.9f + 0.1f * rowAlpha
+                scaleX = scale
+                scaleY = scale
+                translationY = p * 50.dp.toPx() // 隨住鍵盤展開，向下滑動 50dp 讓路
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // ... (裡面嘅 Box(Modifier.weight(1f)) 同 Surface 保持不變)
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             if (currentPage == 0) {
                 androidx.compose.animation.AnimatedVisibility(
