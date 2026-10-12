@@ -1,7 +1,6 @@
 package com.example.hello
 
 import android.app.DatePickerDialog
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -140,6 +139,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+// ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchRequest = mutableStateOf(false)
 
 // ===== 配色 =====
@@ -551,62 +551,6 @@ fun FanMenuOverlay(
                     )
                 }
             }
-        }
-    }
-}
-
-// ===== 常駐通知：快速記帳快捷入口 =====
-object QuickAddNotification {
-    const val CHANNEL_ID = "ledger_quick_add"
-    const val NOTIFICATION_ID = 1001
-
-    fun createChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "快速記帳",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "常駐通知，一撳即開記帳鍵盤"
-                setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            }
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
-        }
-    }
-
-    fun show(context: Context) {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(MainActivity.EXTRA_OPEN_KEYBOARD, true)
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_input_add)
-            .setContentTitle("快速記帳")
-            .setContentText("撳一下即開鍵盤記一筆")
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setAutoCancel(false)
-            .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .build()
-
-        try {
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                    == PackageManager.PERMISSION_GRANTED
-            if (granted) nm.notify(NOTIFICATION_ID, notification)
-        } catch (_: SecurityException) {
         }
     }
 }
@@ -4354,12 +4298,10 @@ fun CalendarRow(
 
     val cellMaxScale = 1.06f
 
-    // 垂直預留（上下）：跟內容高度比例 + 2dp 緩衝
     val verticalPad = (
         contentHeight * (cellMaxScale - 1f) / 2f + 2.dp
     ).coerceAtLeast(4.dp)
 
-    // ★ 水平預留（左右）：只留喺 Row 兩端，唔影響格與格之間嘅間距
     val horizontalPad = 3.dp
 
     val rowHeight by animateDpAsState(
