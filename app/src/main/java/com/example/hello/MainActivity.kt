@@ -141,6 +141,7 @@ import kotlin.math.roundToInt
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchRequest = mutableStateOf(false)
+private val keyboardPrefillNote = mutableStateOf<String?>(null)
 
 // ===== 供通知顯示嘅最近項目資訊 =====
 data class QuickNoteInfo(
@@ -567,6 +568,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
+        const val EXTRA_PREFILL_NOTE = "extra_prefill_note"
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
@@ -578,13 +580,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
-        if (fromNotification) keyboardLaunchRequest.value = true
+        if (fromNotification) {
+            keyboardLaunchRequest.value = true
+            keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
+        }
 
         createQuickAddChannel()
         askNotificationPermissionIfNeeded()
 
         setContent {
             val requestKeyboard = keyboardLaunchRequest.value
+            val prefillNote = keyboardPrefillNote.value
             val notesInfo = topQuickNotesInfo.value
 
             LaunchedEffect(notesInfo) {
@@ -595,7 +601,11 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
                     MainApp(
                         openKeyboardOnLaunch = requestKeyboard,
-                        onKeyboardLaunchConsumed = { keyboardLaunchRequest.value = false }
+                        prefillNoteOnLaunch = prefillNote,
+                        onKeyboardLaunchConsumed = {
+                            keyboardLaunchRequest.value = false
+                            keyboardPrefillNote.value = null
+                        }
                     )
                 }
             }
@@ -612,6 +622,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchRequest.value = true
+            keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
         }
     }
 
@@ -635,6 +646,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun buildLaunchIntent(prefillNote: String?): Intent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_KEYBOARD, true)
+            if (!prefillNote.isNullOrBlank()) {
+                putExtra(EXTRA_PREFILL_NOTE, prefillNote)
+            }
+        }
+        return intent
+    }
+
     private fun showQuickAddNotification() {
         try {
             if (Build.VERSION.SDK_INT >= 33) {
@@ -645,42 +667,50 @@ class MainActivity : ComponentActivity() {
 
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-            val tapIntent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_OPEN_KEYBOARD, true)
-            }
-            val pi = PendingIntent.getActivity(
+            // 通知主體撳落去：普通記帳（冇預填名稱）
+            val normalIntent = buildLaunchIntent(prefillNote = null)
+            val normalPi = PendingIntent.getActivity(
                 this,
                 0,
-                tapIntent,
+                normalIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
             val infos = topQuickNotesInfo.value
             val first = infos.firstOrNull()
 
-            val collapsedText = if (first == null) {
-                "撳一下即開鍵盤記一筆"
-            } else {
-                "最近：${first.note} · ${first.category}"
-            }
-
             val builder = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_input_add)
                 .setContentTitle("快速記帳")
-                .setContentText(collapsedText)
-                .setContentIntent(pi)
+                .setContentText(
+                    if (first == null) "撳一下即開鍵盤記一筆"
+                    else "最近：${first.note} · ${first.category}"
+                )
+                .setContentIntent(normalPi)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
-            if (infos.isNotEmpty()) {
-                val style = NotificationCompat.InboxStyle()
-                    .setBigContentTitle("快速記帳")
-                infos.forEach { info ->
-                    val amtStr = if (info.amount > 0.0) " · $${formatAmountNoDecimal(info.amount)}" else ""
-                    style.addLine("${info.note} · ${info.category}$amtStr")
-                }
-                builder.setStyle(style)
+            // 動作 1：普通記帳（無名稱）
+            builder.addAction(
+                android.R.drawable.ic_input_add,
+                "普通記帳",
+                normalPi
+            )
+
+            // 動作 2：快速記帳（預填最近項目名）
+            if (first != null && first.note.isNotBlank()) {
+                val noteIntent = buildLaunchIntent(prefillNote = first.note)
+                val notePi = PendingIntent.getActivity(
+                    this,
+                    1,
+                    noteIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(
+                    android.R.drawable.ic_menu_edit,
+                    first.note,
+                    notePi
+                )
             }
 
             nm.notify(NOTIFICATION_ID, builder.build())
@@ -692,6 +722,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainApp(
     openKeyboardOnLaunch: Boolean = false,
+    prefillNoteOnLaunch: String? = null,
     onKeyboardLaunchConsumed: () -> Unit = {}
 ) {
     val db = Firebase.firestore
@@ -1079,12 +1110,16 @@ fun MainApp(
     }
 
     // ★ 由通知／快捷入口啟動時，自動切返記帳頁 + 彈鍵盤
-    LaunchedEffect(openKeyboardOnLaunch) {
+    LaunchedEffect(openKeyboardOnLaunch, prefillNoteOnLaunch) {
         if (openKeyboardOnLaunch) {
             if (filterModeOn) filterModeOn = false
             if (currentPage != 0) currentPage = 0
             if (!showKeyboard) {
-                openKeyboardForNew()
+                if (prefillNoteOnLaunch.isNullOrBlank()) {
+                    openKeyboardForNew()
+                } else {
+                    openKeyboardForNew(prefillNoteOnLaunch)
+                }
             }
             onKeyboardLaunchConsumed()
         }
