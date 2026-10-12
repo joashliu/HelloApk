@@ -1360,9 +1360,8 @@ fun MainApp() {
                 )
             }
         }
-    } // 👈 呢度係原本 webSearchTarget (搜尋圖片功能) 區塊嘅結尾
-
-} // 👈 🌟🌟🌟 加上呢個右括號！用嚟正式關閉 MainApp() 函數 🌟🌟🌟
+    }
+} // 🌟 🌟 🌟 補返呢個右括號，用嚟正式收尾 MainApp()！ 🌟 🌟 🌟
 
 @Composable
 private fun BoxScope.KeyboardAndFabLayer(
