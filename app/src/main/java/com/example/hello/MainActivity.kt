@@ -2426,21 +2426,20 @@ fun LedgerContent(
             }
         }
 
-        // ★ 底部漸進遮罩：由 FAB 上方約 120dp 開始，一路漸變到螢幕底部
-        //   導航欄喺 MainApp 層級更後繪製，會自然蓋住漸層下半部，
-        //   所以漸層同導航欄之間完全冇硬接縫
+                // ★ 底部漸進遮罩：由導航欄上緣約 20dp 之上先開始淡出
+        //   高度縮短，色標推後，令列表底部保持清晰耐啲
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(280.dp)
+                .height(200.dp)
                 .background(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.00f to SURFACE_BG.copy(alpha = 0f),
-                            0.30f to SURFACE_BG.copy(alpha = 0.35f),
-                            0.55f to SURFACE_BG.copy(alpha = 0.75f),
-                            0.75f to SURFACE_BG.copy(alpha = 0.95f),
+                            0.50f to SURFACE_BG.copy(alpha = 0f),     // 頭 100dp 完全清晰
+                            0.70f to SURFACE_BG.copy(alpha = 0.45f),
+                            0.88f to SURFACE_BG.copy(alpha = 0.88f),
                             1.00f to SURFACE_BG
                         )
                     )
