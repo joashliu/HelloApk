@@ -1,9 +1,15 @@
 package com.example.hello
 
 import android.app.DatePickerDialog
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.TimePickerDialog
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -108,6 +114,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
+import androidx.core.app.NotificationCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.imageLoader
@@ -546,20 +553,118 @@ fun FanMenuOverlay(
     }
 }
 
+// ===== 常駐通知：快速記帳快捷入口 =====
+object QuickAddNotification {
+    const val CHANNEL_ID = "ledger_quick_add"
+    const val NOTIFICATION_ID = 1001
+
+    fun createChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "快速記帳",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "常駐通知，一撳即開記帳鍵盤"
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    fun show(context: Context) {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(MainActivity.EXTRA_OPEN_KEYBOARD, true)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_input_add)
+            .setContentTitle("快速記帳")
+            .setContentText("撳一下即開鍵盤記一筆")
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
+
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    == PackageManager.PERMISSION_GRANTED
+            if (granted) nm.notify(NOTIFICATION_ID, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+}
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
+        private const val REQ_POST_NOTIFICATIONS = 1001
+    }
+
+    private var pendingOpenKeyboard by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        pendingOpenKeyboard = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) == true
+
+        QuickAddNotification.createChannel(this)
+        requestNotificationPermissionIfNeeded()
+        QuickAddNotification.show(this)
+
         setContent {
             MaterialTheme {
-                Surface(Modifier.fillMaxSize(), color = SURFACE_BG) { MainApp() }
+                Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
+                    MainApp(
+                        openKeyboardOnLaunch = pendingOpenKeyboard,
+                        onKeyboardLaunchConsumed = { pendingOpenKeyboard = false }
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
+            pendingOpenKeyboard = true
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(
+                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                    REQ_POST_NOTIFICATIONS
+                )
             }
         }
     }
 }
 
 @Composable
-fun MainApp() {
+fun MainApp(
+    openKeyboardOnLaunch: Boolean = false,
+    onKeyboardLaunchConsumed: () -> Unit = {}
+) {
     val db = Firebase.firestore
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -926,6 +1031,18 @@ fun MainApp() {
         showKeyboard = false
         keyboardState = KeyboardState()
         scrollToTopTrigger++
+    }
+
+    // ★ 由通知／快捷入口啟動時，自動切返記帳頁 + 彈鍵盤
+    LaunchedEffect(openKeyboardOnLaunch) {
+        if (openKeyboardOnLaunch) {
+            if (filterModeOn) filterModeOn = false
+            if (currentPage != 0) currentPage = 0
+            if (!showKeyboard) {
+                openKeyboardForNew()
+            }
+            onKeyboardLaunchConsumed()
+        }
     }
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
@@ -4205,10 +4322,8 @@ fun CalendarRow(
         Modifier
             .fillMaxWidth()
             .height(rowHeight)
-            .clipToBounds()                       // ← 先 clip，邊界＝整行寬度
-            .padding(horizontal = horizontalPad), // ← 再 padding，令內容左右各內縮 3dp
-                                                  //   但 clip 邊界仍然包住呢 3dp，
-                                                  //   所以最左／最右格仔放大溢出時唔會被裁
+            .clipToBounds()
+            .padding(horizontal = horizontalPad),
         horizontalArrangement = Arrangement.spacedBy(spacing),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -4219,7 +4334,7 @@ fun CalendarRow(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(vertical = verticalPad)   // ← 只保留垂直內距，冇水平內距
+                    .padding(vertical = verticalPad)
             ) {
                 if (dayOfMonth in 1..daysInMonth) {
                     CalendarDayCell(
@@ -5251,15 +5366,15 @@ fun CompareContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             MonthDropdown(
-    value = selectedMonthA,
-    months = monthlyKeysThisYear,
-    onChange = { newA ->
-        var newB = selectedMonthB
-        if (newA == newB) newB = shiftMonthKey(newA, 1)
-        onMonthAChange(newA)
-        if (newB != selectedMonthB) onMonthBChange(newB)
-    }
-)
+                                value = selectedMonthA,
+                                months = monthlyKeysThisYear,
+                                onChange = { newA ->
+                                    var newB = selectedMonthB
+                                    if (newA == newB) newB = shiftMonthKey(newA, 1)
+                                    onMonthAChange(newA)
+                                    if (newB != selectedMonthB) onMonthBChange(newB)
+                                }
+                            )
                         }
                         Spacer(Modifier.width(6.dp))
                         Row(
@@ -5268,15 +5383,15 @@ fun CompareContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             MonthDropdown(
-    value = selectedMonthB,
-    months = monthlyKeysThisYear,
-    onChange = { newB ->
-        var newA = selectedMonthA
-        if (newB == newA) newA = shiftMonthKey(newB, -1)
-        onMonthBChange(newB)
-        if (newA != selectedMonthA) onMonthAChange(newA)
-    }
-)
+                                value = selectedMonthB,
+                                months = monthlyKeysThisYear,
+                                onChange = { newB ->
+                                    var newA = selectedMonthA
+                                    if (newB == newA) newA = shiftMonthKey(newB, -1)
+                                    onMonthBChange(newB)
+                                    if (newA != selectedMonthA) onMonthAChange(newA)
+                                }
+                            )
                         }
                     }
 
@@ -5428,16 +5543,16 @@ fun CompareContent(
         }
 
         FloatingActionButton(
-    onClick = onAddClick,
-    shape = CircleShape,
-    containerColor = BRAND_PRIMARY,
-    contentColor = Color.White,
-    modifier = Modifier
-        .align(Alignment.BottomEnd)
-        .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-) {
-    Icon(Icons.Default.Add, "新增")
-}
+            onClick = onAddClick,
+            shape = CircleShape,
+            containerColor = BRAND_PRIMARY,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) {
+            Icon(Icons.Default.Add, "新增")
+        }
     }
 }
 
