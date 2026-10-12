@@ -142,6 +142,14 @@ import kotlin.math.roundToInt
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchRequest = mutableStateOf(false)
 
+// ===== 供通知顯示嘅最近項目資訊 =====
+data class QuickNoteInfo(
+    val note: String,
+    val category: String,
+    val amount: Double
+)
+private val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
+
 // ===== 配色 =====
 val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
@@ -577,6 +585,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val requestKeyboard = keyboardLaunchRequest.value
+            val notesInfo = topQuickNotesInfo.value
+
+            LaunchedEffect(notesInfo) {
+                showQuickAddNotification()
+            }
+
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
                     MainApp(
@@ -642,16 +656,34 @@ class MainActivity : ComponentActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val notif = NotificationCompat.Builder(this, CHANNEL_ID)
+            val infos = topQuickNotesInfo.value
+            val first = infos.firstOrNull()
+
+            val collapsedText = if (first == null) {
+                "撳一下即開鍵盤記一筆"
+            } else {
+                "最近：${first.note} · ${first.category}"
+            }
+
+            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_input_add)
                 .setContentTitle("快速記帳")
-                .setContentText("撳一下即開鍵盤記一筆")
+                .setContentText(collapsedText)
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
-                .build()
 
-            nm.notify(NOTIFICATION_ID, notif)
+            if (infos.isNotEmpty()) {
+                val style = NotificationCompat.InboxStyle()
+                    .setBigContentTitle("快速記帳")
+                infos.forEach { info ->
+                    val amtStr = if (info.amount > 0.0) " · $${formatAmountNoDecimal(info.amount)}" else ""
+                    style.addLine("${info.note} · ${info.category}$amtStr")
+                }
+                builder.setStyle(style)
+            }
+
+            nm.notify(NOTIFICATION_ID, builder.build())
         } catch (_: Throwable) {
         }
     }
@@ -814,6 +846,22 @@ fun MainApp(
                 .take(20)
                 .map { it.first to 0 }
         }
+    }
+
+    // ★ 將最近嘅 top 3 快速記帳項目同步去 top-level state，供通知使用
+    val topNotesList = remember(topNotes, noteCategoryMap) {
+        topNotes.take(3).mapNotNull { (note, _) ->
+            if (note.isBlank()) null
+            else QuickNoteInfo(
+                note = note,
+                category = noteCategoryMap[note] ?: "飲食",
+                amount = records.filter { it.note == note }
+                    .maxByOrNull { it.timestamp }?.amount ?: 0.0
+            )
+        }
+    }
+    LaunchedEffect(topNotesList) {
+        topQuickNotesInfo.value = topNotesList
     }
 
     val recentAmountByNote by remember {
