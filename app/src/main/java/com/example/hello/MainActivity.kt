@@ -140,7 +140,8 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
-private val keyboardLaunchRequest = mutableStateOf(false)
+// 用遞增 token 而唔係 Boolean，確保連續撳同一個通知按鈕都會觸發 effect
+private val keyboardLaunchToken = mutableStateOf(0)
 private val keyboardPrefillNote = mutableStateOf<String?>(null)
 
 // ===== 供通知顯示嘅最近項目資訊 =====
@@ -581,7 +582,7 @@ class MainActivity : ComponentActivity() {
 
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
         if (fromNotification) {
-            keyboardLaunchRequest.value = true
+            keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
         }
 
@@ -589,7 +590,7 @@ class MainActivity : ComponentActivity() {
         askNotificationPermissionIfNeeded()
 
         setContent {
-            val requestKeyboard = keyboardLaunchRequest.value
+            val token = keyboardLaunchToken.value
             val prefillNote = keyboardPrefillNote.value
             val notesInfo = topQuickNotesInfo.value
 
@@ -600,11 +601,11 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
                     MainApp(
-                        openKeyboardOnLaunch = requestKeyboard,
+                        keyboardLaunchToken = token,
                         prefillNoteOnLaunch = prefillNote,
                         onKeyboardLaunchConsumed = {
-                            keyboardLaunchRequest.value = false
                             keyboardPrefillNote.value = null
+                            // token 唔重置，留返俾下次對比用
                         }
                     )
                 }
@@ -621,7 +622,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
-            keyboardLaunchRequest.value = true
+            keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
         }
     }
@@ -667,7 +668,7 @@ class MainActivity : ComponentActivity() {
 
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-            // 通知主體撳落去：普通記帳（冇預填名稱）
+            // 通知本體撳落去：空白鍵盤
             val normalIntent = buildLaunchIntent(prefillNote = null)
             val normalPi = PendingIntent.getActivity(
                 this,
@@ -676,7 +677,7 @@ class MainActivity : ComponentActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-                        val infos = topQuickNotesInfo.value
+            val infos = topQuickNotesInfo.value
             val first = infos.firstOrNull()
 
             val builder = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -687,14 +688,7 @@ class MainActivity : ComponentActivity() {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
-            // 動作 1：普通記帳（無名稱）
-            builder.addAction(
-                android.R.drawable.ic_input_add,
-                "普通記帳",
-                normalPi
-            )
-
-            // 動作 2：快速記帳（預填最近項目名）
+            // 只有一個動作按鈕：快速記帳（預填最近項目名）
             if (first != null && first.note.isNotBlank()) {
                 val noteIntent = buildLaunchIntent(prefillNote = first.note)
                 val notePi = PendingIntent.getActivity(
@@ -705,7 +699,7 @@ class MainActivity : ComponentActivity() {
                 )
                 builder.addAction(
                     android.R.drawable.ic_menu_edit,
-                    first.note,
+                    "快速記帳",
                     notePi
                 )
             }
@@ -718,7 +712,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainApp(
-    openKeyboardOnLaunch: Boolean = false,
+    keyboardLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
     onKeyboardLaunchConsumed: () -> Unit = {}
 ) {
@@ -1027,6 +1021,40 @@ fun MainApp(
         showKeyboard = true
     }
 
+        // 強制覆蓋式打開鍵盤：
+    //   note == null → 空白鍵盤（清空一切）
+    //   note != null → 覆蓋項目名；鍵盤已開則保留金額，否則全清
+    fun openKeyboardForce(note: String?) {
+        val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
+
+        if (note == null) {
+            keyboardState = KeyboardState(
+                noteText = "",
+                amountText = "",
+                category = defaultCategory,
+                currency = defaultCurrency
+            )
+        } else {
+            if (showKeyboard) {
+                // 鍵盤已開：保留金額／類別／貨幣，只覆蓋項目名
+                keyboardState = keyboardState.copy(
+                    noteText = note,
+                    editingNote = false
+                )
+            } else {
+                keyboardState = KeyboardState(
+                    noteText = note,
+                    amountText = "",
+                    category = defaultCategory,
+                    currency = defaultCurrency
+                )
+            }
+            if (note.isNotBlank()) nameFlashTrigger++
+        }
+        showKeyboard = true
+    }
+
     fun dismissKeyboard() {
         showKeyboard = false
         keyboardState = KeyboardState()
@@ -1106,18 +1134,12 @@ fun MainApp(
         scrollToTopTrigger++
     }
 
-    // ★ 由通知／快捷入口啟動時，自動切返記帳頁 + 彈鍵盤
-    LaunchedEffect(openKeyboardOnLaunch, prefillNoteOnLaunch) {
-        if (openKeyboardOnLaunch) {
+       // ★ 監聽 token：每次撳通知都觸發（包括鍵盤已開、連續撳同一按鈕）
+    LaunchedEffect(keyboardLaunchToken) {
+        if (keyboardLaunchToken > 0) {
             if (filterModeOn) filterModeOn = false
             if (currentPage != 0) currentPage = 0
-            if (!showKeyboard) {
-                if (prefillNoteOnLaunch.isNullOrBlank()) {
-                    openKeyboardForNew()
-                } else {
-                    openKeyboardForNew(prefillNoteOnLaunch)
-                }
-            }
+            openKeyboardForce(prefillNoteOnLaunch)
             onKeyboardLaunchConsumed()
         }
     }
