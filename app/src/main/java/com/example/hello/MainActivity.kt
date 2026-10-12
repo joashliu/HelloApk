@@ -3544,90 +3544,86 @@ fun AnimatedAmount(
 
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
-    val info = remember(dateKey) { parseDateHeader(dateKey) }
-    val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
+    // 解析日期 (假設 dateKey 格式係標準嘅 "yyyy-MM-dd")
+    var dayStr = dateKey
+    var monthStr = ""
+    var weekStr = ""
+    var isToday = false
 
-    val incomeText = formatAmountNoDecimal(income)
-    val expenseText = formatAmountNoDecimal(expense)
-
-    val showIncome = income > 0.0
-    val showExpense = expense > 0.0
+    try {
+        val date = java.time.LocalDate.parse(dateKey)
+        dayStr = String.format("%02d", date.dayOfMonth) // 補零，例如 "05", "12"，視覺更統一
+        monthStr = "${date.monthValue}月"
+        weekStr = when (date.dayOfWeek.value) {
+            1 -> "週一"; 2 -> "週二"; 3 -> "週三"; 4 -> "週四"; 5 -> "週五"; 6 -> "週六"; 7 -> "週日"; else -> ""
+        }
+        isToday = date == java.time.LocalDate.now()
+    } catch (e: Exception) {
+        // 如果解析失敗（可能 dateKey 係其他格式），就 fallback 用返原本字串
+    }
 
     Row(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .padding(horizontal = 16.dp, vertical = 12.dp), // 加大垂直 padding，增加呼吸感
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 🗓️ 左邊：高級感日期排版 (Big Number Style)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (info != null) {
-                val monthStr = if (info.year == currentYear) "${info.month}月" else "${info.year}年${info.month}月"
-                Text(
-                    text = "${info.day}",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Black,
-                    color = TEXT_PRIMARY
-                )
-                Spacer(Modifier.width(8.dp))
-
+            Text(
+                text = dayStr,
+                fontSize = 34.sp, // 特大字體，極具現代感
+                fontWeight = FontWeight.ExtraBold,
+                color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
+                letterSpacing = (-1).sp // 收緊字距，令大字體更聚神
+            )
+            
+            if (monthStr.isNotEmpty()) {
+                Spacer(modifier = Modifier.width(8.dp))
                 Column(verticalArrangement = Arrangement.Center) {
                     Text(
                         text = monthStr,
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TEXT_SECONDARY
+                        color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY
                     )
+                    Spacer(modifier = Modifier.height(1.dp))
                     Text(
-                        text = "週${info.weekdayChar}",
+                        text = if (isToday) "今天" else weekStr,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (info.isWeekend) WEEKEND_FG else TEXT_TERTIARY
+                        fontWeight = FontWeight.Medium,
+                        color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY
                     )
                 }
-
-                if (info.dayTag != null) {
-                    Spacer(Modifier.width(12.dp))
-                    Box(
-                        Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (info.dayTag == "今日") BRAND_PRIMARY else SURFACE_ELEVATED)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = info.dayTag,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (info.dayTag == "今日") Color.White else TEXT_SECONDARY
-                        )
-                    }
-                }
-            } else {
-                Text(
-                    formatDateHeader(dateKey),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TEXT_PRIMARY
-                )
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (showIncome) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(2.dp))
-                    // 🔥 替換成 AnimatedAmount
-                    AnimatedAmount(text = incomeText, fontSize = 14.sp, color = COLOR_INCOME, fontWeight = FontWeight.ExtraBold)
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // 💰 右邊：簡潔財務明細
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (income > 0) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("收入", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "+$${formatAmountNoDecimal(income)}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = COLOR_INCOME
+                    )
                 }
             }
-            if (showIncome && showExpense) Spacer(Modifier.width(10.dp))
-            if (showExpense) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TrendingDown, null, tint = TEXT_PRIMARY, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(2.dp))
-                    // 🔥 替換成 AnimatedAmount
-                    AnimatedAmount(text = expenseText, fontSize = 14.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.ExtraBold)
+            if (expense > 0) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "-$${formatAmountNoDecimal(expense)}",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = COLOR_EXPENSE
+                    )
                 }
             }
         }
