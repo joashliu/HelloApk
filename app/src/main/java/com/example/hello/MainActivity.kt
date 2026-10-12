@@ -5423,16 +5423,16 @@ fun CompareContent(
         }
 
         FloatingActionButton(
-            onClick = onAddClick,
-            shape = RoundedCornerShape(20.dp),
-            containerColor = BRAND_PRIMARY,
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-        ) {
-            Icon(Icons.Default.Add, "新增")
-        }
+    onClick = onAddClick,
+    shape = CircleShape,
+    containerColor = BRAND_PRIMARY,
+    contentColor = Color.White,
+    modifier = Modifier
+        .align(Alignment.BottomEnd)
+        .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+) {
+    Icon(Icons.Default.Add, "新增")
+}
     }
 }
 
