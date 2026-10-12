@@ -676,16 +676,13 @@ class MainActivity : ComponentActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val infos = topQuickNotesInfo.value
+                        val infos = topQuickNotesInfo.value
             val first = infos.firstOrNull()
 
             val builder = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_input_add)
                 .setContentTitle("快速記帳")
-                .setContentText(
-                    if (first == null) "撳一下即開鍵盤記一筆"
-                    else "最近：${first.note} · ${first.category}"
-                )
+                .setContentText("撳一下即開鍵盤記一筆")
                 .setContentIntent(normalPi)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
