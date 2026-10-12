@@ -2373,7 +2373,7 @@ fun LedgerContent(
                 }
             }
 
-            Box(
+                        Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -2423,6 +2423,26 @@ fun LedgerContent(
                         }
                     }
                 }
+
+                // ★ 漸進淡出遮罩：列表底部優雅過渡到背景色，貼住導航欄上方
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING)  // 對齊導航欄上緣
+                        .height(120.dp)                                     // 由 FAB 上方約 120dp 開始
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    SURFACE_BG.copy(alpha = 0f),     // 頂：完全透明
+                                    SURFACE_BG.copy(alpha = 0.25f),
+                                    SURFACE_BG.copy(alpha = 0.6f),
+                                    SURFACE_BG.copy(alpha = 0.9f),
+                                    SURFACE_BG                       // 底：完全不透明
+                                )
+                            )
+                        )
+                )
             }
         }
 
