@@ -1801,24 +1801,38 @@ fun LedgerContent(
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
 
+    // 🌟 神級優化 (Level 1)：群組層級嘅延遲移除機制
+    var displayGroups by remember { mutableStateOf(groupedByDate) }
+    LaunchedEffect(groupedByDate) {
+        val updatedGroups = displayGroups.map { oldGrp ->
+            groupedByDate.find { it.first == oldGrp.first } ?: oldGrp
+        }
+        val missing = groupedByDate.filter { newGrp -> displayGroups.none { oldGrp -> oldGrp.first == newGrp.first } }
+        displayGroups = (updatedGroups + missing).sortedByDescending { it.first }
+        delay(350)
+        displayGroups = groupedByDate
+    }
+    val visibleGroupKeys = remember(groupedByDate) { groupedByDate.map { it.first }.toSet() }
+
     val listContent: LazyListScope.() -> Unit = {
-        // 🌟 頂級彈性物理動畫，打造蘋果級極致順滑、帶有呼吸感嘅實體移動
         val itemAnimSpec = spring<IntOffset>(dampingRatio = 0.75f, stiffness = 300f)
         val fadeSpec = spring<Float>(dampingRatio = 0.8f, stiffness = 250f)
-        val groupDeleteSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
-        val groupFade = tween<Float>(350, easing = FastOutSlowInEasing)
+        val springSpec = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
+        val fadeAnim = tween<Float>(350, easing = FastOutSlowInEasing)
 
-        groupedByDate.forEach { (dateKey, dayRecords) ->
+        displayGroups.forEach { (dateKey, dayRecords) ->
+            val isGroupVisible = visibleGroupKeys.contains(dateKey)
             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
             val dayExpense = dayRecords.sumOf { if (it.category != INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
             val isGroupDeleting = dayRecords.size == 1 && dayRecords.first().id == deletingRecordId
+            val showWholeGroup = isGroupVisible && !isGroupDeleting
 
             stickyHeader(key = "header_$dateKey") {
                 Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                     AnimatedVisibility(
-                        visible = !isGroupDeleting,
-                        enter = fadeIn(groupFade) + expandVertically(groupDeleteSpring),
-                        exit = fadeOut(groupFade) + shrinkVertically(groupDeleteSpring)
+                        visible = showWholeGroup,
+                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
+                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
                     ) {
                         FadingStickyHeader {
                             Box(modifier = Modifier.fillMaxWidth().background(SURFACE_CARD)) {
@@ -1832,66 +1846,76 @@ fun LedgerContent(
             item(key = "group_$dateKey") {
                 Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                     AnimatedVisibility(
-                        visible = !isGroupDeleting,
-                        enter = fadeIn(groupFade) + expandVertically(groupDeleteSpring),
-                        exit = fadeOut(groupFade) + shrinkVertically(groupDeleteSpring)
+                        visible = showWholeGroup,
+                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
+                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
                     ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .shadow(
-                                    elevation = 8.dp,
-                                    shape = RoundedCornerShape(20.dp),
-                                    ambientColor = Color(0x04000000),
-                                    spotColor = Color(0x0A000000),
-                                    clip = false
-                                )
+                                .shadow(8.dp, RoundedCornerShape(20.dp), ambientColor = Color(0x04000000), spotColor = Color(0x0A000000), clip = false)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                                 .clip(RoundedCornerShape(20.dp))
-                                .animateContentSize(animationSpec = groupDeleteSpring)
+                                .animateContentSize(animationSpec = springSpec)
                         ) {
-                            dayRecords.forEachIndexed { idx, r ->
+                            // 🌟 神級優化 (Level 2)：項目層級嘅延遲移除機制
+                            var displayRecords by remember { mutableStateOf(dayRecords) }
+                            LaunchedEffect(dayRecords) {
+                                val updatedRecords = displayRecords.map { oldRec ->
+                                    dayRecords.find { it.id == oldRec.id } ?: oldRec
+                                }
+                                val missingRecs = dayRecords.filter { newRec -> displayRecords.none { oldRec -> oldRec.id == newRec.id } }
+                                displayRecords = (updatedRecords + missingRecs).sortedByDescending { it.timestamp }
+                                delay(350)
+                                displayRecords = dayRecords
+                            }
+                            val visibleRecordIds = remember(dayRecords) { dayRecords.map { it.id }.toSet() }
+
+                            displayRecords.forEachIndexed { idx, r ->
                                 key(r.id) {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        AnimatedRecordItem(
-                                            animateOnMount = r.id == justAddedId,
-                                            isDeleting = r.id == deletingRecordId
-                                        ) {
-                                            SwipeableRecordItem(
-                                                backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
-                                                onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
-                                                onFilter = {
-                                                    if (!filterMode) {
-                                                        preFilterIndex = listState.firstVisibleItemIndex
-                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
-                                                    }
-                                                    onFilterByName(r.note)
-                                                },
-                                                onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
-                                                
-                                                // 👇 確保篩選單一項目時自動隱藏類別
-                                                hideCategory = isExactNoteFilter,
-                                                
-                                                onFanMenuStart = { offset -> handleFanStart(r, offset) },
-                                                onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
-                                                onFanMenuEnd = { handleFanEnd() },
-                                                isFanMenuActive = activeFanRecord != null,
-                                                isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
-                                                isActiveItem = activeFanRecord?.id == r.id
-                                            )
-                                        }
+                                    val isRecVisible = visibleRecordIds.contains(r.id)
+                                    val isRecDeleting = r.id == deletingRecordId
+                                    val showRec = isRecVisible && !isRecDeleting
 
-                                        if (afterSaveHint?.recordId == r.id) {
-                                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
-                                        }
-
-                                        if (idx < dayRecords.lastIndex) {
-                                            AnimatedVisibility(
-                                                visible = deletingRecordId != r.id,
-                                                enter = fadeIn(tween(200)), exit = fadeOut(tween(200))
+                                    AnimatedVisibility(
+                                        visible = showRec,
+                                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
+                                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            AnimatedRecordItem(
+                                                animateOnMount = r.id == justAddedId,
+                                                isDeleting = false // 刪除動畫已交由外層 AnimatedVisibility 接管
                                             ) {
+                                                SwipeableRecordItem(
+                                                    backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
+                                                    onExpand = onExpandChange, onCopy = { onCopyClick(r) }, onEdit = { onEditClick(r) },
+                                                    onFilter = {
+                                                        if (!filterMode) {
+                                                            preFilterIndex = listState.firstVisibleItemIndex
+                                                            preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                        }
+                                                        onFilterByName(r.note)
+                                                    },
+                                                    onDelete = { onDeleteClick(r) }, onChangeIcon = { onChangeIconClick(r) },
+                                                    hideCategory = isExactNoteFilter,
+                                                    onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                                    onFanMenuDrag = { dragAmount -> handleFanDrag(dragAmount) },
+                                                    onFanMenuEnd = { handleFanEnd() },
+                                                    isFanMenuActive = activeFanRecord != null,
+                                                    isOtherItem = activeFanRecord != null && activeFanRecord?.id != r.id,
+                                                    isActiveItem = activeFanRecord?.id == r.id
+                                                )
+                                            }
+
+                                            if (afterSaveHint?.recordId == r.id) {
+                                                CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                            }
+
+                                            val hasVisibleBelow = displayRecords.subList(idx + 1, displayRecords.size).any { visibleRecordIds.contains(it.id) && it.id != deletingRecordId }
+                                            if (hasVisibleBelow) {
                                                 HorizontalDivider(
                                                     modifier = Modifier.padding(start = 68.dp, end = 16.dp),
                                                     color = DIVIDER_COLOR.copy(alpha = 0.8f), thickness = 0.8.dp
@@ -1909,9 +1933,9 @@ fun LedgerContent(
             item(key = "spacer_$dateKey") {
                 Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                     AnimatedVisibility(
-                        visible = !isGroupDeleting,
-                        enter = fadeIn(groupFade) + expandVertically(groupDeleteSpring),
-                        exit = fadeOut(groupFade) + shrinkVertically(groupDeleteSpring)
+                        visible = showWholeGroup,
+                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
+                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
                     ) {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
@@ -2056,14 +2080,13 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // 🌟 魔法錨點
                         item(key = "magic_top_anchor") {
                             Spacer(Modifier.height(1.dp).animateItem(
                                 placementSpec = spring(dampingRatio = 0.75f, stiffness = 300f)
                             ))
                         }
 
-                        if (filtered.isEmpty() && !showKeyboard) {
+                        if (displayGroups.isEmpty() && !showKeyboard) {
                             item(key = "__empty__") {
                                 Box(Modifier.fillParentMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
                                     Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
