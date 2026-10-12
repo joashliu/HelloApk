@@ -4158,7 +4158,7 @@ fun CalendarRow(
     maxAbsNet: Double,
     selectedDay: Int?,
     selectedCol: Int?,
-    isVisible: Boolean,                       // ← 新增
+    isVisible: Boolean,
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -4182,7 +4182,6 @@ fun CalendarRow(
         else -> 52.dp
     }
 
-    // 行高只係跟住整體收／放，唔再係「行距塌埋」
     val rowHeight by animateDpAsState(
         targetValue = if (isVisible) contentHeight else 0.dp,
         animationSpec = spring(
@@ -4196,7 +4195,7 @@ fun CalendarRow(
         Modifier
             .fillMaxWidth()
             .height(rowHeight)
-            .clipToBounds(),                  // ← 收縮時裁走格仔，唔會溢出去
+            .clipToBounds(),
         horizontalArrangement = Arrangement.spacedBy(spacing)
     ) {
         for (col in 0 until 7) {
@@ -4208,7 +4207,7 @@ fun CalendarRow(
                         day = dayOfMonth,
                         isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
                         isSelected = selectedDay == dayOfMonth,
-                        isVisible = isVisible,          // ← 傳落去
+                        isVisible = isVisible,
                         records = recordsByDay[dayOfMonth] ?: emptyList(),
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
@@ -4225,7 +4224,7 @@ fun CalendarDayCell(
     day: Int,
     isToday: Boolean,
     isSelected: Boolean,
-    isVisible: Boolean = true,               // ← 新增
+    isVisible: Boolean = true,
     records: List<Record>,
     displayMode: Int,
     maxAbsNet: Double,
@@ -4259,7 +4258,6 @@ fun CalendarDayCell(
         label = "selScale"
     )
 
-    // ★ 新增：每個格仔獨立嘅出現／消失縮放
     val visibilityScale by animateFloatAsState(
         targetValue = if (isVisible) 1f else 0f,
         animationSpec = spring(
@@ -4291,11 +4289,10 @@ fun CalendarDayCell(
         Modifier
             .fillMaxSize()
             .graphicsLayer {
-                // 兩個 scale 疊加：選中放大 × 出現／消失縮放
                 val s = selectionScale * visibilityScale
                 scaleX = s
                 scaleY = s
-                alpha = visibilityScale          // ← 漸變淡出
+                alpha = visibilityScale
             }
             .shadow(
                 elevation = elevation,
@@ -4776,9 +4773,8 @@ fun CalendarContent(
                 ) {
                     val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
                     val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
-                    val scaleAnim = tween<Float>(250, easing = FastOutSlowInEasing)
 
-                                        for (rowIdx in 0 until totalRows) {
+                    for (rowIdx in 0 until totalRows) {
                         val isThisRowSelected = selectedRowIdx == rowIdx
                         val isHidden = selectedDay != null && !isThisRowSelected
 
@@ -4869,17 +4865,6 @@ fun CalendarContent(
                                 exit = shrinkVertically(masterSpring) + fadeOut(fadeAnim)
                             ) {
                                 Spacer(Modifier.height(6.dp))
-                            }
-                        }
-                    }
-
-                                AnimatedVisibility(
-                                    visible = !(isThisRowSelected && selectedDay != null),
-                                    enter = expandVertically(masterSpring) + fadeIn(fadeAnim),
-                                    exit = shrinkVertically(masterSpring) + fadeOut(fadeAnim)
-                                ) {
-                                    Spacer(Modifier.height(6.dp))
-                                }
                             }
                         }
                     }
