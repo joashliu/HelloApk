@@ -210,10 +210,9 @@ data class KeyboardState(
     val editingRecordId: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val selectAmountOnInput: Boolean = false,
-    // 新增旅遊模式屬性
     val currency: String = "HKD",
     val exchangeRateText: String = "0.052",
-    val focusedField: String = "amount" // "amount" 或 "rate"
+    val focusedField: String = "amount"
 )
 
 data class AfterSaveHint(
@@ -580,8 +579,11 @@ fun MainApp() {
     var filterSearchHasFocus by remember { mutableStateOf(false) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
+    
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
+    var webSearchTarget by remember { mutableStateOf<Record?>(null) } 
     var showIconSourceDialog by remember { mutableStateOf(false) }
+    
     var showUrlInputDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
@@ -768,7 +770,6 @@ fun MainApp() {
         pendingCameraUri = null; iconTargetRecord = null
     }
 
-    // ===== 效能優化：增量更新 =====
     DisposableEffect(Unit) {
         val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
@@ -786,12 +787,9 @@ fun MainApp() {
                             val idx = records.indexOfFirst { it.id == r.id }
                             if (idx >= 0) {
                                 val oldRecord = records[idx]
-                                // 💡 修正排序 Bug：如果時間有變，就要重新排過位
                                 if (oldRecord.timestamp == r.timestamp) {
-                                    // 時間冇變，直接原地更新內容（金額、名稱等），維持動畫順暢
                                     records[idx] = r
                                 } else {
-                                    // 時間變咗，先抽走舊記錄，再插返入啱嘅時間排序位置
                                     records.removeAt(idx)
                                     val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
                                     if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
@@ -812,9 +810,7 @@ fun MainApp() {
             if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
         } ?: ""
 
-        // 直接讀取最新一次記帳嘅類別，保證百分百即時同步
         val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
-        // 如果係旅遊，連貨幣都自動預設為 JPY
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
 
         if (!showKeyboard) {
@@ -903,7 +899,6 @@ fun MainApp() {
         val note = keyboardState.noteText
         val category = keyboardState.category
         
-        // 記錄本次儲存嘅類別，作為下次打開鍵盤嘅預設值，並寫入快取
         lastSavedCategory = category
         prefs.edit().putString("last_category", category).apply()
 
@@ -1151,7 +1146,7 @@ fun MainApp() {
                     Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = BRAND_PRIMARY)
                         Spacer(Modifier.height(12.dp))
-                        Text("上傳中...", color = TEXT_PRIMARY)
+                        Text("處理中...", color = TEXT_PRIMARY)
                     }
                 }
             }
@@ -1166,6 +1161,15 @@ fun MainApp() {
             title = { Text("圖標設定") },
             text = {
                 Column {
+                    if (target != null && target.note.isNotBlank()) {
+                        IconSourceOption(Icons.Default.Search, "搜尋「${target.note}」圖標", tint = BRAND_PRIMARY) {
+                            showIconSourceDialog = false
+                            webSearchTarget = target
+                            iconTargetRecord = null
+                        }
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                    }
+
                     IconSourceOption(Icons.Default.PhotoLibrary, "從相冊揀") {
                         showIconSourceDialog = false
                         pickImageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -1250,6 +1254,114 @@ fun MainApp() {
             }
         )
     }
+
+    if (webSearchTarget != null) {
+        val target = webSearchTarget!!
+        var selectedImageUrl by remember { mutableStateOf<String?>(null) }
+
+        BackHandler { webSearchTarget = null }
+
+        Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
+            Column(Modifier.fillMaxSize()) {
+                Surface(color = SURFACE_CARD, shadowElevation = 4.dp) {
+                    Row(
+                        Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { webSearchTarget = null }) {
+                            Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
+                        }
+                        Text("長按圖片設定圖標", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                    }
+                }
+                
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            webViewClient = android.webkit.WebViewClient()
+                            
+                            setOnLongClickListener { v ->
+                                val result = (v as android.webkit.WebView).hitTestResult
+                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE || 
+                                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                                    val url = result.extra
+                                    if (!url.isNullOrBlank()) {
+                                        selectedImageUrl = url
+                                        true
+                                    } else false
+                                } else false
+                            }
+                            
+                            val q = Uri.encode(target.note + " icon")
+                            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
+                        }
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            }
+
+            if (selectedImageUrl != null) {
+                AlertDialog(
+                    onDismissRequest = { selectedImageUrl = null },
+                    title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("將會設為「${target.note}」的專屬圖標", color = TEXT_SECONDARY, fontSize = 14.sp)
+                            Spacer(Modifier.height(16.dp))
+                            AsyncImage(
+                                model = selectedImageUrl,
+                                contentDescription = null,
+                                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val url = selectedImageUrl!!
+                            selectedImageUrl = null
+                            webSearchTarget = null
+                            
+                            scope.launch {
+                                uploading = true
+                                try {
+                                    val bytes = withContext(Dispatchers.IO) {
+                                        if (url.startsWith("data:image")) {
+                                            val base64 = url.substringAfter(",")
+                                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                                        } else {
+                                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                                            conn.connectTimeout = 10000
+                                            conn.readTimeout = 10000
+                                            conn.inputStream.readBytes()
+                                        }
+                                    }
+                                    val cloudUrl = uploadBytesToCloudinary(bytes)
+                                    if (cloudUrl != null) {
+                                        applyUrlToSameName(context, db, target.note, cloudUrl)
+                                    } else {
+                                        Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "下載失敗，這張圖片可能有版權保護", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    uploading = false
+                                }
+                            }
+                        }) { Text("使用", fontWeight = FontWeight.Bold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { selectedImageUrl = null }) { Text("取消", color = TEXT_SECONDARY) }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = SURFACE_CARD
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1285,22 +1397,16 @@ private fun BoxScope.KeyboardAndFabLayer(
             .height(56.dp)
             .graphicsLayer {
                 val p = progressProvider()
-                
-                // 💡 動畫大升級：主動避讓機制 (Ducking)
-                // 只要鍵盤一開始展開 (p > 0)，篩選掣喺首 25% 嘅時間內就會快速淡出，確保完全唔會同半透明鍵盤重疊！
                 val rowAlpha = (1f - (p / 0.25f)).coerceIn(0f, 1f)
                 alpha = rowAlpha
-                
-                // 💡 加入微縮放同埋向下沉嘅物理滑動，營造被鍵盤「推落去」嘅自然空間感
                 val scale = 0.9f + 0.1f * rowAlpha
                 scaleX = scale
                 scaleY = scale
-                translationY = p * 50.dp.toPx() // 隨住鍵盤展開，向下滑動 50dp 讓路
+                translationY = p * 50.dp.toPx()
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // ... (裡面嘅 Box(Modifier.weight(1f)) 同 Surface 保持不變)
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             if (currentPage == 0) {
                 androidx.compose.animation.AnimatedVisibility(
@@ -1807,7 +1913,6 @@ fun LedgerContent(
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
 
-    // 🌟 神級優化 (Level 1)：群組層級嘅延遲移除機制
     var displayGroups by remember { mutableStateOf(groupedByDate) }
     LaunchedEffect(groupedByDate) {
         val updatedGroups = displayGroups.map { oldGrp ->
@@ -1866,7 +1971,6 @@ fun LedgerContent(
                                 .clip(RoundedCornerShape(20.dp))
                                 .animateContentSize(animationSpec = springSpec)
                         ) {
-                            // 🌟 神級優化 (Level 2)：項目層級嘅延遲移除機制
                             var displayRecords by remember { mutableStateOf(dayRecords) }
                             LaunchedEffect(dayRecords) {
                                 val updatedRecords = displayRecords.map { oldRec ->
@@ -1893,7 +1997,7 @@ fun LedgerContent(
                                         Column(modifier = Modifier.fillMaxWidth()) {
                                             AnimatedRecordItem(
                                                 animateOnMount = r.id == justAddedId,
-                                                isDeleting = false // 刪除動畫已交由外層 AnimatedVisibility 接管
+                                                isDeleting = false 
                                             ) {
                                                 SwipeableRecordItem(
                                                     backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
@@ -2226,7 +2330,6 @@ fun AnimatedRecordItem(
         }
     }
 
-    // ===== 效能優化：粒子只在刪除時創建 =====
     val particles = remember(isDeleting) {
         if (!isDeleting) emptyList()
         else {
@@ -2382,7 +2485,6 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) }
 
-    // ===== 效能優化：移除 blur，改用 alpha（Android 12+ 的 blur 開銷大） =====
     val itemAlpha by animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha")
     val itemScale by animateFloatAsState(
         targetValue = when {
@@ -2639,7 +2741,6 @@ fun DayDetailPanel(
     onFanMenuEnd: () -> Unit = {},
     activeFanRecord: Record? = null
 ) {
-    // 拋棄 Surface，精確控制陰影渲染
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2863,7 +2964,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // 旅遊模式專屬：貨幣與匯率切換器
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -3344,7 +3444,6 @@ fun TopStats(
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
     val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
 
-    // 🌟 預先計算第三區塊（餘額/筆數）嘅數值同顏色，畀數字滾動動畫平滑過渡
     val thirdBlockText = if (isFilterMode) "${filteredCount ?: 0}" else formatAmountNoDecimal(balance)
     val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
     val thirdBlockColor by animateColorAsState(
@@ -3360,7 +3459,6 @@ fun TopStats(
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. 單一類別晶片
         if (showCategory || catW > 0.001f) {
             Box(
                 modifier = Modifier.weight(catW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3380,7 +3478,6 @@ fun TopStats(
             }
         }
 
-        // 2. 收入區塊
         if (showIncome || incomeW > 0.001f) {
             Box(
                 modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3403,7 +3500,6 @@ fun TopStats(
                         Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    // 💡 核心修正：加咗一個高度固定而且有 clipToBounds() 嘅 Box，數字滾動時一超出呢個高度就會被隱藏，完美解決重疊問題！
                     Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(), contentAlignment = Alignment.Center) {
                         AnimatedAmount(
                             text = formatAmountNoDecimal(income),
@@ -3416,7 +3512,6 @@ fun TopStats(
             }
         }
 
-        // 3. 支出區塊
         if (showExpense || expenseW > 0.001f) {
             Box(
                 modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
@@ -3439,7 +3534,6 @@ fun TopStats(
                         Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(4.dp))
-                    // 💡 核心修正：同樣用 Box 裁切，數字唔會飛上天花板
                     Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(), contentAlignment = Alignment.Center) {
                         AnimatedAmount(
                             text = formatAmountNoDecimal(expense),
@@ -3452,14 +3546,11 @@ fun TopStats(
             }
         }
 
-        // 4. 餘額 / 筆數區塊 (第三格)
         Box(
             modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
             Column(Modifier.padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                
-                // 💡 標題層：採用微距上下滑動 + 漸隱漸現，並為「筆數」加入 Icon 保持排版對稱
                 AnimatedContent(
                     targetState = isFilterMode,
                     transitionSpec = {
@@ -3491,7 +3582,6 @@ fun TopStats(
 
                 Spacer(Modifier.height(4.dp))
 
-                // 💡 數字層：放棄左右滑動，直接交返畀 AnimatedAmount 做原地無縫數字滾動！
                 Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(), contentAlignment = Alignment.Center) {
                     AnimatedAmount(
                         text = thirdBlockText,
@@ -3514,38 +3604,29 @@ fun AnimatedAmount(
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        // 預留足夠嘅字元空位 (25 個)，確保任何字元刪除時依然處於 Composition 內，從而順利播放完美退出動畫
         for (i in 0 until 25) {
             val char = text.getOrNull(i)
             key(i) {
                 AnimatedContent(
                     targetState = char,
                     transitionSpec = {
-                        // 位移動畫需要 IntOffset 類型
                         val slideEnter = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
                         val slideExit = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
-                        
-                        // 縮放動畫需要 Float 類型
                         val floatEnter = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
                         val floatExit = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
-                        
-                        // 排版大小動畫需要 IntSize 類型
                         val sizeSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
                         if (targetState != null && initialState == null) {
-                            // 1. 新增輸入：由下向上彈出、放大並淡入
                             (slideInVertically(slideEnter) { it / 2 } +
                              fadeIn(tween(200)) +
                              scaleIn(initialScale = 0.4f, animationSpec = floatEnter)) togetherWith
                             fadeOut(tween(0))
                         } else if (targetState == null && initialState != null) {
-                            // 2. 退格刪除：由上向下滑走、縮細並淡出
                             fadeIn(tween(0)) togetherWith
                             (slideOutVertically(slideExit) { it / 2 } +
                              fadeOut(tween(180)) +
                              scaleOut(targetScale = 0.4f, animationSpec = floatExit))
                         } else {
-                            // 3. 數值變更（如轉換貨幣/結算變動）：上下平滑滾動交替（Odometer 效果）
                             (slideInVertically(slideEnter) { it } + fadeIn(tween(220))) togetherWith
                             (slideOutVertically(slideExit) { -it } + fadeOut(tween(220)))
                         }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
@@ -3562,7 +3643,6 @@ fun AnimatedAmount(
                             softWrap = false
                         )
                     } else {
-                        // 隱藏時寬度為 0，配合 SizeTransform 自動平滑擠出/縮入排版空間
                         Spacer(Modifier.width(0.dp))
                     }
                 }
@@ -3573,7 +3653,6 @@ fun AnimatedAmount(
 
 @Composable
 fun DayHeader(dateKey: String, income: Double, expense: Double) {
-    // 解析日期 (假設 dateKey 格式係標準嘅 "yyyy-MM-dd")
     var dayStr = dateKey
     var monthStr = ""
     var weekStr = ""
@@ -3581,30 +3660,27 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
 
     try {
         val date = java.time.LocalDate.parse(dateKey)
-        dayStr = String.format("%02d", date.dayOfMonth) // 補零，例如 "05", "12"，視覺更統一
+        dayStr = String.format(Locale.US, "%02d", date.dayOfMonth)
         monthStr = "${date.monthValue}月"
         weekStr = when (date.dayOfWeek.value) {
             1 -> "週一"; 2 -> "週二"; 3 -> "週三"; 4 -> "週四"; 5 -> "週五"; 6 -> "週六"; 7 -> "週日"; else -> ""
         }
         isToday = date == java.time.LocalDate.now()
-    } catch (e: Exception) {
-        // 如果解析失敗（可能 dateKey 係其他格式），就 fallback 用返原本字串
-    }
+    } catch (_: Exception) {}
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp), // 加大垂直 padding，增加呼吸感
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 🗓️ 左邊：高級感日期排版 (Big Number Style)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = dayStr,
-                fontSize = 34.sp, // 特大字體，極具現代感
+                fontSize = 34.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
-                letterSpacing = (-1).sp // 收緊字距，令大字體更聚神
+                letterSpacing = (-1).sp
             )
             
             if (monthStr.isNotEmpty()) {
@@ -3629,7 +3705,6 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // 💰 右邊：簡潔財務明細
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
@@ -4349,7 +4424,6 @@ fun CalendarContent(
     var selectedColIdx by remember { mutableStateOf<Int?>(null) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
 
-    // 💡 加入快取狀態：完美解決關閉時日期突變為 1 號嘅 Bug
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
@@ -4680,7 +4754,6 @@ fun CalendarContent(
                         .padding(top = 10.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
-                    // 🌟 核心修正：統一動畫參數，保證「月曆格仔收起」同「明細展開」百分百同步完美交接
                     val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
                     val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
                     val scaleAnim = tween<Float>(250, easing = FastOutSlowInEasing)
@@ -4721,7 +4794,6 @@ fun CalendarContent(
                                             selectedRowIdx = rowIdx
                                             selectedColIdx = col
                                             
-                                            // 💡 點擊時同步寫入快取
                                             cachedSelectedDay = day
                                             cachedSelectedCol = col
                                             detailExpandedId = null
@@ -4729,7 +4801,6 @@ fun CalendarContent(
                                     }
                                 )
 
-                                // 🔥 當日明細面板
                                 AnimatedVisibility(
                                     visible = isThisRowSelected && selectedDay != null,
                                     enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
@@ -4738,7 +4809,6 @@ fun CalendarContent(
                                     Column(Modifier.fillMaxWidth()) {
                                         Spacer(Modifier.height(8.dp))
 
-                                        // 💡 使用快取資料，保證退出動畫期間唔會突然跳變
                                         val activeDay = if (isThisRowSelected && selectedDay != null) selectedDay!! else cachedSelectedDay
                                         val activeCol = if (isThisRowSelected && selectedColIdx != null) selectedColIdx!! else cachedSelectedCol
 
@@ -5057,7 +5127,6 @@ fun CompareContent(
 ) {
     val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
-    // ===== 效能優化：預先建立 category -> month -> sum 的緩存 =====
     val categoryMonthSum = remember(records) {
         val map = HashMap<String, HashMap<String, Double>>()
         records.forEach { r ->
