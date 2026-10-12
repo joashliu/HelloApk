@@ -2020,14 +2020,14 @@ fun LedgerContent(
         derivedStateOf {
             val idx = listState.firstVisibleItemIndex
             val off = listState.firstVisibleItemScrollOffset
-            
+
             val absScroll = when (idx) {
-                0 -> 0f 
-                1 -> off.toFloat() 
-                2 -> off.toFloat() + headerHeightPx 
+                0 -> 0f
+                1 -> off.toFloat()
+                2 -> off.toFloat() + headerHeightPx
                 else -> 10000f
             }
-            
+
             (4 - (absScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
         }
     }
@@ -2075,17 +2075,17 @@ fun LedgerContent(
             try {
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
-            } catch (_: Exception) { 
-                try { listState.scrollToItem(0) } catch (_: Exception) {} 
+            } catch (_: Exception) {
+                try { listState.scrollToItem(0) } catch (_: Exception) {}
             }
         }
     }
 
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
-            try { 
+            try {
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
-                listState.animateScrollToItem(0) 
+                listState.animateScrollToItem(0)
             } catch (_: Exception) {
             } finally {
                 try {
@@ -2098,10 +2098,10 @@ fun LedgerContent(
     }
 
     LaunchedEffect(showFuture) {
-        try { 
+        try {
             if (showFuture) {
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
-                listState.animateScrollToItem(0) 
+                listState.animateScrollToItem(0)
             } else {
                 if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
             }
@@ -2213,7 +2213,7 @@ fun LedgerContent(
                                         Column(modifier = Modifier.fillMaxWidth()) {
                                             AnimatedRecordItem(
                                                 animateOnMount = r.id == justAddedId,
-                                                isDeleting = false 
+                                                isDeleting = false
                                             ) {
                                                 SwipeableRecordItem(
                                                     backgroundColor = SURFACE_CARD, record = r, expandedId = expandedId,
@@ -2373,7 +2373,7 @@ fun LedgerContent(
                 }
             }
 
-                        Box(
+            Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -2423,28 +2423,29 @@ fun LedgerContent(
                         }
                     }
                 }
-
-                // ★ 漸進淡出遮罩：列表底部優雅過渡到背景色，貼住導航欄上方
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING)  // 對齊導航欄上緣
-                        .height(120.dp)                                     // 由 FAB 上方約 120dp 開始
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    SURFACE_BG.copy(alpha = 0f),     // 頂：完全透明
-                                    SURFACE_BG.copy(alpha = 0.25f),
-                                    SURFACE_BG.copy(alpha = 0.6f),
-                                    SURFACE_BG.copy(alpha = 0.9f),
-                                    SURFACE_BG                       // 底：完全不透明
-                                )
-                            )
-                        )
-                )
             }
         }
+
+        // ★ 底部漸進遮罩：由 FAB 上方約 120dp 開始，一路漸變到螢幕底部
+        //   導航欄喺 MainApp 層級更後繪製，會自然蓋住漸層下半部，
+        //   所以漸層同導航欄之間完全冇硬接縫
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(280.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to SURFACE_BG.copy(alpha = 0f),
+                            0.30f to SURFACE_BG.copy(alpha = 0.35f),
+                            0.55f to SURFACE_BG.copy(alpha = 0.75f),
+                            0.75f to SURFACE_BG.copy(alpha = 0.95f),
+                            1.00f to SURFACE_BG
+                        )
+                    )
+                )
+        )
 
         FanMenuOverlay(
             progressProvider = { fanMenuProgress.value },
