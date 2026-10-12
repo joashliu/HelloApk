@@ -4182,8 +4182,16 @@ fun CalendarRow(
         else -> 52.dp
     }
 
+    // ★ 新增：預留上下垂直空間，避免選中格仔放大／陰影被行裁切
+    //   選中格仔 scale = 1.06 → 上下各溢出 (1.06 - 1) / 2 = 0.03 倍高度
+    //   再加 2dp 緩衝俾 shadow / border
+    val cellMaxScale = 1.06f
+    val verticalPad = (
+        contentHeight * (cellMaxScale - 1f) / 2f + 2.dp
+    ).coerceAtLeast(4.dp)
+
     val rowHeight by animateDpAsState(
-        targetValue = if (isVisible) contentHeight else 0.dp,
+        targetValue = if (isVisible) contentHeight + verticalPad * 2 else 0.dp,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioNoBouncy,
             stiffness = Spring.StiffnessMediumLow
@@ -4196,12 +4204,18 @@ fun CalendarRow(
             .fillMaxWidth()
             .height(rowHeight)
             .clipToBounds(),
-        horizontalArrangement = Arrangement.spacedBy(spacing)
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         for (col in 0 until 7) {
             val cellIdx = rowIdx * 7 + col
             val dayOfMonth = cellIdx - firstDayOffset + 1
-            Box(Modifier.weight(1f).fillMaxHeight()) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(vertical = verticalPad)   // ← 上下留白，格仔本身高度保持 contentHeight
+            ) {
                 if (dayOfMonth in 1..daysInMonth) {
                     CalendarDayCell(
                         day = dayOfMonth,
