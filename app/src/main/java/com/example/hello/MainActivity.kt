@@ -140,6 +140,8 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+private val keyboardLaunchRequest = mutableStateOf(false)
+
 // ===== 配色 =====
 val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
@@ -610,52 +612,113 @@ object QuickAddNotification {
 }
 
 class MainActivity : ComponentActivity() {
+
     companion object {
         const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
-        private const val REQ_POST_NOTIFICATIONS = 1001
+        private const val REQ_NOTIFICATION = 1001
+        private const val CHANNEL_ID = "ledger_quick_add"
+        private const val NOTIFICATION_ID = 1001
     }
-
-    private var pendingOpenKeyboard by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        pendingOpenKeyboard = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) == true
+        val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
+        if (fromNotification) {
+            keyboardLaunchRequest.value = true
+        }
 
-        QuickAddNotification.createChannel(this)
-        requestNotificationPermissionIfNeeded()
-        QuickAddNotification.show(this)
+        createQuickAddChannel()
+        maybeRequestNotificationPermission()
 
         setContent {
+            val requestKeyboard = keyboardLaunchRequest.value
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
                     MainApp(
-                        openKeyboardOnLaunch = pendingOpenKeyboard,
-                        onKeyboardLaunchConsumed = { pendingOpenKeyboard = false }
+                        openKeyboardOnLaunch = requestKeyboard,
+                        onKeyboardLaunchConsumed = { keyboardLaunchRequest.value = false }
                     )
                 }
             }
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        showQuickAddNotification()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
-            pendingOpenKeyboard = true
+        val fromNotification = intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)
+        if (fromNotification) {
+            keyboardLaunchRequest.value = true
         }
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+    private fun createQuickAddChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                "快速記帳",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            ch.setShowBadge(false)
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            nm.createNotificationChannel(ch)
+        }
+    }
+
+    private fun maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
                 != PackageManager.PERMISSION_GRANTED
             ) {
                 requestPermissions(
-                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
-                    REQ_POST_NOTIFICATIONS
+                    arrayOf("android.permission.POST_NOTIFICATIONS"),
+                    REQ_NOTIFICATION
                 )
             }
+        }
+    }
+
+    private fun showQuickAddNotification() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+            }
+
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            val tapIntent = Intent(this, MainActivity::class.java)
+            tapIntent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            tapIntent.putExtra(EXTRA_OPEN_KEYBOARD, true)
+
+            val pi = PendingIntent.getActivity(
+                this,
+                0,
+                tapIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notif = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_input_add)
+                .setContentTitle("快速記帳")
+                .setContentText("撳一下即開鍵盤記一筆")
+                .setContentIntent(pi)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            nm.notify(NOTIFICATION_ID, notif)
+        } catch (_: Throwable) {
         }
     }
 }
