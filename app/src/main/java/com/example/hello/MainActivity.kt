@@ -4778,102 +4778,100 @@ fun CalendarContent(
                     val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
                     val scaleAnim = tween<Float>(250, easing = FastOutSlowInEasing)
 
-                    for (rowIdx in 0 until totalRows) {
-    val isThisRowSelected = selectedRowIdx == rowIdx
-    val isHidden = selectedDay != null && !isThisRowSelected
+                                        for (rowIdx in 0 until totalRows) {
+                        val isThisRowSelected = selectedRowIdx == rowIdx
+                        val isHidden = selectedDay != null && !isThisRowSelected
 
-    Column(Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            CalendarRow(
+                                rowIdx = rowIdx,
+                                firstDayOffset = firstDayOffset,
+                                daysInMonth = daysInMonth,
+                                today = today,
+                                isCurrentMonth = isCurrentMonth,
+                                recordsByDay = recordsByDay,
+                                displayMode = displayMode,
+                                maxAbsNet = maxAbsNet,
+                                selectedDay = if (isThisRowSelected) selectedDay else null,
+                                selectedCol = if (isThisRowSelected) selectedColIdx else null,
+                                isVisible = !isHidden,
+                                onCellClick = { day, col ->
+                                    if (selectedDay == day) {
+                                        selectedDay = null
+                                        selectedRowIdx = null
+                                        selectedColIdx = null
+                                        detailExpandedId = null
+                                    } else {
+                                        selectedDay = day
+                                        selectedRowIdx = rowIdx
+                                        selectedColIdx = col
+                                        cachedSelectedDay = day
+                                        cachedSelectedCol = col
+                                        detailExpandedId = null
+                                    }
+                                }
+                            )
 
-        CalendarRow(
-            rowIdx = rowIdx,
-            firstDayOffset = firstDayOffset,
-            daysInMonth = daysInMonth,
-            today = today,
-            isCurrentMonth = isCurrentMonth,
-            recordsByDay = recordsByDay,
-            displayMode = displayMode,
-            maxAbsNet = maxAbsNet,
-            selectedDay = if (isThisRowSelected) selectedDay else null,
-            selectedCol = if (isThisRowSelected) selectedColIdx else null,
-            isVisible = !isHidden,                 // ← 交畀行／格仔自己處理
-            onCellClick = { day, col ->
-                if (selectedDay == day) {
-                    selectedDay = null
-                    selectedRowIdx = null
-                    selectedColIdx = null
-                    detailExpandedId = null
-                } else {
-                    selectedDay = day
-                    selectedRowIdx = rowIdx
-                    selectedColIdx = col
-                    cachedSelectedDay = day
-                    cachedSelectedCol = col
-                    detailExpandedId = null
-                }
-            }
-        )
+                            AnimatedVisibility(
+                                visible = isThisRowSelected && selectedDay != null,
+                                enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
+                                exit = shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) + fadeOut(fadeAnim)
+                            ) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    Spacer(Modifier.height(8.dp))
 
-        // 詳情面板照舊
-        AnimatedVisibility(
-            visible = isThisRowSelected && selectedDay != null,
-            enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
-            exit = shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) + fadeOut(fadeAnim)
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                Spacer(Modifier.height(8.dp))
+                                    val activeDay = if (isThisRowSelected && selectedDay != null) selectedDay!! else cachedSelectedDay
+                                    val activeCol = if (isThisRowSelected && selectedColIdx != null) selectedColIdx!! else cachedSelectedCol
 
-                val activeDay = if (isThisRowSelected && selectedDay != null) selectedDay!! else cachedSelectedDay
-                val activeCol = if (isThisRowSelected && selectedColIdx != null) selectedColIdx!! else cachedSelectedCol
+                                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                        val cellWidth = maxWidth / 7
+                                        TrianglePointer(
+                                            colIndex = activeCol,
+                                            cellWidth = cellWidth,
+                                            color = SURFACE_CARD
+                                        )
+                                    }
 
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val cellWidth = maxWidth / 7
-                    TrianglePointer(
-                        colIndex = activeCol,
-                        cellWidth = cellWidth,
-                        color = SURFACE_CARD
-                    )
-                }
+                                    val dateKey = String.format(
+                                        Locale.US, "%04d-%02d-%02d",
+                                        year, month, activeDay
+                                    )
 
-                val dateKey = String.format(
-                    Locale.US, "%04d-%02d-%02d",
-                    year, month, activeDay
-                )
+                                    DayDetailPanel(
+                                        dateKey = dateKey,
+                                        records = recordsByDay[activeDay] ?: emptyList(),
+                                        expandedId = detailExpandedId,
+                                        onExpandChange = { detailExpandedId = it },
+                                        onCopy = { onCopyClick(it) },
+                                        onEdit = { onEditClick(it) },
+                                        onFilter = { onFilterClick(it) },
+                                        onDelete = { onDeleteClick(it) },
+                                        onChangeIcon = { onChangeIconClick(it) },
+                                        onDismiss = {
+                                            selectedDay = null
+                                            selectedRowIdx = null
+                                            selectedColIdx = null
+                                            detailExpandedId = null
+                                        },
+                                        deletingRecordId = deletingRecordId,
+                                        onFanMenuStart = handleFanStart,
+                                        onFanMenuDrag = handleFanDrag,
+                                        onFanMenuEnd = handleFanEnd,
+                                        activeFanRecord = activeFanRecord
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                }
+                            }
 
-                DayDetailPanel(
-                    dateKey = dateKey,
-                    records = recordsByDay[activeDay] ?: emptyList(),
-                    expandedId = detailExpandedId,
-                    onExpandChange = { detailExpandedId = it },
-                    onCopy = { onCopyClick(it) },
-                    onEdit = { onEditClick(it) },
-                    onFilter = { onFilterClick(it) },
-                    onDelete = { onDeleteClick(it) },
-                    onChangeIcon = { onChangeIconClick(it) },
-                    onDismiss = {
-                        selectedDay = null
-                        selectedRowIdx = null
-                        selectedColIdx = null
-                        detailExpandedId = null
-                    },
-                    deletingRecordId = deletingRecordId,
-                    onFanMenuStart = handleFanStart,
-                    onFanMenuDrag = handleFanDrag,
-                    onFanMenuEnd = handleFanEnd,
-                    activeFanRecord = activeFanRecord
-                )
-                Spacer(Modifier.height(12.dp))
-            }
-        }
-
-        AnimatedVisibility(
-            visible = !isHidden && !(isThisRowSelected && selectedDay != null),
-            enter = expandVertically(masterSpring) + fadeIn(fadeAnim),
-            exit = shrinkVertically(masterSpring) + fadeOut(fadeAnim)
-        ) {
-            Spacer(Modifier.height(6.dp))
-        }
-    }
-}
+                            AnimatedVisibility(
+                                visible = !isHidden && !(isThisRowSelected && selectedDay != null),
+                                enter = expandVertically(masterSpring) + fadeIn(fadeAnim),
+                                exit = shrinkVertically(masterSpring) + fadeOut(fadeAnim)
+                            ) {
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
 
                                 AnimatedVisibility(
                                     visible = !(isThisRowSelected && selectedDay != null),
