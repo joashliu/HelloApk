@@ -4343,6 +4343,10 @@ fun CalendarContent(
     var selectedColIdx by remember { mutableStateOf<Int?>(null) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
 
+    // 💡 加入快取狀態：完美解決關閉時日期突變為 1 號嘅 Bug
+    var cachedSelectedDay by remember { mutableIntStateOf(1) }
+    var cachedSelectedCol by remember { mutableIntStateOf(0) }
+
     val scrollState = rememberScrollState()
     
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
@@ -4465,6 +4469,7 @@ fun CalendarContent(
         selectedColIdx = null
         detailExpandedId = null
     }
+    
     LaunchedEffect(selectedDay) {
         if (selectedDay != null) {
             try { scrollState.animateScrollTo(0) } catch (_: Exception) {}
@@ -4669,25 +4674,23 @@ fun CalendarContent(
                         .padding(top = 10.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
+                    // 🌟 核心修正：統一動畫參數，保證「月曆格仔收起」同「明細展開」百分百同步完美交接
+                    val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
+                    val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
+                    val scaleAnim = tween<Float>(250, easing = FastOutSlowInEasing)
+
                     for (rowIdx in 0 until totalRows) {
                         val isThisRowSelected = selectedRowIdx == rowIdx
                         val isHidden = selectedDay != null && !isThisRowSelected
-                        val distance = if (selectedRowIdx != null) abs(rowIdx - selectedRowIdx!!) else 0
-                        val exitDelay = (distance * 28).coerceAtMost(220)
-                        val enterDelay = (distance * 22).coerceAtMost(180)
 
                         AnimatedVisibility(
                             visible = !isHidden,
-                            enter = fadeIn(tween(280, delayMillis = enterDelay, easing = FastOutSlowInEasing)) +
-                                    expandVertically(
-                                        tween(320, delayMillis = enterDelay, easing = FastOutSlowInEasing),
-                                        expandFrom = Alignment.Top
-                                    ),
-                            exit = fadeOut(tween(240, delayMillis = exitDelay, easing = FastOutSlowInEasing)) +
-                                    shrinkVertically(
-                                        tween(300, delayMillis = exitDelay, easing = FastOutSlowInEasing),
-                                        shrinkTowards = Alignment.Top
-                                    )
+                            enter = fadeIn(fadeAnim) +
+                                    expandVertically(masterSpring, expandFrom = Alignment.Top) +
+                                    scaleIn(initialScale = 0.92f, animationSpec = scaleAnim),
+                            exit = fadeOut(fadeAnim) +
+                                   shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) +
+                                   scaleOut(targetScale = 0.92f, animationSpec = scaleAnim)
                         ) {
                             Column(Modifier.fillMaxWidth()) {
                                 CalendarRow(
@@ -4711,32 +4714,32 @@ fun CalendarContent(
                                             selectedDay = day
                                             selectedRowIdx = rowIdx
                                             selectedColIdx = col
+                                            
+                                            // 💡 點擊時同步寫入快取
+                                            cachedSelectedDay = day
+                                            cachedSelectedCol = col
                                             detailExpandedId = null
                                         }
                                     }
                                 )
 
-                                // 🔥 使用 AnimatedVisibility 控制整個面板嘅平滑展開與收起
+                                // 🔥 當日明細面板
                                 AnimatedVisibility(
-                                    visible = isThisRowSelected && selectedDay != null && selectedColIdx != null,
-                                    enter = expandVertically(
-                                        animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
-                                        expandFrom = Alignment.Top
-                                    ) + fadeIn(tween(250)),
-                                    exit = shrinkVertically(
-                                        animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
-                                        shrinkTowards = Alignment.Top
-                                    ) + fadeOut(tween(200))
+                                    visible = isThisRowSelected && selectedDay != null,
+                                    enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
+                                    exit = shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) + fadeOut(fadeAnim)
                                 ) {
                                     Column(Modifier.fillMaxWidth()) {
-                                        // 拉開格仔同當日明細之間嘅距離
                                         Spacer(Modifier.height(8.dp))
 
-                                        // 加返三角形指示器
+                                        // 💡 使用快取資料，保證退出動畫期間唔會突然跳變
+                                        val activeDay = if (isThisRowSelected && selectedDay != null) selectedDay!! else cachedSelectedDay
+                                        val activeCol = if (isThisRowSelected && selectedColIdx != null) selectedColIdx!! else cachedSelectedCol
+
                                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                                             val cellWidth = maxWidth / 7
                                             TrianglePointer(
-                                                colIndex = selectedColIdx ?: 0,
+                                                colIndex = activeCol,
                                                 cellWidth = cellWidth,
                                                 color = SURFACE_CARD
                                             )
@@ -4744,11 +4747,12 @@ fun CalendarContent(
 
                                         val dateKey = String.format(
                                             Locale.US, "%04d-%02d-%02d",
-                                            year, month, selectedDay ?: 1
+                                            year, month, activeDay
                                         )
+                                        
                                         DayDetailPanel(
                                             dateKey = dateKey,
-                                            records = recordsByDay[selectedDay] ?: emptyList(),
+                                            records = recordsByDay[activeDay] ?: emptyList(),
                                             expandedId = detailExpandedId,
                                             onExpandChange = { detailExpandedId = it },
                                             onCopy = { onCopyClick(it) },
@@ -4772,9 +4776,10 @@ fun CalendarContent(
                                     }
                                 }
 
-                                // 冇展開時保留基本嘅底邊距
                                 AnimatedVisibility(
-                                    visible = !(isThisRowSelected && selectedDay != null && selectedColIdx != null)
+                                    visible = !(isThisRowSelected && selectedDay != null),
+                                    enter = expandVertically(masterSpring) + fadeIn(fadeAnim),
+                                    exit = shrinkVertically(masterSpring) + fadeOut(fadeAnim)
                                 ) {
                                     Spacer(Modifier.height(6.dp))
                                 }
