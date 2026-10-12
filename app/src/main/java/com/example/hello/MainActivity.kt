@@ -4158,6 +4158,7 @@ fun CalendarRow(
     maxAbsNet: Double,
     selectedDay: Int?,
     selectedCol: Int?,
+    isVisible: Boolean = true, // 💡 新增參數
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -4206,6 +4207,7 @@ fun CalendarRow(
                         records = recordsByDay[dayOfMonth] ?: emptyList(),
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
+                        isVisible = isVisible, // 💡 向下傳遞
                         onClick = { onCellClick(dayOfMonth, col) }
                     )
                 }
@@ -4222,6 +4224,7 @@ fun CalendarDayCell(
     records: List<Record>,
     displayMode: Int,
     maxAbsNet: Double,
+    isVisible: Boolean = true,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -4252,6 +4255,18 @@ fun CalendarDayCell(
         label = "selScale"
     )
 
+    // 🌟 核心動畫：每一個格仔獨立嘅縮放同淡出
+    val cellScale by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0.1f,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 350f),
+        label = "cellScale"
+    )
+    val cellAlpha by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = tween(150, easing = FastOutLinearInEasing),
+        label = "cellAlpha"
+    )
+
     val borderWidth by animateDpAsState(
         targetValue = if (isSelected) 2.dp else 0.5.dp,
         animationSpec = tween(240, easing = FastOutSlowInEasing),
@@ -4274,8 +4289,9 @@ fun CalendarDayCell(
         Modifier
             .fillMaxSize()
             .graphicsLayer {
-                scaleX = selectionScale
-                scaleY = selectionScale
+                scaleX = selectionScale * cellScale
+                scaleY = selectionScale * cellScale
+                alpha = cellAlpha
             }
             .shadow(
                 elevation = elevation,
@@ -4393,6 +4409,76 @@ fun CalendarDayCell(
                         }
                         Spacer(Modifier.height(2.dp))
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CalendarRow(
+    rowIdx: Int,
+    firstDayOffset: Int,
+    daysInMonth: Int,
+    today: Calendar,
+    isCurrentMonth: Boolean,
+    recordsByDay: Map<Int, List<Record>>,
+    displayMode: Int,
+    maxAbsNet: Double,
+    selectedDay: Int?,
+    selectedCol: Int?,
+    isVisible: Boolean = true,
+    onCellClick: (day: Int, col: Int) -> Unit,
+) {
+    val spacing = 6.dp
+
+    var maxItemsInRow = 0
+    for (col in 0 until 7) {
+        val day = rowIdx * 7 + col - firstDayOffset + 1
+        if (day in 1..daysInMonth) {
+            val c = recordsByDay[day]?.size ?: 0
+            if (c > maxItemsInRow) maxItemsInRow = c
+        }
+    }
+
+    val targetHeight: Dp = when (displayMode) {
+        0 -> 52.dp
+        1 -> (34 + maxItemsInRow * 16).dp.coerceAtLeast(56.dp)
+        2 -> {
+            val iconRows = (maxItemsInRow + 2) / 3
+            (30 + iconRows * 21).dp.coerceAtLeast(52.dp)
+        }
+        else -> 52.dp
+    }
+
+    val rowHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "rowHeight_$rowIdx"
+    )
+
+    Row(
+        Modifier.fillMaxWidth().height(rowHeight),
+        horizontalArrangement = Arrangement.spacedBy(spacing)
+    ) {
+        for (col in 0 until 7) {
+            val cellIdx = rowIdx * 7 + col
+            val dayOfMonth = cellIdx - firstDayOffset + 1
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                if (dayOfMonth in 1..daysInMonth) {
+                    CalendarDayCell(
+                        day = dayOfMonth,
+                        isToday = isCurrentMonth && dayOfMonth == today.get(Calendar.DAY_OF_MONTH),
+                        isSelected = selectedDay == dayOfMonth,
+                        records = recordsByDay[dayOfMonth] ?: emptyList(),
+                        displayMode = displayMode,
+                        maxAbsNet = maxAbsNet,
+                        isVisible = isVisible,
+                        onClick = { onCellClick(dayOfMonth, col) }
+                    )
                 }
             }
         }
@@ -4756,7 +4842,6 @@ fun CalendarContent(
                 ) {
                     val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
                     val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
-                    val scaleAnim = tween<Float>(250, easing = FastOutSlowInEasing)
 
                     for (rowIdx in 0 until totalRows) {
                         val isThisRowSelected = selectedRowIdx == rowIdx
@@ -4764,12 +4849,15 @@ fun CalendarContent(
 
                         AnimatedVisibility(
                             visible = !isHidden,
-                            enter = fadeIn(fadeAnim) +
-                                    expandVertically(masterSpring, expandFrom = Alignment.Top) +
-                                    scaleIn(initialScale = 0.92f, animationSpec = scaleAnim),
-                            exit = fadeOut(fadeAnim) +
-                                   shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) +
-                                   scaleOut(targetScale = 0.92f, animationSpec = scaleAnim)
+                            enter = expandVertically(
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+                                expandFrom = Alignment.Top
+                            ),
+                            // 🌟 核心修改：延遲行收縮 120ms，畀時間裡面嘅格仔縮細同淡出先
+                            exit = shrinkVertically(
+                                animationSpec = tween(350, delayMillis = 120, easing = FastOutSlowInEasing),
+                                shrinkTowards = Alignment.Top
+                            )
                         ) {
                             Column(Modifier.fillMaxWidth()) {
                                 CalendarRow(
@@ -4783,6 +4871,7 @@ fun CalendarContent(
                                     maxAbsNet = maxAbsNet,
                                     selectedDay = if (isThisRowSelected) selectedDay else null,
                                     selectedCol = if (isThisRowSelected) selectedColIdx else null,
+                                    isVisible = !isHidden, // 💡 將可見狀態傳入去，驅動獨立縮放動畫
                                     onCellClick = { day, col ->
                                         if (selectedDay == day) {
                                             selectedDay = null
