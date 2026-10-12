@@ -615,21 +615,21 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
-        private const val REQ_NOTIFICATION = 1001
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
-        if (fromNotification) {
-            keyboardLaunchRequest.value = true
-        }
+        if (fromNotification) keyboardLaunchRequest.value = true
 
         createQuickAddChannel()
-        maybeRequestNotificationPermission()
+        askNotificationPermissionIfNeeded()
 
         setContent {
             val requestKeyboard = keyboardLaunchRequest.value
@@ -652,54 +652,45 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val fromNotification = intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)
-        if (fromNotification) {
+        if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchRequest.value = true
         }
     }
 
     private fun createQuickAddChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(
-                CHANNEL_ID,
-                "快速記帳",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            ch.setShowBadge(false)
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-            nm.createNotificationChannel(ch)
-        }
+        if (Build.VERSION.SDK_INT < 26) return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        val ch = NotificationChannel(
+            CHANNEL_ID,
+            "快速記帳",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        nm.createNotificationChannel(ch)
     }
 
-    private fun maybeRequestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(
-                    arrayOf("android.permission.POST_NOTIFICATIONS"),
-                    REQ_NOTIFICATION
-                )
-            }
+    private fun askNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val granted = checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
         }
     }
 
     private fun showQuickAddNotification() {
         try {
             if (Build.VERSION.SDK_INT >= 33) {
-                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
-                    != PackageManager.PERMISSION_GRANTED
-                ) {
-                    return
-                }
+                val granted = checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+                    PackageManager.PERMISSION_GRANTED
+                if (!granted) return
             }
 
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-            val tapIntent = Intent(this, MainActivity::class.java)
-            tapIntent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            tapIntent.putExtra(EXTRA_OPEN_KEYBOARD, true)
-
+            val tapIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_OPEN_KEYBOARD, true)
+            }
             val pi = PendingIntent.getActivity(
                 this,
                 0,
@@ -713,7 +704,6 @@ class MainActivity : ComponentActivity() {
                 .setContentText("撳一下即開鍵盤記一筆")
                 .setContentIntent(pi)
                 .setOngoing(true)
-                .setAutoCancel(false)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build()
 
