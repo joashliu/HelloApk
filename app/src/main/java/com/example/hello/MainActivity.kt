@@ -4182,13 +4182,17 @@ fun CalendarRow(
         else -> 52.dp
     }
 
-    // ★ 新增：預留上下垂直空間，避免選中格仔放大／陰影被行裁切
-    //   選中格仔 scale = 1.06 → 上下各溢出 (1.06 - 1) / 2 = 0.03 倍高度
-    //   再加 2dp 緩衝俾 shadow / border
+    // 選中格仔放大 1.06 → 上下左右各溢出 (1.06-1)/2 = 0.03 倍尺寸
     val cellMaxScale = 1.06f
+
+    // 垂直預留：跟內容高度比例 + 2dp 緩衝（俾 shadow / border）
     val verticalPad = (
         contentHeight * (cellMaxScale - 1f) / 2f + 2.dp
     ).coerceAtLeast(4.dp)
+
+    // ★ 新增：水平預留，令最左／最右格仔嘅藍框唔會被 Row 嘅 clipToBounds 裁到
+    //   一般手機 7 欄每格約 43dp，0.03 × 43 ≈ 1.3dp，2dp 已足夠，再加少少 buffer
+    val horizontalPad = 3.dp
 
     val rowHeight by animateDpAsState(
         targetValue = if (isVisible) contentHeight + verticalPad * 2 else 0.dp,
@@ -4214,7 +4218,8 @@ fun CalendarRow(
                 Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(vertical = verticalPad)   // ← 上下留白，格仔本身高度保持 contentHeight
+                    // ★ 同時預留垂直 + 水平空間
+                    .padding(vertical = verticalPad, horizontal = horizontalPad)
             ) {
                 if (dayOfMonth in 1..daysInMonth) {
                     CalendarDayCell(
