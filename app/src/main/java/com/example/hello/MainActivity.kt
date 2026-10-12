@@ -5246,15 +5246,15 @@ fun CompareContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             MonthDropdown(
-                                value = selectedMonthA,
-                                months = availableMonths.ifEmpty { listOf(currentMonthKey) },
-                                onChange = { newA ->
-                                    var newB = selectedMonthB
-                                    if (newA == newB) newB = shiftMonthKey(newA, 1)
-                                    onMonthAChange(newA)
-                                    if (newB != selectedMonthB) onMonthBChange(newB)
-                                }
-                            )
+    value = selectedMonthA,
+    months = monthlyKeysThisYear,
+    onChange = { newA ->
+        var newB = selectedMonthB
+        if (newA == newB) newB = shiftMonthKey(newA, 1)
+        onMonthAChange(newA)
+        if (newB != selectedMonthB) onMonthBChange(newB)
+    }
+)
                         }
                         Spacer(Modifier.width(6.dp))
                         Row(
@@ -5263,15 +5263,15 @@ fun CompareContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             MonthDropdown(
-                                value = selectedMonthB,
-                                months = availableMonths.ifEmpty { listOf(currentMonthKey) },
-                                onChange = { newB ->
-                                    var newA = selectedMonthA
-                                    if (newB == newA) newA = shiftMonthKey(newB, -1)
-                                    onMonthBChange(newB)
-                                    if (newA != selectedMonthA) onMonthAChange(newA)
-                                }
-                            )
+    value = selectedMonthB,
+    months = monthlyKeysThisYear,
+    onChange = { newB ->
+        var newA = selectedMonthA
+        if (newB == newA) newA = shiftMonthKey(newB, -1)
+        onMonthBChange(newB)
+        if (newA != selectedMonthA) onMonthAChange(newA)
+    }
+)
                         }
                     }
 
