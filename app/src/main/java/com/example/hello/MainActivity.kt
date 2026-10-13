@@ -2409,9 +2409,12 @@ fun LedgerContent(
                         if (topNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
                             QuickInputSection(
-                                topNotes = topNotes, noteIconMap = noteIconMap, animatedQuickInputs = animatedQuickInputs,
-                                maxRowsPerPage = quickInputMaxRows, onClick = onQuickInputClick
-                            )
+    topNotes = topNotes,
+    noteIconMap = noteIconMap,
+    animatedQuickInputs = animatedQuickInputs,
+    visibleRowCount = quickInputMaxRows,   // ← 由 maxRowsPerPage 改為 visibleRowCount
+    onClick = onQuickInputClick
+)
                         }
                         Spacer(Modifier.height(4.dp))
                     }
@@ -4242,7 +4245,7 @@ fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     animatedQuickInputs: MutableMap<String, Boolean>,
-    maxRowsPerPage: Int = 4,
+    visibleRowCount: Int = 4,          // ← 原本叫 maxRowsPerPage，改咗名
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -4251,6 +4254,7 @@ fun QuickInputSection(
     val configuration = LocalConfiguration.current
     val availableWidth = configuration.screenWidthDp - 52
 
+    // ★ 只依賴 items + availableWidth，永遠唔會因 scroll 而重新計算
     val allFixedRows = remember(items, availableWidth) {
         val rows = mutableListOf<List<Pair<String, Int>>>()
         var currentRow = mutableListOf<Pair<String, Int>>()
@@ -4269,20 +4273,15 @@ fun QuickInputSection(
                 currentRowWidth += estimatedItemWidth + 8
             }
         }
-        if (currentRow.isNotEmpty()) {
-            rows.add(currentRow)
-        }
+        if (currentRow.isNotEmpty()) rows.add(currentRow)
         rows
     }
 
-    val pages = remember(allFixedRows, maxRowsPerPage) {
-        if (allFixedRows.isEmpty()) {
-            emptyList()
-        } else {
-            allFixedRows.chunked(maxRowsPerPage).map { pageRows ->
-                pageRows.flatten()
-            }
-        }
+    // ★ 分頁大小固定 4 行，唔會隨 scroll 改變
+    val ROWS_PER_PAGE = 4
+    val pages = remember(allFixedRows) {
+        if (allFixedRows.isEmpty()) emptyList()
+        else allFixedRows.chunked(ROWS_PER_PAGE)
     }
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
@@ -4294,33 +4293,62 @@ fun QuickInputSection(
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.Top
         ) { page ->
-            AnimatedStretchingFlowRow(
-                items = pages[page],
-                modifier = Modifier
+            Column(
+                Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 14.dp)
-                    .padding(bottom = if (pages.size > 1) 16.dp else 0.dp),
-                horizontalSpacing = 8.dp,
-                verticalSpacing = 8.dp
-            ) { item ->
-                val name = item.first
-                val originalIndex = items.indexOfFirst { it.first == name }
-
-                AnimatedQuickChip(
-                    name = name,
-                    iconUrl = noteIconMap[name] ?: "",
-                    index = maxOf(0, originalIndex),
-                    animatedNames = animatedQuickInputs,
-                    onClick = { onClick(name) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    .padding(bottom = if (pages.size > 1) 16.dp else 0.dp)
+            ) {
+                // ★ 每一行獨立，根據 visibleRowCount 決定顯示／收合
+                pages[page].forEachIndexed { rowIdx, rowItems ->
+                    val rowVisible = rowIdx < visibleRowCount
+                    AnimatedVisibility(
+                        visible = rowVisible,
+                        enter = expandVertically(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            expandFrom = Alignment.Top
+                        ) + fadeIn(tween(180)),
+                        exit = shrinkVertically(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            shrinkTowards = Alignment.Top
+                        ) + fadeOut(tween(140))
+                    ) {
+                        Column {
+                            AnimatedStretchingFlowRow(
+                                items = rowItems,   // ← 只傳一行，包保唔會跨行
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalSpacing = 8.dp,
+                                verticalSpacing = 8.dp
+                            ) { item ->
+                                val name = item.first
+                                val originalIndex = items.indexOfFirst { it.first == name }
+                                AnimatedQuickChip(
+                                    name = name,
+                                    iconUrl = noteIconMap[name] ?: "",
+                                    index = maxOf(0, originalIndex),
+                                    animatedNames = animatedQuickInputs,
+                                    onClick = { onClick(name) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            if (rowIdx < pages[page].lastIndex) {
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
             }
         }
 
