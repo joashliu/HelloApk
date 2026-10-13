@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 26                    // 你用到 NotificationChannel (API 26)
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.3"
+        versionCode = 3
+        versionName = "1.4"
 
         vectorDrawables {
             useSupportLibrary = true
