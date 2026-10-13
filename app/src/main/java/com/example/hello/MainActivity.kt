@@ -411,35 +411,31 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     _records.update { current ->
-                        val updated = current.toMutableList()
-                        parsed.forEach { (type, r, _) ->
-                            when (type) {
-                                DocumentChange.Type.ADDED -> {
-                                    if (updated.any { it.id == r.id }) return@forEach
-                                    val i = updated.indexOfFirst { it.timestamp < r.timestamp }
-                                    if (i >= 0) updated.add(i, r) else updated.add(r)
-                                }
-                                DocumentChange.Type.MODIFIED -> {
-                                    val i = updated.indexOfFirst { it.id == r.id }
-                                    if (i >= 0) {
-                                        if (updated[i].timestamp == r.timestamp) updated[i] = r
-                                        else {
-                                            updated.removeAt(i)
-                                            val ni = updated.indexOfFirst { it.timestamp < r.timestamp }
-                                            if (ni >= 0) updated.add(ni, r) else updated.add(r)
-                                        }
-                                    } else {
-                                        val ni = updated.indexOfFirst { it.timestamp < r.timestamp }
-                                        if (ni >= 0) updated.add(ni, r) else updated.add(r)
-                                    }
-                                }
-                                DocumentChange.Type.REMOVED -> {
-                                    updated.removeAll { it.id == r.id }
-                                }
-                            }
-                        }
-                        updated
-                    }
+    // 一次過合併，唔逐條插入
+    val removedIds = parsed
+        .filter { it.first == DocumentChange.Type.REMOVED }
+        .map { it.second.id }
+        .toSet()
+
+    val changedMap = parsed
+        .filter { it.first == DocumentChange.Type.MODIFIED }
+        .associateBy { it.second.id }
+
+    val addedList = parsed
+        .filter { it.first == DocumentChange.Type.ADDED }
+        .map { it.second }
+        .filter { r -> current.none { it.id == r.id } }
+
+    // 保留 + 更新
+    val merged = current
+        .filter { it.id !in removedIds }
+        .map { changedMap[it.id] ?: it }
+        .toMutableList()
+
+    merged.addAll(addedList)
+    merged.sortByDescending { it.timestamp }
+    merged
+}
                 }
             }
     }
