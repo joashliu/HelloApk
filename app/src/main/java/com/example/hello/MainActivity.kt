@@ -5102,7 +5102,11 @@ fun CalendarDayCell(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CalendarContent(
-    records: List<Record>,
+    calendarUi: CalendarUiState,
+    currentMonthKey: String,
+    onMonthChange: (String) -> Unit,
+    filterCategory: String?,
+    onFilterCategoryChange: (String?) -> Unit,
     onCopyClick: (Record) -> Unit,
     onEditClick: (Record) -> Unit,
     onFilterClick: (Record) -> Unit,
@@ -5114,9 +5118,7 @@ fun CalendarContent(
     val today = remember { Calendar.getInstance() }
     val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
-    var currentMonthKey by remember { mutableStateOf(todayKey) }
     var monthDirection by remember { mutableIntStateOf(1) }
-    var filterCategory by remember { mutableStateOf<String?>(null) }
     var displayMode by remember { mutableIntStateOf(0) }
 
     var selectedDay by remember { mutableStateOf<Int?>(null) }
@@ -5128,7 +5130,7 @@ fun CalendarContent(
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
     val scrollState = rememberScrollState()
-    
+
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
     var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
@@ -5178,62 +5180,15 @@ fun CalendarContent(
     val year = curCal.get(Calendar.YEAR)
     val month = curCal.get(Calendar.MONTH) + 1
     val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
-
-    val monthAllRecords by remember(currentMonthKey) {
-        derivedStateOf { records.filter { monthKeyFromTimestamp(it.timestamp) == currentMonthKey } }
-    }
-
-    val visibleCategories by remember {
-        derivedStateOf {
-            val hasIncome = monthAllRecords.any { it.category == INCOME_CATEGORY }
-            val expenseCats = monthAllRecords
-                .filter { it.category != INCOME_CATEGORY }
-                .groupBy { it.category }
-                .mapValues { (_, list) -> list.sumOf { it.amount } }
-                .toList()
-                .sortedByDescending { it.second }
-                .map { it.first }
-            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
-        }
-    }
-
-    val monthRecords by remember(filterCategory) {
-        derivedStateOf {
-            if (filterCategory == null) monthAllRecords
-            else monthAllRecords.filter { it.category == filterCategory }
-        }
-    }
-
-    val recordsByDay by remember {
-        derivedStateOf {
-            monthRecords.groupBy { r ->
-                Calendar.getInstance().apply { timeInMillis = r.timestamp }
-                    .get(Calendar.DAY_OF_MONTH)
-            }
-        }
-    }
-
-    val maxAbsNet by remember {
-        derivedStateOf {
-            recordsByDay.values.maxOfOrNull { dayRecords ->
-                val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-                val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-                abs(inc - exp)
-            } ?: 0.0
-        }
-    }
-
-    val monthIncome = monthRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
-    val monthExpense = monthRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-    val totalNet = monthIncome - monthExpense
-
-    val itemCount = monthRecords.size
-    val avgPerItem = if (itemCount > 0) {
-        (monthIncome + monthExpense) / itemCount
-    } else 0.0
     val isCurrentMonth = currentMonthKey == todayKey
-    val daysElapsed = if (isCurrentMonth) today.get(Calendar.DAY_OF_MONTH) else daysInMonth
-    val avgPerDay = if (daysElapsed > 0) monthExpense / daysElapsed else 0.0
+
+    // ★ 由 ViewModel 帶入嘅統計資料
+    val recordsByDay = calendarUi.recordsByDay
+    val maxAbsNet = calendarUi.maxAbsNet
+    val totalNet = calendarUi.totalNet
+    val avgPerItem = calendarUi.avgPerItem
+    val avgPerDay = calendarUi.avgPerDay
+    val visibleCategories = calendarUi.visibleCategories
 
     val firstDayOffset = remember(curCal) {
         val first = curCal.clone() as Calendar
@@ -5273,11 +5228,11 @@ fun CalendarContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Surface(
-                        onClick = {
-                            monthDirection = -1
-                            currentMonthKey = shiftMonthKey(currentMonthKey, -1)
-                        },
-                        modifier = Modifier.size(36.dp),
+    onClick = {
+        monthDirection = -1
+        onMonthChange(shiftMonthKey(currentMonthKey, -1))
+    },
+    modifier = Modifier.size(36.dp),
                         shape = CircleShape,
                         color = SURFACE_ELEVATED
                     ) {
@@ -5292,17 +5247,17 @@ fun CalendarContent(
                     Spacer(Modifier.width(10.dp))
 
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            if (currentMonthKey != todayKey) {
-                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
-                                currentMonthKey = todayKey
-                            }
-                        }
-                    ) {
+    horizontalAlignment = Alignment.CenterHorizontally,
+    modifier = Modifier.clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null
+    ) {
+        if (currentMonthKey != todayKey) {
+            monthDirection = if (todayKey > currentMonthKey) 1 else -1
+            onMonthChange(todayKey)
+        }
+    }
+) {
                         Text(
                             "${year}年",
                             fontSize = 11.sp,
@@ -5337,11 +5292,11 @@ fun CalendarContent(
 
                     Spacer(Modifier.width(10.dp))
                     Surface(
-                        onClick = {
-                            monthDirection = 1
-                            currentMonthKey = shiftMonthKey(currentMonthKey, 1)
-                        },
-                        modifier = Modifier.size(36.dp),
+    onClick = {
+        monthDirection = 1
+        onMonthChange(shiftMonthKey(currentMonthKey, 1))
+    },
+    modifier = Modifier.size(36.dp),
                         shape = CircleShape,
                         color = SURFACE_ELEVATED
                     ) {
@@ -5380,26 +5335,26 @@ fun CalendarContent(
                             userScrollEnabled = false
                         ) {
                             item(key = "__all__") {
-                                CalendarFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部",
-                                    onClick = { filterCategory = null }
-                                )
-                            }
-                            items(
-                                items = visibleCategories,
-                                key = { it }
-                            ) { cat ->
-                                CalendarFilterChip(
-                                    modifier = Modifier.animateItem().fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat,
-                                    onClick = {
-                                        filterCategory = if (filterCategory == cat) null else cat
-                                    }
-                                )
-                            }
+    CalendarFilterChip(
+        modifier = Modifier.fillMaxWidth(),
+        selected = filterCategory == null,
+        label = "全部",
+        onClick = { onFilterCategoryChange(null) }
+    )
+}
+items(
+    items = visibleCategories,
+    key = { it }
+) { cat ->
+    CalendarFilterChip(
+        modifier = Modifier.animateItem().fillMaxWidth(),
+        selected = filterCategory == cat,
+        label = cat,
+        onClick = {
+            onFilterCategoryChange(if (filterCategory == cat) null else cat)
+        }
+    )
+}
                         }
                         Spacer(Modifier.height(8.dp))
                         Row(
@@ -5806,70 +5761,24 @@ fun CompareValueCell(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CompareContent(
-    records: List<Record>,
-    availableMonths: List<String>,
+    compareUi: CompareUiState,
     selectedMonthA: String,
     onMonthAChange: (String) -> Unit,
     selectedMonthB: String,
     onMonthBChange: (String) -> Unit,
     onAddClick: () -> Unit,
 ) {
-    val currentMonthKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
-
-    val categoryMonthSum = remember(records) {
-        val map = HashMap<String, HashMap<String, Double>>()
-        records.forEach { r ->
-            val inner = map.getOrPut(r.category) { HashMap() }
-            val key = monthKeyFromTimestamp(r.timestamp)
-            inner[key] = (inner[key] ?: 0.0) + r.amount
-        }
-        map
-    }
+    val categoryMonthSum = compareUi.categoryMonthSum
     fun sumLocal(cat: String, month: String): Double =
         categoryMonthSum[cat]?.get(month) ?: 0.0
 
-    val sortedCategories = remember(records, selectedMonthB, categoryMonthSum) {
-        val expenses = EXPENSE_CATEGORIES.sortedByDescending { cat ->
-            sumLocal(cat, selectedMonthB)
-        }
-        listOf(INCOME_CATEGORY) + expenses
-    }
-
-    val displayCategories = remember(sortedCategories, records, selectedMonthA, selectedMonthB, categoryMonthSum) {
-        sortedCategories.filter { cat ->
-            val amtA = sumLocal(cat, selectedMonthA)
-            val amtB = sumLocal(cat, selectedMonthB)
-            amtA != 0.0 || amtB != 0.0
-        }
-    }
-
-    val incomeA = remember(records, selectedMonthA, categoryMonthSum) { sumLocal(INCOME_CATEGORY, selectedMonthA) }
-    val incomeB = remember(records, selectedMonthB, categoryMonthSum) { sumLocal(INCOME_CATEGORY, selectedMonthB) }
-
-    val totalExpenseA = remember(records, selectedMonthA, categoryMonthSum) {
-        EXPENSE_CATEGORIES.sumOf { sumLocal(it, selectedMonthA) }
-    }
-    val totalExpenseB = remember(records, selectedMonthB, categoryMonthSum) {
-        EXPENSE_CATEGORIES.sumOf { sumLocal(it, selectedMonthB) }
-    }
-    val balanceA = incomeA - totalExpenseA
-    val balanceB = incomeB - totalExpenseB
-
-    val nowCal = remember { Calendar.getInstance() }
-    val currentYear = remember { nowCal.get(Calendar.YEAR) }
-    val currentMonthNum = remember { nowCal.get(Calendar.MONTH) + 1 }
-
-    val monthlyKeysThisYear = remember(currentYear, currentMonthNum) {
-        (1..currentMonthNum).map { m ->
-            String.format(Locale.US, "%04d-%02d", currentYear, m)
-        }
-    }
-
-    val histogramData = remember(records, monthlyKeysThisYear, categoryMonthSum) {
-        EXPENSE_CATEGORIES.associateWith { cat ->
-            monthlyKeysThisYear.map { key -> sumLocal(cat, key) }
-        }
-    }
+    val displayCategories = compareUi.displayCategories
+    val incomeA = compareUi.incomeA
+    val incomeB = compareUi.incomeB
+    val balanceA = compareUi.balanceA
+    val balanceB = compareUi.balanceB
+    val histogramData = compareUi.histogramData
+    val monthlyKeysThisYear = compareUi.monthlyKeysThisYear
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         Column(
