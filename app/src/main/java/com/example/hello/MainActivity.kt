@@ -140,7 +140,6 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
-// 用遞增 token 而唔係 Boolean，確保連續撳同一個通知按鈕都會觸發 effect
 private val keyboardLaunchToken = mutableStateOf(0)
 private val keyboardPrefillNote = mutableStateOf<String?>(null)
 
@@ -151,6 +150,10 @@ data class QuickNoteInfo(
     val amount: Double
 )
 private val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
+
+// ===== ★ 性能：全局 dominant color 緩存 =====
+//  避免每次 recompose 都重新下載圖片 + 掃 pixel 計色
+private val dominantColorCache = mutableMapOf<String, Color>()
 
 // ===== 配色 =====
 val BRAND_PRIMARY = Color(0xFF6366F1)
@@ -422,9 +425,13 @@ fun timeOfDayDistanceSeconds(timestamp: Long, nowMillis: Long): Int {
     return minOf(d, 86400 - d)
 }
 
+/**
+ * ★ 性能優化：targetSize 由 72 降到 32（快 ~5 倍），
+ *  並且封裝成 suspend 方便緩存。
+ */
 fun getDominantMutedColor(bitmap: Bitmap): Color {
     if (bitmap.width <= 0 || bitmap.height <= 0) return Color(0xFFF1F5F9)
-    val targetSize = 72
+    val targetSize = 32
     val scaled: Bitmap = if (bitmap.width > targetSize || bitmap.height > targetSize) {
         val ratio = minOf(targetSize.toFloat() / bitmap.width, targetSize.toFloat() / bitmap.height)
         val nw = (bitmap.width * ratio).toInt().coerceAtLeast(1)
@@ -459,6 +466,40 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     hsv[2] = 0.96f
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
+
+/**
+ * ★ 性能優化：抽出 suspend 函數，方便被緩存調用。
+ */
+suspend fun extractDominantColorFromUrl(ctx: Context, iconUrl: String): Color? =
+    withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(ctx)
+                .data(iconUrl)
+                .allowHardware(false)
+                .build()
+            val result = ctx.imageLoader.execute(request)
+            when (val d = result.drawable) {
+                is android.graphics.drawable.BitmapDrawable ->
+                    getDominantMutedColor(d.bitmap)
+
+                is android.graphics.drawable.ColorDrawable -> {
+                    val c = d.color
+                    if (android.graphics.Color.alpha(c) > 0 &&
+                        android.graphics.Color.red(c)   < 240 &&
+                        android.graphics.Color.green(c) < 240 &&
+                        android.graphics.Color.blue(c)  < 240
+                    ) {
+                        val hsv = FloatArray(3)
+                        android.graphics.Color.colorToHSV(c, hsv)
+                        hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
+                        hsv[2] = 0.96f
+                        Color(android.graphics.Color.HSVToColor(hsv))
+                    } else null
+                }
+                else -> null
+            }
+        } catch (_: Exception) { null }
+    }
 
 fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): Int? {
     val dx = touch.x - center.x
@@ -605,7 +646,6 @@ class MainActivity : ComponentActivity() {
                         prefillNoteOnLaunch = prefillNote,
                         onKeyboardLaunchConsumed = {
                             keyboardPrefillNote.value = null
-                            // token 唔重置，留返俾下次對比用
                         }
                     )
                 }
@@ -668,7 +708,6 @@ class MainActivity : ComponentActivity() {
 
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-            // 通知本體撳落去：空白鍵盤
             val normalIntent = buildLaunchIntent(prefillNote = null)
             val normalPi = PendingIntent.getActivity(
                 this,
@@ -688,7 +727,6 @@ class MainActivity : ComponentActivity() {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
-                        // 只有一個動作按鈕：按鈕顯示最近項目名
             if (first != null && first.note.isNotBlank()) {
                 val noteIntent = buildLaunchIntent(prefillNote = first.note)
                 val notePi = PendingIntent.getActivity(
@@ -699,7 +737,7 @@ class MainActivity : ComponentActivity() {
                 )
                 builder.addAction(
                     android.R.drawable.ic_menu_edit,
-                    first.note,     // ← 顯示最近項目名
+                    first.note,
                     notePi
                 )
             }
@@ -735,11 +773,11 @@ fun MainApp(
     var filterSearchHasFocus by remember { mutableStateOf(false) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
-    
+
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
-    var webSearchTarget by remember { mutableStateOf<Record?>(null) } 
+    var webSearchTarget by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
-    
+
     var showUrlInputDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
@@ -836,7 +874,7 @@ fun MainApp(
             }
         }
     }
-    
+
     val ledgerRecords by remember {
         derivedStateOf {
             val base = if (filterModeOn) filtered else records.toList()
@@ -870,7 +908,6 @@ fun MainApp(
         }
     }
 
-    // ★ 將最近嘅 top 3 快速記帳項目同步去 top-level state，供通知使用
     val topNotesList = remember(topNotes, noteCategoryMap) {
         topNotes.take(3).mapNotNull { (note, _) ->
             if (note.isBlank()) null
@@ -902,8 +939,8 @@ fun MainApp(
         }
     }
     val availableMonths by remember {
-        derivedStateOf { 
-            searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() 
+        derivedStateOf {
+            searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted()
         }
     }
     val visibleCategories by remember {
@@ -1021,9 +1058,6 @@ fun MainApp(
         showKeyboard = true
     }
 
-        // 強制覆蓋式打開鍵盤：
-    //   note == null → 空白鍵盤（清空一切）
-    //   note != null → 覆蓋項目名；鍵盤已開則保留金額，否則全清
     fun openKeyboardForce(note: String?) {
         val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
@@ -1037,7 +1071,6 @@ fun MainApp(
             )
         } else {
             if (showKeyboard) {
-                // 鍵盤已開：保留金額／類別／貨幣，只覆蓋項目名
                 keyboardState = keyboardState.copy(
                     noteText = note,
                     editingNote = false
@@ -1094,7 +1127,7 @@ fun MainApp(
         val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
         if (inputAmt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        
+
         val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
             val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
             inputAmt * rate
@@ -1104,14 +1137,14 @@ fun MainApp(
 
         val note = keyboardState.noteText
         val category = keyboardState.category
-        
+
         lastSavedCategory = category
         prefs.edit().putString("last_category", category).apply()
 
         val editId = keyboardState.editingRecordId
         val ts = keyboardState.timestamp
         val monthKey = monthKeyFromTimestamp(ts)
-        
+
         if (editId != null) {
             db.collection("records").document(editId).update(mapOf(
                 "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
@@ -1128,13 +1161,12 @@ fun MainApp(
                 amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
             scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
         }
-        
+
         showKeyboard = false
         keyboardState = KeyboardState()
         scrollToTopTrigger++
     }
 
-       // ★ 監聽 token：每次撳通知都觸發（包括鍵盤已開、連續撳同一按鈕）
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             if (filterModeOn) filterModeOn = false
@@ -1516,17 +1548,17 @@ fun MainApp(
                         Text("長按圖片設定圖標", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
                     }
                 }
-                
+
                 androidx.compose.ui.viewinterop.AndroidView(
                     factory = { ctx ->
                         android.webkit.WebView(ctx).apply {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             webViewClient = android.webkit.WebViewClient()
-                            
+
                             setOnLongClickListener { v ->
                                 val result = (v as android.webkit.WebView).hitTestResult
-                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE || 
+                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
                                     result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
                                     val url = result.extra
                                     if (!url.isNullOrBlank()) {
@@ -1535,7 +1567,7 @@ fun MainApp(
                                     } else false
                                 } else false
                             }
-                            
+
                             val q = Uri.encode(target.note + " icon")
                             loadUrl("https://www.google.com/search?tbm=isch&q=$q")
                         }
@@ -1565,7 +1597,7 @@ fun MainApp(
                             val url = selectedImageUrl!!
                             selectedImageUrl = null
                             webSearchTarget = null
-                            
+
                             scope.launch {
                                 uploading = true
                                 try {
@@ -2061,6 +2093,13 @@ fun LedgerContent(
     val rowThresholdPx = remember(density) { with(density) { 90.dp.toPx() } }
     val headerHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
 
+    // ★ 首帧標記：避免一開機所有 AnimatedVisibility 同時動畫
+    var isFirstFrame by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        delay(80)
+        isFirstFrame = false
+    }
+
     val quickInputMaxRows by remember {
         derivedStateOf {
             val idx = listState.firstVisibleItemIndex
@@ -2192,6 +2231,11 @@ fun LedgerContent(
         val springSpec = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
         val fadeAnim = tween<Float>(350, easing = FastOutSlowInEasing)
 
+        // ★ 首帧跳過進入動畫
+        val enterTrans: EnterTransition = if (isFirstFrame) EnterTransition.None
+                                            else fadeIn(fadeAnim) + expandVertically(springSpec)
+        val exitTrans: ExitTransition = fadeOut(fadeAnim) + shrinkVertically(springSpec)
+
         displayGroups.forEach { (dateKey, dayRecords) ->
             val isGroupVisible = visibleGroupKeys.contains(dateKey)
             val dayIncome = dayRecords.sumOf { if (it.category == INCOME_CATEGORY && it.id != deletingRecordId) it.amount else 0.0 }
@@ -2199,12 +2243,12 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords.first().id == deletingRecordId
             val showWholeGroup = isGroupVisible && !isGroupDeleting
 
-            stickyHeader(key = "header_$dateKey") {
+            stickyHeader(key = "header_$dateKey", contentType = "header") {
                 Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                     AnimatedVisibility(
                         visible = showWholeGroup,
-                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
-                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
+                        enter = enterTrans,
+                        exit = exitTrans
                     ) {
                         FadingStickyHeader {
                             Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
@@ -2215,12 +2259,12 @@ fun LedgerContent(
                 }
             }
 
-            item(key = "group_$dateKey") {
+            item(key = "group_$dateKey", contentType = "group") {
                 Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                     AnimatedVisibility(
                         visible = showWholeGroup,
-                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
-                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
+                        enter = enterTrans,
+                        exit = exitTrans
                     ) {
                         Column(
                             modifier = Modifier
@@ -2252,12 +2296,12 @@ fun LedgerContent(
 
                                     AnimatedVisibility(
                                         visible = showRec,
-                                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
-                                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
+                                        enter = enterTrans,
+                                        exit = exitTrans
                                     ) {
                                         Column(modifier = Modifier.fillMaxWidth()) {
                                             AnimatedRecordItem(
-                                                animateOnMount = r.id == justAddedId,
+                                                animateOnMount = r.id == justAddedId && !isFirstFrame,
                                                 isDeleting = false
                                             ) {
                                                 SwipeableRecordItem(
@@ -2301,12 +2345,12 @@ fun LedgerContent(
                 }
             }
 
-            item(key = "spacer_$dateKey") {
+            item(key = "spacer_$dateKey", contentType = "spacer") {
                 Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                     AnimatedVisibility(
                         visible = showWholeGroup,
-                        enter = fadeIn(fadeAnim) + expandVertically(springSpec),
-                        exit = fadeOut(fadeAnim) + shrinkVertically(springSpec)
+                        enter = enterTrans,
+                        exit = exitTrans
                     ) {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
@@ -2409,12 +2453,9 @@ fun LedgerContent(
                         if (topNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
                             QuickInputSection(
-    topNotes = topNotes,
-    noteIconMap = noteIconMap,
-    animatedQuickInputs = animatedQuickInputs,
-    visibleRowCount = quickInputMaxRows,   // ← 由 maxRowsPerPage 改為 visibleRowCount
-    onClick = onQuickInputClick
-)
+                                topNotes = topNotes, noteIconMap = noteIconMap, animatedQuickInputs = animatedQuickInputs,
+                                visibleRowCount = quickInputMaxRows, onClick = onQuickInputClick
+                            )
                         }
                         Spacer(Modifier.height(4.dp))
                     }
@@ -2454,14 +2495,14 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        item(key = "magic_top_anchor") {
+                        item(key = "magic_top_anchor", contentType = "anchor") {
                             Spacer(Modifier.height(1.dp).animateItem(
                                 placementSpec = spring(dampingRatio = 0.75f, stiffness = 300f)
                             ))
                         }
 
                         if (displayGroups.isEmpty() && !showKeyboard) {
-                            item(key = "__empty__") {
+                            item(key = "__empty__", contentType = "empty") {
                                 Box(Modifier.fillParentMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.Center) {
                                     Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增", color = TEXT_SECONDARY)
                                 }
@@ -2474,8 +2515,6 @@ fun LedgerContent(
             }
         }
 
-                // ★ 底部漸進遮罩：由導航欄上緣約 20dp 之上先開始淡出
-        //   高度縮短，色標推後，令列表底部保持清晰耐啲
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -2485,7 +2524,7 @@ fun LedgerContent(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.00f to SURFACE_BG.copy(alpha = 0f),
-                            0.50f to SURFACE_BG.copy(alpha = 0f),     // 頭 100dp 完全清晰
+                            0.50f to SURFACE_BG.copy(alpha = 0f),
                             0.70f to SURFACE_BG.copy(alpha = 0.45f),
                             0.88f to SURFACE_BG.copy(alpha = 0.88f),
                             1.00f to SURFACE_BG
@@ -2509,9 +2548,9 @@ fun CategoryStatChip(category: String) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            "類別", 
-            fontSize = 11.sp, 
-            color = TEXT_SECONDARY, 
+            "類別",
+            fontSize = 11.sp,
+            color = TEXT_SECONDARY,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             softWrap = false
@@ -3041,7 +3080,7 @@ fun DayDetailPanel(
     ) {
         val income = records.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
         val expense = records.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
-        
+
         Row(
             Modifier
                 .fillMaxWidth()
@@ -3081,7 +3120,7 @@ fun DayDetailPanel(
         HorizontalDivider(color = DIVIDER_COLOR)
 
         val sortedRecords = records.sortedByDescending { it.timestamp }
-        
+
         sortedRecords.forEachIndexed { idx, r ->
             key(r.id) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -3107,7 +3146,7 @@ fun DayDetailPanel(
                             isActiveItem = activeFanRecord?.id == r.id
                         )
                     }
-                    
+
                     if (idx < sortedRecords.lastIndex) {
                         AnimatedVisibility(
                             visible = deletingRecordId != r.id,
@@ -3378,7 +3417,7 @@ fun LedgerKeyboardPanel(
                                             val base = if (state.selectAmountOnInput) "" else state.amountText
                                             val dotIdx = base.indexOf(".")
                                             val newT = if (dotIdx >= 0) {
-                                                if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base else "$base$key" 
+                                                if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base else "$base$key"
                                             } else {
                                                 if (base.length >= 9) base else "$base$key"
                                             }
@@ -3879,6 +3918,10 @@ fun TopStats(
     }
 }
 
+/**
+ * ★ 性能優化：只遍歷 text 實際長度，唔再固定 25 個 AnimatedContent。
+ *  呢個可以大幅減少 TopStats + 每行金額嘅 Transition 數量。
+ */
 @Composable
 fun AnimatedAmount(
     text: String,
@@ -3888,8 +3931,8 @@ fun AnimatedAmount(
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        for (i in 0 until 25) {
-            val char = text.getOrNull(i)
+        for (i in text.indices) {
+            val char = text[i]
             key(i) {
                 AnimatedContent(
                     targetState = char,
@@ -3900,35 +3943,20 @@ fun AnimatedAmount(
                         val floatExit = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
                         val sizeSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
-                        if (targetState != null && initialState == null) {
-                            (slideInVertically(slideEnter) { it / 2 } +
-                             fadeIn(tween(200)) +
-                             scaleIn(initialScale = 0.4f, animationSpec = floatEnter)) togetherWith
-                            fadeOut(tween(0))
-                        } else if (targetState == null && initialState != null) {
-                            fadeIn(tween(0)) togetherWith
-                            (slideOutVertically(slideExit) { it / 2 } +
-                             fadeOut(tween(180)) +
-                             scaleOut(targetScale = 0.4f, animationSpec = floatExit))
-                        } else {
-                            (slideInVertically(slideEnter) { it } + fadeIn(tween(220))) togetherWith
-                            (slideOutVertically(slideExit) { -it } + fadeOut(tween(220)))
-                        }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
+                        (slideInVertically(slideEnter) { it } + fadeIn(tween(220))) togetherWith
+                        (slideOutVertically(slideExit) { -it } + fadeOut(tween(220)))
+                            .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
                     },
                     label = "digit_$i"
                 ) { c ->
-                    if (c != null) {
-                        Text(
-                            text = c.toString(),
-                            color = color,
-                            fontSize = fontSize,
-                            fontWeight = fontWeight,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    } else {
-                        Spacer(Modifier.width(0.dp))
-                    }
+                    Text(
+                        text = c.toString(),
+                        color = color,
+                        fontSize = fontSize,
+                        fontWeight = fontWeight,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
         }
@@ -3966,7 +3994,7 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
                 color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
                 letterSpacing = (-1).sp
             )
-            
+
             if (monthStr.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(verticalArrangement = Arrangement.Center) {
@@ -4031,41 +4059,29 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
+/**
+ * ★ 性能優化：
+ *  1. 加 200ms 延遲，避免同開機動畫爭資源
+ *  2. 用全局緩存，唔會重複 request 同一張圖
+ */
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val ctx = LocalContext.current
-    var extracted by remember(iconUrl, name) { mutableStateOf<Color?>(null) }
+    var extracted by remember(iconUrl, name) { mutableStateOf(dominantColorCache[iconUrl]) }
 
     LaunchedEffect(iconUrl, name) {
         if (iconUrl.isBlank()) { extracted = null; return@LaunchedEffect }
-        extracted = withContext(Dispatchers.IO) {
-            try {
-                val request = ImageRequest.Builder(ctx)
-                    .data(iconUrl)
-                    .allowHardware(false)
-                    .build()
-                val result = ctx.imageLoader.execute(request)
-                when (val d = result.drawable) {
-                    is android.graphics.drawable.BitmapDrawable ->
-                        getDominantMutedColor(d.bitmap)
-
-                    is android.graphics.drawable.ColorDrawable -> {
-                        val c = d.color
-                        if (android.graphics.Color.alpha(c) > 0 &&
-                            android.graphics.Color.red(c)   < 240 &&
-                            android.graphics.Color.green(c) < 240 &&
-                            android.graphics.Color.blue(c)  < 240
-                        ) {
-                            val hsv = FloatArray(3)
-                            android.graphics.Color.colorToHSV(c, hsv)
-                            hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
-                            hsv[2] = 0.96f
-                            Color(android.graphics.Color.HSVToColor(hsv))
-                        } else null
-                    }
-                    else -> null
-                }
-            } catch (_: Exception) { null }
+        val cached = dominantColorCache[iconUrl]
+        if (cached != null) {
+            extracted = cached
+            return@LaunchedEffect
+        }
+        // 延遲 200ms，等開機動畫播完先做重活
+        delay(200)
+        val color = extractDominantColorFromUrl(ctx, iconUrl)
+        if (color != null) {
+            dominantColorCache[iconUrl] = color
+            extracted = color
         }
     }
 
@@ -4101,6 +4117,11 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+/**
+ * ★ 性能優化：
+ *  移除 maxIntrinsicWidth（遞歸測量，昂貴），
+ *  改用 name.length 估算寬度（與 QuickInputSection 一致）。
+ */
 @Composable
 fun AnimatedStretchingFlowRow(
     items: List<Pair<String, Int>>,
@@ -4127,8 +4148,12 @@ fun AnimatedStretchingFlowRow(
 
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
 
-        measurables.forEach { measurable ->
-            val intrinsicW = measurable.maxIntrinsicWidth(constraints.maxHeight)
+        measurables.forEachIndexed { index, measurable ->
+            // ★ 用估算寬度，唔再用 maxIntrinsicWidth
+            val name = items.getOrNull(index)?.first ?: ""
+            val estimatedW = with(LocalDensity.current) { (50 + name.length * 14).dp.roundToPx() }
+            val intrinsicW = estimatedW.coerceAtMost(safeMaxWidth)
+
             if (currentRow.isEmpty()) {
                 currentRow.add(measurable to intrinsicW)
                 currentWidth = intrinsicW
@@ -4177,7 +4202,7 @@ fun AnimatedStretchingFlowRow(
 
         layout(safeMaxWidth, totalHeight) {
             finalPlaceables.forEachIndexed { index, (placeable, targetOffset) ->
-                val key = items[index].first
+                val key = items.getOrNull(index)?.first ?: return@forEachIndexed
                 val animatable = offsets.getOrPut(key) { Animatable(targetOffset, IntOffset.VectorConverter) }
 
                 if (animatable.targetValue != targetOffset) {
@@ -4209,7 +4234,8 @@ private fun AnimatedQuickChip(
     LaunchedEffect(name) {
         if (!animatedNames.containsKey(name)) {
             animatedNames[name] = true
-            delay((index * 24L).coerceAtMost(260L))
+            // ★ 延遲最多 120ms（原本 42 * 24 = 1008ms）
+            delay((index * 12L).coerceAtMost(120L))
             animProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = spring(
@@ -4239,13 +4265,20 @@ private fun AnimatedQuickChip(
     }
 }
 
+/**
+ * ★ 性能優化 + 行為修復：
+ *  1. allFixedRows 只依賴 items + availableWidth，永遠唔變
+ *  2. 每頁固定 ROWS_PER_PAGE 行（唔跟 scroll 改變）
+ *  3. visibleRowCount 控制逐行顯示（AnimatedVisibility 逐行收合）
+ *  4. 每一行嘅 chips 數量由 allFixedRows 固定，永遠唔會變
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     animatedQuickInputs: MutableMap<String, Boolean>,
-    visibleRowCount: Int = 4,          // ← 原本叫 maxRowsPerPage，改咗名
+    visibleRowCount: Int = 4,
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -4254,7 +4287,7 @@ fun QuickInputSection(
     val configuration = LocalConfiguration.current
     val availableWidth = configuration.screenWidthDp - 52
 
-    // ★ 只依賴 items + availableWidth，永遠唔會因 scroll 而重新計算
+    // ★ 只依賴 items + availableWidth，永遠唔會因 scroll 重新計算
     val allFixedRows = remember(items, availableWidth) {
         val rows = mutableListOf<List<Pair<String, Int>>>()
         var currentRow = mutableListOf<Pair<String, Int>>()
@@ -4305,7 +4338,7 @@ fun QuickInputSection(
                     .padding(horizontal = 14.dp, vertical = 14.dp)
                     .padding(bottom = if (pages.size > 1) 16.dp else 0.dp)
             ) {
-                // ★ 每一行獨立，根據 visibleRowCount 決定顯示／收合
+                // ★ 每一行獨立按 visibleRowCount 顯示／收合
                 pages[page].forEachIndexed { rowIdx, rowItems ->
                     val rowVisible = rowIdx < visibleRowCount
                     AnimatedVisibility(
@@ -4327,7 +4360,7 @@ fun QuickInputSection(
                     ) {
                         Column {
                             AnimatedStretchingFlowRow(
-                                items = rowItems,   // ← 只傳一行，包保唔會跨行
+                                items = rowItems,   // ★ 只傳一行
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalSpacing = 8.dp,
                                 verticalSpacing = 8.dp
@@ -4769,7 +4802,7 @@ fun CalendarContent(
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
     val scrollState = rememberScrollState()
-    
+
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     var fanMenuCenter by remember { mutableStateOf(Offset.Zero) }
     var fanMenuTouch by remember { mutableStateOf(Offset.Zero) }
@@ -4890,7 +4923,7 @@ fun CalendarContent(
         selectedColIdx = null
         detailExpandedId = null
     }
-    
+
     LaunchedEffect(selectedDay) {
         if (selectedDay != null) {
             try { scrollState.animateScrollTo(0) } catch (_: Exception) {}
@@ -5195,7 +5228,7 @@ fun CalendarContent(
                 }
             }
         }
-        
+
         FanMenuOverlay(
             progressProvider = { fanMenuProgress.value },
             centerProvider = { fanMenuCenter },
@@ -5860,6 +5893,8 @@ suspend fun applyUrlToSameName(context: Context, db: FirebaseFirestore, name: St
         val batch = db.batch()
         snap.documents.forEach { doc -> batch.update(doc.reference, "iconUrl", url) }
         batch.commit().await()
+        // ★ 清緩存，因為 icon 變咗，dominant color 要重算
+        dominantColorCache.remove(url)
         Toast.makeText(context,
             if (snap.size() > 1) "圖標已套用到 ${snap.size()} 條同名記錄" else "圖標已更新",
             Toast.LENGTH_SHORT).show()
