@@ -323,6 +323,449 @@ data class CalendarUiState(
 // ===== 由 ViewModel 暴露俾 UI 嘅狀態 END =====
 
 
+// =========================================================
+//  ★ LedgerViewModel：Firebase listener + 所有背景運算
+// =========================================================
+class LedgerViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val db = Firebase.firestore
+    private val prefs = app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+
+    // ---------- 原始資料 ----------
+    private val _records = MutableStateFlow<List<Record>>(emptyList())
+    val records: StateFlow<List<Record>> = _records.asStateFlow()
+
+    private val _loading = MutableStateFlow(true)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    // ---------- Ledger 篩選狀態 ----------
+    private val _filter = MutableStateFlow(FilterState())
+    val filterState: StateFlow<FilterState> = _filter.asStateFlow()
+
+    fun setFilterModeOn(v: Boolean)     { _filter.update { it.copy(modeOn = v) } }
+    fun setFilterCategory(v: String?)   { _filter.update { it.copy(category = v) } }
+    fun setFilterMonth(v: String?)      { _filter.update { it.copy(month = v) } }
+    fun setFilterSearch(v: String)      { _filter.update { it.copy(search = v) } }
+    fun setShowFuture(v: Boolean)       { _filter.update { it.copy(showFuture = v) } }
+    fun setDeletingId(v: String?)       { _filter.update { it.copy(deletingId = v) } }
+
+    // ---------- 比較頁狀態 ----------
+    private val _defaultMonthA = monthKeyFromTimestamp(System.currentTimeMillis())
+    private val _defaultMonthB = shiftMonthKey(_defaultMonthA, -1)
+
+    private val _compareMonthA = MutableStateFlow(
+        prefs.getString("compare_month_a", _defaultMonthA) ?: _defaultMonthA)
+    val compareMonthA: StateFlow<String> = _compareMonthA.asStateFlow()
+
+    private val _compareMonthB = MutableStateFlow(
+        prefs.getString("compare_month_b", _defaultMonthB) ?: _defaultMonthB)
+    val compareMonthB: StateFlow<String> = _compareMonthB.asStateFlow()
+
+    fun setCompareMonthA(v: String) {
+        _compareMonthA.value = v
+        prefs.edit().putString("compare_month_a", v).apply()
+    }
+    fun setCompareMonthB(v: String) {
+        _compareMonthB.value = v
+        prefs.edit().putString("compare_month_b", v).apply()
+    }
+
+    // ---------- 月曆頁狀態 ----------
+    private val _calendarMonthKey = MutableStateFlow(
+        monthKeyFromTimestamp(System.currentTimeMillis()))
+    val calendarMonthKey: StateFlow<String> = _calendarMonthKey.asStateFlow()
+
+    private val _calendarFilterCategory = MutableStateFlow<String?>(null)
+    val calendarFilterCategory: StateFlow<String?> = _calendarFilterCategory.asStateFlow()
+
+    fun setCalendarMonthKey(v: String)          { _calendarMonthKey.value = v }
+    fun setCalendarFilterCategory(v: String?)   { _calendarFilterCategory.value = v }
+
+    // ---------- Ledger UI State ----------
+    val ledgerUiState: StateFlow<LedgerUiState> = combine(
+        _records, _loading, _filter
+    ) { records, loading, filter ->
+        computeLedgerUiState(records, loading, filter)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
+
+    // ---------- Compare UI State ----------
+    val compareUiState: StateFlow<CompareUiState> = combine(
+        _records, _compareMonthA, _compareMonthB
+    ) { records, a, b ->
+        computeCompareUiState(records, a, b)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CompareUiState())
+
+    // ---------- Calendar UI State ----------
+    val calendarUiState: StateFlow<CalendarUiState> = combine(
+        _records, _calendarMonthKey, _calendarFilterCategory
+    ) { records, mk, cat ->
+        computeCalendarUiState(records, mk, cat)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
+
+    // =====================================================
+    //  Firebase listener
+    // =====================================================
+    init { listenToFirestore() }
+
+    private fun listenToFirestore() {
+        db.collection("records")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, err ->
+                _loading.value = false
+                if (err != null || snap == null) return@addSnapshotListener
+
+                _records.update { current ->
+                    val updated = current.toMutableList()
+                    snap.documentChanges.forEach { change ->
+                        val r = change.document.toObject(Record::class.java)
+                            ?.copy(id = change.document.id) ?: return@forEach
+                        when (change.type) {
+                            DocumentChange.Type.ADDED -> {
+                                if (updated.any { it.id == r.id }) return@forEach
+                                val i = updated.indexOfFirst { it.timestamp < r.timestamp }
+                                if (i >= 0) updated.add(i, r) else updated.add(r)
+                            }
+                            DocumentChange.Type.MODIFIED -> {
+                                val i = updated.indexOfFirst { it.id == r.id }
+                                if (i >= 0) {
+                                    if (updated[i].timestamp == r.timestamp) updated[i] = r
+                                    else {
+                                        updated.removeAt(i)
+                                        val ni = updated.indexOfFirst { it.timestamp < r.timestamp }
+                                        if (ni >= 0) updated.add(ni, r) else updated.add(r)
+                                    }
+                                } else {
+                                    val ni = updated.indexOfFirst { it.timestamp < r.timestamp }
+                                    if (ni >= 0) updated.add(ni, r) else updated.add(r)
+                                }
+                            }
+                            DocumentChange.Type.REMOVED -> {
+                                updated.removeAll { it.id == r.id }
+                            }
+                        }
+                    }
+                    updated
+                }
+            }
+    }
+
+    // =====================================================
+    //  CRUD
+    // =====================================================
+    fun addRecord(record: Record, onIdReady: (String) -> Unit = {}) {
+        val newId = db.collection("records").document().id
+        val toSave = record.copy(id = newId)
+        _records.update { current ->
+            val list = current.toMutableList()
+            val i = list.indexOfFirst { it.timestamp < toSave.timestamp }
+            if (i >= 0) list.add(i, toSave) else list.add(toSave)
+            list
+        }
+        viewModelScope.launch {
+            try { db.collection("records").document(newId).set(toSave) }
+            catch (_: Exception) {}
+        }
+        onIdReady(newId)
+    }
+
+    fun updateRecord(id: String, amount: Double, note: String,
+                     category: String, timestamp: Long) {
+        _records.update { list ->
+            list.map {
+                if (it.id == id) it.copy(
+                    amount = amount, note = note,
+                    category = category, timestamp = timestamp
+                ) else it
+            }
+        }
+        viewModelScope.launch {
+            try {
+                db.collection("records").document(id).update(mapOf(
+                    "amount" to amount, "note" to note,
+                    "category" to category, "timestamp" to timestamp))
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun deleteRecord(id: String) {
+        viewModelScope.launch {
+            try { db.collection("records").document(id).delete() }
+            catch (_: Exception) {}
+        }
+    }
+
+    fun restoreRecord(record: Record) {
+        _records.update { current ->
+            if (current.any { it.id == record.id }) current
+            else (current + record).sortedByDescending { it.timestamp }
+        }
+        viewModelScope.launch {
+            try { db.collection("records").document(record.id).set(record) }
+            catch (_: Exception) {}
+        }
+    }
+
+    fun latestIconForNote(note: String): String =
+        _records.value.filter { it.note == note && it.note.isNotBlank() }
+            .maxByOrNull { it.timestamp }?.iconUrl ?: ""
+
+    fun monthTotal(category: String, monthKey: String): Double =
+        _records.value
+            .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
+            .sumOf { it.amount }
+}
+
+
+// =========================================================
+//  ★ 純函數：全部重運算集中呢度，跑喺 Dispatchers.Default
+// =========================================================
+private fun computeLedgerUiState(
+    records: List<Record>,
+    loading: Boolean,
+    filter: FilterState,
+): LedgerUiState {
+    val now = System.currentTimeMillis()
+
+    // ---- 1. 搜尋 ----
+    val searchFiltered: List<Record> = if (filter.search.isBlank()) records else {
+        val q = filter.search
+        val hasExactNote = records.any { it.note == q }
+        val hasExactCategory = CATEGORIES.any { it == q }
+        records.filter { r ->
+            when {
+                hasExactNote -> r.note == q
+                hasExactCategory -> r.category == q
+                else -> r.note.contains(q, true) || r.category.contains(q, true)
+            }
+        }
+    }
+
+    // ---- 2. 類別 / 月份 ----
+    val catMonthFiltered = searchFiltered.filter { r ->
+        (filter.category == null || r.category == filter.category) &&
+        (filter.month == null || monthKeyFromTimestamp(r.timestamp) == filter.month)
+    }
+
+    // ---- 3. ledgerRecords ----
+    val base = if (filter.modeOn) catMonthFiltered else records
+    val ledgerRecords = if (filter.showFuture) base
+                        else base.filter { it.timestamp <= now + 60_000 }
+
+    // ---- 4. 統計 ----
+    val hasIncome  = ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != filter.deletingId }
+    val hasExpense = ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != filter.deletingId }
+    val totalIncome = ledgerRecords.sumOf {
+        if (it.category == INCOME_CATEGORY && it.id != filter.deletingId) it.amount else 0.0 }
+    val totalExpense = ledgerRecords.sumOf {
+        if (it.category != INCOME_CATEGORY && it.id != filter.deletingId) it.amount else 0.0 }
+
+    // ---- 5. 分組 ----
+    val groupedByDate = ledgerRecords
+        .groupBy { dateKeyFromTimestamp(it.timestamp) }
+        .toList()
+
+    // ---- 6. 單一 note filter ----
+    val isExactNoteFilter = filter.modeOn &&
+        ledgerRecords.isNotEmpty() &&
+        ledgerRecords.map { it.note }.distinct().size == 1
+
+    // ---- 7. topNotes / recentAmount / icon / names / category ----
+    val nonBlank = records.filter { it.note.isNotBlank() }
+
+    val topNotes = nonBlank
+        .groupBy { it.note }
+        .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
+        .sortedBy { it.second }
+        .take(20)
+        .map { it.first to 0 }
+
+    val recentAmountByNote = nonBlank
+        .groupBy { it.note }
+        .mapValues { (_, list) ->
+            list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0
+        }
+
+    val noteIconMap = records
+        .filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
+        .groupBy { it.note }
+        .mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
+
+    val allNoteNames = nonBlank.map { it.note }.distinct()
+
+    val noteCategoryMap = nonBlank
+        .groupBy { it.note }
+        .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
+
+    val availableMonths = searchFiltered
+        .map { monthKeyFromTimestamp(it.timestamp) }
+        .distinct()
+        .sorted()
+
+    // ---- 8. visible categories ----
+    val baseForCat = if (filter.month == null) searchFiltered
+                     else searchFiltered.filter { monthKeyFromTimestamp(it.timestamp) == filter.month }
+    val hasInc = baseForCat.any { it.category == INCOME_CATEGORY }
+    val expenseCats = baseForCat
+        .filter { it.category != INCOME_CATEGORY }
+        .groupBy { it.category }
+        .mapValues { (_, list) -> list.sumOf { it.amount } }
+        .toList().sortedByDescending { it.second }.map { it.first }
+    val visibleCategories =
+        (if (hasInc) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+
+    // ---- 9. 通知用嘅 top 3 ----
+    val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
+        if (note.isBlank()) null
+        else QuickNoteInfo(
+            note = note,
+            category = noteCategoryMap[note] ?: "飲食",
+            amount = records.filter { it.note == note }
+                .maxByOrNull { it.timestamp }?.amount ?: 0.0
+        )
+    }
+
+    return LedgerUiState(
+        loading = loading,
+        ledgerRecords = ledgerRecords,
+        groupedByDate = groupedByDate,
+        hasIncome = hasIncome,
+        hasExpense = hasExpense,
+        totalIncome = totalIncome,
+        totalExpense = totalExpense,
+        isExactNoteFilter = isExactNoteFilter,
+        topNotes = topNotes,
+        recentAmountByNote = recentAmountByNote,
+        noteIconMap = noteIconMap,
+        allNoteNames = allNoteNames,
+        noteCategoryMap = noteCategoryMap,
+        availableMonths = availableMonths,
+        visibleCategories = visibleCategories,
+        topQuickNotesInfo = quickInfo,
+    )
+}
+
+private fun computeCompareUiState(
+    records: List<Record>,
+    monthA: String,
+    monthB: String,
+): CompareUiState {
+    val categoryMonthSum = HashMap<String, HashMap<String, Double>>()
+    records.forEach { r ->
+        val inner = categoryMonthSum.getOrPut(r.category) { HashMap() }
+        val key = monthKeyFromTimestamp(r.timestamp)
+        inner[key] = (inner[key] ?: 0.0) + r.amount
+    }
+    fun sumLocal(cat: String, month: String): Double =
+        categoryMonthSum[cat]?.get(month) ?: 0.0
+
+    val sortedCategories = listOf(INCOME_CATEGORY) +
+        EXPENSE_CATEGORIES.sortedByDescending { sumLocal(it, monthB) }
+
+    val displayCategories = sortedCategories.filter { cat ->
+        sumLocal(cat, monthA) != 0.0 || sumLocal(cat, monthB) != 0.0
+    }
+
+    val incomeA = sumLocal(INCOME_CATEGORY, monthA)
+    val incomeB = sumLocal(INCOME_CATEGORY, monthB)
+    val totalExpenseA = EXPENSE_CATEGORIES.sumOf { sumLocal(it, monthA) }
+    val totalExpenseB = EXPENSE_CATEGORIES.sumOf { sumLocal(it, monthB) }
+
+    val cal = Calendar.getInstance()
+    val currentYear = cal.get(Calendar.YEAR)
+    val currentMonthNum = cal.get(Calendar.MONTH) + 1
+    val monthlyKeysThisYear = (1..currentMonthNum).map { m ->
+        String.format(Locale.US, "%04d-%02d", currentYear, m)
+    }
+
+    val histogramData = EXPENSE_CATEGORIES.associateWith { cat ->
+        monthlyKeysThisYear.map { key -> sumLocal(cat, key) }
+    }
+
+    return CompareUiState(
+        categoryMonthSum = categoryMonthSum,
+        sortedCategories = sortedCategories,
+        displayCategories = displayCategories,
+        incomeA = incomeA,
+        incomeB = incomeB,
+        totalExpenseA = totalExpenseA,
+        totalExpenseB = totalExpenseB,
+        balanceA = incomeA - totalExpenseA,
+        balanceB = incomeB - totalExpenseB,
+        histogramData = histogramData,
+        monthlyKeysThisYear = monthlyKeysThisYear,
+    )
+}
+
+private fun computeCalendarUiState(
+    records: List<Record>,
+    monthKey: String,
+    filterCategory: String?,
+): CalendarUiState {
+    val monthAllRecords = records.filter { monthKeyFromTimestamp(it.timestamp) == monthKey }
+
+    val hasIncome = monthAllRecords.any { it.category == INCOME_CATEGORY }
+    val expenseCats = monthAllRecords
+        .filter { it.category != INCOME_CATEGORY }
+        .groupBy { it.category }
+        .mapValues { (_, list) -> list.sumOf { it.amount } }
+        .toList().sortedByDescending { it.second }.map { it.first }
+    val visibleCategories =
+        (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+
+    val monthRecords = if (filterCategory == null) monthAllRecords
+                       else monthAllRecords.filter { it.category == filterCategory }
+
+    val recordsByDay = monthRecords.groupBy { r ->
+        Calendar.getInstance().apply { timeInMillis = r.timestamp }
+            .get(Calendar.DAY_OF_MONTH)
+    }
+
+    val maxAbsNet = recordsByDay.values.maxOfOrNull { dayRecords ->
+        val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+        val exp = dayRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+        abs(inc - exp)
+    } ?: 0.0
+
+    val monthIncome = monthRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+    val monthExpense = monthRecords.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+    val totalNet = monthIncome - monthExpense
+
+    val itemCount = monthRecords.size
+    val avgPerItem = if (itemCount > 0) (monthIncome + monthExpense) / itemCount else 0.0
+
+    val todayKey = monthKeyFromTimestamp(System.currentTimeMillis())
+    val parts = monthKey.split("-")
+    val curCal = Calendar.getInstance().apply {
+        if (parts.size == 2) set(parts[0].toInt(), parts[1].toInt() - 1, 1)
+    }
+    val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val isCurrentMonth = monthKey == todayKey
+    val daysElapsed = if (isCurrentMonth)
+        Calendar.getInstance().get(Calendar.DAY_OF_MONTH) else daysInMonth
+    val avgPerDay = if (daysElapsed > 0) monthExpense / daysElapsed else 0.0
+
+    return CalendarUiState(
+        monthAllRecords = monthAllRecords,
+        visibleCategories = visibleCategories,
+        monthRecords = monthRecords,
+        recordsByDay = recordsByDay,
+        maxAbsNet = maxAbsNet,
+        monthIncome = monthIncome,
+        monthExpense = monthExpense,
+        totalNet = totalNet,
+        itemCount = itemCount,
+        avgPerItem = avgPerItem,
+        avgPerDay = avgPerDay,
+    )
+}
+
+
 object AboveAnchorPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
