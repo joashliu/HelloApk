@@ -4030,7 +4030,7 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        for (i in 0 until 25) {
+        for (i in 0 until text.length.coerceAtLeast(1)) {
             val char = text.getOrNull(i)
             key(i) {
                 AnimatedContent(
