@@ -3936,16 +3936,15 @@ fun AnimatedAmount(
             key(i) {
                 AnimatedContent(
                     targetState = char,
-                    transitionSpec = {
+                                        transitionSpec = {
                         val slideEnter = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
                         val slideExit = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
-                        val floatEnter = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
-                        val floatExit = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
                         val sizeSpring = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
-                        (slideInVertically(slideEnter) { it } + fadeIn(tween(220))) togetherWith
-                        (slideOutVertically(slideExit) { -it } + fadeOut(tween(220)))
-                            .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
+                        (
+                            (slideInVertically(slideEnter) { it } + fadeIn(tween(220))) togetherWith
+                            (slideOutVertically(slideExit) { -it } + fadeOut(tween(220)))
+                        ).using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> sizeSpring }))
                     },
                     label = "digit_$i"
                 ) { c ->
@@ -4117,11 +4116,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-/**
- * ★ 性能優化：
- *  移除 maxIntrinsicWidth（遞歸測量，昂貴），
- *  改用 name.length 估算寬度（與 QuickInputSection 一致）。
- */
 @Composable
 fun AnimatedStretchingFlowRow(
     items: List<Pair<String, Int>>,
@@ -4130,8 +4124,10 @@ fun AnimatedStretchingFlowRow(
     verticalSpacing: Dp = 8.dp,
     itemContent: @Composable (Pair<String, Int>) -> Unit
 ) {
-    val hSpacingPx = with(LocalDensity.current) { horizontalSpacing.roundToPx() }
-    val vSpacingPx = with(LocalDensity.current) { verticalSpacing.roundToPx() }
+    // ★ 一次性喺 composable 作用域捕獲 density，唔好喺 Layout block 入面讀
+    val density = LocalDensity.current
+    val hSpacingPx = with(density) { horizontalSpacing.roundToPx() }
+    val vSpacingPx = with(density) { verticalSpacing.roundToPx() }
 
     val offsets = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
     val coroutineScope = rememberCoroutineScope()
@@ -4146,12 +4142,12 @@ fun AnimatedStretchingFlowRow(
         var currentRow = mutableListOf<Pair<androidx.compose.ui.layout.Measurable, Int>>()
         var currentWidth = 0
 
-        val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
+        val safeMaxWidth = if (constraints.hasBoundWidth) constraints.maxWidth else 1000
 
         measurables.forEachIndexed { index, measurable ->
-            // ★ 用估算寬度，唔再用 maxIntrinsicWidth
+            // ★ 用捕獲嘅 density（唔再係 composable 讀取）
             val name = items.getOrNull(index)?.first ?: ""
-            val estimatedW = with(LocalDensity.current) { (50 + name.length * 14).dp.roundToPx() }
+            val estimatedW = with(density) { (50 + name.length * 14).dp.roundToPx() }
             val intrinsicW = estimatedW.coerceAtMost(safeMaxWidth)
 
             if (currentRow.isEmpty()) {
