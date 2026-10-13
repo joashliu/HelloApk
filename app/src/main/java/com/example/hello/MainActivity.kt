@@ -2842,42 +2842,33 @@ fun AnimatedRecordItem(
         }
     }
 
-    // ★ 唔需要動畫嘅情況直接跳過
-val skipAnim = !isDeleting && !animateOnMount
-val itemHeight = if (skipAnim) 72.dp else {
-    val targetHeight = if (isDeleting) 0.dp else if (!appeared) 0.dp else 72.dp
-    animateDpAsState(
+    val targetHeight = if (isDeleting) 0.dp
+                       else if (animateOnMount && !appeared) 0.dp else 72.dp
+    val itemHeight by animateDpAsState(
         targetValue = targetHeight,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "eHeight"
-    ).value
-}
-    val entranceScale = if (skipAnim) 1f else {
-    val targetScale = if (isDeleting) 0.85f else if (!appeared) 0.85f else 1f
-    animateFloatAsState(
+    )
+    val targetScale = if (isDeleting) 0.85f
+                      else if (animateOnMount && !appeared) 0.85f else 1f
+    val entranceScale by animateFloatAsState(
         targetValue = targetScale,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
         label = "eScale"
-    ).value
-}
-
-val entranceAlpha = if (skipAnim) 1f else {
-    val targetAlpha = if (isDeleting) 0f else if (!appeared) 0f else 1f
-    animateFloatAsState(
+    )
+    val targetAlpha = if (isDeleting) 0f
+                      else if (animateOnMount && !appeared) 0f else 1f
+    val entranceAlpha by animateFloatAsState(
         targetValue = targetAlpha,
         animationSpec = tween(if (isDeleting) 200 else 300, easing = FastOutSlowInEasing),
         label = "eAlpha"
-    ).value
-}
-
-val entranceTranslationY = if (skipAnim) 0f else {
-    val targetTranslateY = if (!appeared) 40f else 0f
-    animateFloatAsState(
+    )
+    val targetTranslateY = if (animateOnMount && !appeared) 40f else 0f
+    val entranceTranslationY by animateFloatAsState(
         targetValue = targetTranslateY,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
         label = "eY"
-    ).value
-}
+    )
 
     val particleProgress = remember { Animatable(0f) }
     LaunchedEffect(isDeleting) {
@@ -3025,7 +3016,7 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    val itemGlobalPosition = remember { androidx.compose.runtime.mutableStateOf(Offset.Zero) }
+    var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) }
 
     val itemAlpha by animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha")
     val itemScale by animateFloatAsState(
@@ -3108,7 +3099,7 @@ fun SwipeableRecordItem(
             .pointerInput("longPress_${record.id}") {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { localOffset ->
-                        onFanMenuStart(itemGlobalPosition.value + localOffset)
+                        onFanMenuStart(itemGlobalPosition + localOffset)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
