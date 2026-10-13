@@ -114,6 +114,18 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import androidx.core.app.NotificationCompat
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.imageLoader
@@ -216,7 +228,7 @@ data class Record(
     val category: String = "飲食",
     val timestamp: Long = System.currentTimeMillis(),
     val iconUrl: String = "",
-    var id: String = ""
+    val id: String = ""
 )
 
 data class NavItem(val label: String, val icon: ImageVector)
@@ -248,6 +260,68 @@ data class DateHeaderInfo(
     val isWeekend: Boolean,
     val dayTag: String?
 )
+
+
+// ===== 由 ViewModel 暴露俾 UI 嘅狀態 =====
+
+data class FilterState(
+    val modeOn: Boolean = false,
+    val category: String? = null,
+    val month: String? = null,
+    val search: String = "",
+    val showFuture: Boolean = false,
+    val deletingId: String? = null,
+)
+
+data class LedgerUiState(
+    val loading: Boolean = true,
+    val ledgerRecords: List<Record> = emptyList(),
+    val groupedByDate: List<Pair<String, List<Record>>> = emptyList(),
+    val hasIncome: Boolean = false,
+    val hasExpense: Boolean = false,
+    val totalIncome: Double = 0.0,
+    val totalExpense: Double = 0.0,
+    val isExactNoteFilter: Boolean = false,
+    val topNotes: List<Pair<String, Int>> = emptyList(),
+    val recentAmountByNote: Map<String, Double> = emptyMap(),
+    val noteIconMap: Map<String, String> = emptyMap(),
+    val allNoteNames: List<String> = emptyList(),
+    val noteCategoryMap: Map<String, String> = emptyMap(),
+    val availableMonths: List<String> = emptyList(),
+    val visibleCategories: List<String> = emptyList(),
+    val topQuickNotesInfo: List<QuickNoteInfo> = emptyList(),
+)
+
+data class CompareUiState(
+    val categoryMonthSum: Map<String, Map<String, Double>> = emptyMap(),
+    val sortedCategories: List<String> = emptyList(),
+    val displayCategories: List<String> = emptyList(),
+    val incomeA: Double = 0.0,
+    val incomeB: Double = 0.0,
+    val totalExpenseA: Double = 0.0,
+    val totalExpenseB: Double = 0.0,
+    val balanceA: Double = 0.0,
+    val balanceB: Double = 0.0,
+    val histogramData: Map<String, List<Double>> = emptyMap(),
+    val monthlyKeysThisYear: List<String> = emptyList(),
+)
+
+data class CalendarUiState(
+    val monthAllRecords: List<Record> = emptyList(),
+    val visibleCategories: List<String> = emptyList(),
+    val monthRecords: List<Record> = emptyList(),
+    val recordsByDay: Map<Int, List<Record>> = emptyMap(),
+    val maxAbsNet: Double = 0.0,
+    val monthIncome: Double = 0.0,
+    val monthExpense: Double = 0.0,
+    val totalNet: Double = 0.0,
+    val itemCount: Int = 0,
+    val avgPerItem: Double = 0.0,
+    val avgPerDay: Double = 0.0,
+)
+
+// ===== 由 ViewModel 暴露俾 UI 嘅狀態 END =====
+
 
 object AboveAnchorPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
