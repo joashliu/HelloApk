@@ -1,3 +1,5 @@
+import org.gradle.api.GradleException
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -12,17 +14,40 @@ android {
 
     defaultConfig {
         applicationId = "com.example.hello"
-        minSdk = 26                    // 你用到 NotificationChannel (API 26)
+        minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.5"
+        versionCode = 361
+        versionName = "37.5"
 
         vectorDrawables {
             useSupportLibrary = true
         }
     }
 
+    // ★★★ 由舊版加返：release keystore 設定 ★★★
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("KEYSTORE_PATH")
+            val ksFile = if (keystorePath.isNullOrBlank()) file("release.keystore")
+                         else file(keystorePath)
+            if (!ksFile.exists()) {
+                throw GradleException(
+                    "keystore 唔存在: ${ksFile.absolutePath}\n" +
+                    "請確認 workflow 有 decode keystore,同 KEYSTORE_PATH 環境變數正確。"
+                )
+            }
+            storeFile = ksFile
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
+        // ★★★ 由舊版加返：debug 都用 release keystore ★★★
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -64,7 +89,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
 
-    // ============ Lifecycle (★ 新增：ViewModel + Compose 整合) ============
+    // ============ Lifecycle (ViewModel + Compose 整合) ============
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
@@ -82,7 +107,7 @@ dependencies {
 
     // Material 3
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")   // ★ 你用到大量 Icons.Default.*
+    implementation("androidx.compose.material:material-icons-extended")
 
     // Activity Compose
     implementation("androidx.activity:activity-compose:1.9.3")
@@ -90,18 +115,15 @@ dependencies {
     // ============ Firebase ============
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-firestore-ktx")
-    // 如果你仲有 Auth / Storage，加埋：
-    // implementation("com.google.firebase:firebase-auth-ktx")
-    // implementation("com.google.firebase:firebase-storage-ktx")
 
     // ============ Coil (圖片載入) ============
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     // ============ Coroutines ============
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")   // ★ for `Task.await()`
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
-    // ============ 測試 (可選) ============
+    // ============ 測試 ============
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
