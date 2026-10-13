@@ -1583,11 +1583,11 @@ fun MainApp(
                     .shadow(18.dp, CircleShape, clip = false,
                         ambientColor = Color(0x26000000), spotColor = Color(0x26000000))
                     .clip(CircleShape)
-                    .background(Brush.verticalGradient(arrayOf(
-                        0f to Color(0xF0FFFFFF), 0.5f to Color(0xE0FFFFFF), 1f to Color(0xC0FFFFFF))))
-                    .border(0.8.dp, Brush.verticalGradient(arrayOf(
-                        0f to Color(0x80FFFFFF), 0.5f to Color(0x33FFFFFF), 1f to Color(0x14FFFFFF))),
-                        CircleShape)
+                    .background(Brush.verticalGradient(colorStops = arrayOf(
+    0f to Color(0xF0FFFFFF), 0.5f to Color(0xE0FFFFFF), 1f to Color(0xC0FFFFFF))))
+.border(0.8.dp, Brush.verticalGradient(colorStops = arrayOf(
+    0f to Color(0x80FFFFFF), 0.5f to Color(0x33FFFFFF), 1f to Color(0x14FFFFFF))),
+    CircleShape)
             ) {
                 Row(
                     modifier = Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp),
@@ -2214,11 +2214,11 @@ fun FloatingNavBar(
             .shadow(16.dp, RoundedCornerShape(NAV_HEIGHT / 2), clip = false,
                 ambientColor = Color(0x26000000), spotColor = Color(0x26000000))
             .clip(RoundedCornerShape(NAV_HEIGHT / 2))
-            .background(Brush.verticalGradient(arrayOf(
-                0f to Color(0xF0FFFFFF), 0.5f to Color(0xE0FFFFFF), 1f to Color(0xC0FFFFFF))))
-            .border(0.8.dp, Brush.verticalGradient(arrayOf(
-                0f to Color(0x80FFFFFF), 0.5f to Color(0x33FFFFFF), 1f to Color(0x14FFFFFF))),
-                RoundedCornerShape(NAV_HEIGHT / 2))
+            .background(Brush.verticalGradient(colorStops = arrayOf(
+    0f to Color(0xF0FFFFFF), 0.5f to Color(0xE0FFFFFF), 1f to Color(0xC0FFFFFF))))
+.border(0.8.dp, Brush.verticalGradient(colorStops = arrayOf(
+    0f to Color(0x80FFFFFF), 0.5f to Color(0x33FFFFFF), 1f to Color(0x14FFFFFF))),
+    RoundedCornerShape(NAV_HEIGHT / 2))
     ) {
         Box(Modifier.fillMaxSize().pointerInput(Unit) {
             awaitPointerEventScope {
@@ -2770,13 +2770,13 @@ fun LedgerContent(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .height(200.dp)
-                .background(Brush.verticalGradient(arrayOf(
-                    0.00f to SURFACE_BG.copy(alpha = 0f),
-                    0.50f to SURFACE_BG.copy(alpha = 0f),
-                    0.70f to SURFACE_BG.copy(alpha = 0.45f),
-                    0.88f to SURFACE_BG.copy(alpha = 0.88f),
-                    1.00f to SURFACE_BG
-                )))
+                .background(Brush.verticalGradient(colorStops = arrayOf(
+    0.00f to SURFACE_BG.copy(alpha = 0f),
+    0.50f to SURFACE_BG.copy(alpha = 0f),
+    0.70f to SURFACE_BG.copy(alpha = 0.45f),
+    0.88f to SURFACE_BG.copy(alpha = 0.88f),
+    1.00f to SURFACE_BG
+)))
         )
 
         FanMenuOverlay(
