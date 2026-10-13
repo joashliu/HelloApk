@@ -411,31 +411,35 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     _records.update { current ->
-    // 一次過合併，唔逐條插入
-    val removedIds = parsed
-        .filter { it.first == DocumentChange.Type.REMOVED }
-        .map { it.second.id }
-        .toSet()
-
-    val changedMap = parsed
-        .filter { it.first == DocumentChange.Type.MODIFIED }
-        .associateBy { it.second.id }
-
-    val addedList = parsed
-        .filter { it.first == DocumentChange.Type.ADDED }
-        .map { it.second }
-        .filter { r -> current.none { it.id == r.id } }
-
-    // 保留 + 更新
-    val merged = current
-        .filter { it.id !in removedIds }
-        .map { changedMap[it.id] ?: it }
-        .toMutableList()
-
-    merged.addAll(addedList)
-    merged.sortByDescending { it.timestamp }
-    merged
-}
+                        val updated = current.toMutableList()
+                        parsed.forEach { (type, r, _) ->
+                            when (type) {
+                                DocumentChange.Type.ADDED -> {
+                                    if (updated.any { it.id == r.id }) return@forEach
+                                    val i = updated.indexOfFirst { it.timestamp < r.timestamp }
+                                    if (i >= 0) updated.add(i, r) else updated.add(r)
+                                }
+                                DocumentChange.Type.MODIFIED -> {
+                                    val i = updated.indexOfFirst { it.id == r.id }
+                                    if (i >= 0) {
+                                        if (updated[i].timestamp == r.timestamp) updated[i] = r
+                                        else {
+                                            updated.removeAt(i)
+                                            val ni = updated.indexOfFirst { it.timestamp < r.timestamp }
+                                            if (ni >= 0) updated.add(ni, r) else updated.add(r)
+                                        }
+                                    } else {
+                                        val ni = updated.indexOfFirst { it.timestamp < r.timestamp }
+                                        if (ni >= 0) updated.add(ni, r) else updated.add(r)
+                                    }
+                                }
+                                DocumentChange.Type.REMOVED -> {
+                                    updated.removeAll { it.id == r.id }
+                                }
+                            }
+                        }
+                        updated
+                    }
                 }
             }
     }
@@ -2838,33 +2842,42 @@ fun AnimatedRecordItem(
         }
     }
 
-    val targetHeight = if (isDeleting) 0.dp
-                       else if (animateOnMount && !appeared) 0.dp else 72.dp
-    val itemHeight by animateDpAsState(
+    // ★ 唔需要動畫嘅情況直接跳過
+val skipAnim = !isDeleting && !animateOnMount
+val itemHeight = if (skipAnim) 72.dp else {
+    val targetHeight = if (isDeleting) 0.dp else if (!appeared) 0.dp else 72.dp
+    animateDpAsState(
         targetValue = targetHeight,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "eHeight"
-    )
-    val targetScale = if (isDeleting) 0.85f
-                      else if (animateOnMount && !appeared) 0.85f else 1f
-    val entranceScale by animateFloatAsState(
+    ).value
+}
+    val entranceScale = if (skipAnim) 1f else {
+    val targetScale = if (isDeleting) 0.85f else if (!appeared) 0.85f else 1f
+    animateFloatAsState(
         targetValue = targetScale,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
         label = "eScale"
-    )
-    val targetAlpha = if (isDeleting) 0f
-                      else if (animateOnMount && !appeared) 0f else 1f
-    val entranceAlpha by animateFloatAsState(
+    ).value
+}
+
+val entranceAlpha = if (skipAnim) 1f else {
+    val targetAlpha = if (isDeleting) 0f else if (!appeared) 0f else 1f
+    animateFloatAsState(
         targetValue = targetAlpha,
         animationSpec = tween(if (isDeleting) 200 else 300, easing = FastOutSlowInEasing),
         label = "eAlpha"
-    )
-    val targetTranslateY = if (animateOnMount && !appeared) 40f else 0f
-    val entranceTranslationY by animateFloatAsState(
+    ).value
+}
+
+val entranceTranslationY = if (skipAnim) 0f else {
+    val targetTranslateY = if (!appeared) 40f else 0f
+    animateFloatAsState(
         targetValue = targetTranslateY,
         animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
         label = "eY"
-    )
+    ).value
+}
 
     val particleProgress = remember { Animatable(0f) }
     LaunchedEffect(isDeleting) {
@@ -3012,7 +3025,7 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    var itemGlobalPosition by remember { mutableStateOf(Offset.Zero) }
+    val itemGlobalPosition = remember { androidx.compose.runtime.mutableStateOf(Offset.Zero) }
 
     val itemAlpha by animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha")
     val itemScale by animateFloatAsState(
@@ -3095,7 +3108,7 @@ fun SwipeableRecordItem(
             .pointerInput("longPress_${record.id}") {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { localOffset ->
-                        onFanMenuStart(itemGlobalPosition + localOffset)
+                        onFanMenuStart(itemGlobalPosition.value + localOffset)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
