@@ -114,17 +114,23 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import androidx.core.app.NotificationCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.imageLoader
 import com.google.firebase.Firebase
-import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -476,6 +482,91 @@ fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): In
     }
 }
 
+// ===== UI State 與 ViewModel 架構 =====
+
+data class LedgerUiState(
+    val loading: Boolean = true,
+    val records: List<Record> = emptyList(),
+    val allNoteNames: List<String> = emptyList(),
+    val noteCategoryMap: Map<String, String> = emptyMap(),
+    val topNotes: List<Pair<String, Int>> = emptyList(),
+    val recentAmountByNote: Map<String, Double> = emptyMap(),
+    val noteIconMap: Map<String, String> = emptyMap()
+)
+
+class LedgerViewModel : ViewModel() {
+    private val db = Firebase.firestore
+    private val _uiState = MutableStateFlow(LedgerUiState())
+    val uiState: StateFlow<LedgerUiState> = _uiState.asStateFlow()
+
+    init {
+        // ViewModel 初始化時建立 Snapshot Listener
+        db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, err ->
+                if (err != null || snap == null) {
+                    _uiState.update { it.copy(loading = false) }
+                    return@addSnapshotListener
+                }
+
+                // 🔥 將所有複雜計算轉交俾 Dispatchers.Default 背景線程處理
+                viewModelScope.launch(Dispatchers.Default) {
+                    // 1. 提取所有記錄為 Immutable List
+                    val newRecords = snap.documents.mapNotNull { doc ->
+                        doc.toObject(Record::class.java)?.copy(id = doc.id)
+                    }
+
+                    val now = System.currentTimeMillis()
+                    val validNotes = newRecords.filter { it.note.isNotBlank() }
+
+                    val allNoteNames = validNotes.map { it.note }.distinct()
+
+                    val noteCategoryMap = validNotes.groupBy { it.note }
+                        .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
+
+                    val topNotes = validNotes.groupBy { it.note }
+                        .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
+                        .sortedBy { it.second }
+                        .take(20)
+                        .map { it.first to 0 }
+
+                    val topNotesList = topNotes.take(3).mapNotNull { (note, _) ->
+                        if (note.isBlank()) null
+                        else QuickNoteInfo(
+                            note = note,
+                            category = noteCategoryMap[note] ?: "飲食",
+                            amount = newRecords.filter { it.note == note }
+                                .maxByOrNull { it.timestamp }?.amount ?: 0.0
+                        )
+                    }
+
+                    val recentAmountByNote = validNotes.groupBy { it.note }
+                        .mapValues { (_, list) -> list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0 }
+
+                    val noteIconMap = validNotes.filter { it.iconUrl.isNotBlank() }
+                        .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
+
+                    // 將通知用嘅狀態切換回 Main Thread 更新
+                    withContext(Dispatchers.Main) {
+                        topQuickNotesInfo.value = topNotesList
+                    }
+
+                    // 2. 算好晒一次過推俾 UI 更新
+                    _uiState.update {
+                        it.copy(
+                            loading = false,
+                            records = newRecords,
+                            allNoteNames = allNoteNames,
+                            noteCategoryMap = noteCategoryMap,
+                            topNotes = topNotes,
+                            recentAmountByNote = recentAmountByNote,
+                            noteIconMap = noteIconMap
+                        )
+                    }
+                }
+            }
+    }
+}
+
 @Composable
 fun FanMenuOverlay(
     progressProvider: () -> Float,
@@ -688,7 +779,7 @@ class MainActivity : ComponentActivity() {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
-                        // 只有一個動作按鈕：按鈕顯示最近項目名
+            // 只有一個動作按鈕：按鈕顯示最近項目名
             if (first != null && first.note.isNotBlank()) {
                 val noteIntent = buildLaunchIntent(prefillNote = first.note)
                 val notePi = PendingIntent.getActivity(
@@ -714,18 +805,27 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     keyboardLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
-    onKeyboardLaunchConsumed: () -> Unit = {}
+    onKeyboardLaunchConsumed: () -> Unit = {},
+    viewModel: LedgerViewModel = viewModel() // 🔥 注入 ViewModel
 ) {
     val db = Firebase.firestore
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    // 接收 ViewModel 算好嘅狀態
+    val uiState by viewModel.uiState.collectAsState()
+    val records = uiState.records
+    val loading = uiState.loading
+    val allNoteNames = uiState.allNoteNames
+    val noteCategoryMap = uiState.noteCategoryMap
+    val topNotes = uiState.topNotes
+    val recentAmountByNote = uiState.recentAmountByNote
+    val noteIconMap = uiState.noteIconMap
+
     val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
     var lastSavedCategory by remember { mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食") }
 
-    val records = remember { mutableStateListOf<Record>() }
-    var loading by remember { mutableStateOf(true) }
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
     var filterModeOn by remember { mutableStateOf(false) }
@@ -783,12 +883,8 @@ fun MainApp(
     val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
     val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
 
-    var compareMonthA by remember {
-        mutableStateOf(prefs.getString("compare_month_a", defaultMonthA) ?: defaultMonthA)
-    }
-    var compareMonthB by remember {
-        mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB)
-    }
+    var compareMonthA by remember { mutableStateOf(prefs.getString("compare_month_a", defaultMonthA) ?: defaultMonthA) }
+    var compareMonthB by remember { mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB) }
     fun setCompareMonthA(v: String) { compareMonthA = v; prefs.edit().putString("compare_month_a", v).apply() }
     fun setCompareMonthB(v: String) { compareMonthB = v; prefs.edit().putString("compare_month_b", v).apply() }
 
@@ -797,26 +893,16 @@ fun MainApp(
     var deletingRecordId by remember { mutableStateOf<String?>(null) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
-    val allNoteNames by remember {
-        derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
-    }
-    val noteCategoryMap by remember {
-        derivedStateOf {
-            records.filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
-        }
-    }
-
-    val searchFilteredRecords by remember {
+    // 🔥 以下全改用 remember(keys) 以免過度重繪
+    val searchFilteredRecords by remember(filterSearch.text, records) {
         derivedStateOf {
             val q = filterSearch.text
             if (q.isBlank()) {
-                records.toList()
+                records
             } else {
                 val hasExactNoteMatch = records.any { it.note == q }
                 val hasExactCategoryMatch = CATEGORIES.any { it == q }
-                records.toList().filter { r ->
+                records.filter { r ->
                     when {
                         hasExactNoteMatch -> r.note == q
                         hasExactCategoryMatch -> r.category == q
@@ -827,7 +913,7 @@ fun MainApp(
         }
     }
 
-    val filtered by remember {
+    val filtered by remember(searchFilteredRecords, filterCategory, filterMonth) {
         derivedStateOf {
             searchFilteredRecords.filter { r ->
                 val catOk = filterCategory == null || r.category == filterCategory
@@ -837,20 +923,20 @@ fun MainApp(
         }
     }
     
-    val ledgerRecords by remember {
+    val ledgerRecords by remember(filterModeOn, filtered, records, showFuture, deletingRecordId) {
         derivedStateOf {
-            val base = if (filterModeOn) filtered else records.toList()
+            val base = if (filterModeOn) filtered else records
             if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
         }
     }
 
-    val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
-    val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
-    val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
-    val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
-    val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
+    val hasIncome by remember(ledgerRecords, deletingRecordId) { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
+    val hasExpense by remember(ledgerRecords, deletingRecordId) { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
+    val totalIncome by remember(ledgerRecords, deletingRecordId) { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
+    val totalExpense by remember(ledgerRecords, deletingRecordId) { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
+    val groupedByDate by remember(ledgerRecords) { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
 
-    val isExactNoteFilter by remember {
+    val isExactNoteFilter by remember(filterModeOn, ledgerRecords) {
         derivedStateOf {
             filterModeOn &&
                 ledgerRecords.isNotEmpty() &&
@@ -858,64 +944,22 @@ fun MainApp(
         }
     }
 
-    val topNotes by remember {
-        derivedStateOf {
-            val now = System.currentTimeMillis()
-            records.toList().filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
-                .sortedBy { it.second }
-                .take(20)
-                .map { it.first to 0 }
-        }
-    }
-
-    // ★ 將最近嘅 top 3 快速記帳項目同步去 top-level state，供通知使用
-    val topNotesList = remember(topNotes, noteCategoryMap) {
-        topNotes.take(3).mapNotNull { (note, _) ->
-            if (note.isBlank()) null
-            else QuickNoteInfo(
-                note = note,
-                category = noteCategoryMap[note] ?: "飲食",
-                amount = records.filter { it.note == note }
-                    .maxByOrNull { it.timestamp }?.amount ?: 0.0
-            )
-        }
-    }
-    LaunchedEffect(topNotesList) {
-        topQuickNotesInfo.value = topNotesList
-    }
-
-    val recentAmountByNote by remember {
-        derivedStateOf {
-            val now = System.currentTimeMillis()
-            records.toList().filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .mapValues { (_, list) -> list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0 }
-        }
-    }
-
-    val noteIconMap by remember {
-        derivedStateOf {
-            records.toList().filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
-                .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
-        }
-    }
-    val availableMonths by remember {
+    val availableMonths by remember(searchFilteredRecords) {
         derivedStateOf { 
             searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() 
         }
     }
-    val visibleCategories by remember {
+    
+    val visibleCategories by remember(searchFilteredRecords, filterMonth) {
         derivedStateOf {
             val base = if (filterMonth == null) searchFilteredRecords
                        else searchFilteredRecords.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
-            val hasIncome = base.any { it.category == INCOME_CATEGORY }
+            val incomeIncluded = base.any { it.category == INCOME_CATEGORY }
             val expenseCats = base.filter { it.category != INCOME_CATEGORY }
                 .groupBy { it.category }
                 .mapValues { (_, list) -> list.sumOf { it.amount } }
                 .toList().sortedByDescending { it.second }.map { it.first }
-            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+            (if (incomeIncluded) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
         }
     }
 
@@ -930,6 +974,7 @@ fun MainApp(
         }
         iconTargetRecord = null
     }
+    
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val target = iconTargetRecord; val uri = pendingCameraUri
         if (ok && target != null && uri != null) {
@@ -940,41 +985,6 @@ fun MainApp(
             }
         }
         pendingCameraUri = null; iconTargetRecord = null
-    }
-
-    DisposableEffect(Unit) {
-        val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                loading = false
-                if (err != null || snap == null) return@addSnapshotListener
-                snap.documentChanges.forEach { change ->
-                    val r = change.document.toObject(Record::class.java)
-                        ?.copy(id = change.document.id) ?: return@forEach
-                    when (change.type) {
-                        DocumentChange.Type.ADDED -> {
-                            val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
-                            if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
-                        }
-                        DocumentChange.Type.MODIFIED -> {
-                            val idx = records.indexOfFirst { it.id == r.id }
-                            if (idx >= 0) {
-                                val oldRecord = records[idx]
-                                if (oldRecord.timestamp == r.timestamp) {
-                                    records[idx] = r
-                                } else {
-                                    records.removeAt(idx)
-                                    val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
-                                    if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
-                                }
-                            }
-                        }
-                        DocumentChange.Type.REMOVED -> {
-                            records.removeAll { it.id == r.id }
-                        }
-                    }
-                }
-            }
-        onDispose { listener.remove() }
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
@@ -1021,9 +1031,7 @@ fun MainApp(
         showKeyboard = true
     }
 
-        // 強制覆蓋式打開鍵盤：
-    //   note == null → 空白鍵盤（清空一切）
-    //   note != null → 覆蓋項目名；鍵盤已開則保留金額，否則全清
+    // 強制覆蓋式打開鍵盤
     fun openKeyboardForce(note: String?) {
         val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
@@ -1037,7 +1045,6 @@ fun MainApp(
             )
         } else {
             if (showKeyboard) {
-                // 鍵盤已開：保留金額／類別／貨幣，只覆蓋項目名
                 keyboardState = keyboardState.copy(
                     noteText = note,
                     editingNote = false
@@ -1134,7 +1141,6 @@ fun MainApp(
         scrollToTopTrigger++
     }
 
-       // ★ 監聽 token：每次撳通知都觸發（包括鍵盤已開、連續撳同一按鈕）
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             if (filterModeOn) filterModeOn = false
@@ -2471,8 +2477,6 @@ fun LedgerContent(
             }
         }
 
-                // ★ 底部漸進遮罩：由導航欄上緣約 20dp 之上先開始淡出
-        //   高度縮短，色標推後，令列表底部保持清晰耐啲
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -2482,7 +2486,7 @@ fun LedgerContent(
                     Brush.verticalGradient(
                         colorStops = arrayOf(
                             0.00f to SURFACE_BG.copy(alpha = 0f),
-                            0.50f to SURFACE_BG.copy(alpha = 0f),     // 頭 100dp 完全清晰
+                            0.50f to SURFACE_BG.copy(alpha = 0f), 
                             0.70f to SURFACE_BG.copy(alpha = 0.45f),
                             0.88f to SURFACE_BG.copy(alpha = 0.88f),
                             1.00f to SURFACE_BG
@@ -2824,7 +2828,7 @@ fun SwipeableRecordItem(
                             targetOffset < maxLeft * 0.65f -> maxLeft
                             targetOffset > maxRight * 0.65f -> {
                                 if (hasIcon) {
-                                    maxRight
+                                maxRight
                                 } else {
                                     shouldTriggerIconAction = true
                                     0f
@@ -4792,11 +4796,11 @@ fun CalendarContent(
     val month = curCal.get(Calendar.MONTH) + 1
     val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
 
-    val monthAllRecords by remember(currentMonthKey) {
+    val monthAllRecords by remember(currentMonthKey, records) {
         derivedStateOf { records.filter { monthKeyFromTimestamp(it.timestamp) == currentMonthKey } }
     }
 
-    val visibleCategories by remember {
+    val visibleCategories by remember(monthAllRecords) {
         derivedStateOf {
             val hasIncome = monthAllRecords.any { it.category == INCOME_CATEGORY }
             val expenseCats = monthAllRecords
@@ -4810,14 +4814,14 @@ fun CalendarContent(
         }
     }
 
-    val monthRecords by remember(filterCategory) {
+    val monthRecords by remember(filterCategory, monthAllRecords) {
         derivedStateOf {
             if (filterCategory == null) monthAllRecords
             else monthAllRecords.filter { it.category == filterCategory }
         }
     }
 
-    val recordsByDay by remember {
+    val recordsByDay by remember(monthRecords) {
         derivedStateOf {
             monthRecords.groupBy { r ->
                 Calendar.getInstance().apply { timeInMillis = r.timestamp }
@@ -4826,7 +4830,7 @@ fun CalendarContent(
         }
     }
 
-    val maxAbsNet by remember {
+    val maxAbsNet by remember(recordsByDay) {
         derivedStateOf {
             recordsByDay.values.maxOfOrNull { dayRecords ->
                 val inc = dayRecords.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
