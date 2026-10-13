@@ -1231,7 +1231,8 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     keyboardLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
-    onKeyboardLaunchConsumed: () -> Unit = {}
+    onKeyboardLaunchConsumed: () -> Unit = {},
+    vm: LedgerViewModel = viewModel()
 ) {
     val db = Firebase.firestore
     val context = LocalContext.current
@@ -1239,24 +1240,32 @@ fun MainApp(
     val haptic = LocalHapticFeedback.current
 
     val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
-    var lastSavedCategory by remember { mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食") }
+    var lastSavedCategory by remember {
+        mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食")
+    }
 
-    val records = remember { mutableStateListOf<Record>() }
-    var loading by remember { mutableStateOf(true) }
+    // ===== 由 ViewModel 帶入嘅資料 =====
+    val ui by vm.ledgerUiState.collectAsState()
+    val filter by vm.filterState.collectAsState()
+    val compareMonthA by vm.compareMonthA.collectAsState()
+    val compareMonthB by vm.compareMonthB.collectAsState()
+    val compareUi by vm.compareUiState.collectAsState()
+    val calendarMonthKey by vm.calendarMonthKey.collectAsState()
+    val calendarFilterCategory by vm.calendarFilterCategory.collectAsState()
+    val calendarUi by vm.calendarUiState.collectAsState()
+
+    // ===== 純 UI 狀態 =====
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
-    var filterModeOn by remember { mutableStateOf(false) }
-    var filterCategory by remember { mutableStateOf<String?>(null) }
-    var filterMonth by remember { mutableStateOf<String?>(null) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSearchHasFocus by remember { mutableStateOf(false) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
-    
+
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
-    var webSearchTarget by remember { mutableStateOf<Record?>(null) } 
+    var webSearchTarget by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
-    
+
     var showUrlInputDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
@@ -1274,13 +1283,22 @@ fun MainApp(
     }
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
-    var showFuture by remember { mutableStateOf(false) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
     val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
+
+    // ===== filterSearch 同步去 VM =====
+    LaunchedEffect(filterSearch.text) {
+        vm.setFilterSearch(filterSearch.text)
+    }
+
+    // ===== 通知顯示更新 =====
+    LaunchedEffect(ui.topQuickNotesInfo) {
+        topQuickNotesInfo.value = ui.topQuickNotesInfo
+    }
 
     LaunchedEffect(afterSaveHint?.recordId) {
         val hint = afterSaveHint
@@ -1297,144 +1315,9 @@ fun MainApp(
         }
     }
 
-    val defaultMonthA = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
-    val defaultMonthB = remember { shiftMonthKey(defaultMonthA, -1) }
-
-    var compareMonthA by remember {
-        mutableStateOf(prefs.getString("compare_month_a", defaultMonthA) ?: defaultMonthA)
-    }
-    var compareMonthB by remember {
-        mutableStateOf(prefs.getString("compare_month_b", defaultMonthB) ?: defaultMonthB)
-    }
-    fun setCompareMonthA(v: String) { compareMonthA = v; prefs.edit().putString("compare_month_a", v).apply() }
-    fun setCompareMonthB(v: String) { compareMonthB = v; prefs.edit().putString("compare_month_b", v).apply() }
-
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
-    var deletingRecordId by remember { mutableStateOf<String?>(null) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
-
-    val allNoteNames by remember {
-        derivedStateOf { records.map { it.note }.filter { it.isNotBlank() }.distinct() }
-    }
-    val noteCategoryMap by remember {
-        derivedStateOf {
-            records.filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .mapValues { (_, list) -> list.maxByOrNull { it.timestamp }?.category ?: "飲食" }
-        }
-    }
-
-    val searchFilteredRecords by remember {
-        derivedStateOf {
-            val q = filterSearch.text
-            if (q.isBlank()) {
-                records.toList()
-            } else {
-                val hasExactNoteMatch = records.any { it.note == q }
-                val hasExactCategoryMatch = CATEGORIES.any { it == q }
-                records.toList().filter { r ->
-                    when {
-                        hasExactNoteMatch -> r.note == q
-                        hasExactCategoryMatch -> r.category == q
-                        else -> r.note.contains(q, true) || r.category.contains(q, true)
-                    }
-                }
-            }
-        }
-    }
-
-    val filtered by remember {
-        derivedStateOf {
-            searchFilteredRecords.filter { r ->
-                val catOk = filterCategory == null || r.category == filterCategory
-                val monthOk = filterMonth == null || monthKeyFromTimestamp(r.timestamp) == filterMonth
-                catOk && monthOk
-            }
-        }
-    }
-    
-    val ledgerRecords by remember {
-        derivedStateOf {
-            val base = if (filterModeOn) filtered else records.toList()
-            if (showFuture) base else base.filter { it.timestamp <= System.currentTimeMillis() + 60_000 }
-        }
-    }
-
-    val hasIncome by remember { derivedStateOf { ledgerRecords.any { it.category == INCOME_CATEGORY && it.id != deletingRecordId } } }
-    val hasExpense by remember { derivedStateOf { ledgerRecords.any { it.category != INCOME_CATEGORY && it.id != deletingRecordId } } }
-    val totalIncome by remember { derivedStateOf { ledgerRecords.filter { it.category == INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
-    val totalExpense by remember { derivedStateOf { ledgerRecords.filter { it.category != INCOME_CATEGORY && it.id != deletingRecordId }.sumOf { it.amount } } }
-    val groupedByDate by remember { derivedStateOf { ledgerRecords.groupBy { dateKeyFromTimestamp(it.timestamp) }.toList() } }
-
-    val isExactNoteFilter by remember {
-        derivedStateOf {
-            filterModeOn &&
-                ledgerRecords.isNotEmpty() &&
-                ledgerRecords.map { it.note }.distinct().size == 1
-        }
-    }
-
-    val topNotes by remember {
-        derivedStateOf {
-            val now = System.currentTimeMillis()
-            records.toList().filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .map { (note, list) -> note to list.minOf { timeOfDayDistanceSeconds(it.timestamp, now) } }
-                .sortedBy { it.second }
-                .take(20)
-                .map { it.first to 0 }
-        }
-    }
-
-    // ★ 將最近嘅 top 3 快速記帳項目同步去 top-level state，供通知使用
-    val topNotesList = remember(topNotes, noteCategoryMap) {
-        topNotes.take(3).mapNotNull { (note, _) ->
-            if (note.isBlank()) null
-            else QuickNoteInfo(
-                note = note,
-                category = noteCategoryMap[note] ?: "飲食",
-                amount = records.filter { it.note == note }
-                    .maxByOrNull { it.timestamp }?.amount ?: 0.0
-            )
-        }
-    }
-    LaunchedEffect(topNotesList) {
-        topQuickNotesInfo.value = topNotesList
-    }
-
-    val recentAmountByNote by remember {
-        derivedStateOf {
-            val now = System.currentTimeMillis()
-            records.toList().filter { it.note.isNotBlank() }
-                .groupBy { it.note }
-                .mapValues { (_, list) -> list.minByOrNull { timeOfDayDistanceSeconds(it.timestamp, now) }?.amount ?: 0.0 }
-        }
-    }
-
-    val noteIconMap by remember {
-        derivedStateOf {
-            records.toList().filter { it.note.isNotBlank() && it.iconUrl.isNotBlank() }
-                .groupBy { it.note }.mapValues { (_, l) -> l.maxByOrNull { it.timestamp }?.iconUrl ?: "" }
-        }
-    }
-    val availableMonths by remember {
-        derivedStateOf { 
-            searchFilteredRecords.map { monthKeyFromTimestamp(it.timestamp) }.distinct().sorted() 
-        }
-    }
-    val visibleCategories by remember {
-        derivedStateOf {
-            val base = if (filterMonth == null) searchFilteredRecords
-                       else searchFilteredRecords.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
-            val hasIncome = base.any { it.category == INCOME_CATEGORY }
-            val expenseCats = base.filter { it.category != INCOME_CATEGORY }
-                .groupBy { it.category }
-                .mapValues { (_, list) -> list.sumOf { it.amount } }
-                .toList().sortedByDescending { it.second }.map { it.first }
-            (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
-        }
-    }
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
@@ -1457,41 +1340,6 @@ fun MainApp(
             }
         }
         pendingCameraUri = null; iconTargetRecord = null
-    }
-
-    DisposableEffect(Unit) {
-        val listener = db.collection("records").orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                loading = false
-                if (err != null || snap == null) return@addSnapshotListener
-                snap.documentChanges.forEach { change ->
-                    val r = change.document.toObject(Record::class.java)
-                        ?.copy(id = change.document.id) ?: return@forEach
-                    when (change.type) {
-                        DocumentChange.Type.ADDED -> {
-                            val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
-                            if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
-                        }
-                        DocumentChange.Type.MODIFIED -> {
-                            val idx = records.indexOfFirst { it.id == r.id }
-                            if (idx >= 0) {
-                                val oldRecord = records[idx]
-                                if (oldRecord.timestamp == r.timestamp) {
-                                    records[idx] = r
-                                } else {
-                                    records.removeAt(idx)
-                                    val insertIdx = records.indexOfFirst { it.timestamp < r.timestamp }
-                                    if (insertIdx >= 0) records.add(insertIdx, r) else records.add(r)
-                                }
-                            }
-                        }
-                        DocumentChange.Type.REMOVED -> {
-                            records.removeAll { it.id == r.id }
-                        }
-                    }
-                }
-            }
-        onDispose { listener.remove() }
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
