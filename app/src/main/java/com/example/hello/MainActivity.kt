@@ -1426,167 +1426,189 @@ fun MainApp(
     }
 
     fun deleteRecordWithUndo(r: Record) {
-        deleteJob?.cancel()
-        deletingRecordId = r.id
-        recentlyDeletedRecord = r
-        showUndoToast = true
-        deleteJob = scope.launch {
-            delay(650)
-            try { db.collection("records").document(r.id).delete() } catch (_: Exception) {}
-            delay(4350)
-            if (recentlyDeletedRecord?.id == r.id) {
-                showUndoToast = false
-                recentlyDeletedRecord = null
-                if (deletingRecordId == r.id) deletingRecordId = null
-            }
+    deleteJob?.cancel()
+    vm.setDeletingId(r.id)
+    recentlyDeletedRecord = r
+    showUndoToast = true
+    deleteJob = scope.launch {
+        delay(650)
+        vm.deleteRecord(r.id)
+        delay(4350)
+        if (recentlyDeletedRecord?.id == r.id) {
+            showUndoToast = false
+            recentlyDeletedRecord = null
+            vm.setDeletingId(null)
         }
     }
+}
 
     fun restoreDeletedRecord() {
-        val target = recentlyDeletedRecord ?: return
-        deleteJob?.cancel(); deleteJob = null
-        showUndoToast = false
-        recentlyDeletedRecord = null
-        deletingRecordId = null
+    val target = recentlyDeletedRecord ?: return
+    deleteJob?.cancel(); deleteJob = null
+    showUndoToast = false
+    recentlyDeletedRecord = null
+    vm.setDeletingId(null)
 
-        justAddedId = target.id
-        scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
-
-        try { db.collection("records").document(target.id).set(target) } catch (_: Exception) {}
-    }
+    vm.restoreRecord(target)
+    justAddedId = target.id
+    scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
+}
 
     fun saveFromKeyboard() {
-        val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
-        if (inputAmt <= 0.0) { Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return }
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        
-        val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
-            val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
-            inputAmt * rate
-        } else {
-            inputAmt
-        }
+    val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
+    if (inputAmt <= 0.0) {
+        Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show(); return
+    }
+    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
-        val note = keyboardState.noteText
-        val category = keyboardState.category
-        
-        lastSavedCategory = category
-        prefs.edit().putString("last_category", category).apply()
+    val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
+        val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
+        inputAmt * rate
+    } else inputAmt
 
-        val editId = keyboardState.editingRecordId
-        val ts = keyboardState.timestamp
+    val note = keyboardState.noteText
+    val category = keyboardState.category
+
+    lastSavedCategory = category
+    prefs.edit().putString("last_category", category).apply()
+
+    val editId = keyboardState.editingRecordId
+    val ts = keyboardState.timestamp
+
+    if (editId != null) {
+        vm.updateRecord(editId, amt, note, category, ts)
+    } else {
+        val inherited = vm.latestIconForNote(note)
         val monthKey = monthKeyFromTimestamp(ts)
-        
-        if (editId != null) {
-            db.collection("records").document(editId).update(mapOf(
-                "amount" to amt, "note" to note, "category" to category, "timestamp" to ts))
-        } else {
-            val inherited = records.filter { it.note == note && it.note.isNotBlank() }
-                .maxByOrNull { it.timestamp }?.iconUrl ?: ""
-            val newId = db.collection("records").document().id
+        val totalThisMonth = vm.monthTotal(category, monthKey) + amt
+
+        vm.addRecord(
+            Record(amount = amt, note = note, category = category,
+                   timestamp = ts, iconUrl = inherited)
+        ) { newId ->
             justAddedId = newId
-            val totalThisMonth = records
-                .filter { it.category == category && monthKeyFromTimestamp(it.timestamp) == monthKey }
-                .sumOf { it.amount } + amt
             afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
-            db.collection("records").document(newId).set(Record(
-                amount = amt, note = note, category = category, timestamp = ts, iconUrl = inherited))
             scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
         }
-        
-        showKeyboard = false
-        keyboardState = KeyboardState()
-        scrollToTopTrigger++
     }
+
+    showKeyboard = false
+    keyboardState = KeyboardState()
+    scrollToTopTrigger++
+}
 
        // ★ 監聽 token：每次撳通知都觸發（包括鍵盤已開、連續撳同一按鈕）
     LaunchedEffect(keyboardLaunchToken) {
-        if (keyboardLaunchToken > 0) {
-            if (filterModeOn) filterModeOn = false
-            if (currentPage != 0) currentPage = 0
-            openKeyboardForce(prefillNoteOnLaunch)
-            onKeyboardLaunchConsumed()
-        }
+    if (keyboardLaunchToken > 0) {
+        if (filter.modeOn) vm.setFilterModeOn(false)
+        if (currentPage != 0) currentPage = 0
+        openKeyboardForce(prefillNoteOnLaunch)
+        onKeyboardLaunchConsumed()
     }
+}
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
-    BackHandler(enabled = filterModeOn && !showKeyboard && currentPage == 0) { filterModeOn = false }
-    LaunchedEffect(filterSelectAllTrigger) {
-        if (filterSelectAllTrigger > 0 && filterModeOn && currentPage == 0) {
-            delay(300)
-            try {
-                filterSearchFocusRequester.requestFocus()
-                filterSearch = filterSearch.copy(selection = TextRange(0, filterSearch.text.length))
-            } catch (_: Exception) {}
-        }
+BackHandler(enabled = filter.modeOn && !showKeyboard && currentPage == 0) {
+    vm.setFilterModeOn(false)
+}
+LaunchedEffect(filterSelectAllTrigger) {
+    if (filterSelectAllTrigger > 0 && filter.modeOn && currentPage == 0) {
+        delay(300)
+        try {
+            filterSearchFocusRequester.requestFocus()
+            filterSearch = filterSearch.copy(selection = TextRange(0, filterSearch.text.length))
+        } catch (_: Exception) {}
     }
+}
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
 
         when (currentPage) {
             0 -> LedgerContent(
-                loading = loading, filtered = ledgerRecords,
-                groupedByDate = groupedByDate,
-                topNotes = topNotes, noteIconMap = noteIconMap,
-                hasIncome = hasIncome, hasExpense = hasExpense,
-                totalIncome = totalIncome, totalExpense = totalExpense,
-                filterMode = filterModeOn, filterCategory = filterCategory,
-                onFilterCategoryChange = { filterCategory = it },
-                filterMonth = filterMonth, onFilterMonthChange = { filterMonth = it },
-                availableMonths = availableMonths,
-                visibleCategories = visibleCategories,
-                expandedId = expandedId, onExpandChange = { expandedId = it },
-                isExactNoteFilter = isExactNoteFilter,
-                onQuickInputClick = { name ->
-                    val amt = recentAmountByNote[name]
-                    openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
-                },
-                onCopyClick = { openKeyboardForCopy(it) },
-                onEditClick = { openKeyboardForEdit(it) },
-                onDeleteClick = { deleteRecordWithUndo(it) },
-                onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onFilterByName = { name ->
-                    filterCategory = null; filterMonth = null
-                    filterSearch = TextFieldValue(name); filterModeOn = true
-                },
-                showKeyboard = showKeyboard, keyboardState = keyboardState,
-                onKeyboardStateChange = { keyboardState = it },
-                onKeyboardDismiss = { dismissKeyboard() },
-                onKeyboardConfirm = { saveFromKeyboard() },
-                onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
-                onKeyboardPickCategory = { },
-                showFuture = showFuture, onShowFutureChange = { showFuture = it },
-                allNoteNames = allNoteNames,
-                noteCategoryMap = noteCategoryMap,
-                scrollToTopTrigger = scrollToTopTrigger,
-                nameFlashTrigger = nameFlashTrigger,
-                justAddedId = justAddedId,
-                deletingRecordId = deletingRecordId,
-                afterSaveHint = afterSaveHint,
-                afterSaveHintVisible = afterSaveHintVisible,
-                animatedQuickInputs = animatedQuickInputs,
-                keyboardProgressProvider = { keyboardAnimProgress.value }
-            )
+    loading = ui.loading, filtered = ui.ledgerRecords,
+    groupedByDate = ui.groupedByDate,
+    topNotes = ui.topNotes, noteIconMap = ui.noteIconMap,
+    hasIncome = ui.hasIncome, hasExpense = ui.hasExpense,
+    totalIncome = ui.totalIncome, totalExpense = ui.totalExpense,
+    filterMode = filter.modeOn, filterCategory = filter.category,
+    onFilterCategoryChange = { vm.setFilterCategory(it) },
+    filterMonth = filter.month, onFilterMonthChange = { vm.setFilterMonth(it) },
+    availableMonths = ui.availableMonths,
+    visibleCategories = ui.visibleCategories,
+    expandedId = expandedId, onExpandChange = { expandedId = it },
+    isExactNoteFilter = ui.isExactNoteFilter,
+    onQuickInputClick = { name ->
+        val amt = ui.recentAmountByNote[name]
+        openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
+    },
+    onCopyClick = { openKeyboardForCopy(it) },
+    onEditClick = { openKeyboardForEdit(it) },
+    onDeleteClick = { deleteRecordWithUndo(it) },
+    onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+    onFilterByName = { name ->
+        vm.setFilterCategory(null)
+        vm.setFilterMonth(null)
+        filterSearch = TextFieldValue(name)
+        vm.setFilterSearch(name)
+        vm.setFilterModeOn(true)
+    },
+    showKeyboard = showKeyboard, keyboardState = keyboardState,
+    onKeyboardStateChange = { keyboardState = it },
+    onKeyboardDismiss = { dismissKeyboard() },
+    onKeyboardConfirm = { saveFromKeyboard() },
+    onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
+    onKeyboardPickCategory = { },
+    showFuture = filter.showFuture, onShowFutureChange = { vm.setShowFuture(it) },
+    allNoteNames = ui.allNoteNames,
+    noteCategoryMap = ui.noteCategoryMap,
+    scrollToTopTrigger = scrollToTopTrigger,
+    nameFlashTrigger = nameFlashTrigger,
+    justAddedId = justAddedId,
+    deletingRecordId = filter.deletingId,
+    afterSaveHint = afterSaveHint,
+    afterSaveHintVisible = afterSaveHintVisible,
+    animatedQuickInputs = animatedQuickInputs,
+    keyboardProgressProvider = { keyboardAnimProgress.value }
+)
             1 -> CompareContent(
-                records = records, availableMonths = availableMonths,
-                selectedMonthA = compareMonthA, onMonthAChange = { setCompareMonthA(it) },
-                selectedMonthB = compareMonthB, onMonthBChange = { setCompareMonthB(it) },
-                onAddClick = { currentPage = 0; openKeyboardForNew() }
-            )
+    compareUi = compareUi,
+    selectedMonthA = compareMonthA,
+    onMonthAChange = { newA ->
+        var newB = compareMonthB
+        if (newA == newB) newB = shiftMonthKey(newA, 1)
+        vm.setCompareMonthA(newA)
+        if (newB != compareMonthB) vm.setCompareMonthB(newB)
+    },
+    selectedMonthB = compareMonthB,
+    onMonthBChange = { newB ->
+        var newA = compareMonthA
+        if (newB == newA) newA = shiftMonthKey(newB, -1)
+        vm.setCompareMonthB(newB)
+        if (newA != compareMonthA) vm.setCompareMonthA(newA)
+    },
+    onAddClick = { currentPage = 0; openKeyboardForNew() }
+)
             2 -> CalendarContent(
-                records = records,
-                onCopyClick = { r -> currentPage = 0; openKeyboardForCopy(r) },
-                onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
-                onFilterClick = { r ->
-                    currentPage = 0
-                    filterCategory = null; filterMonth = null
-                    filterSearch = TextFieldValue(r.note); filterModeOn = true
-                },
-                onDeleteClick = { deleteRecordWithUndo(it) },
-                onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onAddClick = { currentPage = 0; openKeyboardForNew() },
-                deletingRecordId = deletingRecordId
-            )
+    calendarUi = calendarUi,
+    currentMonthKey = calendarMonthKey,
+    onMonthChange = { vm.setCalendarMonthKey(it) },
+    filterCategory = calendarFilterCategory,
+    onFilterCategoryChange = { vm.setCalendarFilterCategory(it) },
+    onCopyClick = { r -> currentPage = 0; openKeyboardForCopy(r) },
+    onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
+    onFilterClick = { r ->
+        currentPage = 0
+        vm.setFilterCategory(null)
+        vm.setFilterMonth(null)
+        filterSearch = TextFieldValue(r.note)
+        vm.setFilterSearch(r.note)
+        vm.setFilterModeOn(true)
+    },
+    onDeleteClick = { deleteRecordWithUndo(it) },
+    onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+    onAddClick = { currentPage = 0; openKeyboardForNew() },
+    deletingRecordId = filter.deletingId
+)
         }
 
         AnimatedVisibility(
@@ -1709,43 +1731,43 @@ fun MainApp(
         }
 
         KeyboardAndFabLayer(
-            showKeyboard = showKeyboard,
-            progressProvider = { keyboardAnimProgress.value },
-            currentPage = currentPage,
-            filterModeOn = filterModeOn,
-            filterSearch = filterSearch,
-            onFilterSearchChange = { filterSearch = it },
-            filterSearchHasFocus = filterSearchHasFocus,
-            onFilterSearchFocusChange = { filterSearchHasFocus = it },
-            filterSearchFocusRequester = filterSearchFocusRequester,
-            onFilterButtonTap = {
-                if (currentPage != 0) {
-                    currentPage = 0
-                    filterModeOn = true
-                } else if (!filterModeOn) {
-                    filterModeOn = true
-                } else {
-                    filterSelectAllTrigger++
-                }
-            },
-            onFabTap = {
-                if (showKeyboard) {
-                    keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
-                } else {
-                    if (filterModeOn) filterModeOn = false
-                    if (currentPage != 0) currentPage = 0
-                    openKeyboardForNew()
-                }
-            },
-            keyboardState = keyboardState,
-            onKeyboardStateChange = { keyboardState = it },
-            onKeyboardDismiss = { dismissKeyboard() },
-            onKeyboardConfirm = { saveFromKeyboard() },
-            onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
-            allNoteNames = allNoteNames,
-            noteCategoryMap = noteCategoryMap,
-            nameFlashTrigger = nameFlashTrigger
-        )
+    showKeyboard = showKeyboard,
+    progressProvider = { keyboardAnimProgress.value },
+    currentPage = currentPage,
+    filterModeOn = filter.modeOn,
+    filterSearch = filterSearch,
+    onFilterSearchChange = { filterSearch = it },
+    filterSearchHasFocus = filterSearchHasFocus,
+    onFilterSearchFocusChange = { filterSearchHasFocus = it },
+    filterSearchFocusRequester = filterSearchFocusRequester,
+    onFilterButtonTap = {
+        if (currentPage != 0) {
+            currentPage = 0
+            vm.setFilterModeOn(true)
+        } else if (!filter.modeOn) {
+            vm.setFilterModeOn(true)
+        } else {
+            filterSelectAllTrigger++
+        }
+    },
+    onFabTap = {
+        if (showKeyboard) {
+            keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
+        } else {
+            if (filter.modeOn) vm.setFilterModeOn(false)
+            if (currentPage != 0) currentPage = 0
+            openKeyboardForNew()
+        }
+    },
+    keyboardState = keyboardState,
+    onKeyboardStateChange = { keyboardState = it },
+    onKeyboardDismiss = { dismissKeyboard() },
+    onKeyboardConfirm = { saveFromKeyboard() },
+    onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
+    allNoteNames = ui.allNoteNames,
+    noteCategoryMap = ui.noteCategoryMap,
+    nameFlashTrigger = nameFlashTrigger
+)
 
         if (uploading) {
             Box(Modifier.fillMaxSize().background(Color(0x80000000)), contentAlignment = Alignment.Center) {
