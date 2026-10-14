@@ -153,6 +153,7 @@ import kotlin.math.roundToInt
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchToken = mutableStateOf(0)
 private val keyboardPrefillNote = mutableStateOf<String?>(null)
+private val keyboardPrefillAmount = mutableStateOf<Double?>(null)   // ★ 新增
 
 // ===== 供通知顯示嘅最近項目資訊 =====
 data class QuickNoteInfo(
@@ -597,14 +598,13 @@ private fun computeLedgerUiState(
         (if (hasInc) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
 
     val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
-        if (note.isBlank()) null
-        else QuickNoteInfo(
-            note = note,
-            category = noteCategoryMap[note] ?: "飲食",
-            amount = records.filter { it.note == note }
-                .maxByOrNull { it.timestamp }?.amount ?: 0.0
-        )
-    }
+    if (note.isBlank()) null
+    else QuickNoteInfo(
+        note = note,
+        category = noteCategoryMap[note] ?: "飲食",
+        amount = recentAmountByNote[note] ?: 0.0   // ★ 改用「時間最近」金額
+    )
+}
 
     return LedgerUiState(
         loading = loading,
@@ -1071,6 +1071,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
         const val EXTRA_PREFILL_NOTE = "extra_prefill_note"
+        const val EXTRA_PREFILL_AMOUNT = "extra_prefill_amount"
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
@@ -1082,35 +1083,40 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
-        if (fromNotification) {
-            keyboardLaunchToken.value += 1
-            keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
-        }
+if (fromNotification) {
+    keyboardLaunchToken.value += 1
+    keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
+    keyboardPrefillAmount.value = if (intent?.hasExtra(EXTRA_PREFILL_AMOUNT) == true)
+        intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null   // ★
+}
 
         createQuickAddChannel()
         askNotificationPermissionIfNeeded()
 
         setContent {
-            val token = keyboardLaunchToken.value
-            val prefillNote = keyboardPrefillNote.value
-            val notesInfo = topQuickNotesInfo.value
+    val token = keyboardLaunchToken.value
+    val prefillNote = keyboardPrefillNote.value
+    val prefillAmount = keyboardPrefillAmount.value       // ★
+    val notesInfo = topQuickNotesInfo.value
 
-            LaunchedEffect(notesInfo) {
-                showQuickAddNotification()
-            }
+    LaunchedEffect(notesInfo) {
+        showQuickAddNotification()
+    }
 
-            MaterialTheme {
-                Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
-                    MainApp(
-                        keyboardLaunchToken = token,
-                        prefillNoteOnLaunch = prefillNote,
-                        onKeyboardLaunchConsumed = {
-                            keyboardPrefillNote.value = null
-                        }
-                    )
+    MaterialTheme {
+        Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
+            MainApp(
+                keyboardLaunchToken = token,
+                prefillNoteOnLaunch = prefillNote,
+                prefillAmountOnLaunch = prefillAmount,     // ★
+                onKeyboardLaunchConsumed = {
+                    keyboardPrefillNote.value = null
+                    keyboardPrefillAmount.value = null     // ★
                 }
-            }
+            )
         }
+    }
+}
     }
 
     override fun onResume() {
@@ -1119,13 +1125,15 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
-            keyboardLaunchToken.value += 1
-            keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
-        }
+    super.onNewIntent(intent)
+    setIntent(intent)
+    if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
+        keyboardLaunchToken.value += 1
+        keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
+        keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
+            intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null   // ★
     }
+}
 
     private fun createQuickAddChannel() {
         if (Build.VERSION.SDK_INT < 26) return
@@ -1141,13 +1149,16 @@ class MainActivity : ComponentActivity() {
         if (!granted) notificationPermissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
     }
 
-    private fun buildLaunchIntent(prefillNote: String?): Intent {
-        return Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_KEYBOARD, true)
-            if (!prefillNote.isNullOrBlank()) putExtra(EXTRA_PREFILL_NOTE, prefillNote)
+    private fun buildLaunchIntent(prefillNote: String?, prefillAmount: Double? = null): Intent {
+    return Intent(this, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(EXTRA_OPEN_KEYBOARD, true)
+        if (!prefillNote.isNullOrBlank()) putExtra(EXTRA_PREFILL_NOTE, prefillNote)
+        if (prefillAmount != null && prefillAmount > 0.0) {
+            putExtra(EXTRA_PREFILL_AMOUNT, prefillAmount)   // ★
         }
     }
+}
 
     private fun showQuickAddNotification() {
         try {
@@ -1177,13 +1188,16 @@ class MainActivity : ComponentActivity() {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
             if (first != null && first.note.isNotBlank()) {
-                val noteIntent = buildLaunchIntent(prefillNote = first.note)
-                val notePi = PendingIntent.getActivity(
-                    this, 1, noteIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
-            }
+    val noteIntent = buildLaunchIntent(
+        prefillNote = first.note,
+        prefillAmount = first.amount          // ★ 傳埋金額
+    )
+    val notePi = PendingIntent.getActivity(
+        this, 1, noteIntent,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+    builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
+}
 
             nm.notify(NOTIFICATION_ID, builder.build())
         } catch (_: Throwable) {}
@@ -1194,6 +1208,7 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     keyboardLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
+    prefillAmountOnLaunch: Double? = null,             // ★
     onKeyboardLaunchConsumed: () -> Unit = {},
     vm: LedgerViewModel = viewModel()
 ) {
@@ -1446,13 +1461,31 @@ fun MainApp(
     }
 
     LaunchedEffect(keyboardLaunchToken) {
-        if (keyboardLaunchToken > 0) {
-            if (filter.modeOn) vm.setFilterModeOn(false)
-            if (currentPage != 0) currentPage = 0
-            openKeyboardForce(prefillNoteOnLaunch)
-            onKeyboardLaunchConsumed()
+    if (keyboardLaunchToken > 0) {
+        if (filter.modeOn) vm.setFilterModeOn(false)
+        if (currentPage != 0) currentPage = 0
+
+        val note = prefillNoteOnLaunch
+        val amt = prefillAmountOnLaunch
+
+        when {
+            note.isNullOrBlank() -> {
+                // 通知本體：空白鍵盤
+                openKeyboardForce(null)
+            }
+            amt != null && amt > 0.0 -> {
+                // 通知按鈕：有金額 → 同 Quick Input Chip 一樣
+                openKeyboardForNew(note, amt)
+            }
+            else -> {
+                // 冇金額，只填名稱
+                openKeyboardForce(note)
+            }
         }
+
+        onKeyboardLaunchConsumed()
     }
+}
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
     BackHandler(enabled = filter.modeOn && !showKeyboard && currentPage == 0) {
