@@ -6087,10 +6087,13 @@ private val AVATAR_TEXT_STYLE_BASE = TextStyle(
 
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
+    // ★ 圓角正方形：圓角 = 短邊 28%（大約 40dp 圖標 → 11dp 圓角）
+    val shape = RoundedCornerShape(percent = 28)
+
     if (iconUrl.isBlank()) {
         val ch = remember(name) { name.trim().take(1).ifBlank { "?" } }
         val bgColor = remember(name) { avatarColor(name) }
-        Box(Modifier.size(size).clip(CircleShape).background(bgColor),
+        Box(Modifier.size(size).clip(shape).background(bgColor),
             contentAlignment = Alignment.Center) {
             Text(
                 text = ch, color = Color.White,
@@ -6110,7 +6113,7 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
         }
         AsyncImage(model = req, contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.size(size).clip(CircleShape))
+            modifier = Modifier.size(size).clip(shape))
     }
 }
 
@@ -6118,8 +6121,8 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
 fun IconViewAdaptive(
     iconUrl: String, name: String, modifier: Modifier = Modifier,
 ) {
-    // ★★★ 優化：移除 BoxWithConstraints（SubcomposeLayout），月曆圖標模式零子組合開銷 ★★★
-    Box(modifier.clip(CircleShape), contentAlignment = Alignment.Center) {
+    // ★ 圓角正方形（月曆格仔用）
+    Box(modifier.clip(RoundedCornerShape(percent = 28)), contentAlignment = Alignment.Center) {
         if (iconUrl.isBlank()) {
             val ch = remember(name) { name.trim().take(1).ifBlank { "?" } }
             val bgColor = remember(name) { avatarColor(name) }
