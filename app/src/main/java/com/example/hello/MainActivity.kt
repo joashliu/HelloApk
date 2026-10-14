@@ -353,7 +353,8 @@ private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "�
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 
-private val threadLocalCal = object : ThreadLocal<Calendar>() {
+// ✅ 用完全限定名，強制指向 java.lang.ThreadLocal
+private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
 }
 
