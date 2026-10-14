@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.BorderStroke
 import android.app.Application
 import android.app.DatePickerDialog
 import android.app.NotificationChannel
@@ -5352,12 +5353,14 @@ fun CompareContent(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 shape = RoundedCornerShape(16.dp),
                 color = SURFACE_CARD,
-                shadowElevation = 4.dp
+                border = BorderStroke(0.8.dp, DIVIDER_COLOR.copy(alpha = 0.6f))
             ) {
                 Column(Modifier.fillMaxSize()) {
+                    // ===== 表頭 =====
                     Row(
-                        Modifier.fillMaxWidth().background(SURFACE_ELEVATED)
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        Modifier.fillMaxWidth()
+                            .background(SURFACE_ELEVATED)
+                            .padding(horizontal = 10.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("類別", Modifier.weight(1.0f),
@@ -5385,7 +5388,7 @@ fun CompareContent(
                         }
                     }
 
-                    HorizontalDivider(color = DIVIDER_COLOR)
+                    HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.6f), thickness = 0.8.dp)
 
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (displayCategories.isEmpty()) {
@@ -5395,7 +5398,11 @@ fun CompareContent(
                         } else {
                             BoxWithConstraints(Modifier.fillMaxSize()) {
                                 val rowCount = displayCategories.size
-                                val calculatedHeight = maxHeight / rowCount
+                                val dividerThickness = 0.8.dp
+                                val totalDividerHeight =
+                                    dividerThickness * (rowCount - 1).coerceAtLeast(0)
+                                val calculatedHeight =
+                                    (maxHeight - totalDividerHeight) / rowCount
                                 val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
 
                                 LazyColumn(Modifier.fillMaxSize(), userScrollEnabled = false) {
@@ -5413,10 +5420,9 @@ fun CompareContent(
                                         val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0)
                                             (amtB / incomeB * 100.0) else null
 
-                                        Row(
+                                        Column(
                                             Modifier
                                                 .fillMaxWidth()
-                                                .height(rowHeight)
                                                 .animateItem(
                                                     fadeInSpec = tween(220, easing = FastOutSlowInEasing),
                                                     fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
@@ -5425,53 +5431,69 @@ fun CompareContent(
                                                         dampingRatio = Spring.DampingRatioLowBouncy
                                                     )
                                                 )
-                                                .background(if (idx % 2 == 0) SURFACE_CARD else ROW_ALT_COLOR)
-                                                .padding(horizontal = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(Modifier.weight(1.0f),
-                                                verticalAlignment = Alignment.CenterVertically) {
-                                                if (style != null) {
-                                                    Box(
-                                                        Modifier.size(26.dp)
-                                                            .clip(RoundedCornerShape(7.dp))
-                                                            .background(style.bgColor),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(style.icon, null, tint = style.fgColor,
-                                                            modifier = Modifier.size(15.dp))
-                                                    }
-                                                    Spacer(Modifier.width(7.dp))
-                                                }
-                                                Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
-                                                    fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
-                                            }
-
-                                            Box(
-                                                Modifier.weight(0.65f).fillMaxHeight()
-                                                    .padding(start = 12.dp, end = 16.dp),
-                                                contentAlignment = Alignment.Center
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .height(rowHeight)
+                                                    .background(SURFACE_CARD)
+                                                    .padding(horizontal = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                if (!isIncome) {
-                                                    val values = histogramData[cat].orEmpty()
-                                                    val histHeight = (rowHeight - 16.dp).coerceAtLeast(20.dp)
-                                                    MiniHistogram(
-                                                        values = values,
-                                                        color = style?.fgColor ?: TEXT_TERTIARY,
-                                                        modifier = Modifier.fillMaxWidth().height(histHeight)
-                                                    )
+                                                Row(Modifier.weight(1.0f),
+                                                    verticalAlignment = Alignment.CenterVertically) {
+                                                    if (style != null) {
+                                                        Box(
+                                                            Modifier.size(26.dp)
+                                                                .clip(RoundedCornerShape(7.dp))
+                                                                .background(style.bgColor),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(style.icon, null, tint = style.fgColor,
+                                                                modifier = Modifier.size(15.dp))
+                                                        }
+                                                        Spacer(Modifier.width(7.dp))
+                                                    }
+                                                    Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
+                                                        fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
                                                 }
+
+                                                Box(
+                                                    Modifier.weight(0.65f).fillMaxHeight()
+                                                        .padding(start = 12.dp, end = 16.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (!isIncome) {
+                                                        val values = histogramData[cat].orEmpty()
+                                                        val histHeight =
+                                                            (rowHeight - 16.dp).coerceAtLeast(20.dp)
+                                                        MiniHistogram(
+                                                            values = values,
+                                                            color = style?.fgColor ?: TEXT_TERTIARY,
+                                                            modifier = Modifier.fillMaxWidth().height(histHeight)
+                                                        )
+                                                    }
+                                                }
+
+                                                CompareValueCell(
+                                                    amount = amtA, isIncome = isIncome, pct = pctA,
+                                                    modifier = Modifier.weight(1.55f)
+                                                )
+                                                Spacer(Modifier.width(6.dp))
+                                                CompareValueCell(
+                                                    amount = amtB, isIncome = isIncome, pct = pctB,
+                                                    modifier = Modifier.weight(1.55f)
+                                                )
                                             }
 
-                                            CompareValueCell(
-                                                amount = amtA, isIncome = isIncome, pct = pctA,
-                                                modifier = Modifier.weight(1.55f)
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            CompareValueCell(
-                                                amount = amtB, isIncome = isIncome, pct = pctB,
-                                                modifier = Modifier.weight(1.55f)
-                                            )
+                                            // ★ 灰色細分隔線（最後一行唔畫）
+                                            if (idx < displayCategories.lastIndex) {
+                                                HorizontalDivider(
+                                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                                    color = DIVIDER_COLOR.copy(alpha = 0.7f),
+                                                    thickness = dividerThickness
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -5479,10 +5501,12 @@ fun CompareContent(
                         }
                     }
 
-                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.5.dp)
+                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.dp)
 
+                    // ===== 餘額行 =====
                     Row(
-                        Modifier.fillMaxWidth().background(SURFACE_ELEVATED)
+                        Modifier.fillMaxWidth()
+                            .background(SURFACE_ELEVATED)
                             .padding(horizontal = 10.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
