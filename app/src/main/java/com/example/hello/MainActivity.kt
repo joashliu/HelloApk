@@ -3390,6 +3390,7 @@ fun LedgerKeyboardPanel(
                 .verticalScroll(rememberScrollState())
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
+            // ============ 日期 / 時間 ============
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3399,7 +3400,10 @@ fun LedgerKeyboardPanel(
                         .weight(1.4f)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(14.dp))
-                        .clickable {
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
                             val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
                             DatePickerDialog(ctx, { _, y, m, d ->
                                 cal.set(Calendar.YEAR, y)
@@ -3426,7 +3430,10 @@ fun LedgerKeyboardPanel(
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(14.dp))
-                        .clickable {
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
                             val cal = Calendar.getInstance().apply { timeInMillis = state.timestamp }
                             TimePickerDialog(ctx, { _, h, mi ->
                                 cal.set(Calendar.HOUR_OF_DAY, h)
@@ -3452,6 +3459,7 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
+            // ============ 旅遊：HKD / JPY 切換 ============
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -3468,7 +3476,10 @@ fun LedgerKeyboardPanel(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(if (isHKD) BRAND_PRIMARY else Color.Transparent)
-                                        .clickable {
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
                                             onStateChange(state.copy(currency = "HKD", focusedField = "amount"))
                                         }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -3480,7 +3491,10 @@ fun LedgerKeyboardPanel(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(if (!isHKD) BRAND_PRIMARY else Color.Transparent)
-                                        .clickable {
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
                                             onStateChange(state.copy(currency = "JPY", focusedField = "amount"))
                                         }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -3507,7 +3521,10 @@ fun LedgerKeyboardPanel(
                                         .border(1.dp,
                                             if (state.focusedField == "rate") BRAND_PRIMARY else Color.Transparent,
                                             RoundedCornerShape(8.dp))
-                                        .clickable { onStateChange(state.copy(focusedField = "rate")) }
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onStateChange(state.copy(focusedField = "rate")) }
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text(
@@ -3528,53 +3545,55 @@ fun LedgerKeyboardPanel(
                 }
             }
 
+            // ============ 金額顯示區（含淺藍 Highlight）============
             Surface(Modifier.fillMaxWidth().height(76.dp),
-    shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(16.dp))
-            .border(2.dp,
-                if (state.focusedField == "amount" && state.currency == "JPY") BRAND_PRIMARY_LIGHT
-                else Color.Transparent,
-                RoundedCornerShape(16.dp))
-            .clickable { onStateChange(state.copy(focusedField = "amount")) }
-            .padding(start = 22.dp, end = 12.dp),
-        contentAlignment = Alignment.CenterEnd
-    ) {
-        Text(
-            text = if (state.category == "旅遊" && state.currency == "JPY") "¥" else "$",
-            fontSize = 24.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterStart)
-        )
-        val showText = if (state.amountText.isEmpty()) "0" else state.amountText
+                shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(2.dp,
+                            if (state.focusedField == "amount" && state.currency == "JPY") BRAND_PRIMARY_LIGHT
+                            else Color.Transparent,
+                            RoundedCornerShape(16.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onStateChange(state.copy(focusedField = "amount")) }
+                        .padding(start = 22.dp, end = 12.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        text = if (state.category == "旅遊" && state.currency == "JPY") "¥" else "$",
+                        fontSize = 24.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    )
+                    val showText = if (state.amountText.isEmpty()) "0" else state.amountText
 
-        val amountHighlight by animateColorAsState(
-    targetValue = if (state.selectAmountOnInput) Color(0xFFDBEAFE)   // 淺藍
-                  else Color.Transparent,
-    animationSpec = tween(220, easing = FastOutSlowInEasing),
-    label = "amountHighlight"
-)
+                    // ★★★ 淺藍 Highlight：即時切換，冇動畫，唔會有半透明黑殘留 ★★★
+                    val highlightColor = if (state.selectAmountOnInput) Color(0xFFDBEAFE)
+                                         else Color.Transparent
 
-Box(
-    modifier = Modifier
-        .padding(end = 44.dp)
-        .clip(RoundedCornerShape(10.dp))
-        .background(amountHighlight)
-        .padding(horizontal = 10.dp, vertical = 2.dp)
-) {
-            AnimatedAmount(
-                text = showText,
-                color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
-                fontSize = 38.sp, fontWeight = FontWeight.Bold
-            )
-        }
-        // ★★★ highlight END ★★★
-    }
-}
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(highlightColor)
+                            .padding(horizontal = 10.dp, vertical = 2.dp)
+                    ) {
+                        AnimatedAmount(
+                            text = showText,
+                            color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
+                            fontSize = 38.sp, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    // ★★★ Highlight END ★★★
+                }
+            }
 
             Spacer(Modifier.height(10.dp))
 
+            // ============ 數字鍵盤 ============
             val rows = listOf(
                 listOf("1", "2", "3"), listOf("4", "5", "6"),
                 listOf("7", "8", "9"), listOf(".", "0", "backspace")
@@ -3639,6 +3658,7 @@ Box(
 
             Spacer(Modifier.height(10.dp))
 
+            // ============ 名稱 + 類別 ============
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -3727,7 +3747,10 @@ Box(
                                         suggestions.forEach { s ->
                                             Row(
                                                 Modifier.fillMaxWidth()
-                                                    .clickable { onStateChange(state.copy(noteText = s)) }
+                                                    .clickable(
+                                                        interactionSource = remember { MutableInteractionSource() },
+                                                        indication = null
+                                                    ) { onStateChange(state.copy(noteText = s)) }
                                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
@@ -3799,7 +3822,10 @@ Box(
                                                 .background(
                                                     if (sel) (s?.fgColor ?: BRAND_PRIMARY)
                                                     else (s?.bgColor ?: SURFACE_ELEVATED))
-                                                .clickable {
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) {
                                                     onStateChange(state.copy(
                                                         category = cat, currency = "HKD",
                                                         focusedField = "amount"))
@@ -3830,6 +3856,7 @@ Box(
 
             Spacer(Modifier.height(10.dp))
 
+            // ============ 收起 / 入帳 ============
             Row(Modifier.fillMaxWidth().height(58.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
