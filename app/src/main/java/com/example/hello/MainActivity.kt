@@ -3549,21 +3549,20 @@ fun LedgerKeyboardPanel(
         )
         val showText = if (state.amountText.isEmpty()) "0" else state.amountText
 
-        // ★★★ 新增：淺藍色 highlight 只包住數字 ★★★
         val amountHighlight by animateColorAsState(
-            targetValue = if (state.selectAmountOnInput) Color(0xFFDBEAFE)   // 淺藍
-                          else Color.Transparent,
-            animationSpec = tween(220, easing = FastOutSlowInEasing),
-            label = "amountHighlight"
-        )
+    targetValue = if (state.selectAmountOnInput) Color(0xFFDBEAFE)   // 淺藍
+                  else Color.Transparent,
+    animationSpec = tween(220, easing = FastOutSlowInEasing),
+    label = "amountHighlight"
+)
 
-        Box(
-            modifier = Modifier
-                .padding(end = 44.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(amountHighlight)
-                .padding(horizontal = 10.dp, vertical = 2.dp)
-        ) {
+Box(
+    modifier = Modifier
+        .padding(end = 44.dp)
+        .clip(RoundedCornerShape(10.dp))
+        .background(amountHighlight)
+        .padding(horizontal = 10.dp, vertical = 2.dp)
+) {
             AnimatedAmount(
                 text = showText,
                 color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
