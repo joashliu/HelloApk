@@ -1442,7 +1442,7 @@ fun MainApp(
         mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食")
     }
 
-    // ===== 由 ViewModel 帶入嘅核心資料（Compare 同 Calendar 按頁延遲訂閱） =====
+    // ===== 由 ViewModel 帶入嘅核心資料 =====
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
 
@@ -1481,7 +1481,7 @@ fun MainApp(
     var afterSaveHintVisible by remember { mutableStateOf(false) }
     val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
 
-    // ★★★ 打字 debounce 250ms，唔好每 key 都重算 ★★★
+    // ★★★ 打字 debounce 250ms ★★★
     LaunchedEffect(filterSearch.text) {
         delay(250)
         vm.setFilterSearch(filterSearch.text)
@@ -1510,6 +1510,7 @@ fun MainApp(
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
+    // ===== 從相冊揀圖 =====
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
         if (uri != null && target != null) {
@@ -1521,16 +1522,52 @@ fun MainApp(
         }
         iconTargetRecord = null
     }
+
+    // ===== 即時拍照（FileProvider URI，拍完清 cache） =====
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val target = iconTargetRecord; val uri = pendingCameraUri
+        val target = iconTargetRecord
+        val uri = pendingCameraUri
         if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
+                // 清 cache 臨時檔
+                try {
+                    uri.path?.let { p ->
+                        val f = java.io.File(p)
+                        if (f.exists()) f.delete()
+                    }
+                } catch (_: Exception) {}
             }
         }
-        pendingCameraUri = null; iconTargetRecord = null
+        pendingCameraUri = null
+        iconTargetRecord = null
+    }
+
+    // ===== ★★★ 新增：相機權限 launcher ★★★ =====
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val target = iconTargetRecord
+        if (granted && target != null) {
+            try {
+                val uri = createTempImageUri(context)
+                if (uri != null) {
+                    pendingCameraUri = uri
+                    takePictureLauncher.launch(uri)
+                } else {
+                    Toast.makeText(context, "開啟相機失敗", Toast.LENGTH_SHORT).show()
+                    iconTargetRecord = null
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show()
+                iconTargetRecord = null
+            }
+        } else if (!granted) {
+            Toast.makeText(context, "需要相機權限才能拍照", Toast.LENGTH_SHORT).show()
+            iconTargetRecord = null
+        }
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
@@ -1958,20 +1995,30 @@ fun MainApp(
                         showIconSourceDialog = false
                         pickImageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
+                    // ===== ★★★ 即時拍照：先檢查／請求權限 ★★★ =====
                     IconSourceOption(Icons.Default.PhotoCamera, "即時拍照") {
                         showIconSourceDialog = false
-                        try {
-                            val uri = createTempImageUri(context)
-                            if (uri != null) {
-                                pendingCameraUri = uri
-                                takePictureLauncher.launch(uri)
-                            } else {
-                                Toast.makeText(context, "開啟相機失敗", Toast.LENGTH_SHORT).show()
+                        val hasPermission = ContextCompat.checkSelfPermission(
+                            context, android.Manifest.permission.CAMERA
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (hasPermission) {
+                            try {
+                                val uri = createTempImageUri(context)
+                                if (uri != null) {
+                                    pendingCameraUri = uri
+                                    takePictureLauncher.launch(uri)
+                                } else {
+                                    Toast.makeText(context, "開啟相機失敗", Toast.LENGTH_SHORT).show()
+                                    iconTargetRecord = null
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show()
                                 iconTargetRecord = null
                             }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "開啟相機失敗：${e.message}", Toast.LENGTH_SHORT).show()
-                            iconTargetRecord = null
+                        } else {
+                            // 保留 iconTargetRecord，等權限結果回嚟再影
+                            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                         }
                     }
                     IconSourceOption(Icons.Default.Link, "貼上網址") {
@@ -5915,20 +5962,22 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
     }
 }
 
+import androidx.core.content.FileProvider
+import java.io.File
+
 fun createTempImageUri(context: Context): Uri? {
     return try {
-        val name = "camera_${System.currentTimeMillis()}.jpg"
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, name)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Ledger")
-            }
-        }
-        context.contentResolver.insert(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+        val dir = File(context.cacheDir, "camera").apply { if (!exists()) mkdirs() }
+        val file = File(dir, "camera_${System.currentTimeMillis()}.jpg")
+        if (!file.exists()) file.createNewFile()
+        FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
         )
-    } catch (e: Exception) { null }
+    } catch (e: Exception) {
+        null
+    }
 }
 
 suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE): ByteArray? =
