@@ -769,7 +769,7 @@ private fun computeLedgerUiState(
 
     val topNotes = minDistByNote.entries
         .sortedBy { it.value }
-        .take(20)
+        .take(42)
         .map { it.key to 0 }
 
     val monthsSet = HashSet<String>()
@@ -4777,7 +4777,13 @@ fun QuickInputSection(
 
         for (item in items) {
             val name = item.first
-            val estimatedItemWidth = 50 + (name.length * 14)
+            // 精準計算：中文字約 13.5dp，英數字約 7.5dp，固定邊距及圖標佔 44dp
+            var textW = 0f
+            for (c in name) {
+                textW += if (c.code > 255) 13.5f else 7.5f
+            }
+            val estimatedItemWidth = 44 + textW.toInt()
+
             if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
                 rows.add(currentRow)
                 currentRow = mutableListOf(item)
