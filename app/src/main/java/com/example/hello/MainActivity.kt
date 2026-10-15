@@ -5993,11 +5993,20 @@ suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE):
             val src = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, opts)
             } ?: return@withContext null
-            val scaled = scaleCropCenter(src, maxSize)
-            if (scaled !== src) src.recycle()
+
+            // ★ 依圖片方向決定處理方式
+            val processed = if (src.width > src.height) {
+                // 橫向長方形：保留完整圖，等比縮到闊 = maxSize
+                scaleKeepAspectWidth(src, maxSize)
+            } else {
+                // 直向長方形 / 正方形：裁中間正方形，縮到 maxSize × maxSize
+                scaleCropCenter(src, maxSize)
+            }
+            if (processed !== src) src.recycle()
+
             val baos = ByteArrayOutputStream()
-            scaled.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-            scaled.recycle(); baos.toByteArray()
+            processed.compress(Bitmap.CompressFormat.JPEG, 80, baos)
+            processed.recycle(); baos.toByteArray()
         } catch (e: Exception) { null }
     }
 
@@ -6010,6 +6019,17 @@ fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
                  else Bitmap.createScaledBitmap(cropped, size, size, true)
     if (cropped !== src && cropped !== scaled) cropped.recycle()
     return scaled
+}
+
+/**
+ * 橫向圖片專用：唔裁切，保留完整圖，闊度縮到 maxWidth，高度等比。
+ * 例如 400×200 → 100×50；1200×400 → 100×34。
+ */
+fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
+    if (src.width <= maxWidth) return src
+    val ratio = maxWidth.toFloat() / src.width
+    val newH = (src.height * ratio).roundToInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
 }
 
 suspend fun uploadIconAndApplyToSameName(context: Context, db: FirebaseFirestore,
@@ -6112,8 +6132,8 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
                 .build()
         }
         AsyncImage(model = req, contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.size(size).clip(shape))
+    contentScale = ContentScale.Fit,
+    modifier = Modifier.size(size).clip(shape))
     }
 }
 
@@ -6145,8 +6165,8 @@ fun IconViewAdaptive(
                     .build()
             }
             AsyncImage(model = req, contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize())
+    contentScale = ContentScale.Fit,
+    modifier = Modifier.fillMaxSize())
         }
     }
 }
