@@ -4590,80 +4590,8 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 }
 
 @Composable
-fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val ctx = LocalContext.current
-    // ★★★ 優化：直接由記憶體快取同步讀取主題色，消除翻頁／滾動時重複解碼 Bitmap 同閃爍 ★★★
-    var extracted by remember(iconUrl) {
-        mutableStateOf(if (iconUrl.isBlank()) null else dominantColorCache[iconUrl])
-    }
-
-    LaunchedEffect(iconUrl) {
-        if (iconUrl.isBlank()) {
-            extracted = null
-            return@LaunchedEffect
-        }
-        dominantColorCache[iconUrl]?.let {
-            extracted = it
-            return@LaunchedEffect
-        }
-        val computed = withContext(Dispatchers.IO) {
-            try {
-                val request = ImageRequest.Builder(ctx)
-                    .data(iconUrl).allowHardware(false).build()
-                val result = ctx.imageLoader.execute(request)
-                when (val d = result.drawable) {
-                    is android.graphics.drawable.BitmapDrawable ->
-                        getDominantMutedColor(d.bitmap)
-
-                    is android.graphics.drawable.ColorDrawable -> {
-                        val c = d.color
-                        if (android.graphics.Color.alpha(c) > 0 &&
-                            android.graphics.Color.red(c)   < 240 &&
-                            android.graphics.Color.green(c) < 240 &&
-                            android.graphics.Color.blue(c)  < 240) {
-                            val hsv = FloatArray(3)
-                            android.graphics.Color.colorToHSV(c, hsv)
-                            hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
-                            hsv[2] = 0.96f
-                            Color(android.graphics.Color.HSVToColor(hsv))
-                        } else null
-                    }
-                    else -> null
-                }
-            } catch (_: Exception) { null }
-        }
-        if (computed != null) {
-            dominantColorCache[iconUrl] = computed
-            extracted = computed
-        }
-    }
-
-    val bgColor = extracted ?: SURFACE_ELEVATED
-
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        color = bgColor,
-        onClick = onClick,
-        shadowElevation = 1.dp
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconView(iconUrl, name, size = 18.dp)
-            Spacer(Modifier.width(6.dp))
-            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Medium, maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
 fun AnimatedStretchingFlowRow(
-    rows: List<List<Pair<String, Int>>>, // 依家嚴格接收二維陣列，唔再自己亂換行
+    rows: List<List<Pair<String, Int>>>,
     modifier: Modifier = Modifier,
     horizontalSpacing: Dp = 8.dp,
     verticalSpacing: Dp = 8.dp,
@@ -4688,7 +4616,6 @@ fun AnimatedStretchingFlowRow(
         var y = 0
         var flatIndex = 0
 
-        // 嚴格跟隨傳入嘅 rows 結構嚟擺位
         for (row in rows) {
             if (row.isEmpty()) continue
 
@@ -4711,7 +4638,6 @@ fun AnimatedStretchingFlowRow(
             var rowMaxHeight = 0
 
             for (i in rowMeasurables.indices) {
-                // 如果闊度突咗出嚟，會平均扣減，等入面嘅 TextOverflow 自己變省略號
                 val extra = if (extraSpace > 0) {
                     extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
                 } else {
@@ -4719,6 +4645,7 @@ fun AnimatedStretchingFlowRow(
                     val subtract = (diff.toFloat() / row.size).roundToInt()
                     -subtract
                 }
+                
                 val targetWidth = maxOf(0, intrinsicWidths[i] + extra)
 
                 val placeable = rowMeasurables[i].measure(
@@ -4794,7 +4721,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        // ★ 關鍵修正：拆走 Surface 嘅 onClick，改用 Modifier.clickable，強制高度為 36.dp，廢除 Material 3 最細 48dp 觸控限制
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -4814,6 +4740,51 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                 fontWeight = FontWeight.Medium, maxLines = 1,
                 overflow = TextOverflow.Ellipsis)
         }
+    }
+}
+
+@Composable
+private fun AnimatedQuickChip(
+    name: String, iconUrl: String, index: Int,
+    animatedNames: MutableMap<String, Boolean>,
+    onClick: () -> Unit, modifier: Modifier = Modifier
+) {
+    val alreadyAnimated = animatedNames.containsKey(name)
+    if (alreadyAnimated) {
+        Box(modifier = modifier) {
+            QuickInputChip(
+                name = name,
+                iconUrl = iconUrl,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onClick
+            )
+        }
+        return
+    }
+
+    val animProgress = remember { Animatable(0f) }
+    LaunchedEffect(name) {
+        if (!animatedNames.containsKey(name)) {
+            animatedNames[name] = true
+            delay((index * 24L).coerceAtMost(260L))
+            animProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
+            )
+        }
+    }
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            val p = animProgress.value
+            alpha = p
+            scaleX = 0.92f + 0.08f * p
+            scaleY = 0.92f + 0.08f * p
+            transformOrigin = TransformOrigin.Center
+        }
+    ) {
+        QuickInputChip(name = name, iconUrl = iconUrl,
+            modifier = Modifier.fillMaxWidth(), onClick = onClick)
     }
 }
 
@@ -4859,7 +4830,7 @@ fun QuickInputSection(
                     val name = item.first
                     var textW = 0f
                     for (c in name) {
-                        textW += if (c.code > 255) 14.5f else 8.5f // 增加字元寬度保險量
+                        textW += if (c.code > 255) 14.5f else 8.5f 
                     }
                     val itemPx = with(density) { (44f + textW).dp.toPx() }
                     val needed = if (currentRow.isEmpty()) itemPx
@@ -4938,7 +4909,6 @@ fun QuickInputSection(
                                 bottom = if (hasIndicator) panelVPadding + indicatorSpace else panelVPadding
                             )
                     ) {
-                        // ★ 關鍵修正：依家直接將預先計好嘅整頁二維陣列 pages[page] 傳入去，確保一定對齊，唔會多出嚟
                         AnimatedStretchingFlowRow(
                             rows = pages[page],
                             modifier = Modifier.fillMaxWidth(),
