@@ -4602,7 +4602,6 @@ fun AnimatedStretchingFlowRow(
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
     val scope = rememberCoroutineScope()
-    // 獨立坐標記憶系統：確保改變位置時有平滑滑動動畫，而且唔會因為高度改變而全部掉落
     val offsetAnimators = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
 
     androidx.compose.ui.layout.Layout(
@@ -4614,6 +4613,8 @@ fun AnimatedStretchingFlowRow(
         if (measurables.isEmpty()) return@Layout layout(0, 0) {}
 
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
+        // 防止喺 Compose 測量階段因寬度不足而記錄咗錯誤嘅 (0,0) 坐標
+        if (safeMaxWidth < 50) return@Layout layout(safeMaxWidth, 0) {}
 
         val itemWidths = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
 
@@ -4682,24 +4683,23 @@ fun AnimatedStretchingFlowRow(
                 val (placeable, targetOffset) = placeableInfos[i]
                 val itemName = items[i].first
 
-                // 利用 Animatable 攔截最新坐標，做出極致平滑嘅滑動效果
-                val anim = offsetAnimators.getOrPut(itemName) {
-                    Animatable(targetOffset, IntOffset.VectorConverter)
-                }
-
-                if (anim.targetValue != targetOffset) {
-                    scope.launch {
-                        anim.animateTo(
-                            targetValue = targetOffset,
-                            animationSpec = spring(
-                                dampingRatio = 0.85f,
-                                stiffness = Spring.StiffnessMediumLow
+                val anim = offsetAnimators[itemName]
+                if (anim == null) {
+                    // ★ 第一次出現：直接定位喺最終目標位置，唔會再有「由上至下抌落嚟」嘅奇怪動畫
+                    offsetAnimators[itemName] = Animatable(targetOffset, IntOffset.VectorConverter)
+                    placeable.place(targetOffset)
+                } else {
+                    // ★ 已經存在但改變咗位置：觸發平滑移動動畫
+                    if (anim.targetValue != targetOffset) {
+                        scope.launch {
+                            anim.animateTo(
+                                targetValue = targetOffset,
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
                             )
-                        )
+                        }
                     }
+                    placeable.place(anim.value)
                 }
-
-                placeable.place(anim.value)
             }
         }
     }
@@ -4756,7 +4756,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        // 拆走 Surface 嘅 onClick，改用 Modifier.clickable，強制高度，防止被 Material 3 撐大
+        // 強制高度為 36dp，防止被 Material 3 嘅預設 onClick 撐大
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -4779,57 +4779,12 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@Composable
-private fun AnimatedQuickChip(
-    name: String, iconUrl: String, index: Int,
-    animatedNames: MutableMap<String, Boolean>,
-    onClick: () -> Unit, modifier: Modifier = Modifier
-) {
-    val alreadyAnimated = animatedNames.containsKey(name)
-    if (alreadyAnimated) {
-        Box(modifier = modifier) {
-            QuickInputChip(
-                name = name,
-                iconUrl = iconUrl,
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onClick
-            )
-        }
-        return
-    }
-
-    val animProgress = remember { Animatable(0f) }
-    LaunchedEffect(name) {
-        if (!animatedNames.containsKey(name)) {
-            animatedNames[name] = true
-            delay((index * 24L).coerceAtMost(260L))
-            animProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)
-            )
-        }
-    }
-
-    Box(
-        modifier = modifier.graphicsLayer {
-            val p = animProgress.value
-            alpha = p
-            scaleX = 0.92f + 0.08f * p
-            scaleY = 0.92f + 0.08f * p
-            transformOrigin = TransformOrigin.Center
-        }
-    ) {
-        QuickInputChip(name = name, iconUrl = iconUrl,
-            modifier = Modifier.fillMaxWidth(), onClick = onClick)
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    animatedQuickInputs: MutableMap<String, Boolean>,
+    animatedQuickInputs: MutableMap<String, Boolean>, // 保留參數防止編譯錯誤，但內部棄用以解決閃爍
     maxRowsPerPage: Int = 4,
     onClick: (String) -> Unit
 ) {
@@ -4837,21 +4792,13 @@ fun QuickInputSection(
 
     val topNoteNames = remember(topNotes) { topNotes.map { it.first } }
     val items = remember(topNoteNames) { topNoteNames.take(42).map { it to 0 } }
-    val indexByName = remember(items) {
-        items.mapIndexed { idx, pair -> pair.first to idx }.toMap()
-    }
 
     val density = LocalDensity.current
     val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
 
-    // 用底層 Paint 精準預測文字寬度，徹底解決點點點問題！
-    val textPaint = remember(density) {
-        android.graphics.Paint().apply {
-            textSize = with(density) { 13.sp.toPx() }
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            isAntiAlias = true
-        }
-    }
+    // ★ 關鍵：調用 Compose 內置嘅 TextMeasurer 嚟獲取絕對精準嘅文字像素寬度！
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
     val chipHeight = 36.dp
     val verticalGap = 8.dp
@@ -4873,9 +4820,10 @@ fun QuickInputSection(
 
                 for (item in items) {
                     val name = item.first
-                    val textW = textPaint.measureText(name)
-                    // 44dp: padding 10*2 + icon 18 + spacer 6。加多 6f 像素做安全緩衝
-                    val itemPx = with(density) { 44.dp.toPx() } + textW + 6f
+                    // 精準計算該文字喺畫面上佔用嘅寬度
+                    val textW = textMeasurer.measure(name, textStyle).size.width.toFloat()
+                    // 44dp 係組件內置 Padding 同 Icon 寬度總和，加 2f 像素作為安全緩衝
+                    val itemPx = with(density) { 44.dp.toPx() } + textW + 2f
                     
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
@@ -4893,11 +4841,10 @@ fun QuickInputSection(
                 rows
             }
 
-            val pages: List<List<Pair<String, Int>>> =
-                remember(allFixedRows, maxRowsPerPage) {
-                    if (allFixedRows.isEmpty()) emptyList()
-                    else allFixedRows.chunked(maxRowsPerPage).map { it.flatten() }
-                }
+            val pages: List<List<Pair<String, Int>>> = remember(allFixedRows, maxRowsPerPage) {
+                if (allFixedRows.isEmpty()) emptyList()
+                else allFixedRows.chunked(maxRowsPerPage).map { it.flatten() }
+            }
 
             if (pages.isEmpty()) return@BoxWithConstraints
 
@@ -4964,15 +4911,12 @@ fun QuickInputSection(
                             verticalSpacing = verticalGap
                         ) { item ->
                             val name = item.first
-                            val originalIndex = indexByName[name] ?: 0
                             key(name) {
-                                AnimatedQuickChip(
+                                QuickInputChip(
                                     name = name,
                                     iconUrl = noteIconMap[name] ?: "",
-                                    index = originalIndex,
-                                    animatedNames = animatedQuickInputs,
-                                    onClick = { onClick(name) },
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { onClick(name) }
                                 )
                             }
                         }
