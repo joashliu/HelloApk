@@ -145,6 +145,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -306,6 +307,16 @@ data class LedgerUiState(
 )
 
 @Immutable
+data class NoteIndex(
+    val recentAmountByNote: Map<String, Double> = emptyMap(),
+    val noteIconMap: Map<String, String> = emptyMap(),
+    val allNoteNames: List<String> = emptyList(),
+    val noteCategoryMap: Map<String, String> = emptyMap(),
+    val topNotes: List<Pair<String, Int>> = emptyList(),
+    val topQuickNotesInfo: List<QuickNoteInfo> = emptyList(),
+)
+
+@Immutable
 data class CompareUiState(
     val categoryMonthSum: Map<String, Map<String, Double>> = emptyMap(),
     val sortedCategories: List<String> = emptyList(),
@@ -428,10 +439,16 @@ private fun getTodayStartMillis(): Long {
     return meta.startOfDayMillis
 }
 
+// =========================================================
+//  ★ LedgerViewModel（HashMap source of truth 版本）
+// =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val db = Firebase.firestore
     private val prefs = app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+
+    // ★ HashMap 做 source of truth
+    private val recordsById = HashMap<String, Record>()
 
     private val _records = MutableStateFlow<List<Record>>(emptyList())
     val records: StateFlow<List<Record>> = _records.asStateFlow()
@@ -479,10 +496,16 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun setCalendarMonthKey(v: String)          { _calendarMonthKey.value = v }
     fun setCalendarFilterCategory(v: String?)   { _calendarFilterCategory.value = v }
 
+    // ★ note 索引 flow：只依賴 _records，打字時唔重算
+    private val noteIndexState: StateFlow<NoteIndex> = _records
+        .map { records -> buildNoteIndex(records) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NoteIndex())
+
     val ledgerUiState: StateFlow<LedgerUiState> = combine(
-        _records, _loading, _filter
-    ) { records, loading, filter ->
-        computeLedgerUiState(records, loading, filter)
+        _records, noteIndexState, _loading, _filter
+    ) { records, noteIndex, loading, filter ->
+        computeLedgerUiState(records, noteIndex, loading, filter)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
@@ -505,6 +528,20 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     init { listenToFirestore() }
 
+    // ★ 用 id 做 tiebreaker，避免同 timestamp 順序唔穩定
+    private fun buildSortedList(): List<Record> {
+        val list = ArrayList<Record>(recordsById.size)
+        list.addAll(recordsById.values)
+        list.sortWith(
+            compareByDescending<Record> { it.timestamp }.thenByDescending { it.id }
+        )
+        return list
+    }
+
+    private fun emitSorted() {
+        _records.value = buildSortedList()
+    }
+
     private fun listenToFirestore() {
         db.collection("records")
             .orderBy("timestamp", Query.Direction.DESCENDING)
@@ -516,71 +553,21 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 if (changes.isEmpty()) return@addSnapshotListener
 
                 viewModelScope.launch(Dispatchers.Default) {
-                    val parsed = ArrayList<Pair<DocumentChange.Type, Record>>(changes.size)
+                    // ★ 直接 apply 落 HashMap，O(k)
                     for (change in changes) {
                         val r = change.document.toObject(Record::class.java)
-                            ?.copy(id = change.document.id)
-                        if (r != null) {
-                            getTimestampMeta(r.timestamp)
-                            parsed.add(change.type to r)
+                            ?.copy(id = change.document.id) ?: continue
+                        getTimestampMeta(r.timestamp)
+
+                        when (change.type) {
+                            DocumentChange.Type.ADDED,
+                            DocumentChange.Type.MODIFIED -> recordsById[r.id] = r
+                            DocumentChange.Type.REMOVED -> recordsById.remove(r.id)
                         }
                     }
-
-                    _records.update { current ->
-                        if (current.isEmpty() && parsed.all { it.first == DocumentChange.Type.ADDED }) {
-                            val seen = HashSet<String>(parsed.size)
-                            val initial = ArrayList<Record>(parsed.size)
-                            for ((_, r) in parsed) {
-                                if (seen.add(r.id)) initial.add(r)
-                            }
-                            initial.sortByDescending { it.timestamp }
-                            return@update initial
-                        }
-
-                        val updated = ArrayList<Record>(current.size + parsed.size)
-                        updated.addAll(current)
-
-                        fun insertSortedDesc(list: ArrayList<Record>, item: Record) {
-                            var low = 0
-                            var high = list.size - 1
-                            val ts = item.timestamp
-                            while (low <= high) {
-                                val mid = (low + high) ushr 1
-                                val midTs = list[mid].timestamp
-                                if (midTs >= ts) low = mid + 1 else high = mid - 1
-                            }
-                            list.add(low, item)
-                        }
-
-                        for ((type, r) in parsed) {
-                            when (type) {
-                                DocumentChange.Type.ADDED -> {
-                                    val existingIdx = updated.indexOfFirst { it.id == r.id }
-                                    if (existingIdx < 0) {
-                                        insertSortedDesc(updated, r)
-                                    }
-                                }
-                                DocumentChange.Type.MODIFIED -> {
-                                    val i = updated.indexOfFirst { it.id == r.id }
-                                    if (i >= 0) {
-                                        if (updated[i].timestamp == r.timestamp) {
-                                            updated[i] = r
-                                        } else {
-                                            updated.removeAt(i)
-                                            insertSortedDesc(updated, r)
-                                        }
-                                    } else {
-                                        insertSortedDesc(updated, r)
-                                    }
-                                }
-                                DocumentChange.Type.REMOVED -> {
-                                    val i = updated.indexOfFirst { it.id == r.id }
-                                    if (i >= 0) updated.removeAt(i)
-                                }
-                            }
-                        }
-                        updated
-                    }
+                    // ★ 派生 UI list，O(n log n) 一次過
+                    val newList = buildSortedList()
+                    _records.value = newList
                 }
             }
     }
@@ -589,13 +576,10 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         val newId = db.collection("records").document().id
         val toSave = record.copy(id = newId)
         getTimestampMeta(toSave.timestamp)
-        _records.update { current ->
-            val list = ArrayList<Record>(current.size + 1)
-            list.addAll(current)
-            val i = list.indexOfFirst { it.timestamp < toSave.timestamp }
-            if (i >= 0) list.add(i, toSave) else list.add(toSave)
-            list
-        }
+
+        recordsById[newId] = toSave
+        emitSorted()
+
         viewModelScope.launch {
             try { db.collection("records").document(newId).set(toSave) }
             catch (_: Exception) {}
@@ -606,14 +590,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun updateRecord(id: String, amount: Double, note: String,
                      category: String, timestamp: Long) {
         getTimestampMeta(timestamp)
-        _records.update { list ->
-            list.map {
-                if (it.id == id) it.copy(
-                    amount = amount, note = note,
-                    category = category, timestamp = timestamp
-                ) else it
-            }
-        }
+        val existing = recordsById[id] ?: return
+        recordsById[id] = existing.copy(
+            amount = amount, note = note, category = category, timestamp = timestamp
+        )
+        emitSorted()
         viewModelScope.launch {
             try {
                 db.collection("records").document(id).update(mapOf(
@@ -624,6 +605,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteRecord(id: String) {
+        recordsById.remove(id)
+        emitSorted()
         viewModelScope.launch {
             try { db.collection("records").document(id).delete() }
             catch (_: Exception) {}
@@ -632,10 +615,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun restoreRecord(record: Record) {
         getTimestampMeta(record.timestamp)
-        _records.update { current ->
-            if (current.any { it.id == record.id }) current
-            else (current + record).sortedByDescending { it.timestamp }
-        }
+        recordsById[record.id] = record
+        emitSorted()
         viewModelScope.launch {
             try { db.collection("records").document(record.id).set(record) }
             catch (_: Exception) {}
@@ -658,13 +639,79 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
+// =========================================================
+//  ★ NoteIndex 相關（只依賴 records）
+// =========================================================
+private fun buildNoteIndex(records: List<Record>): NoteIndex {
+    if (records.isEmpty()) return NoteIndex()
+
+    val now = System.currentTimeMillis()
+    val secNow = getTimestampMeta(now).secOfDay
+
+    val minDistByNote = LinkedHashMap<String, Int>()
+    val recentAmountByNote = HashMap<String, Double>()
+    val noteIconMap = HashMap<String, String>()
+    val noteCategoryMap = HashMap<String, String>()
+    val allNoteNames = ArrayList<String>()
+
+    for (r in records) {
+        val note = r.note
+        if (note.isBlank()) continue
+
+        val sec = getTimestampMeta(r.timestamp).secOfDay
+        val d = abs(secNow - sec)
+        val dist = if (d < 86400 - d) d else 86400 - d
+
+        val prevMin = minDistByNote[note]
+        if (prevMin == null) {
+            minDistByNote[note] = dist
+            recentAmountByNote[note] = r.amount
+            noteCategoryMap[note] = r.category
+            allNoteNames.add(note)
+        } else if (dist < prevMin) {
+            minDistByNote[note] = dist
+            recentAmountByNote[note] = r.amount
+        }
+
+        if (r.iconUrl.isNotBlank() && !noteIconMap.containsKey(note)) {
+            noteIconMap[note] = r.iconUrl
+        }
+    }
+
+    val topNotes = minDistByNote.entries
+        .sortedBy { it.value }
+        .take(42)
+        .map { it.key to 0 }
+
+    val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
+        if (note.isBlank()) null
+        else QuickNoteInfo(
+            note = note,
+            category = noteCategoryMap[note] ?: "飲食",
+            amount = recentAmountByNote[note] ?: 0.0
+        )
+    }
+
+    return NoteIndex(
+        recentAmountByNote = recentAmountByNote,
+        noteIconMap = noteIconMap,
+        allNoteNames = allNoteNames,
+        noteCategoryMap = noteCategoryMap,
+        topNotes = topNotes,
+        topQuickNotesInfo = quickInfo,
+    )
+}
+
+// =========================================================
+//  ★ computeLedgerUiState（拆分版：只做 filter 相關）
+// =========================================================
 private fun computeLedgerUiState(
     records: List<Record>,
+    noteIndex: NoteIndex,
     loading: Boolean,
     filter: FilterState,
 ): LedgerUiState {
     val now = System.currentTimeMillis()
-    val secNow = getTimestampMeta(now).secOfDay
 
     val searchFiltered: List<Record> = if (filter.search.isBlank()) records else {
         val q = filter.search
@@ -727,41 +774,6 @@ private fun computeLedgerUiState(
     val groupedByDate = groupedMap.entries.map { it.key to it.value }
     val isExactNoteFilter = filter.modeOn && ledgerRecords.isNotEmpty() && allSameNote
 
-    val minDistByNote = LinkedHashMap<String, Int>()
-    val recentAmountByNote = HashMap<String, Double>()
-    val noteIconMap = HashMap<String, String>()
-    val noteCategoryMap = HashMap<String, String>()
-    val allNoteNames = ArrayList<String>()
-
-    for (r in records) {
-        val note = r.note
-        if (note.isBlank()) continue
-
-        val sec = getTimestampMeta(r.timestamp).secOfDay
-        val d = abs(secNow - sec)
-        val dist = if (d < 86400 - d) d else 86400 - d
-
-        val prevMin = minDistByNote[note]
-        if (prevMin == null) {
-            minDistByNote[note] = dist
-            recentAmountByNote[note] = r.amount
-            noteCategoryMap[note] = r.category
-            allNoteNames.add(note)
-        } else if (dist < prevMin) {
-            minDistByNote[note] = dist
-            recentAmountByNote[note] = r.amount
-        }
-
-        if (r.iconUrl.isNotBlank() && !noteIconMap.containsKey(note)) {
-            noteIconMap[note] = r.iconUrl
-        }
-    }
-
-    val topNotes = minDistByNote.entries
-        .sortedBy { it.value }
-        .take(42)
-        .map { it.key to 0 }
-
     val monthsSet = HashSet<String>()
     var hasIncForCat = false
     val expenseSums = HashMap<String, Double>()
@@ -783,15 +795,6 @@ private fun computeLedgerUiState(
     val visibleCategories =
         (if (hasIncForCat) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
 
-    val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
-        if (note.isBlank()) null
-        else QuickNoteInfo(
-            note = note,
-            category = noteCategoryMap[note] ?: "飲食",
-            amount = recentAmountByNote[note] ?: 0.0
-        )
-    }
-
     return LedgerUiState(
         loading = loading,
         ledgerRecords = ledgerRecords,
@@ -801,14 +804,14 @@ private fun computeLedgerUiState(
         totalIncome = totalIncome,
         totalExpense = totalExpense,
         isExactNoteFilter = isExactNoteFilter,
-        topNotes = topNotes,
-        recentAmountByNote = recentAmountByNote,
-        noteIconMap = noteIconMap,
-        allNoteNames = allNoteNames,
-        noteCategoryMap = noteCategoryMap,
+        topNotes = noteIndex.topNotes,
+        recentAmountByNote = noteIndex.recentAmountByNote,
+        noteIconMap = noteIndex.noteIconMap,
+        allNoteNames = noteIndex.allNoteNames,
+        noteCategoryMap = noteIndex.noteCategoryMap,
         availableMonths = availableMonths,
         visibleCategories = visibleCategories,
-        topQuickNotesInfo = quickInfo,
+        topQuickNotesInfo = noteIndex.topQuickNotesInfo,
     )
 }
 
@@ -943,6 +946,9 @@ private fun computeCalendarUiState(
     )
 }
 
+// =========================================================
+//  Helpers
+// =========================================================
 object AboveAnchorPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
@@ -1008,11 +1014,8 @@ fun formatRecordTime(timestamp: Long): String {
 }
 
 fun formatDatePart(timestamp: Long): String = getTimestampMeta(timestamp).datePart
-
 fun formatTimePart(timestamp: Long): String = getTimestampMeta(timestamp).timePart
-
 fun dateKeyFromTimestamp(timestamp: Long): String = getTimestampMeta(timestamp).dateKey
-
 fun monthKeyFromTimestamp(timestamp: Long): String = getTimestampMeta(timestamp).monthKey
 
 fun shiftMonthKey(key: String, delta: Int): String {
@@ -1309,6 +1312,9 @@ fun FanMenuOverlay(
     }
 }
 
+// =========================================================
+//  ★ MainActivity（通知防抖版本）
+// =========================================================
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -1321,6 +1327,9 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
+
+    // ★ 通知防抖 timestamp
+    private var lastNotificationBuildMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1364,6 +1373,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // ★ onResume 時強制重建
+        lastNotificationBuildMs = 0L
         showQuickAddNotification()
     }
 
@@ -1403,7 +1414,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ★ 加防抖：1 秒內最多建一次通知
     private fun showQuickAddNotification() {
+        val now = System.currentTimeMillis()
+        if (now - lastNotificationBuildMs < 1000L) return
+        lastNotificationBuildMs = now
+
         try {
             if (Build.VERSION.SDK_INT >= 33) {
                 val granted = checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
@@ -2679,6 +2695,13 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
+    // ★ 喺 composable 頂層計好，唔好擺入 remember lambda
+    val configuration = LocalConfiguration.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
+    val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+    val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
+
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
     val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
@@ -2735,76 +2758,68 @@ fun LedgerContent(
     )
 
     val minFanRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
-
-// ★ 喺 composable 頂層計好，唔好擺入 remember lambda
-val configuration = LocalConfiguration.current
-val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
-val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
-
-val handleFanStart = remember {
-    { r: Record, offset: Offset ->
-        activeFanRecord = r
-        fanMenuCenterState.value = offset
-        fanMenuTouchState.value = offset
-    }
-}
-val handleFanDrag = remember {
-    { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
-}
-val latestFilterMode by rememberUpdatedState(filterMode)
-val latestOnCopy by rememberUpdatedState(onCopyClick)
-val latestOnEdit by rememberUpdatedState(onEditClick)
-val latestOnFilterByName by rememberUpdatedState(onFilterByName)
-val latestOnDelete by rememberUpdatedState(onDeleteClick)
-
-val handleFanEnd = remember {
-    {
-        val center = fanMenuCenterState.value
-        val leftSpace = center.x
-        val rightSpace = screenWidthPx - center.x
-        val rotation = when {
-            leftSpace < fanEdgeThreshold -> {
-                val factor = (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f)
-                factor * 80f
-            }
-            rightSpace < fanEdgeThreshold -> {
-                val factor = (1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f)
-                -factor * 80f
-            }
-            else -> 0f
+    val handleFanStart = remember {
+        { r: Record, offset: Offset ->
+            activeFanRecord = r
+            fanMenuCenterState.value = offset
+            fanMenuTouchState.value = offset
         }
-        val arcCenterAngle = -90f + rotation
+    }
+    val handleFanDrag = remember {
+        { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
+    }
+    val latestFilterMode by rememberUpdatedState(filterMode)
+    val latestOnCopy by rememberUpdatedState(onCopyClick)
+    val latestOnEdit by rememberUpdatedState(onEditClick)
+    val latestOnFilterByName by rememberUpdatedState(onFilterByName)
+    val latestOnDelete by rememberUpdatedState(onDeleteClick)
 
-        val hovered = getHoveredActionIndexWithCenter(
-            center = center,
-            touch = fanMenuTouchState.value,
-            minRadiusPx = minFanRadiusPx,
-            arcCenterAngle = arcCenterAngle
-        )
-        val targetRecord = activeFanRecord
-        activeFanRecord = null
+    val handleFanEnd = remember {
+        {
+            val center = fanMenuCenterState.value
+            val leftSpace = center.x
+            val rightSpace = screenWidthPx - center.x
+            val rotation = when {
+                leftSpace < fanEdgeThreshold -> {
+                    val factor = (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                    factor * 80f
+                }
+                rightSpace < fanEdgeThreshold -> {
+                    val factor = (1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                    -factor * 80f
+                }
+                else -> 0f
+            }
+            val arcCenterAngle = -90f + rotation
 
-        if (targetRecord != null && hovered != null) {
-            scope.launch {
-                delay(120)
-                when (hovered) {
-                    0 -> latestOnCopy(targetRecord)
-                    1 -> latestOnEdit(targetRecord)
-                    2 -> {
-                        if (!latestFilterMode) {
-                            preFilterIndex = listState.firstVisibleItemIndex
-                            preFilterOffset = listState.firstVisibleItemScrollOffset
+            val hovered = getHoveredActionIndexWithCenter(
+                center = center,
+                touch = fanMenuTouchState.value,
+                minRadiusPx = minFanRadiusPx,
+                arcCenterAngle = arcCenterAngle
+            )
+            val targetRecord = activeFanRecord
+            activeFanRecord = null
+
+            if (targetRecord != null && hovered != null) {
+                scope.launch {
+                    delay(120)
+                    when (hovered) {
+                        0 -> latestOnCopy(targetRecord)
+                        1 -> latestOnEdit(targetRecord)
+                        2 -> {
+                            if (!latestFilterMode) {
+                                preFilterIndex = listState.firstVisibleItemIndex
+                                preFilterOffset = listState.firstVisibleItemScrollOffset
+                            }
+                            latestOnFilterByName(targetRecord.note)
                         }
-                        latestOnFilterByName(targetRecord.note)
+                        3 -> latestOnDelete(targetRecord)
                     }
-                    3 -> latestOnDelete(targetRecord)
                 }
             }
         }
     }
-}
 
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
@@ -3446,7 +3461,6 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     val itemGlobalPosHolder = remember { OffsetHolder() }
 
-    // ★ 修復：始終調用 animateFloatAsState，令狀態變化有平滑過渡
     val itemAlpha by animateFloatAsState(
         targetValue = if (isOtherItem) 0.35f else 1f,
         animationSpec = tween(300),
@@ -4857,6 +4871,9 @@ fun QuickInputSection(
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
+    // ★ 文字寬度 cache，跨 maxRowsPerPage 變化保留
+    val noteTextWidthCache = remember { mutableMapOf<String, Float>() }
+
     val chipHeight = 36.dp
     val verticalGap = 8.dp
     val panelVPadding = 14.dp
@@ -4877,8 +4894,10 @@ fun QuickInputSection(
 
                 for (item in items) {
                     val name = item.first
-                    val textW = textMeasurer.measure(name, textStyle).size.width.toFloat()
-                    // ★ 加大餘量，避免文字被誤判為溢出而觸發省略號
+                    // ★ 用 cache，只喺首次見到嘅 note 先 measure
+                    val textW = noteTextWidthCache.getOrPut(name) {
+                        textMeasurer.measure(name, textStyle).size.width.toFloat()
+                    }
                     val itemPx = with(density) { 44.dp.toPx() } + textW + 12f
 
                     val needed = if (currentRow.isEmpty()) itemPx
@@ -4897,7 +4916,6 @@ fun QuickInputSection(
                 rows
             }
 
-            // ★ 每頁保留行結構（最多 maxRowsPerPage 行）
             val pages: List<List<List<Pair<String, Int>>>> = remember(allFixedRows, maxRowsPerPage) {
                 if (allFixedRows.isEmpty()) emptyList()
                 else allFixedRows.chunked(maxRowsPerPage)
@@ -5320,6 +5338,13 @@ fun CalendarContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
+    // ★ 喺 composable 頂層計好
+    val configuration = LocalConfiguration.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
+    val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+    val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
+
     val fanMenuProgress = animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
@@ -5327,69 +5352,61 @@ fun CalendarContent(
     )
 
     val minFanRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
+    val latestOnCopy by rememberUpdatedState(onCopyClick)
+    val latestOnEdit by rememberUpdatedState(onEditClick)
+    val latestOnFilter by rememberUpdatedState(onFilterClick)
+    val latestOnDelete by rememberUpdatedState(onDeleteClick)
 
-// ★ 喺 composable 頂層計好
-val configuration = LocalConfiguration.current
-val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
-val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
-
-val latestOnCopy by rememberUpdatedState(onCopyClick)
-val latestOnEdit by rememberUpdatedState(onEditClick)
-val latestOnFilter by rememberUpdatedState(onFilterClick)
-val latestOnDelete by rememberUpdatedState(onDeleteClick)
-
-val handleFanStart = remember {
-    { r: Record, offset: Offset ->
-        activeFanRecord = r
-        fanMenuCenterState.value = offset
-        fanMenuTouchState.value = offset
-    }
-}
-val handleFanDrag = remember {
-    { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
-}
-val handleFanEnd = remember {
-    {
-        val center = fanMenuCenterState.value
-        val leftSpace = center.x
-        val rightSpace = screenWidthPx - center.x
-        val rotation = when {
-            leftSpace < fanEdgeThreshold -> {
-                val factor = (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f)
-                factor * 80f
-            }
-            rightSpace < fanEdgeThreshold -> {
-                val factor = (1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f)
-                -factor * 80f
-            }
-            else -> 0f
+    val handleFanStart = remember {
+        { r: Record, offset: Offset ->
+            activeFanRecord = r
+            fanMenuCenterState.value = offset
+            fanMenuTouchState.value = offset
         }
-        val arcCenterAngle = -90f + rotation
+    }
+    val handleFanDrag = remember {
+        { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
+    }
+    val handleFanEnd = remember {
+        {
+            val center = fanMenuCenterState.value
+            val leftSpace = center.x
+            val rightSpace = screenWidthPx - center.x
+            val rotation = when {
+                leftSpace < fanEdgeThreshold -> {
+                    val factor = (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                    factor * 80f
+                }
+                rightSpace < fanEdgeThreshold -> {
+                    val factor = (1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                    -factor * 80f
+                }
+                else -> 0f
+            }
+            val arcCenterAngle = -90f + rotation
 
-        val hovered = getHoveredActionIndexWithCenter(
-            center = center,
-            touch = fanMenuTouchState.value,
-            minRadiusPx = minFanRadiusPx,
-            arcCenterAngle = arcCenterAngle
-        )
-        val targetRecord = activeFanRecord
-        activeFanRecord = null
+            val hovered = getHoveredActionIndexWithCenter(
+                center = center,
+                touch = fanMenuTouchState.value,
+                minRadiusPx = minFanRadiusPx,
+                arcCenterAngle = arcCenterAngle
+            )
+            val targetRecord = activeFanRecord
+            activeFanRecord = null
 
-        if (targetRecord != null && hovered != null) {
-            scope.launch {
-                delay(120)
-                when (hovered) {
-                    0 -> latestOnCopy(targetRecord)
-                    1 -> latestOnEdit(targetRecord)
-                    2 -> latestOnFilter(targetRecord)
-                    3 -> latestOnDelete(targetRecord)
+            if (targetRecord != null && hovered != null) {
+                scope.launch {
+                    delay(120)
+                    when (hovered) {
+                        0 -> latestOnCopy(targetRecord)
+                        1 -> latestOnEdit(targetRecord)
+                        2 -> latestOnFilter(targetRecord)
+                        3 -> latestOnDelete(targetRecord)
+                    }
                 }
             }
         }
     }
-}
 
     val curCal = remember(currentMonthKey) {
         val parts = currentMonthKey.split("-")
@@ -6266,6 +6283,7 @@ private val AVATAR_TEXT_STYLE_BASE = TextStyle(
     )
 )
 
+// ★ 加 Coil size hint，大幅減少解碼成本
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     val shape = RoundedCornerShape(percent = 28)
@@ -6283,20 +6301,26 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
         }
     } else {
         val ctx = LocalContext.current
-        val req = remember(iconUrl, ctx) {
+        val density = LocalDensity.current
+        // ★ 用實際像素做 cache key
+        val sizePx = remember(density, size) { with(density) { size.roundToPx() } }
+
+        val req = remember(iconUrl, ctx, sizePx) {
             ImageRequest.Builder(ctx)
                 .data(iconUrl)
-                .memoryCacheKey(iconUrl)
+                .memoryCacheKey("$iconUrl@$sizePx")
                 .diskCacheKey(iconUrl)
+                .size(sizePx, sizePx)   // ★ 解碼時直接縮到目標大小
                 .crossfade(false)
                 .build()
         }
         AsyncImage(model = req, contentDescription = null,
-    contentScale = ContentScale.Fit,
-    modifier = Modifier.size(size).clip(shape))
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.size(size).clip(shape))
     }
 }
 
+// ★ 月曆格仔用固定 48px，避免解大圖
 @Composable
 fun IconViewAdaptive(
     iconUrl: String, name: String, modifier: Modifier = Modifier,
@@ -6318,14 +6342,15 @@ fun IconViewAdaptive(
             val req = remember(iconUrl, ctx) {
                 ImageRequest.Builder(ctx)
                     .data(iconUrl)
-                    .memoryCacheKey(iconUrl)
+                    .memoryCacheKey("$iconUrl@48")
                     .diskCacheKey(iconUrl)
+                    .size(48, 48)
                     .crossfade(false)
                     .build()
             }
             AsyncImage(model = req, contentDescription = null,
-    contentScale = ContentScale.Fit,
-    modifier = Modifier.fillMaxSize())
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize())
         }
     }
 }
