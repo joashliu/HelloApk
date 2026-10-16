@@ -4591,7 +4591,7 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 
 @Composable
 fun AnimatedStretchingFlowRow(
-    rows: List<List<Pair<String, Int>>>,
+    items: List<Pair<String, Int>>,
     modifier: Modifier = Modifier,
     horizontalSpacing: Dp = 8.dp,
     verticalSpacing: Dp = 8.dp,
@@ -4601,34 +4601,50 @@ fun AnimatedStretchingFlowRow(
     val hSpacingPx = remember(density, horizontalSpacing) { with(density) { horizontalSpacing.roundToPx() } }
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
+    val scope = rememberCoroutineScope()
+    // 獨立坐標記憶系統：確保改變位置時有平滑滑動動畫，而且唔會因為高度改變而全部掉落
+    val offsetAnimators = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
+
     androidx.compose.ui.layout.Layout(
         content = {
-            rows.forEach { row ->
-                row.forEach { item -> itemContent(item) }
-            }
+            items.forEach { item -> itemContent(item) }
         },
         modifier = modifier
     ) { measurables, constraints ->
-        if (measurables.isEmpty() || rows.isEmpty()) return@Layout layout(0, 0) {}
+        if (measurables.isEmpty()) return@Layout layout(0, 0) {}
 
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
-        val finalPlaceables = ArrayList<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>(measurables.size)
+
+        val itemWidths = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
+
+        val rows = mutableListOf<MutableList<Int>>()
+        var currentRow = mutableListOf<Int>()
+        var currentWidth = 0
+
+        for (i in measurables.indices) {
+            val w = itemWidths[i]
+            if (currentRow.isEmpty()) {
+                currentRow.add(i)
+                currentWidth = w
+            } else {
+                if (currentWidth + hSpacingPx + w > safeMaxWidth) {
+                    rows.add(currentRow)
+                    currentRow = mutableListOf(i)
+                    currentWidth = w
+                } else {
+                    currentRow.add(i)
+                    currentWidth += hSpacingPx + w
+                }
+            }
+        }
+        if (currentRow.isNotEmpty()) rows.add(currentRow)
+
+        val placeableInfos = ArrayList<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>(measurables.size)
         var y = 0
-        var flatIndex = 0
 
         for (row in rows) {
-            if (row.isEmpty()) continue
-
-            val rowMeasurables = measurables.subList(flatIndex, flatIndex + row.size)
-            flatIndex += row.size
-
             var rowIntrinsicWidth = (row.size - 1) * hSpacingPx
-            val intrinsicWidths = IntArray(row.size)
-            for (i in rowMeasurables.indices) {
-                val w = rowMeasurables[i].maxIntrinsicWidth(constraints.maxHeight)
-                intrinsicWidths[i] = w
-                rowIntrinsicWidth += w
-            }
+            for (idx in row) rowIntrinsicWidth += itemWidths[idx]
 
             val extraSpace = safeMaxWidth - rowIntrinsicWidth
             val extraPerItem = if (extraSpace > 0) extraSpace / row.size else 0
@@ -4637,7 +4653,7 @@ fun AnimatedStretchingFlowRow(
             var x = 0
             var rowMaxHeight = 0
 
-            for (i in rowMeasurables.indices) {
+            for (idx in row) {
                 val extra = if (extraSpace > 0) {
                     extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
                 } else {
@@ -4645,14 +4661,13 @@ fun AnimatedStretchingFlowRow(
                     val subtract = (diff.toFloat() / row.size).roundToInt()
                     -subtract
                 }
-                
-                val targetWidth = maxOf(0, intrinsicWidths[i] + extra)
+                val targetWidth = maxOf(0, itemWidths[idx] + extra)
 
-                val placeable = rowMeasurables[i].measure(
+                val placeable = measurables[idx].measure(
                     constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
                 )
 
-                finalPlaceables.add(placeable to IntOffset(x, y))
+                placeableInfos.add(placeable to IntOffset(x, y))
 
                 x += targetWidth + hSpacingPx
                 if (placeable.height > rowMaxHeight) rowMaxHeight = placeable.height
@@ -4663,8 +4678,28 @@ fun AnimatedStretchingFlowRow(
         val totalHeight = maxOf(0, y - vSpacingPx)
 
         layout(safeMaxWidth, totalHeight) {
-            for ((placeable, targetOffset) in finalPlaceables) {
-                placeable.place(targetOffset)
+            for (i in placeableInfos.indices) {
+                val (placeable, targetOffset) = placeableInfos[i]
+                val itemName = items[i].first
+
+                // 利用 Animatable 攔截最新坐標，做出極致平滑嘅滑動效果
+                val anim = offsetAnimators.getOrPut(itemName) {
+                    Animatable(targetOffset, IntOffset.VectorConverter)
+                }
+
+                if (anim.targetValue != targetOffset) {
+                    scope.launch {
+                        anim.animateTo(
+                            targetValue = targetOffset,
+                            animationSpec = spring(
+                                dampingRatio = 0.85f,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        )
+                    }
+                }
+
+                placeable.place(anim.value)
             }
         }
     }
@@ -4721,6 +4756,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
+        // 拆走 Surface 嘅 onClick，改用 Modifier.clickable，強制高度，防止被 Material 3 撐大
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -4808,6 +4844,15 @@ fun QuickInputSection(
     val density = LocalDensity.current
     val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
 
+    // 用底層 Paint 精準預測文字寬度，徹底解決點點點問題！
+    val textPaint = remember(density) {
+        android.graphics.Paint().apply {
+            textSize = with(density) { 13.sp.toPx() }
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            isAntiAlias = true
+        }
+    }
+
     val chipHeight = 36.dp
     val verticalGap = 8.dp
     val panelVPadding = 14.dp
@@ -4828,11 +4873,10 @@ fun QuickInputSection(
 
                 for (item in items) {
                     val name = item.first
-                    var textW = 0f
-                    for (c in name) {
-                        textW += if (c.code > 255) 14.5f else 8.5f 
-                    }
-                    val itemPx = with(density) { (44f + textW).dp.toPx() }
+                    val textW = textPaint.measureText(name)
+                    // 44dp: padding 10*2 + icon 18 + spacer 6。加多 6f 像素做安全緩衝
+                    val itemPx = with(density) { 44.dp.toPx() } + textW + 6f
+                    
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
 
@@ -4849,10 +4893,10 @@ fun QuickInputSection(
                 rows
             }
 
-            val pages: List<List<List<Pair<String, Int>>>> =
+            val pages: List<List<Pair<String, Int>>> =
                 remember(allFixedRows, maxRowsPerPage) {
                     if (allFixedRows.isEmpty()) emptyList()
-                    else allFixedRows.chunked(maxRowsPerPage)
+                    else allFixedRows.chunked(maxRowsPerPage).map { it.flatten() }
                 }
 
             if (pages.isEmpty()) return@BoxWithConstraints
@@ -4869,7 +4913,11 @@ fun QuickInputSection(
             val hasIndicator = pages.size > 1
 
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pages.lastIndex)
-            val currentRowCount = pages[safeCurrentPage].size
+            val currentRowCount = remember(allFixedRows, safeCurrentPage, maxRowsPerPage) {
+                val startIndex = safeCurrentPage * maxRowsPerPage
+                val endIndex = minOf(startIndex + maxRowsPerPage, allFixedRows.size)
+                maxOf(0, endIndex - startIndex)
+            }
 
             val targetHeight =
                 chipHeight * currentRowCount +
@@ -4910,7 +4958,7 @@ fun QuickInputSection(
                             )
                     ) {
                         AnimatedStretchingFlowRow(
-                            rows = pages[page],
+                            items = pages[page],
                             modifier = Modifier.fillMaxWidth(),
                             horizontalSpacing = 8.dp,
                             verticalSpacing = verticalGap
