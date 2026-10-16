@@ -213,6 +213,15 @@ val NAV_BOTTOM_PADDING = 20.dp
 val ROW_ALT_COLOR = Color(0xFFF4F7FC)
 const val FILTER_ANIM_MS = 250
 
+// ★ 提升到 top-level：動畫 spec 只建一次
+private val ITEM_ANIM_SPEC = spring<IntOffset>(dampingRatio = 0.75f, stiffness = 300f)
+private val ITEM_FADE_SPEC = spring<Float>(dampingRatio = 0.8f, stiffness = 250f)
+private val ITEM_SIZE_SPEC = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
+private val SWIPE_SPRING = spring<Float>(
+    stiffness = Spring.StiffnessMediumLow,
+    dampingRatio = Spring.DampingRatioNoBouncy
+)
+
 @Immutable
 data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
 
@@ -447,7 +456,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val db = Firebase.firestore
     private val prefs = app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
 
-    // ★ HashMap 做 source of truth
     private val recordsById = HashMap<String, Record>()
 
     private val _records = MutableStateFlow<List<Record>>(emptyList())
@@ -496,7 +504,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun setCalendarMonthKey(v: String)          { _calendarMonthKey.value = v }
     fun setCalendarFilterCategory(v: String?)   { _calendarFilterCategory.value = v }
 
-    // ★ note 索引 flow：只依賴 _records，打字時唔重算
     private val noteIndexState: StateFlow<NoteIndex> = _records
         .map { records -> buildNoteIndex(records) }
         .flowOn(Dispatchers.Default)
@@ -528,7 +535,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     init { listenToFirestore() }
 
-    // ★ 用 id 做 tiebreaker，避免同 timestamp 順序唔穩定
     private fun buildSortedList(): List<Record> {
         val list = ArrayList<Record>(recordsById.size)
         list.addAll(recordsById.values)
@@ -553,7 +559,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 if (changes.isEmpty()) return@addSnapshotListener
 
                 viewModelScope.launch(Dispatchers.Default) {
-                    // ★ 直接 apply 落 HashMap，O(k)
                     for (change in changes) {
                         val r = change.document.toObject(Record::class.java)
                             ?.copy(id = change.document.id) ?: continue
@@ -565,7 +570,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                             DocumentChange.Type.REMOVED -> recordsById.remove(r.id)
                         }
                     }
-                    // ★ 派生 UI list，O(n log n) 一次過
                     val newList = buildSortedList()
                     _records.value = newList
                 }
@@ -1328,7 +1332,6 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
-    // ★ 通知防抖 timestamp
     private var lastNotificationBuildMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1373,7 +1376,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // ★ onResume 時強制重建
         lastNotificationBuildMs = 0L
         showQuickAddNotification()
     }
@@ -1414,7 +1416,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ★ 加防抖：1 秒內最多建一次通知
     private fun showQuickAddNotification() {
         val now = System.currentTimeMillis()
         if (now - lastNotificationBuildMs < 1000L) return
@@ -2695,7 +2696,6 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // ★ 喺 composable 頂層計好，唔好擺入 remember lambda
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
@@ -2889,10 +2889,6 @@ fun LedgerContent(
     val activeFanId = activeFanRecord?.id
 
     val listContent: LazyListScope.() -> Unit = {
-        val itemAnimSpec = spring<IntOffset>(dampingRatio = 0.75f, stiffness = 300f)
-        val fadeSpec = spring<Float>(dampingRatio = 0.8f, stiffness = 250f)
-        val springSpec = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
-
         displayGroups.forEach { (dateKey, dayRecords) ->
             var dayIncome = 0.0
             var dayExpense = 0.0
@@ -2907,7 +2903,7 @@ fun LedgerContent(
             if (!isGroupDeleting) {
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     Box(modifier = Modifier.animateItem(
-                        fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
+                        fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)) {
                         FadingStickyHeader {
                             Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
                                 DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
@@ -2918,7 +2914,7 @@ fun LedgerContent(
 
                 item(key = "group_$dateKey", contentType = "day_group") {
                     Box(modifier = Modifier.animateItem(
-                        fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
+                        fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2929,7 +2925,7 @@ fun LedgerContent(
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                                 .clip(RoundedCornerShape(20.dp))
-                                .animateContentSize(animationSpec = springSpec)
+                                .animateContentSize(animationSpec = ITEM_SIZE_SPEC)
                         ) {
                             val activeCount = if (deletingRecordId == null) dayRecords.size
                                               else dayRecords.count { it.id != deletingRecordId }
@@ -2995,7 +2991,7 @@ fun LedgerContent(
                     Spacer(
                         modifier = Modifier
                             .height(10.dp)
-                            .animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)
+                            .animateItem(fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)
                     )
                 }
             }
@@ -3428,6 +3424,12 @@ fun TrianglePointer(
 
 private class OffsetHolder(var value: Offset = Offset.Zero)
 
+// =========================================================
+//  ★ SwipeableRecordItem（滾動性能優化版）
+//  - 單一 Animatable 取代條件式 animateFloatAsState
+//  - onGloballyPositioned 節流 200ms
+//  - 條件式 graphicsLayer（靜態 item 唔建離屏圖層）
+// =========================================================
 @Composable
 fun SwipeableRecordItem(
     modifier: Modifier = Modifier,
@@ -3459,7 +3461,28 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableFloatStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    val itemGlobalPosHolder = remember { OffsetHolder() }
+    val itemPosHolder = remember { OffsetHolder() }
+    // ★ 節流：唔用 state，用 mutableLong 直接寫
+    val lastPosUpdateMs = remember { longArrayOf(0L) }
+
+    // ★ 用單一 Animatable，唔再條件分支
+    val offsetAnim = remember { Animatable(0f) }
+
+    LaunchedEffect(targetOffset, isDragging) {
+        if (!isDragging) {
+            offsetAnim.animateTo(targetOffset, SWIPE_SPRING)
+        }
+    }
+    LaunchedEffect(isDragging) {
+        if (isDragging) {
+            offsetAnim.snapTo(targetOffset)
+        }
+    }
+
+    val offsetX = if (isDragging) targetOffset else offsetAnim.value
+
+    // ★ 只有 fan menu 活躍或 item 有視覺變化時才建圖層
+    val needsLayer = isFanMenuActive || isActiveItem || isOtherItem
 
     val itemAlpha by animateFloatAsState(
         targetValue = if (isOtherItem) 0.35f else 1f,
@@ -3478,21 +3501,6 @@ fun SwipeableRecordItem(
     )
 
     LaunchedEffect(isExpanded) { if (!isExpanded && targetOffset != 0f) targetOffset = 0f }
-    val offsetX = if (targetOffset == 0f && !isDragging) {
-        animateFloatAsState(
-            0f,
-            spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-            label = "swipe"
-        ).value
-    } else if (isDragging) {
-        targetOffset
-    } else {
-        animateFloatAsState(
-            targetOffset,
-            spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
-            label = "swipe"
-        ).value
-    }
 
     val leftProgress = if (maxLeft == 0f) 0f else (offsetX / maxLeft).coerceIn(0f, 1f)
     val rightProgress = if (maxRight == 0f) 0f else (offsetX / maxRight).coerceIn(0f, 1f)
@@ -3517,13 +3525,24 @@ fun SwipeableRecordItem(
             .fillMaxWidth()
             .wrapContentHeight()
             .zIndex(if (isActiveItem) 10f else 0f)
-            .graphicsLayer {
-                scaleX = itemScale
-                scaleY = itemScale
-                alpha = itemAlpha
-            }
+            .then(
+                // ★ 條件式 graphicsLayer：靜態 item 唔建立離屏圖層
+                if (needsLayer) {
+                    Modifier.graphicsLayer {
+                        scaleX = itemScale
+                        scaleY = itemScale
+                        alpha = itemAlpha
+                    }
+                } else Modifier
+            )
             .background(backgroundColor)
-            .onGloballyPositioned { itemGlobalPosHolder.value = it.boundsInRoot().topLeft }
+            .onGloballyPositioned { coords ->
+                // ★ 節流 200ms，避免每 frame 都做 boundsInRoot
+                val now = System.currentTimeMillis()
+                if (now - lastPosUpdateMs[0] < 200L) return@onGloballyPositioned
+                lastPosUpdateMs[0] = now
+                itemPosHolder.value = coords.boundsInRoot().topLeft
+            }
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -3564,7 +3583,7 @@ fun SwipeableRecordItem(
             .pointerInput("longPress_${record.id}") {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { localOffset ->
-                        latestOnFanStart(itemGlobalPosHolder.value + localOffset)
+                        latestOnFanStart(itemPosHolder.value + localOffset)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
@@ -4871,7 +4890,6 @@ fun QuickInputSection(
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
-    // ★ 文字寬度 cache，跨 maxRowsPerPage 變化保留
     val noteTextWidthCache = remember { mutableMapOf<String, Float>() }
 
     val chipHeight = 36.dp
@@ -4894,7 +4912,6 @@ fun QuickInputSection(
 
                 for (item in items) {
                     val name = item.first
-                    // ★ 用 cache，只喺首次見到嘅 note 先 measure
                     val textW = noteTextWidthCache.getOrPut(name) {
                         textMeasurer.measure(name, textStyle).size.width.toFloat()
                     }
@@ -5338,7 +5355,6 @@ fun CalendarContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // ★ 喺 composable 頂層計好
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
@@ -6283,7 +6299,6 @@ private val AVATAR_TEXT_STYLE_BASE = TextStyle(
     )
 )
 
-// ★ 加 Coil size hint，大幅減少解碼成本
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     val shape = RoundedCornerShape(percent = 28)
@@ -6302,7 +6317,6 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     } else {
         val ctx = LocalContext.current
         val density = LocalDensity.current
-        // ★ 用實際像素做 cache key
         val sizePx = remember(density, size) { with(density) { size.roundToPx() } }
 
         val req = remember(iconUrl, ctx, sizePx) {
@@ -6310,7 +6324,7 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
                 .data(iconUrl)
                 .memoryCacheKey("$iconUrl@$sizePx")
                 .diskCacheKey(iconUrl)
-                .size(sizePx, sizePx)   // ★ 解碼時直接縮到目標大小
+                .size(sizePx, sizePx)
                 .crossfade(false)
                 .build()
         }
@@ -6320,7 +6334,6 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
     }
 }
 
-// ★ 月曆格仔用固定 48px，避免解大圖
 @Composable
 fun IconViewAdaptive(
     iconUrl: String, name: String, modifier: Modifier = Modifier,
