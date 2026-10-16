@@ -4702,7 +4702,6 @@ fun AnimatedStretchingFlowRow(
                             try {
                                 anim.animateTo(
                                     targetValue = p.target,
-                                    // ★ 同高度動畫用同一個 spring 規格，同步先至靚
                                     animationSpec = spring(
                                         dampingRatio = 0.9f,
                                         stiffness = 400f
@@ -4885,20 +4884,14 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
-            // ★ 同 Chips 位置動畫用同一個 spring 規格，兩者先至同步、唔會扽
-            val animatedHeight by animateDpAsState(
-                targetValue = targetHeight,
-                animationSpec = spring(
-                    dampingRatio = 0.9f,
-                    stiffness = 400f
-                ),
-                label = "quickPanelHeight"
-            )
+            // ★ 高度即時跟隨，唔再過 animateDpAsState
+            // 避免同 Chip 位置動畫爭一幀，造成「扽一下」
+            val panelHeight = targetHeight
 
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(animatedHeight)
+                    .height(panelHeight)
                     .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SURFACE_CARD)
