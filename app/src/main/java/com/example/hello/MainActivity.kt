@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -2646,10 +2647,12 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
 
     // =========================================================
-    //  ★ 新摺疊邏輯：真實滾動位移 + hysteresis + 回頂自動重置
+    //  ★ 摺疊邏輯：用 nestedScroll 累積真實 px + hysteresis
     // =========================================================
+    // oneRowPx 只係「每縮一行需要幾多 px 滾動」嘅抽象單位，
+    // 唔代表實際 UI 行高，所以繼續用 72dp 冇問題。
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
-    val collapseDistancePx = remember(density) { with(density) { 320.dp.toPx() } }
+    val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
     val scrollAccumPx = remember { mutableFloatStateOf(0f) }
@@ -2660,12 +2663,12 @@ fun LedgerContent(
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                // available.y < 0 → 手指向上推（內容向上）→ 累積增加 → 摺疊
-                // available.y > 0 → 手指向下拉（內容向下）→ 累積減少 → 展開
+                // available.y < 0 → 手指向上推 → 累積增加 → 摺疊
+                // available.y > 0 → 手指向下拉 → 累積減少 → 展開
                 val next = (scrollAccumPx.value - available.y)
                     .coerceIn(0f, collapseDistancePx)
                 if (next != scrollAccumPx.value) scrollAccumPx.value = next
-                return Offset.Zero  // 唔攔截，繼續傳落 LazyColumn
+                return Offset.Zero  // 唔攔截，繼續俾 LazyColumn
             }
         }
     }
@@ -2675,7 +2678,7 @@ fun LedgerContent(
             .distinctUntilChanged()
             .collect { v ->
                 val prev = quickInputMaxRows
-                // 以「半行」為切換邊界 → 有 hysteresis，避免抖動
+                // 用「半行」做 hysteresis 邊界
                 val rawTarget = when {
                     v < oneRowPx * 0.5f -> 4
                     v < oneRowPx * 1.5f -> 3
@@ -2686,7 +2689,7 @@ fun LedgerContent(
             }
     }
 
-    // 回頂自動歸零（避免長時間使用後累積誤差）
+    // 回頂自動歸零
     LaunchedEffect(listState) {
         snapshotFlow {
             listState.firstVisibleItemIndex == 0 &&
@@ -4802,122 +4805,122 @@ fun QuickInputSection(
         items.mapIndexed { idx, pair -> pair.first to idx }.toMap()
     }
 
-    val configuration = LocalConfiguration.current
-    val availableWidth = configuration.screenWidthDp - 52
-
-    // 固定行高（與 LedgerContent 嗰個 oneRowPx 保持 72dp 一致）
-    val rowHeight = 72.dp
-
-    val allFixedRows = remember(items, availableWidth) {
-        val rows = mutableListOf<List<Pair<String, Int>>>()
-        var currentRow = mutableListOf<Pair<String, Int>>()
-        var currentRowWidth = 0
-
-        for (item in items) {
-            val name = item.first
-            // 精準計算：中文字約 13.5dp，英數字約 7.5dp，固定邊距及圖標佔 44dp
-            var textW = 0f
-            for (c in name) {
-                textW += if (c.code > 255) 13.5f else 7.5f
-            }
-            val estimatedItemWidth = 44 + textW.toInt()
-
-            if (currentRowWidth > 0 && currentRowWidth + estimatedItemWidth > availableWidth) {
-                rows.add(currentRow)
-                currentRow = mutableListOf(item)
-                currentRowWidth = estimatedItemWidth + 8
-            } else {
-                currentRow.add(item)
-                currentRowWidth += estimatedItemWidth + 8
-            }
-        }
-        if (currentRow.isNotEmpty()) rows.add(currentRow)
-        rows
-    }
-
-    val pages = remember(allFixedRows, maxRowsPerPage) {
-        if (allFixedRows.isEmpty()) emptyList()
-        else allFixedRows.chunked(maxRowsPerPage).map { it.flatten() }
-    }
-
-    if (pages.isEmpty()) return
-
-    val pagerState = rememberPagerState(pageCount = { pages.size })
-
-    // ★ 防止 maxRowsPerPage 變動時 currentPage 越界
-    LaunchedEffect(pages.size) {
-        val maxPage = (pages.size - 1).coerceAtLeast(0)
-        if (pagerState.currentPage > maxPage) {
-            pagerState.scrollToPage(maxPage)
-        }
-    }
-
-    // ★ 用固定高度 + 動畫做平滑縮放（唔會因為 pager 內容高度變化而 pop）
-    val targetHeight = rowHeight * maxRowsPerPage +
-        (14.dp * 2) +                       // 上下 padding
-        (if (pages.size > 1) 16.dp else 0.dp) +
-        (8.dp * (maxRowsPerPage - 1)).coerceAtLeast(0.dp)  // 行間距
-    val animatedHeight by animateDpAsState(
-        targetValue = targetHeight,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "quickPanelHeight"
-    )
-
+    // 外層 panel：shadow + 圓角 + clip + 背景，用 animateContentSize
+    // 令高度永遠跟內容，唔會出現底部空行或者頂部 padding 俾壓扁
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
-            .height(animatedHeight)
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
     ) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.Top
-        ) { page ->
-            AnimatedStretchingFlowRow(
-                items = pages[page],
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 14.dp)
-                    .padding(bottom = if (pages.size > 1) 16.dp else 0.dp),
-                horizontalSpacing = 8.dp,
-                verticalSpacing = 8.dp
-            ) { item ->
-                val name = item.first
-                val originalIndex = indexByName[name] ?: 0
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            // Pager 頁面內容左右各 14dp padding，真正可用寬度 = maxWidth - 28dp
+            val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
+            val gapPx = with(density) { 8.dp.toPx() }
 
-                key(name) {
-                    AnimatedQuickChip(
-                        name = name,
-                        iconUrl = noteIconMap[name] ?: "",
-                        index = originalIndex,
-                        animatedNames = animatedQuickInputs,
-                        onClick = { onClick(name) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+            // ★ 用真實可用寬度做貪心換行，避免預估過寬 → 渲染時又多爆一行
+            val allFixedRows = remember(items, contentWidthPx, gapPx) {
+                val rows = mutableListOf<List<Pair<String, Int>>>()
+                var currentRow = mutableListOf<Pair<String, Int>>()
+                var currentRowWidth = 0f
+                for (item in items) {
+                    val name = item.first
+                    var textW = 0f
+                    for (c in name) textW += if (c.code > 255) 13.5f else 7.5f
+                    // 44 = 左右 padding 20 + 圖標 18 + 間距 6
+                    val itemPx = with(density) { (44f + textW).dp.toPx() }
+                    val needed = if (currentRow.isEmpty()) itemPx
+                                 else currentRowWidth + gapPx + itemPx
+                    if (currentRow.isNotEmpty() && needed > contentWidthPx) {
+                        rows.add(currentRow)
+                        currentRow = mutableListOf(item)
+                        currentRowWidth = itemPx
+                    } else {
+                        currentRow.add(item)
+                        currentRowWidth = needed
+                    }
+                }
+                if (currentRow.isNotEmpty()) rows.add(currentRow)
+                rows
+            }
+
+            val pages = remember(allFixedRows, maxRowsPerPage) {
+                if (allFixedRows.isEmpty()) emptyList()
+                else allFixedRows.chunked(maxRowsPerPage)
+            }
+
+            if (pages.isEmpty()) return@BoxWithConstraints
+
+            val pagerState = rememberPagerState(pageCount = { pages.size })
+
+            // ★ 防止 maxRowsPerPage 變動時越界
+            LaunchedEffect(pages.size) {
+                val maxPage = (pages.size - 1).coerceAtLeast(0)
+                if (pagerState.currentPage > maxPage) {
+                    pagerState.scrollToPage(maxPage)
                 }
             }
-        }
 
-        if (pages.size > 1) {
-            Row(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                repeat(pages.size) { i ->
-                    val isSelected = pagerState.currentPage == i
-                    Box(
-                        Modifier
-                            .size(if (isSelected) 6.dp else 4.dp)
-                            .clip(CircleShape)
-                            .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR)
-                    )
+            // 主體：HorizontalPager + 底部指示器用 Box align 絕對定位
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) { page ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 14.dp)  // 頂 / 底永遠 14dp
+                        .padding(bottom = if (pages.size > 1) 16.dp else 0.dp)  // 額外留位俾指示器
+                ) {
+                    AnimatedStretchingFlowRow(
+                        items = pages[page].flatten(),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalSpacing = 8.dp,
+                        verticalSpacing = 8.dp
+                    ) { item ->
+                        val name = item.first
+                        val originalIndex = indexByName[name] ?: 0
+                        key(name) {
+                            AnimatedQuickChip(
+                                name = name,
+                                iconUrl = noteIconMap[name] ?: "",
+                                index = originalIndex,
+                                animatedNames = animatedQuickInputs,
+                                onClick = { onClick(name) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (pages.size > 1) {
+                Row(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val safeCurrent = pagerState.currentPage.coerceIn(0, pages.lastIndex)
+                    repeat(pages.size) { i ->
+                        val isSelected = safeCurrent == i
+                        Box(
+                            Modifier
+                                .size(if (isSelected) 6.dp else 4.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR)
+                        )
+                    }
                 }
             }
         }
