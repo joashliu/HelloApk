@@ -1,5 +1,10 @@
 package com.example.hello
 
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -2640,53 +2645,65 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // ★★★ 平滑滾動縮減優化 ★★★
-    val rowThresholdPx = remember(density) { with(density) { 130.dp.toPx() } }
-    val headerHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
-    val hysteresisPx = remember(density) { with(density) { 24.dp.toPx() } }
-    val fallback3Px = remember(density) { with(density) { 80.dp.toPx() } }
-    val fallback4Px = remember(density) { with(density) { 100.dp.toPx() } }
-    val fallbackBasePx = remember(density) { with(density) { 150.dp.toPx() } }
-    val fallbackStepPx = remember(density) { with(density) { 30.dp.toPx() } }
+    // =========================================================
+    //  ★ 新摺疊邏輯：真實滾動位移 + hysteresis + 回頂自動重置
+    // =========================================================
+    val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
+    val collapseDistancePx = remember(density) { with(density) { 320.dp.toPx() } }
 
-    var lastStableMaxRows by remember { mutableIntStateOf(4) }
-    val quickInputMaxRows by remember {
-        derivedStateOf {
-            val idx = listState.firstVisibleItemIndex
-            val off = listState.firstVisibleItemScrollOffset
-            if (idx == 0 && off == 0) {
-                lastStableMaxRows = 4
-                4
-            } else {
-                val absScroll = when (idx) {
-                    0 -> 0f
-                    1 -> off.toFloat()
-                    2 -> off.toFloat() + headerHeightPx
-                    3 -> off.toFloat() + headerHeightPx + fallback3Px
-                    4 -> off.toFloat() + headerHeightPx + fallback4Px
-                    else -> off.toFloat() + fallbackBasePx + (idx * fallbackStepPx)
-                }
-                
-                var rawTarget = (4 - (absScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
-                
-                if (idx == 3 || idx == 4) rawTarget = minOf(rawTarget, 2)
-                if (idx >= 5) rawTarget = 1
+    var quickInputMaxRows by remember { mutableIntStateOf(4) }
+    val scrollAccumPx = remember { mutableFloatStateOf(0f) }
 
-                val prev = lastStableMaxRows
-                val next = if (rawTarget < prev) {
-                    val boundary = (4 - prev + 1) * rowThresholdPx + hysteresisPx
-                    if (absScroll >= boundary || idx >= 3) rawTarget else prev
-                } else if (rawTarget > prev) {
-                    val boundary = (4 - prev) * rowThresholdPx - hysteresisPx
-                    if (absScroll <= boundary && idx <= 2) rawTarget else prev
-                } else prev
-                
-                lastStableMaxRows = next
-                next
+    val collapseScrollConnection = remember(collapseDistancePx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                // available.y < 0 → 手指向上推（內容向上）→ 累積增加 → 摺疊
+                // available.y > 0 → 手指向下拉（內容向下）→ 累積減少 → 展開
+                val next = (scrollAccumPx.value - available.y)
+                    .coerceIn(0f, collapseDistancePx)
+                if (next != scrollAccumPx.value) scrollAccumPx.value = next
+                return Offset.Zero  // 唔攔截，繼續傳落 LazyColumn
             }
         }
     }
 
+    LaunchedEffect(oneRowPx) {
+        snapshotFlow { scrollAccumPx.value }
+            .distinctUntilChanged()
+            .collect { v ->
+                val prev = quickInputMaxRows
+                // 以「半行」為切換邊界 → 有 hysteresis，避免抖動
+                val rawTarget = when {
+                    v < oneRowPx * 0.5f -> 4
+                    v < oneRowPx * 1.5f -> 3
+                    v < oneRowPx * 2.5f -> 2
+                    else -> 1
+                }
+                if (rawTarget != prev) quickInputMaxRows = rawTarget
+            }
+    }
+
+    // 回頂自動歸零（避免長時間使用後累積誤差）
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex == 0 &&
+            listState.firstVisibleItemScrollOffset == 0
+        }
+            .distinctUntilChanged()
+            .collect { atTop ->
+                if (atTop) {
+                    if (scrollAccumPx.value != 0f) scrollAccumPx.value = 0f
+                    if (quickInputMaxRows != 4) quickInputMaxRows = 4
+                }
+            }
+    }
+
+    // =========================================================
+    //  ★ Fan Menu
+    // =========================================================
     val fanMenuProgress = animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
@@ -2712,7 +2729,8 @@ fun LedgerContent(
 
     val handleFanEnd = remember {
         {
-            val hovered = getHoveredActionIndex(fanMenuCenterState.value, fanMenuTouchState.value, minFanRadiusPx)
+            val hovered = getHoveredActionIndex(
+                fanMenuCenterState.value, fanMenuTouchState.value, minFanRadiusPx)
             val targetRecord = activeFanRecord
             activeFanRecord = null
 
@@ -2736,6 +2754,9 @@ fun LedgerContent(
         }
     }
 
+    // =========================================================
+    //  ★ 各種 scroll 效果
+    // =========================================================
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
             try {
@@ -2821,7 +2842,8 @@ fun LedgerContent(
 
             if (!isGroupDeleting) {
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
-                    Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
+                    Box(modifier = Modifier.animateItem(
+                        fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                         FadingStickyHeader {
                             Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
                                 DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
@@ -2831,7 +2853,8 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
-                    Box(modifier = Modifier.animateItem(fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
+                    Box(modifier = Modifier.animateItem(
+                        fadeInSpec = fadeSpec, fadeOutSpec = fadeSpec, placementSpec = itemAnimSpec)) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -3055,7 +3078,9 @@ fun LedgerContent(
                 } else {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(collapseScrollConnection),   // ★ 新增
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
@@ -4780,6 +4805,9 @@ fun QuickInputSection(
     val configuration = LocalConfiguration.current
     val availableWidth = configuration.screenWidthDp - 52
 
+    // 固定行高（與 LedgerContent 嗰個 oneRowPx 保持 72dp 一致）
+    val rowHeight = 72.dp
+
     val allFixedRows = remember(items, availableWidth) {
         val rows = mutableListOf<List<Pair<String, Int>>>()
         var currentRow = mutableListOf<Pair<String, Int>>()
@@ -4812,20 +4840,44 @@ fun QuickInputSection(
         else allFixedRows.chunked(maxRowsPerPage).map { it.flatten() }
     }
 
+    if (pages.isEmpty()) return
+
     val pagerState = rememberPagerState(pageCount = { pages.size })
+
+    // ★ 防止 maxRowsPerPage 變動時 currentPage 越界
+    LaunchedEffect(pages.size) {
+        val maxPage = (pages.size - 1).coerceAtLeast(0)
+        if (pagerState.currentPage > maxPage) {
+            pagerState.scrollToPage(maxPage)
+        }
+    }
+
+    // ★ 用固定高度 + 動畫做平滑縮放（唔會因為 pager 內容高度變化而 pop）
+    val targetHeight = rowHeight * maxRowsPerPage +
+        (14.dp * 2) +                       // 上下 padding
+        (if (pages.size > 1) 16.dp else 0.dp) +
+        (8.dp * (maxRowsPerPage - 1)).coerceAtLeast(0.dp)  // 行間距
+    val animatedHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "quickPanelHeight"
+    )
 
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
+            .height(animatedHeight)
             .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
             .clip(RoundedCornerShape(18.dp))
             .background(SURFACE_CARD)
-            .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy))
     ) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.Top
         ) { page ->
             AnimatedStretchingFlowRow(
@@ -4860,8 +4912,12 @@ fun QuickInputSection(
             ) {
                 repeat(pages.size) { i ->
                     val isSelected = pagerState.currentPage == i
-                    Box(Modifier.size(if (isSelected) 6.dp else 4.dp).clip(CircleShape)
-                        .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR))
+                    Box(
+                        Modifier
+                            .size(if (isSelected) 6.dp else 4.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR)
+                    )
                 }
             }
         }
