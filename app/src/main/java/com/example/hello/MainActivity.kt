@@ -2590,7 +2590,6 @@ fun FloatingNavBar(
     }
 }
 
-// ===== LedgerContent =====
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -2641,11 +2640,15 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    val rowThresholdPx = remember(density) { with(density) { 90.dp.toPx() } }
+    // ★★★ 平滑滾動縮減優化 ★★★
+    val rowThresholdPx = remember(density) { with(density) { 130.dp.toPx() } }
     val headerHeightPx = remember(density) { with(density) { 56.dp.toPx() } }
-    val hysteresisPx = remember(density) { with(density) { 18.dp.toPx() } }
+    val hysteresisPx = remember(density) { with(density) { 24.dp.toPx() } }
+    val fallback3Px = remember(density) { with(density) { 80.dp.toPx() } }
+    val fallback4Px = remember(density) { with(density) { 100.dp.toPx() } }
+    val fallbackBasePx = remember(density) { with(density) { 150.dp.toPx() } }
+    val fallbackStepPx = remember(density) { with(density) { 30.dp.toPx() } }
 
-    // ★★★ 優化：加入遲滯區間（Hysteresis）防止 QuickInputSection 高度縮放時同 LazyColumn 產生上下震盪 ★★★
     var lastStableMaxRows by remember { mutableIntStateOf(4) }
     val quickInputMaxRows by remember {
         derivedStateOf {
@@ -2659,17 +2662,25 @@ fun LedgerContent(
                     0 -> 0f
                     1 -> off.toFloat()
                     2 -> off.toFloat() + headerHeightPx
-                    else -> 10000f
+                    3 -> off.toFloat() + headerHeightPx + fallback3Px
+                    4 -> off.toFloat() + headerHeightPx + fallback4Px
+                    else -> off.toFloat() + fallbackBasePx + (idx * fallbackStepPx)
                 }
-                val rawTarget = (4 - (absScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
+                
+                var rawTarget = (4 - (absScroll / rowThresholdPx).toInt()).coerceIn(1, 4)
+                
+                if (idx == 3 || idx == 4) rawTarget = minOf(rawTarget, 2)
+                if (idx >= 5) rawTarget = 1
+
                 val prev = lastStableMaxRows
                 val next = if (rawTarget < prev) {
                     val boundary = (4 - prev + 1) * rowThresholdPx + hysteresisPx
-                    if (absScroll >= boundary) rawTarget else prev
+                    if (absScroll >= boundary || idx >= 3) rawTarget else prev
                 } else if (rawTarget > prev) {
                     val boundary = (4 - prev) * rowThresholdPx - hysteresisPx
-                    if (absScroll <= boundary) rawTarget else prev
+                    if (absScroll <= boundary && idx <= 2) rawTarget else prev
                 } else prev
+                
                 lastStableMaxRows = next
                 next
             }
@@ -3030,7 +3041,6 @@ fun LedgerContent(
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
                         if (p > 0.02f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            // 量化模糊半徑（步進為 2px）並使用快取，大幅減少 GPU 離屏緩衝區重建
                             val quantized = ((p * 24f).roundToInt() * 2).coerceIn(2, 48)
                             renderEffect = getCachedBlurEffect(quantized)
                         } else {
