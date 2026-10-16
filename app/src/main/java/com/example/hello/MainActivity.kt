@@ -1,5 +1,10 @@
 package com.example.hello
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector2D
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.ui.unit.VectorConverter
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -4601,6 +4606,11 @@ fun AnimatedStretchingFlowRow(
     val hSpacingPx = remember(density, horizontalSpacing) { with(density) { horizontalSpacing.roundToPx() } }
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
+    val scope = rememberCoroutineScope()
+    val offsetAnimators = remember {
+        mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>()
+    }
+
     androidx.compose.ui.layout.Layout(
         content = {
             items.forEach { item -> itemContent(item) }
@@ -4636,7 +4646,8 @@ fun AnimatedStretchingFlowRow(
         }
         if (currentRow.isNotEmpty()) rows.add(currentRow)
 
-        val placeableInfos = ArrayList<Pair<androidx.compose.ui.layout.Placeable, IntOffset>>(measurables.size)
+        class Placement(val placeable: Placeable, val target: IntOffset, val name: String)
+        val placements = ArrayList<Placement>(measurables.size)
         var y = 0
 
         for (row in rows) {
@@ -4664,7 +4675,7 @@ fun AnimatedStretchingFlowRow(
                     constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
                 )
 
-                placeableInfos.add(placeable to IntOffset(x, y))
+                placements.add(Placement(placeable, IntOffset(x, y), items[idx].first))
 
                 x += targetWidth + hSpacingPx
                 if (placeable.height > rowMaxHeight) rowMaxHeight = placeable.height
@@ -4674,11 +4685,34 @@ fun AnimatedStretchingFlowRow(
 
         val totalHeight = maxOf(0, y - vSpacingPx)
 
+        // ★ 清走已經唔存在嘅 item animator，避免 map 越積越多
+        val currentNames = placements.map { it.name }.toHashSet()
+        offsetAnimators.keys.retainAll(currentNames)
+
         layout(safeMaxWidth, totalHeight) {
-            for (i in placeableInfos.indices) {
-                val (placeable, targetOffset) = placeableInfos[i]
-                // ★ 直接瞬間定位，唔再啟動任何 Animatable 動畫
-                placeable.place(targetOffset)
+            for (p in placements) {
+                val anim = offsetAnimators[p.name]
+                if (anim == null) {
+                    // ★ 首次出現：直接放目標位置，完全冇進場動畫
+                    offsetAnimators[p.name] = Animatable(p.target, IntOffset.VectorConverter)
+                    p.placeable.place(p.target)
+                } else {
+                    if (anim.targetValue != p.target) {
+                        scope.launch {
+                            try {
+                                anim.animateTo(
+                                    targetValue = p.target,
+                                    // ★ 同高度動畫用同一個 spring 規格，同步先至靚
+                                    animationSpec = spring(
+                                        dampingRatio = 0.9f,
+                                        stiffness = 400f
+                                    )
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    p.placeable.place(anim.value)
+                }
             }
         }
     }
