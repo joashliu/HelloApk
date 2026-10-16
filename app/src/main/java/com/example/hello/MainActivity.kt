@@ -4808,11 +4808,6 @@ fun QuickInputSection(
     val density = LocalDensity.current
     val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
 
-    // ============================================================
-    //  ★ 固定尺寸常量（可微調）
-    //  chipHeight 係 QuickInputChip 實際高度：
-    //    文字 ~20dp + 上下 padding 8dp*2 = 36dp
-    // ============================================================
     val chipHeight = 36.dp
     val verticalGap = 8.dp
     val panelVPadding = 14.dp
@@ -4824,11 +4819,10 @@ fun QuickInputSection(
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            // Pager 內容左右各 14dp padding，真正可用寬度 = maxWidth - 28dp
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
-            // ---------- 貪心換行（用真實可用寬度） ----------
-            val allFixedRows = remember(items, contentWidthPx, gapPx) {
+            // 貪心換行
+            val allFixedRows: List<List<Pair<String, Int>>> = remember(items, contentWidthPx, gapPx) {
                 val rows = mutableListOf<List<Pair<String, Int>>>()
                 var currentRow = mutableListOf<Pair<String, Int>>()
                 var currentRowWidth = 0f
@@ -4839,7 +4833,6 @@ fun QuickInputSection(
                     for (c in name) {
                         textW += if (c.code > 255) 13.5f else 7.5f
                     }
-                    // 44 = 左右 padding 20 + 圖標 18 + 間距 6
                     val itemPx = with(density) { (44f + textW).dp.toPx() }
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
@@ -4857,16 +4850,17 @@ fun QuickInputSection(
                 rows
             }
 
-            val pages = remember(allFixedRows, maxRowsPerPage) {
-                if (allFixedRows.isEmpty()) emptyList()
-                else allFixedRows.chunked(maxRowsPerPage)
-            }
+            // 每頁 = 幾行；每行 = 幾個 chip
+            val pages: List<List<List<Pair<String, Int>>>> =
+                remember(allFixedRows, maxRowsPerPage) {
+                    if (allFixedRows.isEmpty()) emptyList()
+                    else allFixedRows.chunked(maxRowsPerPage)
+                }
 
             if (pages.isEmpty()) return@BoxWithConstraints
 
             val pagerState = rememberPagerState(pageCount = { pages.size })
 
-            // 防止 maxRowsPerPage 縮細時 currentPage 越界
             LaunchedEffect(pages.size) {
                 val maxPage = (pages.size - 1).coerceAtLeast(0)
                 if (pagerState.currentPage > maxPage) {
@@ -4876,10 +4870,6 @@ fun QuickInputSection(
 
             val hasIndicator = pages.size > 1
 
-            // ============================================================
-            //  ★ 高度計算：用「當前頁行數」而唔係 maxRowsPerPage，
-            //     噉最後一頁唔會空底。pager 換頁時高度會平滑過渡。
-            // ============================================================
             val safeCurrentPage = pagerState.currentPage
                 .coerceIn(0, pages.lastIndex)
             val currentRowCount = pages[safeCurrentPage].size
@@ -4924,7 +4914,7 @@ fun QuickInputSection(
                             )
                     ) {
                         AnimatedStretchingFlowRow(
-                            items = pages[page].flatten(),
+                            items = pages[page].flatten(),   // ★ 修正：攤平「行」變成「chip」
                             modifier = Modifier.fillMaxWidth(),
                             horizontalSpacing = 8.dp,
                             verticalSpacing = verticalGap
