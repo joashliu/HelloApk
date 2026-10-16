@@ -4851,19 +4851,10 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
-            val animatedHeight by animateDpAsState(
-                targetValue = targetHeight,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                ),
-                label = "quickPanelHeight"
-            )
-
             Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(animatedHeight)
+    Modifier
+        .fillMaxWidth()
+        .height(targetHeight)   
                     .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SURFACE_CARD)
