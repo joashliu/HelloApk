@@ -4805,41 +4805,45 @@ fun QuickInputSection(
         items.mapIndexed { idx, pair -> pair.first to idx }.toMap()
     }
 
-    // 外層 panel：shadow + 圓角 + clip + 背景，用 animateContentSize
-    // 令高度永遠跟內容，唔會出現底部空行或者頂部 padding 俾壓扁
+    val density = LocalDensity.current
+    val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
+
+    // ============================================================
+    //  ★ 固定尺寸常量（可微調）
+    //  chipHeight 係 QuickInputChip 實際高度：
+    //    文字 ~20dp + 上下 padding 8dp*2 = 36dp
+    // ============================================================
+    val chipHeight = 36.dp
+    val verticalGap = 8.dp
+    val panelVPadding = 14.dp
+    val indicatorSpace = 20.dp
+
     Box(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
-            .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
-            .clip(RoundedCornerShape(18.dp))
-            .background(SURFACE_CARD)
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
     ) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val density = LocalDensity.current
-            // Pager 頁面內容左右各 14dp padding，真正可用寬度 = maxWidth - 28dp
+            // Pager 內容左右各 14dp padding，真正可用寬度 = maxWidth - 28dp
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
-            val gapPx = with(density) { 8.dp.toPx() }
 
-            // ★ 用真實可用寬度做貪心換行，避免預估過寬 → 渲染時又多爆一行
+            // ---------- 貪心換行（用真實可用寬度） ----------
             val allFixedRows = remember(items, contentWidthPx, gapPx) {
                 val rows = mutableListOf<List<Pair<String, Int>>>()
                 var currentRow = mutableListOf<Pair<String, Int>>()
                 var currentRowWidth = 0f
+
                 for (item in items) {
                     val name = item.first
                     var textW = 0f
-                    for (c in name) textW += if (c.code > 255) 13.5f else 7.5f
+                    for (c in name) {
+                        textW += if (c.code > 255) 13.5f else 7.5f
+                    }
                     // 44 = 左右 padding 20 + 圖標 18 + 間距 6
                     val itemPx = with(density) { (44f + textW).dp.toPx() }
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
+
                     if (currentRow.isNotEmpty() && needed > contentWidthPx) {
                         rows.add(currentRow)
                         currentRow = mutableListOf(item)
@@ -4862,7 +4866,7 @@ fun QuickInputSection(
 
             val pagerState = rememberPagerState(pageCount = { pages.size })
 
-            // ★ 防止 maxRowsPerPage 變動時越界
+            // 防止 maxRowsPerPage 縮細時 currentPage 越界
             LaunchedEffect(pages.size) {
                 val maxPage = (pages.size - 1).coerceAtLeast(0)
                 if (pagerState.currentPage > maxPage) {
@@ -4870,56 +4874,98 @@ fun QuickInputSection(
                 }
             }
 
-            // 主體：HorizontalPager + 底部指示器用 Box align 絕對定位
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top
-            ) { page ->
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 14.dp)  // 頂 / 底永遠 14dp
-                        .padding(bottom = if (pages.size > 1) 16.dp else 0.dp)  // 額外留位俾指示器
-                ) {
-                    AnimatedStretchingFlowRow(
-                        items = pages[page].flatten(),
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalSpacing = 8.dp,
-                        verticalSpacing = 8.dp
-                    ) { item ->
-                        val name = item.first
-                        val originalIndex = indexByName[name] ?: 0
-                        key(name) {
-                            AnimatedQuickChip(
-                                name = name,
-                                iconUrl = noteIconMap[name] ?: "",
-                                index = originalIndex,
-                                animatedNames = animatedQuickInputs,
-                                onClick = { onClick(name) },
-                                modifier = Modifier.fillMaxWidth()
+            val hasIndicator = pages.size > 1
+
+            // ============================================================
+            //  ★ 高度計算：用「當前頁行數」而唔係 maxRowsPerPage，
+            //     噉最後一頁唔會空底。pager 換頁時高度會平滑過渡。
+            // ============================================================
+            val safeCurrentPage = pagerState.currentPage
+                .coerceIn(0, pages.lastIndex)
+            val currentRowCount = pages[safeCurrentPage].size
+
+            val targetHeight =
+                chipHeight * currentRowCount +
+                verticalGap * (currentRowCount - 1).coerceAtLeast(0) +
+                panelVPadding * 2 +
+                (if (hasIndicator) indicatorSpace else 0.dp)
+
+            val animatedHeight by animateDpAsState(
+                targetValue = targetHeight,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "quickPanelHeight"
+            )
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(animatedHeight)
+                    .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(SURFACE_CARD)
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.Top
+                ) { page ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = 14.dp,
+                                end = 14.dp,
+                                top = panelVPadding,
+                                bottom = if (hasIndicator) panelVPadding + indicatorSpace
+                                         else panelVPadding
                             )
+                    ) {
+                        AnimatedStretchingFlowRow(
+                            items = pages[page],
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalSpacing = 8.dp,
+                            verticalSpacing = verticalGap
+                        ) { item ->
+                            val name = item.first
+                            val originalIndex = indexByName[name] ?: 0
+                            key(name) {
+                                AnimatedQuickChip(
+                                    name = name,
+                                    iconUrl = noteIconMap[name] ?: "",
+                                    index = originalIndex,
+                                    animatedNames = animatedQuickInputs,
+                                    onClick = { onClick(name) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            if (pages.size > 1) {
-                Row(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val safeCurrent = pagerState.currentPage.coerceIn(0, pages.lastIndex)
-                    repeat(pages.size) { i ->
-                        val isSelected = safeCurrent == i
-                        Box(
-                            Modifier
-                                .size(if (isSelected) 6.dp else 4.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR)
-                        )
+                if (hasIndicator) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val safeCurrent = pagerState.currentPage
+                            .coerceIn(0, pages.lastIndex)
+                        repeat(pages.size) { i ->
+                            val isSelected = safeCurrent == i
+                            Box(
+                                Modifier
+                                    .size(if (isSelected) 6.dp else 4.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isSelected) BRAND_PRIMARY
+                                        else DIVIDER_COLOR
+                                    )
+                            )
+                        }
                     }
                 }
             }
