@@ -4601,10 +4601,6 @@ fun AnimatedStretchingFlowRow(
     val hSpacingPx = remember(density, horizontalSpacing) { with(density) { horizontalSpacing.roundToPx() } }
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
-    val scope = rememberCoroutineScope()
-    // 獨立坐標記憶系統：確保改變位置時有平滑滑動動畫，但唔會干擾新出現嘅項目
-    val offsetAnimators = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
-
     androidx.compose.ui.layout.Layout(
         content = {
             items.forEach { item -> itemContent(item) }
@@ -4681,25 +4677,8 @@ fun AnimatedStretchingFlowRow(
         layout(safeMaxWidth, totalHeight) {
             for (i in placeableInfos.indices) {
                 val (placeable, targetOffset) = placeableInfos[i]
-                val itemName = items[i].first
-
-                val anim = offsetAnimators[itemName]
-                if (anim == null) {
-                    // ★ 第一次出現：直接定位喺最終目標位置，絕對唔會有「由上至下抌落嚟」嘅動畫
-                    offsetAnimators[itemName] = Animatable(targetOffset, IntOffset.VectorConverter)
-                    placeable.place(targetOffset)
-                } else {
-                    // ★ 已經存在但改變咗位置（例如重新排序）：觸發極致平滑嘅滑動過渡動畫
-                    if (anim.targetValue != targetOffset) {
-                        scope.launch {
-                            anim.animateTo(
-                                targetValue = targetOffset,
-                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
-                            )
-                        }
-                    }
-                    placeable.place(anim.value)
-                }
+                // ★ 直接瞬間定位，唔再啟動任何 Animatable 動畫
+                placeable.place(targetOffset)
             }
         }
     }
