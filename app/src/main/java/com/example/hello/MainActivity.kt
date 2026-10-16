@@ -1,11 +1,5 @@
 package com.example.hello
 
-import androidx.compose.animation.core.tween
-import androidx.compose.ui.layout.Placeable
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector2D
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -101,6 +95,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -280,9 +275,6 @@ data class DateHeaderInfo(
     val dayTag: String?
 )
 
-// =========================================================
-//  ★ ViewModel 暴露俾 UI 嘅狀態（全部標記 @Immutable 避免無謂 Recomposition）
-// =========================================================
 @Immutable
 data class FilterState(
     val modeOn: Boolean = false,
@@ -343,9 +335,6 @@ data class CalendarUiState(
     val avgPerDay: Double = 0.0,
 )
 
-// =========================================================
-//  ★ 高速時間與顏色快取（徹底消除 Calendar.getInstance 與重複 Bitmap 解碼）
-// =========================================================
 @Immutable
 private data class TimestampMeta(
     val year: Int,
@@ -368,7 +357,6 @@ private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "�
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 
-// ✅ 用完全限定名，強制指向 java.lang.ThreadLocal
 private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
 }
@@ -440,9 +428,6 @@ private fun getTodayStartMillis(): Long {
     return meta.startOfDayMillis
 }
 
-// =========================================================
-//  ★ LedgerViewModel
-// =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val db = Firebase.firestore
@@ -520,7 +505,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     init { listenToFirestore() }
 
-    // ★★★ 優化：Firestore listener O(N) 批次載入 + 二分搜尋插入 + 預熱時間快取 ★★★
     private fun listenToFirestore() {
         db.collection("records")
             .orderBy("timestamp", Query.Direction.DESCENDING)
@@ -537,13 +521,12 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                         val r = change.document.toObject(Record::class.java)
                             ?.copy(id = change.document.id)
                         if (r != null) {
-                            getTimestampMeta(r.timestamp) // 預熱快取
+                            getTimestampMeta(r.timestamp)
                             parsed.add(change.type to r)
                         }
                     }
 
                     _records.update { current ->
-                        // 初次載入快速通道：O(N) 直接建立，避免 O(N^2) 重複掃描
                         if (current.isEmpty() && parsed.all { it.first == DocumentChange.Type.ADDED }) {
                             val seen = HashSet<String>(parsed.size)
                             val initial = ArrayList<Record>(parsed.size)
@@ -661,7 +644,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun latestIconForNote(note: String): String {
         if (note.isBlank()) return ""
-        // _records 已經按 timestamp 降序排列，第一個 match 就係最新
         return _records.value.firstOrNull { it.note == note && it.iconUrl.isNotBlank() }?.iconUrl ?: ""
     }
 
@@ -676,9 +658,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-// =========================================================
-//  ★ 純函數：單次遍歷 + O(1) 時間快取，速度提升 50 倍以上
-// =========================================================
 private fun computeLedgerUiState(
     records: List<Record>,
     loading: Boolean,
@@ -748,7 +727,6 @@ private fun computeLedgerUiState(
     val groupedByDate = groupedMap.entries.map { it.key to it.value }
     val isExactNoteFilter = filter.modeOn && ledgerRecords.isNotEmpty() && allSameNote
 
-    // 單次遍歷 records（已按 timestamp DESC 排序）建立所有 note 相關索引
     val minDistByNote = LinkedHashMap<String, Int>()
     val recentAmountByNote = HashMap<String, Double>()
     val noteIconMap = HashMap<String, String>()
@@ -767,7 +745,7 @@ private fun computeLedgerUiState(
         if (prevMin == null) {
             minDistByNote[note] = dist
             recentAmountByNote[note] = r.amount
-            noteCategoryMap[note] = r.category // records 係降序，首個即最新
+            noteCategoryMap[note] = r.category
             allNoteNames.add(note)
         } else if (dist < prevMin) {
             minDistByNote[note] = dist
@@ -965,9 +943,6 @@ private fun computeCalendarUiState(
     )
 }
 
-// =========================================================
-//  Helpers
-// =========================================================
 object AboveAnchorPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
@@ -1192,6 +1167,30 @@ fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): In
     }
 }
 
+fun getHoveredActionIndexWithCenter(
+    center: Offset,
+    touch: Offset,
+    minRadiusPx: Float,
+    arcCenterAngle: Float
+): Int? {
+    val dx = touch.x - center.x
+    val dy = touch.y - center.y
+    val dist = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+    if (dist < minRadiusPx) return null
+    val angle = kotlin.math.atan2(dy.toDouble(), dx.toDouble()) * 180 / Math.PI
+    var relative = (angle - arcCenterAngle) % 360.0
+    if (relative > 180) relative -= 360
+    if (relative < -180) relative += 360
+
+    return when {
+        relative in -80.0..-40.0 -> 0
+        relative in -40.0..0.0 -> 1
+        relative in 0.0..40.0 -> 2
+        relative in 40.0..80.0 -> 3
+        else -> null
+    }
+}
+
 private val FAN_MENU_ACTIONS = listOf(
     Triple(Icons.Default.ContentCopy, "複製", Color(0xFF64748B)),
     Triple(Icons.Default.Edit, "編輯", Color(0xFF3B82F6)),
@@ -1212,10 +1211,38 @@ fun FanMenuOverlay(
     val currentTouch = touchProvider()
 
     val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+
     val minRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
     val radiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-    val hoveredIndex = getHoveredActionIndex(center, currentTouch, minRadiusPx)
+
+    val edgeThreshold = radiusPx + halfBtnPx
+    val leftSpace = center.x
+    val rightSpace = screenWidthPx - center.x
+
+    val rotation = when {
+        leftSpace < edgeThreshold -> {
+            val factor = (1f - leftSpace / edgeThreshold).coerceIn(0f, 1f)
+            factor * 80f
+        }
+        rightSpace < edgeThreshold -> {
+            val factor = (1f - rightSpace / edgeThreshold).coerceIn(0f, 1f)
+            -factor * 80f
+        }
+        else -> 0f
+    }
+
+    val arcCenterAngle = -90f + rotation
+
+    val hoveredIndex = getHoveredActionIndexWithCenter(
+        center = center,
+        touch = currentTouch,
+        minRadiusPx = minRadiusPx,
+        arcCenterAngle = arcCenterAngle
+    )
+
     val haptic = LocalHapticFeedback.current
     var previousHovered by remember { mutableStateOf<Int?>(null) }
 
@@ -1228,7 +1255,7 @@ fun FanMenuOverlay(
 
     Box(Modifier.fillMaxSize()) {
         FAN_MENU_ACTIONS.forEachIndexed { i, action ->
-            val angle = -150f + i * 40f
+            val angle = arcCenterAngle - 60f + i * 40f
             val angleRad = Math.toRadians(angle.toDouble())
 
             val currentRadius = radiusPx * progress
@@ -1426,7 +1453,6 @@ private val MAIN_NAV_ITEMS = listOf(
     NavItem("月曆", Icons.Default.CalendarMonth)
 )
 
-// 快取模糊特效，避免動畫期間每幀重複建立 JNI RenderEffect
 private val blurEffectCache = ConcurrentHashMap<Int, androidx.compose.ui.graphics.RenderEffect>(32)
 
 private fun getCachedBlurEffect(radiusPx: Int): androidx.compose.ui.graphics.RenderEffect? {
@@ -1457,11 +1483,9 @@ fun MainApp(
         mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食")
     }
 
-    // ===== 由 ViewModel 帶入嘅核心資料 =====
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
 
-    // ===== 純 UI 狀態 =====
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
@@ -1496,7 +1520,6 @@ fun MainApp(
     var afterSaveHintVisible by remember { mutableStateOf(false) }
     val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
 
-    // ★★★ 打字 debounce 250ms ★★★
     LaunchedEffect(filterSearch.text) {
         delay(250)
         vm.setFilterSearch(filterSearch.text)
@@ -1525,7 +1548,6 @@ fun MainApp(
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
-    // ===== 從相冊揀圖 =====
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
         if (uri != null && target != null) {
@@ -1538,7 +1560,6 @@ fun MainApp(
         iconTargetRecord = null
     }
 
-    // ===== 即時拍照（FileProvider URI，拍完清 cache） =====
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val target = iconTargetRecord
         val uri = pendingCameraUri
@@ -1547,7 +1568,6 @@ fun MainApp(
                 uploading = true
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
-                // 清 cache 臨時檔
                 try {
                     uri.path?.let { p ->
                         val f = java.io.File(p)
@@ -1560,7 +1580,6 @@ fun MainApp(
         iconTargetRecord = null
     }
 
-    // ===== ★★★ 新增：相機權限 launcher ★★★ =====
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -1660,9 +1679,9 @@ fun MainApp(
         recentlyDeletedRecord = r
         showUndoToast = true
         deleteJob = scope.launch {
-            delay(650)
+            delay(900)
             vm.deleteRecord(r.id)
-            delay(4350)
+            delay(4100)
             if (recentlyDeletedRecord?.id == r.id) {
                 showUndoToast = false
                 recentlyDeletedRecord = null
@@ -2010,7 +2029,6 @@ fun MainApp(
                         showIconSourceDialog = false
                         pickImageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
-                    // ===== ★★★ 即時拍照：先檢查／請求權限 ★★★ =====
                     IconSourceOption(Icons.Default.PhotoCamera, "即時拍照") {
                         showIconSourceDialog = false
                         val hasPermission = ContextCompat.checkSelfPermission(
@@ -2032,7 +2050,6 @@ fun MainApp(
                                 iconTargetRecord = null
                             }
                         } else {
-                            // 保留 iconTargetRecord，等權限結果回嚟再影
                             cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                         }
                     }
@@ -2401,7 +2418,6 @@ private fun AnimatedFabLayer(
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // 使用 derivedStateOf 避免喺動畫期間每一幀都觸發 AnimatedFabLayer Recomposition
     val isExpandedTint by remember {
         derivedStateOf { progressProvider() > 0.35f }
     }
@@ -2483,25 +2499,19 @@ private fun AnimatedKeyboardLayer(
                     val currentP = progressProvider()
                     alpha = currentP
 
-                    // ★ 用 transformOrigin 讓面板從 FAB 中心位置縮放
-                    // FAB 中心相對屏幕右下角 = (-48dp, -120dp)
-                    // 面板 Box 右下角 = 屏幕右下角
-                    // FAB 中心相對面板左上角 = (size.width - 48dp, size.height - 120dp)
                     val w = size.width
                     val h = size.height
                     if (w > 0f && h > 0f) {
-                        val fabCx = w - 48.dp.toPx()
-                        val fabCy = h - 120.dp.toPx()
-                        transformOrigin = TransformOrigin(
-                            (fabCx / w).coerceIn(0.001f, 0.999f),
-                            (fabCy / h).coerceIn(0.001f, 0.999f)
-                        )
+                        val ox = (1f - (32.dp.toPx() / w)).coerceIn(0.02f, 0.98f)
+                        val oy = (1f - (100.dp.toPx() / h)).coerceIn(0.02f, 0.98f)
+                        transformOrigin = TransformOrigin(ox, oy)
                     } else {
                         transformOrigin = TransformOrigin(1f, 1f)
                     }
 
-                    scaleX = currentP
-                    scaleY = currentP
+                    val s = 0.13f + 0.87f * currentP
+                    scaleX = s
+                    scaleY = s
                 }
         ) {
             LedgerKeyboardPanel(
@@ -2669,11 +2679,6 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // =========================================================
-    //  ★ 摺疊邏輯：用 nestedScroll 累積真實 px + hysteresis
-    // =========================================================
-    // oneRowPx 只係「每縮一行需要幾多 px 滾動」嘅抽象單位，
-    // 唔代表實際 UI 行高，所以繼續用 72dp 冇問題。
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
     val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
@@ -2686,12 +2691,10 @@ fun LedgerContent(
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                // available.y < 0 → 手指向上推 → 累積增加 → 摺疊
-                // available.y > 0 → 手指向下拉 → 累積減少 → 展開
                 val next = (scrollAccumPx.value - available.y)
                     .coerceIn(0f, collapseDistancePx)
                 if (next != scrollAccumPx.value) scrollAccumPx.value = next
-                return Offset.Zero  // 唔攔截，繼續俾 LazyColumn
+                return Offset.Zero
             }
         }
     }
@@ -2701,7 +2704,6 @@ fun LedgerContent(
             .distinctUntilChanged()
             .collect { v ->
                 val prev = quickInputMaxRows
-                // 用「半行」做 hysteresis 邊界
                 val rawTarget = when {
                     v < oneRowPx * 0.5f -> 4
                     v < oneRowPx * 1.5f -> 3
@@ -2712,7 +2714,6 @@ fun LedgerContent(
             }
     }
 
-    // 回頂自動歸零
     LaunchedEffect(listState) {
         snapshotFlow {
             listState.firstVisibleItemIndex == 0 &&
@@ -2727,9 +2728,6 @@ fun LedgerContent(
             }
     }
 
-    // =========================================================
-    //  ★ Fan Menu
-    // =========================================================
     val fanMenuProgress = animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
@@ -2755,8 +2753,34 @@ fun LedgerContent(
 
     val handleFanEnd = remember {
         {
-            val hovered = getHoveredActionIndex(
-                fanMenuCenterState.value, fanMenuTouchState.value, minFanRadiusPx)
+            val configuration = LocalConfiguration.current
+            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+            val radiusPx = with(density) { 105.dp.toPx() }
+            val halfBtnPx = with(density) { 24.dp.toPx() }
+            val edgeThreshold = radiusPx + halfBtnPx
+
+            val center = fanMenuCenterState.value
+            val leftSpace = center.x
+            val rightSpace = screenWidthPx - center.x
+            val rotation = when {
+                leftSpace < edgeThreshold -> {
+                    val factor = (1f - leftSpace / edgeThreshold).coerceIn(0f, 1f)
+                    factor * 80f
+                }
+                rightSpace < edgeThreshold -> {
+                    val factor = (1f - rightSpace / edgeThreshold).coerceIn(0f, 1f)
+                    -factor * 80f
+                }
+                else -> 0f
+            }
+            val arcCenterAngle = -90f + rotation
+
+            val hovered = getHoveredActionIndexWithCenter(
+                center = center,
+                touch = fanMenuTouchState.value,
+                minRadiusPx = minFanRadiusPx,
+                arcCenterAngle = arcCenterAngle
+            )
             val targetRecord = activeFanRecord
             activeFanRecord = null
 
@@ -2780,9 +2804,6 @@ fun LedgerContent(
         }
     }
 
-    // =========================================================
-    //  ★ 各種 scroll 效果
-    // =========================================================
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
             try {
@@ -3106,7 +3127,7 @@ fun LedgerContent(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .nestedScroll(collapseScrollConnection),   // ★ 新增
+                            .nestedScroll(collapseScrollConnection),
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
@@ -3187,7 +3208,6 @@ fun FadingStickyHeader(content: @Composable () -> Unit) {
             .fillMaxWidth()
             .onGloballyPositioned { coords ->
                 val top = coords.boundsInRoot().top
-                // 只有當 Header 接近或處於頂部淡出範圍（top <= 2f）時先更新 State，一般滾動零開銷
                 if (top <= 2f || rootTop <= 2f) {
                     rootTop = top
                 }
@@ -3212,7 +3232,6 @@ fun AnimatedRecordItem(
     isDeleting: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    // 快速通道：完全靜態項目（99.9% 情況）
     if (!animateOnMount && !isDeleting) {
         Box(Modifier.fillMaxWidth().height(72.dp)) {
             content()
@@ -3221,45 +3240,49 @@ fun AnimatedRecordItem(
     }
 
     val density = LocalDensity.current
+    val maxHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
 
-    // ★ 用 Animatable，初始值根據 animateOnMount 決定
-    // 避免 animateDpAsState 首次 snap 到 target 嘅問題
-    val heightAnim = remember { Animatable(if (animateOnMount) 0f else 72f) }
+    val heightAnim = remember { Animatable(if (animateOnMount) 0f else maxHeightPx) }
     val scaleAnim = remember { Animatable(if (animateOnMount) 0.85f else 1f) }
     val alphaAnim = remember { Animatable(if (animateOnMount) 0f else 1f) }
     val translateYAnim = remember { Animatable(if (animateOnMount) 40f else 0f) }
 
     LaunchedEffect(animateOnMount, isDeleting) {
         if (isDeleting) {
-            // 刪除：收縮消失
+            launch {
+                translateYAnim.animateTo(
+                    targetValue = 16f,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f)
+                )
+            }
+            launch {
+                alphaAnim.animateTo(0f, tween(320, easing = FastOutSlowInEasing))
+            }
+            delay(260)
             launch {
                 heightAnim.animateTo(
-                    0f,
-                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                    targetValue = 0f,
+                    animationSpec = spring(dampingRatio = 1f, stiffness = 250f)
                 )
             }
             launch {
                 scaleAnim.animateTo(
-                    0.85f,
-                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                    targetValue = 0.85f,
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
                 )
             }
-            launch {
-                alphaAnim.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
-            }
         } else if (animateOnMount) {
-            // 新增：展開進入
             delay(30)
             launch {
                 heightAnim.animateTo(
-                    72f,
-                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                    targetValue = maxHeightPx,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
                 )
             }
             launch {
                 scaleAnim.animateTo(
-                    1f,
-                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                    targetValue = 1f,
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
                 )
             }
             launch {
@@ -3267,8 +3290,8 @@ fun AnimatedRecordItem(
             }
             launch {
                 translateYAnim.animateTo(
-                    0f,
-                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
+                    targetValue = 0f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
                 )
             }
         }
@@ -3386,7 +3409,6 @@ fun TrianglePointer(
     }
 }
 
-// 非狀態座標容器：避免滾動時喺 onGloballyPositioned 觸發 Snapshot State 寫入
 private class OffsetHolder(var value: Offset = Offset.Zero)
 
 @Composable
@@ -3422,20 +3444,22 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     val itemGlobalPosHolder = remember { OffsetHolder() }
 
-    val itemAlpha = if (!isFanMenuActive && !isOtherItem) 1f else {
-        animateFloatAsState(if (isOtherItem) 0.35f else 1f, tween(300), label = "alpha").value
-    }
-    val itemScale = if (!isFanMenuActive && !isActiveItem && !isOtherItem) 1f else {
-        animateFloatAsState(
-            targetValue = when {
-                isActiveItem -> 1.03f
-                isOtherItem -> 0.95f
-                else -> 1f
-            },
-            animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
-            label = "scale"
-        ).value
-    }
+    // ★ 修復：始終調用 animateFloatAsState，令狀態變化有平滑過渡
+    val itemAlpha by animateFloatAsState(
+        targetValue = if (isOtherItem) 0.35f else 1f,
+        animationSpec = tween(300),
+        label = "itemAlpha"
+    )
+
+    val itemScale by animateFloatAsState(
+        targetValue = when {
+            isActiveItem -> 1.03f
+            isOtherItem -> 0.95f
+            else -> 1f
+        },
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMediumLow),
+        label = "itemScale"
+    )
 
     LaunchedEffect(isExpanded) { if (!isExpanded && targetOffset != 0f) targetOffset = 0f }
     val offsetX = if (targetOffset == 0f && !isDragging) {
@@ -3539,7 +3563,6 @@ fun SwipeableRecordItem(
                 indication = null
             ) { if (hasAnyExpanded) onExpand(null) }
     ) {
-        // ★★★ 優化：只有當項目真正向右或向左滑動時先渲染背景按鈕，靜態滾動零額外節點 ★★★
         if (leftProgress > 0.005f) {
             Row(
                 Modifier
@@ -3797,7 +3820,6 @@ fun LedgerKeyboardPanel(
                 .verticalScroll(rememberScrollState())
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
-            // ============ 日期 / 時間 ============
             val dateText = remember(state.timestamp) { formatDatePart(state.timestamp) }
             val timeText = remember(state.timestamp) { formatTimePart(state.timestamp) }
 
@@ -3869,7 +3891,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ============ 旅遊：HKD / JPY 切換 ============
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -3955,7 +3976,6 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            // ============ 金額顯示區（含淺藍 Highlight）============
             Surface(Modifier.fillMaxWidth().height(76.dp),
                 shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(
@@ -4001,7 +4021,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ============ 數字鍵盤 ============
             Column(Modifier.fillMaxWidth().height(190.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 KEYBOARD_ROWS.forEach { row ->
@@ -4062,7 +4081,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ============ 名稱 + 類別 ============
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -4262,7 +4280,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ============ 收起 / 入帳 ============
             Row(Modifier.fillMaxWidth().height(58.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -4656,7 +4673,6 @@ fun AnimatedStretchingFlowRow(
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
         if (safeMaxWidth < 50) return@Layout layout(safeMaxWidth, 0) {}
 
-        // ★ 按傳入嘅 rows 直接分組 measurables，唔重新分行
         val rowMeasurableGroups = ArrayList<List<androidx.compose.ui.layout.Measurable>>(rows.size)
         var mi = 0
         for (row in rows) {
@@ -4780,7 +4796,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         }
     }
 
-    // ★ 出現動畫：從 0 縮放到 1，中心放大
     val appearAnim = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         appearAnim.animateTo(
@@ -4861,7 +4876,8 @@ fun QuickInputSection(
                 for (item in items) {
                     val name = item.first
                     val textW = textMeasurer.measure(name, textStyle).size.width.toFloat()
-                    val itemPx = with(density) { 44.dp.toPx() } + textW + 4f
+                    // ★ 加大餘量，避免文字被誤判為溢出而觸發省略號
+                    val itemPx = with(density) { 44.dp.toPx() } + textW + 12f
 
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
@@ -5326,7 +5342,34 @@ fun CalendarContent(
     }
     val handleFanEnd = remember {
         {
-            val hovered = getHoveredActionIndex(fanMenuCenterState.value, fanMenuTouchState.value, minFanRadiusPx)
+            val configuration = LocalConfiguration.current
+            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+            val radiusPx = with(density) { 105.dp.toPx() }
+            val halfBtnPx = with(density) { 24.dp.toPx() }
+            val edgeThreshold = radiusPx + halfBtnPx
+
+            val center = fanMenuCenterState.value
+            val leftSpace = center.x
+            val rightSpace = screenWidthPx - center.x
+            val rotation = when {
+                leftSpace < edgeThreshold -> {
+                    val factor = (1f - leftSpace / edgeThreshold).coerceIn(0f, 1f)
+                    factor * 80f
+                }
+                rightSpace < edgeThreshold -> {
+                    val factor = (1f - rightSpace / edgeThreshold).coerceIn(0f, 1f)
+                    -factor * 80f
+                }
+                else -> 0f
+            }
+            val arcCenterAngle = -90f + rotation
+
+            val hovered = getHoveredActionIndexWithCenter(
+                center = center,
+                touch = fanMenuTouchState.value,
+                minRadiusPx = minFanRadiusPx,
+                arcCenterAngle = arcCenterAngle
+            )
             val targetRecord = activeFanRecord
             activeFanRecord = null
 
@@ -5870,7 +5913,6 @@ fun CompareContent(
                 border = BorderStroke(0.8.dp, DIVIDER_COLOR.copy(alpha = 0.6f))
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    // ===== 表頭 =====
                     Row(
                         Modifier.fillMaxWidth()
                             .background(SURFACE_ELEVATED)
@@ -6016,7 +6058,6 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.dp)
 
-                    // ===== 餘額行 =====
                     Row(
                         Modifier.fillMaxWidth()
                             .background(SURFACE_ELEVATED)
@@ -6117,12 +6158,9 @@ suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE):
                 BitmapFactory.decodeStream(it, null, opts)
             } ?: return@withContext null
 
-            // ★ 依圖片方向決定處理方式
             val processed = if (src.width > src.height) {
-                // 橫向長方形：保留完整圖，等比縮到闊 = maxSize
                 scaleKeepAspectWidth(src, maxSize)
             } else {
-                // 直向長方形 / 正方形：裁中間正方形，縮到 maxSize × maxSize
                 scaleCropCenter(src, maxSize)
             }
             if (processed !== src) src.recycle()
@@ -6144,10 +6182,6 @@ fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
     return scaled
 }
 
-/**
- * 橫向圖片專用：唔裁切，保留完整圖，闊度縮到 maxWidth，高度等比。
- * 例如 400×200 → 100×50；1200×400 → 100×34。
- */
 fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     if (src.width <= maxWidth) return src
     val ratio = maxWidth.toFloat() / src.width
@@ -6230,7 +6264,6 @@ private val AVATAR_TEXT_STYLE_BASE = TextStyle(
 
 @Composable
 fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
-    // ★ 圓角正方形：圓角 = 短邊 28%（大約 40dp 圖標 → 11dp 圓角）
     val shape = RoundedCornerShape(percent = 28)
 
     if (iconUrl.isBlank()) {
@@ -6264,7 +6297,6 @@ fun IconView(iconUrl: String, name: String, size: Dp = 40.dp) {
 fun IconViewAdaptive(
     iconUrl: String, name: String, modifier: Modifier = Modifier,
 ) {
-    // ★ 圓角正方形（月曆格仔用）
     Box(modifier.clip(RoundedCornerShape(percent = 28)), contentAlignment = Alignment.Center) {
         if (iconUrl.isBlank()) {
             val ch = remember(name) { name.trim().take(1).ifBlank { "?" } }
