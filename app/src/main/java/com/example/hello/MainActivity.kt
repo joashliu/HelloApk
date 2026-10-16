@@ -1,10 +1,10 @@
 package com.example.hello
 
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector2D
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
-import androidx.compose.ui.unit.VectorConverter
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
