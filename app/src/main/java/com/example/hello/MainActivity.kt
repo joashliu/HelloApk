@@ -4602,7 +4602,7 @@ fun AnimatedStretchingFlowRow(
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
     val scope = rememberCoroutineScope()
-    // 獨立坐標記憶系統：確保改變位置時有平滑滑動動畫
+    // 獨立坐標記憶系統：確保改變位置時有平滑滑動動畫，但唔會干擾新出現嘅項目
     val offsetAnimators = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
 
     androidx.compose.ui.layout.Layout(
@@ -4685,11 +4685,11 @@ fun AnimatedStretchingFlowRow(
 
                 val anim = offsetAnimators[itemName]
                 if (anim == null) {
-                    // ★ 第一次出現：直接定位喺最終目標位置，唔會再有「由上至下抌落嚟」嘅整體位移動畫
+                    // ★ 第一次出現：直接定位喺最終目標位置，絕對唔會有「由上至下抌落嚟」嘅動畫
                     offsetAnimators[itemName] = Animatable(targetOffset, IntOffset.VectorConverter)
                     placeable.place(targetOffset)
                 } else {
-                    // ★ 已經存在但改變咗位置：觸發極致平滑嘅滑動過渡動畫
+                    // ★ 已經存在但改變咗位置（例如重新排序）：觸發極致平滑嘅滑動過渡動畫
                     if (anim.targetValue != targetOffset) {
                         scope.launch {
                             anim.animateTo(
@@ -4756,7 +4756,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        // ★ 強制鎖死高度為 36dp，用 clickable 取代 onClick，徹底解決被系統撐大嘅問題
+        // 強制鎖定高度為 36dp，用 clickable 取代 onClick，徹底解決被系統撐大嘅問題
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -4779,48 +4779,12 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-@Composable
-private fun AnimatedEntranceChip(
-    name: String, iconUrl: String, 
-    animatedNames: MutableMap<String, Boolean>,
-    onClick: () -> Unit, modifier: Modifier = Modifier
-) {
-    // ★ 檢查呢粒 Keep 係咪已經出現過
-    val isAlreadyAnimated = animatedNames[name] == true
-    // 如果已經出現過，起始值直接設為 1f (完全顯示，無動畫)，否則由 0f 開始
-    val animProgress = remember { Animatable(if (isAlreadyAnimated) 1f else 0f) }
-
-    LaunchedEffect(name) {
-        if (!isAlreadyAnimated) {
-            animatedNames[name] = true // 標記為已出現
-            animProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
-            )
-        }
-    }
-
-    Box(
-        modifier = modifier.graphicsLayer {
-            val p = animProgress.value
-            alpha = p
-            scaleX = 0.9f + 0.1f * p
-            scaleY = 0.9f + 0.1f * p
-            // 只有全新嘅項目先會有微量嘅浮現效果，舊項目會穩如泰山
-            translationY = (1f - p) * 20f 
-        }
-    ) {
-        QuickInputChip(name = name, iconUrl = iconUrl, 
-            modifier = Modifier.fillMaxWidth(), onClick = onClick)
-    }
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    animatedQuickInputs: MutableMap<String, Boolean>,
+    animatedQuickInputs: MutableMap<String, Boolean>, // 保留參數防止編譯報錯
     maxRowsPerPage: Int = 4,
     onClick: (String) -> Unit
 ) {
@@ -4948,12 +4912,12 @@ fun QuickInputSection(
                         ) { item ->
                             val name = item.first
                             key(name) {
-                                AnimatedEntranceChip(
+                                // ★ 直接用 QuickInputChip，冇任何多餘嘅進場動畫
+                                QuickInputChip(
                                     name = name,
                                     iconUrl = noteIconMap[name] ?: "",
-                                    animatedNames = animatedQuickInputs,
-                                    onClick = { onClick(name) },
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = { onClick(name) }
                                 )
                             }
                         }
