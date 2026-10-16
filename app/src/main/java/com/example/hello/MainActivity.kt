@@ -4809,7 +4809,7 @@ fun QuickInputSection(
     val density = LocalDensity.current
     val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
 
-    // ★ 關鍵：調用 Compose 內置嘅 TextMeasurer 嚟獲取絕對精準嘅文字像素寬度！解決點點點問題
+    // ★ 調用 Compose 內置嘅 TextMeasurer 嚟獲取絕對精準嘅文字像素寬度
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
@@ -4837,7 +4837,7 @@ fun QuickInputSection(
                     val textW = textMeasurer.measure(name, textStyle).size.width.toFloat()
                     // 44dp 係組件內置 Padding 同 Icon 寬度總和，再加 4f 像素作為安全緩衝
                     val itemPx = with(density) { 44.dp.toPx() } + textW + 4f
-                    
+
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
 
@@ -4885,10 +4885,20 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
+            // ★ 同 Chips 位置動畫用同一個 spring 規格，兩者先至同步、唔會扽
+            val animatedHeight by animateDpAsState(
+                targetValue = targetHeight,
+                animationSpec = spring(
+                    dampingRatio = 0.9f,
+                    stiffness = 400f
+                ),
+                label = "quickPanelHeight"
+            )
+
             Box(
-    Modifier
-        .fillMaxWidth()
-        .height(targetHeight)   
+                Modifier
+                    .fillMaxWidth()
+                    .height(animatedHeight)
                     .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SURFACE_CARD)
