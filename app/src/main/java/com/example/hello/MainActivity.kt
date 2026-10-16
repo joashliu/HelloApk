@@ -4602,6 +4602,7 @@ fun AnimatedStretchingFlowRow(
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
     val scope = rememberCoroutineScope()
+    // 獨立坐標記憶系統：確保改變位置時有平滑滑動動畫
     val offsetAnimators = remember { mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>() }
 
     androidx.compose.ui.layout.Layout(
@@ -4613,7 +4614,6 @@ fun AnimatedStretchingFlowRow(
         if (measurables.isEmpty()) return@Layout layout(0, 0) {}
 
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
-        // 防止喺 Compose 測量階段因寬度不足而記錄咗錯誤嘅 (0,0) 坐標
         if (safeMaxWidth < 50) return@Layout layout(safeMaxWidth, 0) {}
 
         val itemWidths = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
@@ -4685,11 +4685,11 @@ fun AnimatedStretchingFlowRow(
 
                 val anim = offsetAnimators[itemName]
                 if (anim == null) {
-                    // ★ 第一次出現：直接定位喺最終目標位置，唔會再有「由上至下抌落嚟」嘅奇怪動畫
+                    // ★ 第一次出現：直接定位喺最終目標位置，唔會再有「由上至下抌落嚟」嘅整體位移動畫
                     offsetAnimators[itemName] = Animatable(targetOffset, IntOffset.VectorConverter)
                     placeable.place(targetOffset)
                 } else {
-                    // ★ 已經存在但改變咗位置：觸發平滑移動動畫
+                    // ★ 已經存在但改變咗位置：觸發極致平滑嘅滑動過渡動畫
                     if (anim.targetValue != targetOffset) {
                         scope.launch {
                             anim.animateTo(
@@ -4756,7 +4756,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        // 強制高度為 36dp，防止被 Material 3 嘅預設 onClick 撐大
+        // ★ 強制鎖死高度為 36dp，用 clickable 取代 onClick，徹底解決被系統撐大嘅問題
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -4779,12 +4779,48 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+@Composable
+private fun AnimatedEntranceChip(
+    name: String, iconUrl: String, 
+    animatedNames: MutableMap<String, Boolean>,
+    onClick: () -> Unit, modifier: Modifier = Modifier
+) {
+    // ★ 檢查呢粒 Keep 係咪已經出現過
+    val isAlreadyAnimated = animatedNames[name] == true
+    // 如果已經出現過，起始值直接設為 1f (完全顯示，無動畫)，否則由 0f 開始
+    val animProgress = remember { Animatable(if (isAlreadyAnimated) 1f else 0f) }
+
+    LaunchedEffect(name) {
+        if (!isAlreadyAnimated) {
+            animatedNames[name] = true // 標記為已出現
+            animProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+            )
+        }
+    }
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            val p = animProgress.value
+            alpha = p
+            scaleX = 0.9f + 0.1f * p
+            scaleY = 0.9f + 0.1f * p
+            // 只有全新嘅項目先會有微量嘅浮現效果，舊項目會穩如泰山
+            translationY = (1f - p) * 20f 
+        }
+    ) {
+        QuickInputChip(name = name, iconUrl = iconUrl, 
+            modifier = Modifier.fillMaxWidth(), onClick = onClick)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    animatedQuickInputs: MutableMap<String, Boolean>, // 保留參數防止編譯錯誤，但內部棄用以解決閃爍
+    animatedQuickInputs: MutableMap<String, Boolean>,
     maxRowsPerPage: Int = 4,
     onClick: (String) -> Unit
 ) {
@@ -4796,7 +4832,7 @@ fun QuickInputSection(
     val density = LocalDensity.current
     val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
 
-    // ★ 關鍵：調用 Compose 內置嘅 TextMeasurer 嚟獲取絕對精準嘅文字像素寬度！
+    // ★ 關鍵：調用 Compose 內置嘅 TextMeasurer 嚟獲取絕對精準嘅文字像素寬度！解決點點點問題
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
@@ -4820,10 +4856,10 @@ fun QuickInputSection(
 
                 for (item in items) {
                     val name = item.first
-                    // 精準計算該文字喺畫面上佔用嘅寬度
+                    // 精準計算該文字喺畫面上佔用嘅真實寬度
                     val textW = textMeasurer.measure(name, textStyle).size.width.toFloat()
-                    // 44dp 係組件內置 Padding 同 Icon 寬度總和，加 2f 像素作為安全緩衝
-                    val itemPx = with(density) { 44.dp.toPx() } + textW + 2f
+                    // 44dp 係組件內置 Padding 同 Icon 寬度總和，再加 4f 像素作為安全緩衝
+                    val itemPx = with(density) { 44.dp.toPx() } + textW + 4f
                     
                     val needed = if (currentRow.isEmpty()) itemPx
                                  else currentRowWidth + gapPx + itemPx
@@ -4892,7 +4928,7 @@ fun QuickInputSection(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.Top // 確保置頂，唔會亂浮動
                 ) { page ->
                     Column(
                         Modifier
@@ -4912,11 +4948,12 @@ fun QuickInputSection(
                         ) { item ->
                             val name = item.first
                             key(name) {
-                                QuickInputChip(
+                                AnimatedEntranceChip(
                                     name = name,
                                     iconUrl = noteIconMap[name] ?: "",
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onClick = { onClick(name) }
+                                    animatedNames = animatedQuickInputs,
+                                    onClick = { onClick(name) },
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
                         }
