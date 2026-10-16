@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector2D
@@ -2481,9 +2482,26 @@ private fun AnimatedKeyboardLayer(
                 .graphicsLayer {
                     val currentP = progressProvider()
                     alpha = currentP
-                    scaleX = 0.17f + 0.83f * currentP
-                    scaleY = 0.17f + 0.83f * currentP
-                    transformOrigin = TransformOrigin(1f, 1f)
+
+                    // ★ 用 transformOrigin 讓面板從 FAB 中心位置縮放
+                    // FAB 中心相對屏幕右下角 = (-48dp, -120dp)
+                    // 面板 Box 右下角 = 屏幕右下角
+                    // FAB 中心相對面板左上角 = (size.width - 48dp, size.height - 120dp)
+                    val w = size.width
+                    val h = size.height
+                    if (w > 0f && h > 0f) {
+                        val fabCx = w - 48.dp.toPx()
+                        val fabCy = h - 120.dp.toPx()
+                        transformOrigin = TransformOrigin(
+                            (fabCx / w).coerceIn(0.001f, 0.999f),
+                            (fabCy / h).coerceIn(0.001f, 0.999f)
+                        )
+                    } else {
+                        transformOrigin = TransformOrigin(1f, 1f)
+                    }
+
+                    scaleX = currentP
+                    scaleY = currentP
                 }
         ) {
             LedgerKeyboardPanel(
@@ -3194,68 +3212,80 @@ fun AnimatedRecordItem(
     isDeleting: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    var appeared by remember { mutableStateOf(!animateOnMount) }
-    var mountFinished by remember { mutableStateOf(!animateOnMount) }
-
-    // ★★★ 極速通道：99.9% 靜態項目唔建立任何 Animatable / animate*AsState ★★★
-    if (mountFinished && !animateOnMount && !isDeleting) {
+    // 快速通道：完全靜態項目（99.9% 情況）
+    if (!animateOnMount && !isDeleting) {
         Box(Modifier.fillMaxWidth().height(72.dp)) {
             content()
         }
         return
     }
 
-    LaunchedEffect(animateOnMount) {
-        if (animateOnMount) {
-            mountFinished = false
+    val density = LocalDensity.current
+
+    // ★ 用 Animatable，初始值根據 animateOnMount 決定
+    // 避免 animateDpAsState 首次 snap 到 target 嘅問題
+    val heightAnim = remember { Animatable(if (animateOnMount) 0f else 72f) }
+    val scaleAnim = remember { Animatable(if (animateOnMount) 0.85f else 1f) }
+    val alphaAnim = remember { Animatable(if (animateOnMount) 0f else 1f) }
+    val translateYAnim = remember { Animatable(if (animateOnMount) 40f else 0f) }
+
+    LaunchedEffect(animateOnMount, isDeleting) {
+        if (isDeleting) {
+            // 刪除：收縮消失
+            launch {
+                heightAnim.animateTo(
+                    0f,
+                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+            launch {
+                scaleAnim.animateTo(
+                    0.85f,
+                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+            launch {
+                alphaAnim.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
+            }
+        } else if (animateOnMount) {
+            // 新增：展開進入
             delay(30)
-            appeared = true
-            delay(450)
-            mountFinished = true
-        } else {
-            appeared = true
-            mountFinished = true
+            launch {
+                heightAnim.animateTo(
+                    72f,
+                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+            launch {
+                scaleAnim.animateTo(
+                    1f,
+                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+            launch {
+                alphaAnim.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+            }
+            launch {
+                translateYAnim.animateTo(
+                    0f,
+                    spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)
+                )
+            }
         }
     }
 
-    val targetHeight = if (isDeleting) 0.dp
-                       else if (animateOnMount && !appeared) 0.dp else 72.dp
-    val itemHeight by animateDpAsState(
-        targetValue = targetHeight,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "eHeight"
-    )
-    val targetScale = if (isDeleting) 0.85f
-                      else if (animateOnMount && !appeared) 0.85f else 1f
-    val entranceScale by animateFloatAsState(
-        targetValue = targetScale,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
-        label = "eScale"
-    )
-    val targetAlpha = if (isDeleting) 0f
-                      else if (animateOnMount && !appeared) 0f else 1f
-    val entranceAlpha by animateFloatAsState(
-        targetValue = targetAlpha,
-        animationSpec = tween(if (isDeleting) 200 else 300, easing = FastOutSlowInEasing),
-        label = "eAlpha"
-    )
-    val targetTranslateY = if (animateOnMount && !appeared) 40f else 0f
-    val entranceTranslationY by animateFloatAsState(
-        targetValue = targetTranslateY,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
-        label = "eY"
-    )
+    val heightDp = with(density) { heightAnim.value.toDp() }
 
-    Box(Modifier.fillMaxWidth().height(itemHeight).clipToBounds()) {
+    Box(Modifier.fillMaxWidth().height(heightDp).clipToBounds()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(72.dp)
                 .graphicsLayer {
-                    alpha = entranceAlpha
-                    scaleX = entranceScale
-                    scaleY = entranceScale
-                    translationY = entranceTranslationY
+                    alpha = alphaAnim.value
+                    scaleX = scaleAnim.value
+                    scaleY = scaleAnim.value
+                    translationY = translateYAnim.value
                 }
         ) {
             content()
@@ -4596,7 +4626,7 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 
 @Composable
 fun AnimatedStretchingFlowRow(
-    items: List<Pair<String, Int>>,
+    rows: List<List<Pair<String, Int>>>,
     modifier: Modifier = Modifier,
     horizontalSpacing: Dp = 8.dp,
     verticalSpacing: Dp = 8.dp,
@@ -4611,9 +4641,13 @@ fun AnimatedStretchingFlowRow(
         mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>()
     }
 
+    val flatItems = remember(rows) { rows.flatten() }
+
     androidx.compose.ui.layout.Layout(
         content = {
-            items.forEach { item -> itemContent(item) }
+            flatItems.forEach { item ->
+                key(item.first) { itemContent(item) }
+            }
         },
         modifier = modifier
     ) { measurables, constraints ->
@@ -4622,37 +4656,31 @@ fun AnimatedStretchingFlowRow(
         val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
         if (safeMaxWidth < 50) return@Layout layout(safeMaxWidth, 0) {}
 
-        val itemWidths = measurables.map { it.maxIntrinsicWidth(constraints.maxHeight) }
-
-        val rows = mutableListOf<MutableList<Int>>()
-        var currentRow = mutableListOf<Int>()
-        var currentWidth = 0
-
-        for (i in measurables.indices) {
-            val w = itemWidths[i]
-            if (currentRow.isEmpty()) {
-                currentRow.add(i)
-                currentWidth = w
-            } else {
-                if (currentWidth + hSpacingPx + w > safeMaxWidth) {
-                    rows.add(currentRow)
-                    currentRow = mutableListOf(i)
-                    currentWidth = w
-                } else {
-                    currentRow.add(i)
-                    currentWidth += hSpacingPx + w
-                }
-            }
+        // ★ 按傳入嘅 rows 直接分組 measurables，唔重新分行
+        val rowMeasurableGroups = ArrayList<List<androidx.compose.ui.layout.Measurable>>(rows.size)
+        var mi = 0
+        for (row in rows) {
+            if (row.isEmpty()) { rowMeasurableGroups.add(emptyList()); continue }
+            rowMeasurableGroups.add(measurables.subList(mi, mi + row.size))
+            mi += row.size
         }
-        if (currentRow.isNotEmpty()) rows.add(currentRow)
 
         class Placement(val placeable: Placeable, val target: IntOffset, val name: String)
         val placements = ArrayList<Placement>(measurables.size)
         var y = 0
 
-        for (row in rows) {
+        for (ri in rows.indices) {
+            val row = rows[ri]
+            if (row.isEmpty()) continue
+            val rowMeasurables = rowMeasurableGroups[ri]
+
+            val widths = ArrayList<Int>(row.size)
             var rowIntrinsicWidth = (row.size - 1) * hSpacingPx
-            for (idx in row) rowIntrinsicWidth += itemWidths[idx]
+            for (m in rowMeasurables) {
+                val w = m.maxIntrinsicWidth(constraints.maxHeight)
+                widths.add(w)
+                rowIntrinsicWidth += w
+            }
 
             val extraSpace = safeMaxWidth - rowIntrinsicWidth
             val extraPerItem = if (extraSpace > 0) extraSpace / row.size else 0
@@ -4661,7 +4689,7 @@ fun AnimatedStretchingFlowRow(
             var x = 0
             var rowMaxHeight = 0
 
-            for (idx in row) {
+            for (i in rowMeasurables.indices) {
                 val extra = if (extraSpace > 0) {
                     extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
                 } else {
@@ -4669,13 +4697,13 @@ fun AnimatedStretchingFlowRow(
                     val subtract = (diff.toFloat() / row.size).roundToInt()
                     -subtract
                 }
-                val targetWidth = maxOf(0, itemWidths[idx] + extra)
+                val targetWidth = maxOf(0, widths[i] + extra)
 
-                val placeable = measurables[idx].measure(
+                val placeable = rowMeasurables[i].measure(
                     constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
                 )
 
-                placements.add(Placement(placeable, IntOffset(x, y), items[idx].first))
+                placements.add(Placement(placeable, IntOffset(x, y), row[i].first))
 
                 x += targetWidth + hSpacingPx
                 if (placeable.height > rowMaxHeight) rowMaxHeight = placeable.height
@@ -4685,7 +4713,6 @@ fun AnimatedStretchingFlowRow(
 
         val totalHeight = maxOf(0, y - vSpacingPx)
 
-        // ★ 清走已經唔存在嘅 item animator，避免 map 越積越多
         val currentNames = placements.map { it.name }.toHashSet()
         offsetAnimators.keys.retainAll(currentNames)
 
@@ -4693,7 +4720,6 @@ fun AnimatedStretchingFlowRow(
             for (p in placements) {
                 val anim = offsetAnimators[p.name]
                 if (anim == null) {
-                    // ★ 首次出現：直接放目標位置，完全冇進場動畫
                     offsetAnimators[p.name] = Animatable(p.target, IntOffset.VectorConverter)
                     p.placeable.place(p.target)
                 } else {
@@ -4702,10 +4728,7 @@ fun AnimatedStretchingFlowRow(
                             try {
                                 anim.animateTo(
                                     targetValue = p.target,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.9f,
-                                        stiffness = 400f
-                                    )
+                                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
                                 )
                             } catch (_: Exception) {}
                         }
@@ -4725,23 +4748,15 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 
     LaunchedEffect(iconUrl) {
-        if (iconUrl.isBlank()) {
-            extracted = null
-            return@LaunchedEffect
-        }
-        dominantColorCache[iconUrl]?.let {
-            extracted = it
-            return@LaunchedEffect
-        }
+        if (iconUrl.isBlank()) { extracted = null; return@LaunchedEffect }
+        dominantColorCache[iconUrl]?.let { extracted = it; return@LaunchedEffect }
         val computed = withContext(Dispatchers.IO) {
             try {
                 val request = ImageRequest.Builder(ctx)
                     .data(iconUrl).allowHardware(false).build()
                 val result = ctx.imageLoader.execute(request)
                 when (val d = result.drawable) {
-                    is android.graphics.drawable.BitmapDrawable ->
-                        getDominantMutedColor(d.bitmap)
-
+                    is android.graphics.drawable.BitmapDrawable -> getDominantMutedColor(d.bitmap)
                     is android.graphics.drawable.ColorDrawable -> {
                         val c = d.color
                         if (android.graphics.Color.alpha(c) > 0 &&
@@ -4765,12 +4780,26 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         }
     }
 
+    // ★ 出現動畫：從 0 縮放到 1，中心放大
+    val appearAnim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appearAnim.animateTo(
+            targetValue = 1f,
+            animationSpec = spring(dampingRatio = 0.55f, stiffness = 550f)
+        )
+    }
+
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        // 強制鎖定高度為 36dp，用 clickable 取代 onClick，徹底解決被系統撐大嘅問題
         modifier = modifier
             .height(36.dp)
+            .graphicsLayer {
+                val s = appearAnim.value
+                scaleX = s
+                scaleY = s
+                transformOrigin = TransformOrigin(0.5f, 0.5f)
+            }
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
@@ -4796,7 +4825,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    animatedQuickInputs: MutableMap<String, Boolean>, // 保留參數防止編譯報錯
+    animatedQuickInputs: MutableMap<String, Boolean>,
     maxRowsPerPage: Int = 4,
     onClick: (String) -> Unit
 ) {
@@ -4808,7 +4837,6 @@ fun QuickInputSection(
     val density = LocalDensity.current
     val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
 
-    // ★ 調用 Compose 內置嘅 TextMeasurer 嚟獲取絕對精準嘅文字像素寬度
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
@@ -4832,9 +4860,7 @@ fun QuickInputSection(
 
                 for (item in items) {
                     val name = item.first
-                    // 精準計算該文字喺畫面上佔用嘅真實寬度
                     val textW = textMeasurer.measure(name, textStyle).size.width.toFloat()
-                    // 44dp 係組件內置 Padding 同 Icon 寬度總和，再加 4f 像素作為安全緩衝
                     val itemPx = with(density) { 44.dp.toPx() } + textW + 4f
 
                     val needed = if (currentRow.isEmpty()) itemPx
@@ -4853,9 +4879,10 @@ fun QuickInputSection(
                 rows
             }
 
-            val pages: List<List<Pair<String, Int>>> = remember(allFixedRows, maxRowsPerPage) {
+            // ★ 每頁保留行結構（最多 maxRowsPerPage 行）
+            val pages: List<List<List<Pair<String, Int>>>> = remember(allFixedRows, maxRowsPerPage) {
                 if (allFixedRows.isEmpty()) emptyList()
-                else allFixedRows.chunked(maxRowsPerPage).map { it.flatten() }
+                else allFixedRows.chunked(maxRowsPerPage)
             }
 
             if (pages.isEmpty()) return@BoxWithConstraints
@@ -4872,10 +4899,8 @@ fun QuickInputSection(
             val hasIndicator = pages.size > 1
 
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pages.lastIndex)
-            val currentRowCount = remember(allFixedRows, safeCurrentPage, maxRowsPerPage) {
-                val startIndex = safeCurrentPage * maxRowsPerPage
-                val endIndex = minOf(startIndex + maxRowsPerPage, allFixedRows.size)
-                maxOf(0, endIndex - startIndex)
+            val currentRowCount = remember(pages, safeCurrentPage) {
+                pages[safeCurrentPage].size
             }
 
             val targetHeight =
@@ -4884,14 +4909,10 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
-            // ★ 高度即時跟隨，唔再過 animateDpAsState
-            // 避免同 Chip 位置動畫爭一幀，造成「扽一下」
-            val panelHeight = targetHeight
-
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(panelHeight)
+                    .height(targetHeight)
                     .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SURFACE_CARD)
@@ -4899,7 +4920,7 @@ fun QuickInputSection(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.Top // 確保置頂，唔會亂浮動
+                    verticalAlignment = Alignment.Top
                 ) { page ->
                     Column(
                         Modifier
@@ -4912,14 +4933,13 @@ fun QuickInputSection(
                             )
                     ) {
                         AnimatedStretchingFlowRow(
-                            items = pages[page],
+                            rows = pages[page],
                             modifier = Modifier.fillMaxWidth(),
                             horizontalSpacing = 8.dp,
                             verticalSpacing = verticalGap
                         ) { item ->
                             val name = item.first
                             key(name) {
-                                // ★ 直接用 QuickInputChip，冇任何多餘嘅進場動畫
                                 QuickInputChip(
                                     name = name,
                                     iconUrl = noteIconMap[name] ?: "",
