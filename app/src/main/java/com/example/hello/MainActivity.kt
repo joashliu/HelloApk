@@ -4924,7 +4924,7 @@ fun QuickInputSection(
                             )
                     ) {
                         AnimatedStretchingFlowRow(
-                            items = pages[page],
+                            items = pages[page].flatten(),
                             modifier = Modifier.fillMaxWidth(),
                             horizontalSpacing = 8.dp,
                             verticalSpacing = verticalGap
