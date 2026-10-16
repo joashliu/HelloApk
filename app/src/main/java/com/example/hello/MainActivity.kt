@@ -2735,74 +2735,76 @@ fun LedgerContent(
     )
 
     val minFanRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
-    val handleFanStart = remember {
-        { r: Record, offset: Offset ->
-            activeFanRecord = r
-            fanMenuCenterState.value = offset
-            fanMenuTouchState.value = offset
-        }
-    }
-    val handleFanDrag = remember {
-        { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
-    }
-    val latestFilterMode by rememberUpdatedState(filterMode)
-    val latestOnCopy by rememberUpdatedState(onCopyClick)
-    val latestOnEdit by rememberUpdatedState(onEditClick)
-    val latestOnFilterByName by rememberUpdatedState(onFilterByName)
-    val latestOnDelete by rememberUpdatedState(onDeleteClick)
 
-    val handleFanEnd = remember {
-        {
-            val configuration = LocalConfiguration.current
-            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-            val radiusPx = with(density) { 105.dp.toPx() }
-            val halfBtnPx = with(density) { 24.dp.toPx() }
-            val edgeThreshold = radiusPx + halfBtnPx
+// ★ 喺 composable 頂層計好，唔好擺入 remember lambda
+val configuration = LocalConfiguration.current
+val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
+val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
 
-            val center = fanMenuCenterState.value
-            val leftSpace = center.x
-            val rightSpace = screenWidthPx - center.x
-            val rotation = when {
-                leftSpace < edgeThreshold -> {
-                    val factor = (1f - leftSpace / edgeThreshold).coerceIn(0f, 1f)
-                    factor * 80f
-                }
-                rightSpace < edgeThreshold -> {
-                    val factor = (1f - rightSpace / edgeThreshold).coerceIn(0f, 1f)
-                    -factor * 80f
-                }
-                else -> 0f
+val handleFanStart = remember {
+    { r: Record, offset: Offset ->
+        activeFanRecord = r
+        fanMenuCenterState.value = offset
+        fanMenuTouchState.value = offset
+    }
+}
+val handleFanDrag = remember {
+    { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
+}
+val latestFilterMode by rememberUpdatedState(filterMode)
+val latestOnCopy by rememberUpdatedState(onCopyClick)
+val latestOnEdit by rememberUpdatedState(onEditClick)
+val latestOnFilterByName by rememberUpdatedState(onFilterByName)
+val latestOnDelete by rememberUpdatedState(onDeleteClick)
+
+val handleFanEnd = remember {
+    {
+        val center = fanMenuCenterState.value
+        val leftSpace = center.x
+        val rightSpace = screenWidthPx - center.x
+        val rotation = when {
+            leftSpace < fanEdgeThreshold -> {
+                val factor = (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                factor * 80f
             }
-            val arcCenterAngle = -90f + rotation
+            rightSpace < fanEdgeThreshold -> {
+                val factor = (1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                -factor * 80f
+            }
+            else -> 0f
+        }
+        val arcCenterAngle = -90f + rotation
 
-            val hovered = getHoveredActionIndexWithCenter(
-                center = center,
-                touch = fanMenuTouchState.value,
-                minRadiusPx = minFanRadiusPx,
-                arcCenterAngle = arcCenterAngle
-            )
-            val targetRecord = activeFanRecord
-            activeFanRecord = null
+        val hovered = getHoveredActionIndexWithCenter(
+            center = center,
+            touch = fanMenuTouchState.value,
+            minRadiusPx = minFanRadiusPx,
+            arcCenterAngle = arcCenterAngle
+        )
+        val targetRecord = activeFanRecord
+        activeFanRecord = null
 
-            if (targetRecord != null && hovered != null) {
-                scope.launch {
-                    delay(120)
-                    when (hovered) {
-                        0 -> latestOnCopy(targetRecord)
-                        1 -> latestOnEdit(targetRecord)
-                        2 -> {
-                            if (!latestFilterMode) {
-                                preFilterIndex = listState.firstVisibleItemIndex
-                                preFilterOffset = listState.firstVisibleItemScrollOffset
-                            }
-                            latestOnFilterByName(targetRecord.note)
+        if (targetRecord != null && hovered != null) {
+            scope.launch {
+                delay(120)
+                when (hovered) {
+                    0 -> latestOnCopy(targetRecord)
+                    1 -> latestOnEdit(targetRecord)
+                    2 -> {
+                        if (!latestFilterMode) {
+                            preFilterIndex = listState.firstVisibleItemIndex
+                            preFilterOffset = listState.firstVisibleItemScrollOffset
                         }
-                        3 -> latestOnDelete(targetRecord)
+                        latestOnFilterByName(targetRecord.note)
                     }
+                    3 -> latestOnDelete(targetRecord)
                 }
             }
         }
     }
+}
 
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
@@ -5325,67 +5327,69 @@ fun CalendarContent(
     )
 
     val minFanRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
-    val latestOnCopy by rememberUpdatedState(onCopyClick)
-    val latestOnEdit by rememberUpdatedState(onEditClick)
-    val latestOnFilter by rememberUpdatedState(onFilterClick)
-    val latestOnDelete by rememberUpdatedState(onDeleteClick)
 
-    val handleFanStart = remember {
-        { r: Record, offset: Offset ->
-            activeFanRecord = r
-            fanMenuCenterState.value = offset
-            fanMenuTouchState.value = offset
+// ★ 喺 composable 頂層計好
+val configuration = LocalConfiguration.current
+val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
+val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
+
+val latestOnCopy by rememberUpdatedState(onCopyClick)
+val latestOnEdit by rememberUpdatedState(onEditClick)
+val latestOnFilter by rememberUpdatedState(onFilterClick)
+val latestOnDelete by rememberUpdatedState(onDeleteClick)
+
+val handleFanStart = remember {
+    { r: Record, offset: Offset ->
+        activeFanRecord = r
+        fanMenuCenterState.value = offset
+        fanMenuTouchState.value = offset
+    }
+}
+val handleFanDrag = remember {
+    { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
+}
+val handleFanEnd = remember {
+    {
+        val center = fanMenuCenterState.value
+        val leftSpace = center.x
+        val rightSpace = screenWidthPx - center.x
+        val rotation = when {
+            leftSpace < fanEdgeThreshold -> {
+                val factor = (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                factor * 80f
+            }
+            rightSpace < fanEdgeThreshold -> {
+                val factor = (1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f)
+                -factor * 80f
+            }
+            else -> 0f
+        }
+        val arcCenterAngle = -90f + rotation
+
+        val hovered = getHoveredActionIndexWithCenter(
+            center = center,
+            touch = fanMenuTouchState.value,
+            minRadiusPx = minFanRadiusPx,
+            arcCenterAngle = arcCenterAngle
+        )
+        val targetRecord = activeFanRecord
+        activeFanRecord = null
+
+        if (targetRecord != null && hovered != null) {
+            scope.launch {
+                delay(120)
+                when (hovered) {
+                    0 -> latestOnCopy(targetRecord)
+                    1 -> latestOnEdit(targetRecord)
+                    2 -> latestOnFilter(targetRecord)
+                    3 -> latestOnDelete(targetRecord)
+                }
+            }
         }
     }
-    val handleFanDrag = remember {
-        { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
-    }
-    val handleFanEnd = remember {
-        {
-            val configuration = LocalConfiguration.current
-            val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-            val radiusPx = with(density) { 105.dp.toPx() }
-            val halfBtnPx = with(density) { 24.dp.toPx() }
-            val edgeThreshold = radiusPx + halfBtnPx
-
-            val center = fanMenuCenterState.value
-            val leftSpace = center.x
-            val rightSpace = screenWidthPx - center.x
-            val rotation = when {
-                leftSpace < edgeThreshold -> {
-                    val factor = (1f - leftSpace / edgeThreshold).coerceIn(0f, 1f)
-                    factor * 80f
-                }
-                rightSpace < edgeThreshold -> {
-                    val factor = (1f - rightSpace / edgeThreshold).coerceIn(0f, 1f)
-                    -factor * 80f
-                }
-                else -> 0f
-            }
-            val arcCenterAngle = -90f + rotation
-
-            val hovered = getHoveredActionIndexWithCenter(
-                center = center,
-                touch = fanMenuTouchState.value,
-                minRadiusPx = minFanRadiusPx,
-                arcCenterAngle = arcCenterAngle
-            )
-            val targetRecord = activeFanRecord
-            activeFanRecord = null
-
-            if (targetRecord != null && hovered != null) {
-                scope.launch {
-                    delay(120)
-                    when (hovered) {
-                        0 -> latestOnCopy(targetRecord)
-                        1 -> latestOnEdit(targetRecord)
-                        2 -> latestOnFilter(targetRecord)
-                        3 -> latestOnDelete(targetRecord)
-                    }
-                }
-            }
-        }
-    }
+}
 
     val curCal = remember(currentMonthKey) {
         val parts = currentMonthKey.split("-")
