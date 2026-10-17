@@ -376,6 +376,7 @@ private val WEEKDAY_LABELS = arrayOf("週日", "週一", "週二", "週三", "�
 private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
+private val chipAppearedOnce = ConcurrentHashMap.newKeySet<String>()
 
 private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
@@ -3052,92 +3053,93 @@ fun LedgerContent(
                 }
             }
 
-            AnimatedContent(
-    targetState = filterMode,
-    transitionSpec = {
-        (expandVertically(tween(250, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) +
-            fadeIn(tween(150))) togetherWith
-        (shrinkVertically(tween(250, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) +
-            fadeOut(tween(120))) using SizeTransform(
-            clip = true, sizeAnimationSpec = { _, _ -> tween(250, easing = FastOutSlowInEasing) }
-        )
-    },
-    label = "bottomArea",
-    modifier = Modifier.zIndex(1f)
-) { isFilterMode ->
-    if (isFilterMode) {
-        Column(
-            Modifier
-                .padding(horizontal = 16.dp, vertical = 0.dp)
-                .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
-        ) {
-            Spacer(Modifier.height(4.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 72.dp),
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                userScrollEnabled = false
+                        // ★ 用兩個獨立 AnimatedVisibility 取代 AnimatedContent
+            //    避免 SizeTransform 每幀測量兩個狀態
+            Column(
+                modifier = Modifier
+                    .zIndex(1f)
+                    .fillMaxWidth()
             ) {
-                item(key = "__all__") {
-                    AnimatedFilterChip(
-                        modifier = Modifier.fillMaxWidth(),
-                        selected = filterCategory == null,
-                        label = "全部", fillWidth = true,
-                        onClick = { onFilterCategoryChange(null) }
-                    )
-                }
-                items(items = visibleCategories, key = { it }) { cat ->
-                    AnimatedFilterChip(
-                        modifier = Modifier.fillMaxWidth(),   // ★ 移除 .animateItem()
-                        selected = filterCategory == cat,
-                        label = cat, fillWidth = true,
-                        onClick = {
-                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                        }
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            if (availableMonths.isNotEmpty()) {
-                FlowRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !filterMode,
+                    enter = fadeIn(tween(200)) + expandVertically(tween(250, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(tween(150)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
                 ) {
-                    AnimatedFilterChip(
-                        selected = filterMonth == null, label = "全年",
-                        fillWidth = false,
-                        onClick = { onFilterMonthChange(null) }
-                    )
-                    availableMonths.forEach { m ->
-                        AnimatedFilterChip(
-                            selected = filterMonth == m,
-                            label = formatMonthLabel(m), fillWidth = false,
-                            onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
-                        )
+                    Column(Modifier.fillMaxWidth()) {
+                        if (topNotes.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            QuickInputSection(
+                                topNotes = topNotes, noteIconMap = noteIconMap,
+                                animatedQuickInputs = animatedQuickInputs,
+                                maxRowsPerPage = quickInputMaxRows,
+                                onClick = onQuickInputClick
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = filterMode,
+                    enter = fadeIn(tween(200)) + expandVertically(tween(250, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(tween(150)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
+                ) {
+                    Column(
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 0.dp)
+                    ) {
+                        Spacer(Modifier.height(4.dp))
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 72.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            userScrollEnabled = false
+                        ) {
+                            item(key = "__all__") {
+                                AnimatedFilterChip(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selected = filterCategory == null,
+                                    label = "全部", fillWidth = true,
+                                    onClick = { onFilterCategoryChange(null) }
+                                )
+                            }
+                            items(items = visibleCategories, key = { it }) { cat ->
+                                AnimatedFilterChip(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selected = filterCategory == cat,
+                                    label = cat, fillWidth = true,
+                                    onClick = {
+                                        onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                                    }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (availableMonths.isNotEmpty()) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                AnimatedFilterChip(
+                                    selected = filterMonth == null, label = "全年",
+                                    fillWidth = false,
+                                    onClick = { onFilterMonthChange(null) }
+                                )
+                                availableMonths.forEach { m ->
+                                    AnimatedFilterChip(
+                                        selected = filterMonth == m,
+                                        label = formatMonthLabel(m), fillWidth = false,
+                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
-            Spacer(Modifier.height(6.dp))
-        }
-    } else {
-        Column(Modifier.fillMaxWidth()) {
-            if (topNotes.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                QuickInputSection(
-                    topNotes = topNotes, noteIconMap = noteIconMap,
-                    animatedQuickInputs = animatedQuickInputs,
-                    maxRowsPerPage = quickInputMaxRows,
-                    onClick = onQuickInputClick
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-        }
-    }
-}
 
             Box(
                 Modifier
@@ -4862,12 +4864,17 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         }
     }
 
-    val appearAnim = remember { Animatable(0f) }
+    // ★ 只喺真正首次出現時播進場動畫；重建時直接以 1f 開始
+    val appearedBefore = remember { chipAppearedOnce.contains(name) }
+    val appearAnim = remember { Animatable(if (appearedBefore) 1f else 0f) }
     LaunchedEffect(Unit) {
-        appearAnim.animateTo(
-            targetValue = 1f,
-            animationSpec = spring(dampingRatio = 0.55f, stiffness = 550f)
-        )
+        if (!appearedBefore) {
+            chipAppearedOnce.add(name)
+            appearAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(dampingRatio = 0.55f, stiffness = 550f)
+            )
+        }
     }
 
     val bgColor = extracted ?: SURFACE_ELEVATED
