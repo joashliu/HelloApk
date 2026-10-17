@@ -1348,13 +1348,14 @@ class MainActivity : ComponentActivity() {
         createQuickAddChannel()
         askNotificationPermissionIfNeeded()
 
-        setContent {
+                setContent {
             val token = keyboardLaunchToken.value
             val prefillNote = keyboardPrefillNote.value
             val prefillAmount = keyboardPrefillAmount.value
             val notesInfo = topQuickNotesInfo.value
 
             LaunchedEffect(notesInfo) {
+                persistTopQuickNotes(notesInfo)   // ★ 新增呢行
                 showQuickAddNotification()
             }
 
@@ -1405,7 +1406,7 @@ class MainActivity : ComponentActivity() {
         if (!granted) notificationPermissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
     }
 
-    private fun buildLaunchIntent(prefillNote: String?, prefillAmount: Double? = null): Intent {
+        private fun buildLaunchIntent(prefillNote: String?, prefillAmount: Double? = null): Intent {
         return Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_KEYBOARD, true)
@@ -1414,6 +1415,22 @@ class MainActivity : ComponentActivity() {
                 putExtra(EXTRA_PREFILL_AMOUNT, prefillAmount)
             }
         }
+    }
+
+    // ★★★ 新增：將 topQuickNotesInfo 持久化，等磁貼服務可以讀取 ★★★
+    private fun persistTopQuickNotes(infos: List<QuickNoteInfo>) {
+        try {
+            val prefs = getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+            val arr = org.json.JSONArray()
+            infos.take(5).forEach { info ->
+                val obj = org.json.JSONObject()
+                obj.put("note", info.note)
+                obj.put("category", info.category)
+                obj.put("amount", info.amount)
+                arr.put(obj)
+            }
+            prefs.edit().putString("top_quick_notes", arr.toString()).apply()
+        } catch (_: Throwable) {}
     }
 
     private fun showQuickAddNotification() {
@@ -1462,7 +1479,6 @@ class MainActivity : ComponentActivity() {
             nm.notify(NOTIFICATION_ID, builder.build())
         } catch (_: Throwable) {}
     }
-}
 
 private val MAIN_NAV_ITEMS = listOf(
     NavItem("記帳", Icons.Default.Receipt),
