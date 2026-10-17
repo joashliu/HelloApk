@@ -3445,7 +3445,7 @@ fun SwipeableRecordItem(
     val maxLeft = -(leftTotal + edgePx)
     val maxRight = bwPx + edgePx
 
-    var targetOffset by remember { mutableFloatStateOf(0f) }
+        var targetOffset by remember { mutableFloatStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     val itemPosHolder = remember { OffsetHolder() }
@@ -3453,14 +3453,12 @@ fun SwipeableRecordItem(
 
     val offsetAnim = remember { Animatable(0f) }
 
-    LaunchedEffect(targetOffset, isDragging) {
-        if (!isDragging) {
-            offsetAnim.animateTo(targetOffset, SWIPE_SPRING)
-        }
-    }
+    // ✅ 合併成一個 effect
     LaunchedEffect(isDragging) {
         if (isDragging) {
-            offsetAnim.snapTo(targetOffset)
+            snapshotFlow { targetOffset }.collect { offsetAnim.snapTo(it) }
+        } else {
+            offsetAnim.animateTo(targetOffset, SWIPE_SPRING)
         }
     }
 
