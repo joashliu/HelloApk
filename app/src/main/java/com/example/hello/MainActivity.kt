@@ -3019,88 +3019,97 @@ fun LedgerContent(
                 }
             }
 
-            // ★ 用兩個獨立 AnimatedVisibility 取代 AnimatedContent
+                        // ★ 用單一 AnimatedContent + 短 SizeTransform 取代兩個 AnimatedVisibility
+            //    - 同一時間只有一組內容存在，避免同時測量 4 個狀態
+            //    - filter chips 用 Row + weight 取代 LazyVerticalGrid，測量開銷大減
             Column(
                 modifier = Modifier
                     .zIndex(1f)
                     .fillMaxWidth()
             ) {
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = !filterMode,
-                    enter = fadeIn(tween(200)) + expandVertically(tween(250, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(tween(150)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
-                ) {
-                    Column(Modifier.fillMaxWidth()) {
-                        if (topNotes.isNotEmpty()) {
+                AnimatedContent(
+                    targetState = filterMode,
+                    transitionSpec = {
+                        (fadeIn(tween(200, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(150, easing = FastOutSlowInEasing)))
+                            .using(SizeTransform(clip = false) { _, _ ->
+                                tween(120, easing = FastOutSlowInEasing)
+                            })
+                    },
+                    label = "filterContent"
+                ) { isFilter ->
+                    if (!isFilter) {
+                        Column(Modifier.fillMaxWidth()) {
+                            if (topNotes.isNotEmpty()) {
+                                Spacer(Modifier.height(4.dp))
+                                QuickInputSection(
+                                    topNotes = topNotes, noteIconMap = noteIconMap,
+                                    maxRowsPerPage = quickInputMaxRows,
+                                    onClick = onQuickInputClick
+                                )
+                            }
                             Spacer(Modifier.height(4.dp))
-                            QuickInputSection(
-                                topNotes = topNotes, noteIconMap = noteIconMap,
-                                maxRowsPerPage = quickInputMaxRows,
-                                onClick = onQuickInputClick
-                            )
                         }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = filterMode,
-                    enter = fadeIn(tween(200)) + expandVertically(tween(250, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(tween(150)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
-                ) {
-                    Column(
-                        Modifier
-                            .padding(horizontal = 16.dp, vertical = 0.dp)
-                    ) {
-                        Spacer(Modifier.height(4.dp))
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 72.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            userScrollEnabled = false
+                    } else {
+                        Column(
+                            Modifier
+                                .padding(horizontal = 16.dp, vertical = 0.dp)
                         ) {
-                            item(key = "__all__") {
-                                AnimatedFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部", fillWidth = true,
-                                    onClick = { onFilterCategoryChange(null) }
-                                )
+                            Spacer(Modifier.height(4.dp))
+
+                            // ★ Row + weight 取代 LazyVerticalGrid（固定每行 4 個等寬 chip）
+                            val allCategories: List<String?> = remember(visibleCategories) {
+                                listOf(null) + visibleCategories
                             }
-                            items(items = visibleCategories, key = { it }) { cat ->
-                                AnimatedFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat, fillWidth = true,
-                                    onClick = {
-                                        onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                            val rows = remember(allCategories) { allCategories.chunked(4) }
+                            rows.forEach { row ->
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    row.forEach { cat ->
+                                        AnimatedFilterChip(
+                                            modifier = Modifier.weight(1f),
+                                            selected = filterCategory == cat,
+                                            label = cat ?: "全部",
+                                            fillWidth = true,
+                                            onClick = {
+                                                onFilterCategoryChange(
+                                                    if (filterCategory == cat) null else cat
+                                                )
+                                            }
+                                        )
                                     }
-                                )
+                                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                                Spacer(Modifier.height(4.dp))
                             }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        if (availableMonths.isNotEmpty()) {
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                AnimatedFilterChip(
-                                    selected = filterMonth == null, label = "全年",
-                                    fillWidth = false,
-                                    onClick = { onFilterMonthChange(null) }
-                                )
-                                availableMonths.forEach { m ->
+
+                            Spacer(Modifier.height(4.dp))
+                            if (availableMonths.isNotEmpty()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
                                     AnimatedFilterChip(
-                                        selected = filterMonth == m,
-                                        label = formatMonthLabel(m), fillWidth = false,
-                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                        selected = filterMonth == null, label = "全年",
+                                        fillWidth = false,
+                                        onClick = { onFilterMonthChange(null) }
                                     )
+                                    availableMonths.forEach { m ->
+                                        AnimatedFilterChip(
+                                            selected = filterMonth == m,
+                                            label = formatMonthLabel(m), fillWidth = false,
+                                            onClick = {
+                                                onFilterMonthChange(if (filterMonth == m) null else m)
+                                            }
+                                        )
+                                    }
                                 }
                             }
+                            Spacer(Modifier.height(6.dp))
                         }
-                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
@@ -4491,20 +4500,13 @@ fun TopStats(
             contentAlignment = Alignment.Center) {
             Column(Modifier.padding(horizontal = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                AnimatedContent(
-                    targetState = isFilterMode,
-                    transitionSpec = {
-                        if (targetState) {
-                            (slideInVertically(tween(350, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(250))) togetherWith
-                            (slideOutVertically(tween(350, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(250)))
-                        } else {
-                            (slideInVertically(tween(350, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(250))) togetherWith
-                            (slideOutVertically(tween(350, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
-                        }.using(SizeTransform(clip = false))
-                    },
-                    contentAlignment = Alignment.Center,
-                    label = "labelAnim"
-                ) { isFilter ->
+                // ✅ Crossfade：冇 SizeTransform，只做 alpha 動畫，零尺寸測量
+Crossfade(
+    targetState = isFilterMode,
+    animationSpec = tween(200, easing = FastOutSlowInEasing),
+    contentAlignment = Alignment.Center,
+    label = "labelCrossfade"
+) { isFilter ->
                     if (!isFilter) {
                         Row(verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.height(22.dp)) {
