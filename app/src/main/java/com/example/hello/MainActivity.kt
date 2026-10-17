@@ -4720,10 +4720,15 @@ fun AnimatedStretchingFlowRow(
     val density = LocalDensity.current
     val hSpacingPx = remember(density, horizontalSpacing) { with(density) { horizontalSpacing.roundToPx() } }
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
+    
+    // ★ 預先計算 -20.dp 的像素偏移量，留畀圖層平移使用
+    val slideOffsetPx = remember(density) { with(density) { (-20).dp.toPx() } }
 
     val scope = rememberCoroutineScope()
-
     val flatItems = remember(rows) { rows.flatten() }
+
+    // ★ 新增一個 Map，專門用來記住今次組合中「新出現」chip 嘅動畫狀態
+    val itemAnimatables = remember { mutableMapOf<String, Animatable<Float, AnimationVector1D>>() }
 
     androidx.compose.ui.layout.Layout(
         content = {
@@ -4799,21 +4804,31 @@ fun AnimatedStretchingFlowRow(
                 val seenBefore = chipAppearedOnce.contains(p.name)
 
                 if (!seenBefore) {
-                    // ★ 全新 chip：從上方 20px 滑入
+                    // ★ 全新 chip：加入紀錄，並創建一組由 0f 走到 1f 嘅動畫
                     chipAppearedOnce.add(p.name)
-                    val startOffset = IntOffset(p.target.x, p.target.y - 20)
-                    val anim = Animatable(startOffset, IntOffset.VectorConverter)
+                    val anim = Animatable(0f)
+                    itemAnimatables[p.name] = anim
                     scope.launch {
                         try {
                             anim.animateTo(
-                                targetValue = p.target,
+                                targetValue = 1f,
                                 animationSpec = spring(dampingRatio = 0.75f, stiffness = 400f)
                             )
                         } catch (_: Exception) {}
                     }
-                    p.placeable.place(startOffset)
+                }
+
+                val anim = itemAnimatables[p.name]
+                if (anim != null) {
+                    // ★ 新 chip (包括正在執行動畫)：利用 placeWithLayer 喺 GPU 層面做平滑位移同透明度
+                    // 咁樣做只要數值改變就會自動重繪，唔需要重新觸發 Layout 計算，確保流暢
+                    p.placeable.placeWithLayer(p.target.x, p.target.y) {
+                        val progress = anim.value
+                        translationY = (1f - progress) * slideOffsetPx
+                        alpha = progress.coerceIn(0f, 1f)
+                    }
                 } else {
-                    // ★ 已出現過嘅 chip：直接 place，零動畫
+                    // ★ 已出現過嘅舊 chip：直接靜態排版，完全零動畫干預，穩如泰山
                     p.placeable.place(p.target)
                 }
             }
