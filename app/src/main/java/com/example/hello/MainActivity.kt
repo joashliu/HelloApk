@@ -4726,8 +4726,14 @@ fun AnimatedStretchingFlowRow(
         mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>()
     }
 
-    // ★ 記錄上一次嘅行數，用嚟判斷係咪「開新行 / 收行」
-    val prevRowsSizeRef = remember { intArrayOf(rows.size) }
+    // ★ 喺 composition 階段計算行數變化，只喺 rows.size 變化時重新計算
+    //   用 intArrayOf 儲存（唔係 state，唔會觸發 recomposition）
+    val prevRowsSize = remember { intArrayOf(rows.size) }
+    val rowsSizeChanged = remember(rows.size) {
+        val changed = prevRowsSize[0] != rows.size
+        prevRowsSize[0] = rows.size
+        changed
+    }
 
     val flatItems = remember(rows) { rows.flatten() }
 
@@ -4803,10 +4809,6 @@ fun AnimatedStretchingFlowRow(
         val currentNames = placements.map { it.name }.toHashSet()
         offsetAnimators.keys.retainAll(currentNames)
 
-        // ★ 判斷行數有冇變化（開新行 / 收行）
-        val rowsSizeChanged = prevRowsSizeRef[0] != rows.size
-        prevRowsSizeRef[0] = rows.size
-
         layout(safeMaxWidth, totalHeight) {
             for (p in placements) {
                 val anim = offsetAnimators[p.name]
@@ -4825,15 +4827,14 @@ fun AnimatedStretchingFlowRow(
                     }
                     p.placeable.place(startOffset)
                 } else {
-                    if (anim.targetValue != p.target) {
-                        if (rowsSizeChanged) {
-                            // ★ 行數變化：直接替換 animator（無移動動畫）
-                            //    避免「開新行 / 收行」時已有 chips 向下 / 向上移動
-                            val replacement = Animatable(p.target, IntOffset.VectorConverter)
-                            offsetAnimators[p.name] = replacement
-                            p.placeable.place(p.target)
-                        } else {
-                            // 行數不變（同一 page 內重排）：平滑移動
+                    if (rowsSizeChanged) {
+                        // ★ 行數變化：已有 chip 直接 snap 到目標位置，完全無動畫
+                        //    替換 animator 為新嘅 Animatable(target)，確保後續 layout 唔會再觸發 animateTo
+                        offsetAnimators[p.name] = Animatable(p.target, IntOffset.VectorConverter)
+                        p.placeable.place(p.target)
+                    } else {
+                        // 行數不變（同一 page 內重排，例如寬度變化）：保留平滑移動
+                        if (anim.targetValue != p.target) {
                             scope.launch {
                                 try {
                                     anim.animateTo(
@@ -4842,9 +4843,7 @@ fun AnimatedStretchingFlowRow(
                                     )
                                 } catch (_: Exception) {}
                             }
-                            p.placeable.place(anim.value)
                         }
-                    } else {
                         p.placeable.place(anim.value)
                     }
                 }
