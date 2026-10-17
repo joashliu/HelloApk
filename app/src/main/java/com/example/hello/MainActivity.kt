@@ -4184,6 +4184,25 @@ fun LedgerKeyboardPanel(
                                 unfocusedIndicatorColor = Color.Transparent,
                                 disabledIndicatorColor = Color.Transparent
                             ),
+                            // 加咗呢段 trailingIcon 顯示交叉掣
+                            trailingIcon = {
+                                if (state.noteText.isNotEmpty()) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "清除",
+                                        tint = TEXT_SECONDARY,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                tfValue = TextFieldValue("")
+                                                onStateChange(state.copy(noteText = ""))
+                                            }
+                                    )
+                                }
+                            },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { onConfirm() }),
                             modifier = Modifier.fillMaxSize().focusRequester(focusReq)
