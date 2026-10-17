@@ -4948,6 +4948,9 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
+// 加喺 QuickInputSection 上面（top-level private）
+private data class QuickChipSpec(val name: String, val weight: Float)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
@@ -4963,11 +4966,11 @@ fun QuickInputSection(
     val items = remember(topNoteNames) { topNoteNames.take(42).map { it to 0 } }
 
     val density = LocalDensity.current
-    val gapPx = remember(density) { with(density) { 8.dp.toPx() } }
+    val gapDp = 8.dp
+    val gapPx = remember(density) { with(density) { gapDp.toPx() } }
 
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
-
     val noteTextWidthCache = remember { mutableMapOf<String, Float>() }
 
     val chipHeight = 36.dp
@@ -4983,39 +4986,56 @@ fun QuickInputSection(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
-            val allFixedRows: List<List<Pair<String, Int>>> = remember(items, contentWidthPx, gapPx) {
-                val rows = mutableListOf<List<Pair<String, Int>>>()
-                var currentRow = mutableListOf<Pair<String, Int>>()
-                var currentRowWidth = 0f
+            // ★ 1) 一次過計好每一行 chip 嘅目標闊度（weight）
+            //     呢個列表同 maxRowsPerPage 完全無關，所以永遠穩定
+            val allFixedRows: List<List<QuickChipSpec>> =
+                remember(items, contentWidthPx, gapPx) {
+                    val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
+                    var currentRow = mutableListOf<Pair<String, Float>>()
+                    var currentRowWidth = 0f
 
-                for (item in items) {
-                    val name = item.first
-                    val textW = noteTextWidthCache.getOrPut(name) {
-                        textMeasurer.measure(name, textStyle).size.width.toFloat()
+                    for (item in items) {
+                        val name = item.first
+                        val textW = noteTextWidthCache.getOrPut(name) {
+                            textMeasurer.measure(name, textStyle).size.width.toFloat()
+                        }
+                        val itemPx = with(density) { 44.dp.toPx() } + textW + 12f
+
+                        val needed =
+                            if (currentRow.isEmpty()) itemPx
+                            else currentRowWidth + gapPx + itemPx
+
+                        if (currentRow.isNotEmpty() && needed > contentWidthPx) {
+                            intrinsicRows.add(currentRow)
+                            currentRow = mutableListOf()
+                            currentRowWidth = 0f
+                        }
+                        currentRow.add(name to itemPx)
+                        currentRowWidth =
+                            if (currentRow.size == 1) itemPx
+                            else currentRowWidth + gapPx + itemPx
                     }
-                    val itemPx = with(density) { 44.dp.toPx() } + textW + 12f
+                    if (currentRow.isNotEmpty()) intrinsicRows.add(currentRow)
 
-                    val needed = if (currentRow.isEmpty()) itemPx
-                                 else currentRowWidth + gapPx + itemPx
-
-                    if (currentRow.isNotEmpty() && needed > contentWidthPx) {
-                        rows.add(currentRow)
-                        currentRow = mutableListOf(item)
-                        currentRowWidth = itemPx
-                    } else {
-                        currentRow.add(item)
-                        currentRowWidth = needed
+                    // 將每行剩餘空間平均攤做 weight；weight 總和 = 可用闊度 - spacing
+                    intrinsicRows.map { row ->
+                        val n = row.size
+                        val spacingTotal = (n - 1).coerceAtLeast(0) * gapPx
+                        val intrinsicSum = row.fold(0f) { acc, p -> acc + p.second }
+                        val extra = contentWidthPx - intrinsicSum - spacingTotal
+                        if (extra <= 0f) {
+                            row.map { (name, w) -> QuickChipSpec(name, w) }
+                        } else {
+                            val perItem = extra / n
+                            row.map { (name, w) -> QuickChipSpec(name, w + perItem) }
+                        }
                     }
                 }
-                if (currentRow.isNotEmpty()) rows.add(currentRow)
-                rows
-            }
 
-            val pages: List<List<List<Pair<String, Int>>>> = remember(allFixedRows, maxRowsPerPage) {
+            val pages = remember(allFixedRows, maxRowsPerPage) {
                 if (allFixedRows.isEmpty()) emptyList()
                 else allFixedRows.chunked(maxRowsPerPage)
             }
-
             if (pages.isEmpty()) return@BoxWithConstraints
 
             val pagerState = rememberPagerState(pageCount = { pages.size })
@@ -5028,7 +5048,6 @@ fun QuickInputSection(
             }
 
             val hasIndicator = pages.size > 1
-
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pages.lastIndex)
             val currentRowCount = remember(pages, safeCurrentPage) {
                 pages[safeCurrentPage].size
@@ -5040,15 +5059,10 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
-            // ★ 關鍵：panel 高度用 animateDpAsState 平滑過渡
-            //    spring 規格同 AnimatedStretchingFlowRow 內 chips 位置動畫一致，
-            //    兩者同步收縮，唔會一卡一卡
+            // ★ critical damping，避免高度 overshoot 造成視覺抖動
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeight,
-                animationSpec = spring(
-                    dampingRatio = 0.9f,
-                    stiffness = 400f
-                ),
+                animationSpec = spring(dampingRatio = 1f, stiffness = 400f),
                 label = "quickPanelHeight"
             )
 
@@ -5072,23 +5086,36 @@ fun QuickInputSection(
                                 start = 14.dp,
                                 end = 14.dp,
                                 top = panelVPadding,
-                                bottom = if (hasIndicator) panelVPadding + indicatorSpace else panelVPadding
-                            )
+                                bottom = if (hasIndicator)
+                                    panelVPadding + indicatorSpace
+                                else panelVPadding
+                            ),
+                        verticalArrangement = Arrangement.spacedBy(verticalGap)
                     ) {
-                        AnimatedStretchingFlowRow(
-                            rows = pages[page],
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalSpacing = 8.dp,
-                            verticalSpacing = verticalGap
-                        ) { item ->
-                            val name = item.first
-                            key(name) {
-                                QuickInputChip(
-                                    name = name,
-                                    iconUrl = noteIconMap[name] ?: "",
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onClick = { onClick(name) }
-                                )
+                        // ★ 每一行就係一個 Row，chip 用 weight 定位，唔會再 re-measure 到第二個位置
+                        pages[page].forEach { row ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(chipHeight),
+                                horizontalArrangement = Arrangement.spacedBy(gapDp)
+                            ) {
+                                row.forEach { chip ->
+                                    key(chip.name) {
+                                        Box(
+                                            Modifier
+                                                .weight(chip.weight)
+                                                .fillMaxHeight()
+                                        ) {
+                                            QuickInputChip(
+                                                name = chip.name,
+                                                iconUrl = noteIconMap[chip.name] ?: "",
+                                                modifier = Modifier.fillMaxSize(),
+                                                onClick = { onClick(chip.name) }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
