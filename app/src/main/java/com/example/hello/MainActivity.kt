@@ -1317,7 +1317,7 @@ fun FanMenuOverlay(
 }
 
 // =========================================================
-//  ★ MainActivity（通知防抖版本）
+//  ★ MainActivity（通知防抖 + 磁貼持久化版本）
 // =========================================================
 class MainActivity : ComponentActivity() {
 
@@ -1348,14 +1348,14 @@ class MainActivity : ComponentActivity() {
         createQuickAddChannel()
         askNotificationPermissionIfNeeded()
 
-                setContent {
+        setContent {
             val token = keyboardLaunchToken.value
             val prefillNote = keyboardPrefillNote.value
             val prefillAmount = keyboardPrefillAmount.value
             val notesInfo = topQuickNotesInfo.value
 
             LaunchedEffect(notesInfo) {
-                persistTopQuickNotes(notesInfo)   // ★ 新增呢行
+                persistTopQuickNotes(notesInfo)
                 showQuickAddNotification()
             }
 
@@ -1406,7 +1406,7 @@ class MainActivity : ComponentActivity() {
         if (!granted) notificationPermissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
     }
 
-        private fun buildLaunchIntent(prefillNote: String?, prefillAmount: Double? = null): Intent {
+    private fun buildLaunchIntent(prefillNote: String?, prefillAmount: Double? = null): Intent {
         return Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_KEYBOARD, true)
@@ -1417,7 +1417,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ★★★ 新增：將 topQuickNotesInfo 持久化，等磁貼服務可以讀取 ★★★
+    // ★ 新增：將 topQuickNotesInfo 持久化，等磁貼服務可以讀取
     private fun persistTopQuickNotes(infos: List<QuickNoteInfo>) {
         try {
             val prefs = getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
@@ -1479,6 +1479,7 @@ class MainActivity : ComponentActivity() {
             nm.notify(NOTIFICATION_ID, builder.build())
         } catch (_: Throwable) {}
     }
+}
 
 private val MAIN_NAV_ITEMS = listOf(
     NavItem("記帳", Icons.Default.Receipt),
@@ -3440,12 +3441,6 @@ fun TrianglePointer(
 
 private class OffsetHolder(var value: Offset = Offset.Zero)
 
-// =========================================================
-//  ★ SwipeableRecordItem（滾動性能優化版）
-//  - 單一 Animatable 取代條件式 animateFloatAsState
-//  - onGloballyPositioned 節流 200ms
-//  - 條件式 graphicsLayer（靜態 item 唔建離屏圖層）
-// =========================================================
 @Composable
 fun SwipeableRecordItem(
     modifier: Modifier = Modifier,
@@ -3478,10 +3473,8 @@ fun SwipeableRecordItem(
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     val itemPosHolder = remember { OffsetHolder() }
-    // ★ 節流：唔用 state，用 mutableLong 直接寫
     val lastPosUpdateMs = remember { longArrayOf(0L) }
 
-    // ★ 用單一 Animatable，唔再條件分支
     val offsetAnim = remember { Animatable(0f) }
 
     LaunchedEffect(targetOffset, isDragging) {
@@ -3497,7 +3490,6 @@ fun SwipeableRecordItem(
 
     val offsetX = if (isDragging) targetOffset else offsetAnim.value
 
-    // ★ 只有 fan menu 活躍或 item 有視覺變化時才建圖層
     val needsLayer = isFanMenuActive || isActiveItem || isOtherItem
 
     val itemAlpha by animateFloatAsState(
@@ -3542,7 +3534,6 @@ fun SwipeableRecordItem(
             .wrapContentHeight()
             .zIndex(if (isActiveItem) 10f else 0f)
             .then(
-                // ★ 條件式 graphicsLayer：靜態 item 唔建立離屏圖層
                 if (needsLayer) {
                     Modifier.graphicsLayer {
                         scaleX = itemScale
@@ -3553,7 +3544,6 @@ fun SwipeableRecordItem(
             )
             .background(backgroundColor)
             .onGloballyPositioned { coords ->
-                // ★ 節流 200ms，避免每 frame 都做 boundsInRoot
                 val now = System.currentTimeMillis()
                 if (now - lastPosUpdateMs[0] < 200L) return@onGloballyPositioned
                 lastPosUpdateMs[0] = now
