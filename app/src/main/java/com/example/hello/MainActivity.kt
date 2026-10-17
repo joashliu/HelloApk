@@ -3019,7 +3019,7 @@ fun LedgerContent(
                 }
             }
 
-                        // ★ 用單一 AnimatedContent + 短 SizeTransform 取代兩個 AnimatedVisibility
+            // ★ 單一 AnimatedContent + 短 SizeTransform 取代兩個 AnimatedVisibility
             //    - 同一時間只有一組內容存在，避免同時測量 4 個狀態
             //    - filter chips 用 Row + weight 取代 LazyVerticalGrid，測量開銷大減
             Column(
@@ -4500,30 +4500,32 @@ fun TopStats(
             contentAlignment = Alignment.Center) {
             Column(Modifier.padding(horizontal = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                // ✅ Crossfade：冇 SizeTransform，只做 alpha 動畫，零尺寸測量
-Crossfade(
-    targetState = isFilterMode,
-    animationSpec = tween(200, easing = FastOutSlowInEasing),
-    contentAlignment = Alignment.Center,
-    label = "labelCrossfade"
-) { isFilter ->
-                    if (!isFilter) {
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.height(22.dp)) {
-                            Icon(Icons.Default.AccountBalanceWallet, null, tint = targetBalColor,
-                                modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
-                                fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
-                        }
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.height(22.dp)) {
-                            Icon(Icons.Default.FilterList, null, tint = BRAND_PRIMARY,
-                                modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
-                                fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                // ✅ Crossfade 冇 contentAlignment，用外層 Box 置中
+                //    只做 alpha 動畫，零尺寸測量
+                Box(contentAlignment = Alignment.Center) {
+                    Crossfade(
+                        targetState = isFilterMode,
+                        animationSpec = tween(200, easing = FastOutSlowInEasing),
+                        label = "labelCrossfade"
+                    ) { isFilter ->
+                        if (!isFilter) {
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.height(22.dp)) {
+                                Icon(Icons.Default.AccountBalanceWallet, null, tint = targetBalColor,
+                                    modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
+                                    fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                            }
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.height(22.dp)) {
+                                Icon(Icons.Default.FilterList, null, tint = BRAND_PRIMARY,
+                                    modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
+                                    fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                            }
                         }
                     }
                 }
