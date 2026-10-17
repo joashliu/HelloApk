@@ -4709,6 +4709,16 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
+// ★ 1. 新增一個狀態類別同全域快取，用來追蹤每一粒 chip 獨立嘅 X、Y、闊度同埋進場進度
+// 呢個 Cache 確保就算 Pager 點樣重組，晶片嘅動畫座標都絕對唔會流失或重置
+private class ChipAnimState(initialX: Int, initialY: Int, initialWidth: Int, isNew: Boolean) {
+    val x = Animatable(initialX.toFloat())
+    val y = Animatable(initialY.toFloat())
+    val width = Animatable(initialWidth.toFloat())
+    val enterProgress = Animatable(if (isNew) 0f else 1f)
+}
+private val globalChipAnimStates = ConcurrentHashMap<String, ChipAnimState>()
+
 @Composable
 fun AnimatedStretchingFlowRow(
     rows: List<List<Pair<String, Int>>>,
@@ -4720,15 +4730,10 @@ fun AnimatedStretchingFlowRow(
     val density = LocalDensity.current
     val hSpacingPx = remember(density, horizontalSpacing) { with(density) { horizontalSpacing.roundToPx() } }
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
-    
-    // ★ 預先計算 -20.dp 的像素偏移量，留畀圖層平移使用
     val slideOffsetPx = remember(density) { with(density) { (-20).dp.toPx() } }
 
     val scope = rememberCoroutineScope()
     val flatItems = remember(rows) { rows.flatten() }
-
-    // ★ 新增一個 Map，專門用來記住今次組合中「新出現」chip 嘅動畫狀態
-    val itemAnimatables = remember { mutableMapOf<String, Animatable<Float, AnimationVector1D>>() }
 
     androidx.compose.ui.layout.Layout(
         content = {
@@ -4751,10 +4756,17 @@ fun AnimatedStretchingFlowRow(
             mi += row.size
         }
 
-        class Placement(val placeable: Placeable, val target: IntOffset, val name: String)
-        val placements = ArrayList<Placement>(measurables.size)
-        var y = 0
+        // 1. 預先計算每一粒 chip 嘅最終目標位置同闊度（不進行實際測量）
+        class ItemTarget(
+            val measurable: androidx.compose.ui.layout.Measurable,
+            val name: String,
+            val targetX: Int,
+            val targetY: Int,
+            val targetWidth: Int
+        )
+        val targets = ArrayList<ItemTarget>(measurables.size)
 
+        var y = 0
         for (ri in rows.indices) {
             val row = rows[ri]
             if (row.isEmpty()) continue
@@ -4776,60 +4788,93 @@ fun AnimatedStretchingFlowRow(
             var rowMaxHeight = 0
 
             for (i in rowMeasurables.indices) {
+                val h = rowMeasurables[i].maxIntrinsicHeight(widths[i])
+                if (h > rowMaxHeight) rowMaxHeight = h
+            }
+            if (rowMaxHeight == 0) rowMaxHeight = with(density) { 36.dp.roundToPx() }
+
+            for (i in rowMeasurables.indices) {
                 val extra = if (extraSpace > 0) {
                     extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
                 } else {
                     val diff = -extraSpace
-                    val subtract = (diff.toFloat() / row.size).roundToInt()
-                    -subtract
+                    -((diff.toFloat() / row.size).roundToInt())
                 }
                 val targetWidth = maxOf(0, widths[i] + extra)
 
-                val placeable = rowMeasurables[i].measure(
-                    constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
+                targets.add(
+                    ItemTarget(
+                        measurable = rowMeasurables[i],
+                        name = row[i].first,
+                        targetX = x,
+                        targetY = y,
+                        targetWidth = targetWidth
+                    )
                 )
-
-                placements.add(Placement(placeable, IntOffset(x, y), row[i].first))
-
                 x += targetWidth + hSpacingPx
-                if (placeable.height > rowMaxHeight) rowMaxHeight = placeable.height
             }
             y += rowMaxHeight + vSpacingPx
         }
 
         val totalHeight = maxOf(0, y - vSpacingPx)
 
+        // 2. 結合「全域動畫數值」進行排版測量
+        class Placement(
+            val placeable: Placeable,
+            val animState: ChipAnimState
+        )
+        val placementsToDraw = ArrayList<Placement>(targets.size)
+
+        for (target in targets) {
+            val isNewGlobally = !chipAppearedOnce.contains(target.name)
+            if (isNewGlobally) chipAppearedOnce.add(target.name)
+
+            // 從全域 Cache 取得或初始化動畫狀態 (頁面重組時不會重置)
+            val animState = globalChipAnimStates.getOrPut(target.name) {
+                ChipAnimState(
+                    initialX = target.targetX,
+                    initialY = target.targetY,
+                    initialWidth = target.targetWidth,
+                    isNew = isNewGlobally
+                )
+            }
+
+            // ★ 觸發動畫：如果目標位置同當前唔同，就平滑過渡過去，舊 chips 絕對唔會瞬間「扽」
+            if (animState.width.targetValue != target.targetWidth.toFloat()) {
+                scope.launch { animState.width.animateTo(target.targetWidth.toFloat(), spring(dampingRatio = 0.85f, stiffness = 300f)) }
+            }
+            if (animState.x.targetValue != target.targetX.toFloat()) {
+                scope.launch { animState.x.animateTo(target.targetX.toFloat(), spring(dampingRatio = 0.85f, stiffness = 300f)) }
+            }
+            if (animState.y.targetValue != target.targetY.toFloat()) {
+                scope.launch { animState.y.animateTo(target.targetY.toFloat(), spring(dampingRatio = 0.85f, stiffness = 300f)) }
+            }
+            if (animState.enterProgress.targetValue < 1f) {
+                scope.launch { animState.enterProgress.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 350f)) }
+            }
+
+            // 實時讀取「動畫緊」嘅闊度來測量
+            val currentWidth = animState.width.value.roundToInt()
+            val placeable = target.measurable.measure(
+                constraints.copy(minWidth = currentWidth, maxWidth = currentWidth)
+            )
+
+            placementsToDraw.add(Placement(placeable, animState))
+        }
+
+        // 3. 繪製
         layout(safeMaxWidth, totalHeight) {
-            for (p in placements) {
-                val seenBefore = chipAppearedOnce.contains(p.name)
+            for (p in placementsToDraw) {
+                // 讀取當前動畫幀的 X 同 Y
+                val currentX = p.animState.x.value.roundToInt()
+                val currentY = p.animState.y.value.roundToInt()
+                val progress = p.animState.enterProgress.value
 
-                if (!seenBefore) {
-                    // ★ 全新 chip：加入紀錄，並創建一組由 0f 走到 1f 嘅動畫
-                    chipAppearedOnce.add(p.name)
-                    val anim = Animatable(0f)
-                    itemAnimatables[p.name] = anim
-                    scope.launch {
-                        try {
-                            anim.animateTo(
-                                targetValue = 1f,
-                                animationSpec = spring(dampingRatio = 0.75f, stiffness = 400f)
-                            )
-                        } catch (_: Exception) {}
-                    }
-                }
-
-                val anim = itemAnimatables[p.name]
-                if (anim != null) {
-                    // ★ 新 chip (包括正在執行動畫)：利用 placeWithLayer 喺 GPU 層面做平滑位移同透明度
-                    // 咁樣做只要數值改變就會自動重繪，唔需要重新觸發 Layout 計算，確保流暢
-                    p.placeable.placeWithLayer(p.target.x, p.target.y) {
-                        val progress = anim.value
-                        translationY = (1f - progress) * slideOffsetPx
-                        alpha = progress.coerceIn(0f, 1f)
-                    }
-                } else {
-                    // ★ 已出現過嘅舊 chip：直接靜態排版，完全零動畫干預，穩如泰山
-                    p.placeable.place(p.target)
+                // 利用 placeWithLayer 喺 GPU 層面做平滑位移同透明度
+                // 只有全新進場嘅 chip 會有 progress < 1f 嘅滑入效果
+                p.placeable.placeWithLayer(currentX, currentY) {
+                    translationY = (1f - progress) * slideOffsetPx
+                    alpha = progress.coerceIn(0f, 1f)
                 }
             }
         }
