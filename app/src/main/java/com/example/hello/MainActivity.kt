@@ -5000,10 +5000,22 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
+            // ★ 關鍵：panel 高度用 animateDpAsState 平滑過渡
+            //    spring 規格同 AnimatedStretchingFlowRow 內 chips 位置動畫一致，
+            //    兩者同步收縮，唔會一卡一卡
+            val animatedHeight by animateDpAsState(
+                targetValue = targetHeight,
+                animationSpec = spring(
+                    dampingRatio = 0.9f,
+                    stiffness = 400f
+                ),
+                label = "quickPanelHeight"
+            )
+
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(targetHeight)
+                    .height(animatedHeight)
                     .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SURFACE_CARD)
