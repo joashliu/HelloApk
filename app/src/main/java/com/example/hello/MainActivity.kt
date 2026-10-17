@@ -3087,10 +3087,13 @@ fun LedgerContent(
 
                             Spacer(Modifier.height(4.dp))
                             if (availableMonths.isNotEmpty()) {
-                                FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
+                                // 將 FlowRow 換成可以橫向滑動嘅 Row
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     AnimatedFilterChip(
                                         selected = filterMonth == null, label = "全年",
@@ -4356,7 +4359,6 @@ fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnimatedFilterChip(
     selected: Boolean, label: String, onClick: () -> Unit,
@@ -4364,31 +4366,80 @@ fun AnimatedFilterChip(
 ) {
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.9f else 1f,
-        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "cs")
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "cs"
+    )
 
-    FilterChip(
-        selected = selected, onClick = onClick,
-        label = {
-            Box(
-                modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier,
-                contentAlignment = Alignment.Center
-            ) {
-                Text(label, textAlign = TextAlign.Center, fontSize = 13.sp, maxLines = 1,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-            }
-        },
-        interactionSource = src,
+    val bgColor = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED
+    val textColor = if (selected) Color.White else Color.Black
+    val fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .height(34.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale },
         shape = RoundedCornerShape(12.dp),
-        border = null,
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BRAND_PRIMARY,
-            selectedLabelColor = Color.White,
-            containerColor = SURFACE_ELEVATED,
-            labelColor = Color.Black
-        ),
-        modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale })
+        color = bgColor,
+        interactionSource = src
+    ) {
+        Box(
+            modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 14.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label, 
+                textAlign = TextAlign.Center, 
+                fontSize = 13.sp, 
+                maxLines = 1,
+                color = textColor,
+                fontWeight = fontWeight,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+        }
+    }
+}
+
+@Composable
+fun CalendarFilterChip(
+    selected: Boolean, label: String, onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "cs"
+    )
+
+    val bgColor = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED
+    val textColor = if (selected) Color.White else Color.Black
+    val fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .height(34.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale },
+        shape = RoundedCornerShape(12.dp),
+        color = bgColor,
+        interactionSource = src
+    ) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+            Text(
+                text = label, 
+                textAlign = TextAlign.Center, 
+                fontSize = 13.sp, 
+                maxLines = 1,
+                color = textColor,
+                fontWeight = fontWeight,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
+        }
+    }
 }
 
 @Composable
