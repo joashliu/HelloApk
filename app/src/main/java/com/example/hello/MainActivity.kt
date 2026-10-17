@@ -2725,14 +2725,24 @@ fun LedgerContent(
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
     val scrollAccumPx = remember { mutableFloatStateOf(0f) }
 
+    // ★ 方案 1：50ms 節流，避免每幀寫 state
     val collapseScrollConnection = remember(collapseDistancePx) {
         object : NestedScrollConnection {
+            private var pendingDelta = 0f
+            private var lastWriteMs = 0L
+
             override fun onPreScroll(
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                val next = (scrollAccumPx.value - available.y)
+                pendingDelta += available.y
+                val now = System.currentTimeMillis()
+                if (now - lastWriteMs < 50L) return Offset.Zero
+                lastWriteMs = now
+
+                val next = (scrollAccumPx.value - pendingDelta)
                     .coerceIn(0f, collapseDistancePx)
+                pendingDelta = 0f
                 if (next != scrollAccumPx.value) scrollAccumPx.value = next
                 return Offset.Zero
             }
@@ -2905,6 +2915,7 @@ fun LedgerContent(
     val isFanActive = activeFanRecord != null
     val activeFanId = activeFanRecord?.id
 
+    // ★ 方案 3：移除 stickyHeader / spacer 嘅 animateItem
     val listContent: LazyListScope.() -> Unit = {
         displayGroups.forEach { (dateKey, dayRecords) ->
             var dayIncome = 0.0
@@ -2918,17 +2929,16 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id == deletingRecordId
 
             if (!isGroupDeleting) {
+                // ★ sticky header：唔再用 animateItem
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
-                    Box(modifier = Modifier.animateItem(
-                        fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)) {
-                        FadingStickyHeader {
-                            Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
-                                DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
-                            }
+                    FadingStickyHeader {
+                        Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
+                            DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                         }
                     }
                 }
 
+                // group item：保留 animateItem（插入/刪除需要動畫）
                 item(key = "group_$dateKey", contentType = "day_group") {
                     Box(modifier = Modifier.animateItem(
                         fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)) {
@@ -3004,12 +3014,9 @@ fun LedgerContent(
                     }
                 }
 
+                // ★ spacer：唔再用 animateItem
                 item(key = "spacer_$dateKey", contentType = "day_spacer") {
-                    Spacer(
-                        modifier = Modifier
-                            .height(10.dp)
-                            .animateItem(fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)
-                    )
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
         }
@@ -3163,10 +3170,9 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
+                        // ★ magic_top_anchor：唔再用 animateItem
                         item(key = "magic_top_anchor", contentType = "anchor") {
-                            Spacer(Modifier.height(1.dp).animateItem(
-                                placementSpec = spring(dampingRatio = 0.75f, stiffness = 300f)
-                            ))
+                            Spacer(Modifier.height(1.dp))
                         }
                         if (displayGroups.isEmpty() && !showKeyboard) {
                             item(key = "__empty__", contentType = "empty") {
@@ -3230,13 +3236,18 @@ fun CategoryStatChip(category: String) {
     }
 }
 
+// ★ 方案 2：FadingStickyHeader 加 100ms 節流
 @Composable
 fun FadingStickyHeader(content: @Composable () -> Unit) {
     var rootTop by remember { mutableFloatStateOf(100f) }
+    val lastUpdateMs = remember { longArrayOf(0L) }
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .onGloballyPositioned { coords ->
+                val now = System.currentTimeMillis()
+                if (now - lastUpdateMs[0] < 100L) return@onGloballyPositioned
+                lastUpdateMs[0] = now
                 val top = coords.boundsInRoot().top
                 if (top <= 2f || rootTop <= 2f) {
                     rootTop = top
