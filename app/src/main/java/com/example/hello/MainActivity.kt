@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -4984,40 +4985,6 @@ fun QuickInputSection(
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun CalendarFilterChip(
-    selected: Boolean, label: String, onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val src = remember { MutableInteractionSource() }
-    val pressed by src.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.9f else 1f,
-        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "cs")
-
-    FilterChip(
-        selected = selected, onClick = onClick,
-        label = {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(label, textAlign = TextAlign.Center, fontSize = 13.sp, maxLines = 1,
-                    color = if (selected) Color.White else Color.Black,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
-            }
-        },
-        interactionSource = src,
-        shape = RoundedCornerShape(12.dp),
-        border = null,
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = BRAND_PRIMARY,
-            selectedLabelColor = Color.White,
-            containerColor = SURFACE_ELEVATED,
-            labelColor = Color.Black
-        ),
-        modifier = modifier.graphicsLayer { scaleX = scale; scaleY = scale }
-    )
 }
 
 @Composable
