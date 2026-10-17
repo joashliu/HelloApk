@@ -16,7 +16,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.TimePickerDialog
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -25,7 +24,6 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -88,14 +86,11 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -376,7 +371,6 @@ private val WEEKDAY_LABELS = arrayOf("週日", "週一", "週二", "週三", "�
 private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
-private val chipAppearedOnce = ConcurrentHashMap.newKeySet<String>()
 
 private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
@@ -1109,13 +1103,6 @@ fun avatarColor(name: String): Color {
     return AVATAR_COLORS[(name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size]
 }
 
-fun timeOfDayDistanceSeconds(timestamp: Long, nowMillis: Long): Int {
-    val secNow = getTimestampMeta(nowMillis).secOfDay
-    val sec = getTimestampMeta(timestamp).secOfDay
-    val d = abs(secNow - sec)
-    return minOf(d, 86400 - d)
-}
-
 fun getDominantMutedColor(bitmap: Bitmap): Color {
     if (bitmap.width <= 0 || bitmap.height <= 0) return Color(0xFFF1F5F9)
     val targetSize = 48
@@ -1158,21 +1145,6 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
     hsv[1] = (hsv[1] * 0.42f).coerceAtMost(0.45f)
     hsv[2] = 0.96f
     return Color(android.graphics.Color.HSVToColor(hsv))
-}
-
-fun getHoveredActionIndex(center: Offset, touch: Offset, minRadiusPx: Float): Int? {
-    val dx = touch.x - center.x
-    val dy = touch.y - center.y
-    val dist = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-    if (dist < minRadiusPx) return null
-    val angle = kotlin.math.atan2(dy.toDouble(), dx.toDouble()) * 180 / Math.PI
-    return when {
-        angle in -170.0..-130.0 -> 0
-        angle in -130.0..-90.0 -> 1
-        angle in -90.0..-50.0 -> 2
-        angle in -50.0..-10.0 -> 3
-        else -> null
-    }
 }
 
 fun getHoveredActionIndexWithCenter(
@@ -1418,7 +1390,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ★ 新增：將 topQuickNotesInfo 持久化，等磁貼服務可以讀取
+    // ★ 將 topQuickNotesInfo 持久化，等磁貼服務可以讀取
     private fun persistTopQuickNotes(infos: List<QuickNoteInfo>) {
         try {
             val prefs = getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
@@ -1553,7 +1525,6 @@ fun MainApp(
     var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
-    val animatedQuickInputs = remember { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(filterSearch.text) {
         delay(250)
@@ -1860,7 +1831,6 @@ fun MainApp(
                 deletingRecordId = filter.deletingId,
                 afterSaveHint = afterSaveHint,
                 afterSaveHintVisible = afterSaveHintVisible,
-                animatedQuickInputs = animatedQuickInputs,
                 keyboardProgressProvider = keyboardProgressProvider
             )
             1 -> {
@@ -2700,7 +2670,6 @@ fun LedgerContent(
     deletingRecordId: String?,
     afterSaveHint: AfterSaveHint?,
     afterSaveHintVisible: Boolean,
-    animatedQuickInputs: MutableMap<String, Boolean>,
     keyboardProgressProvider: () -> Float
 ) {
     val listState = rememberLazyListState()
@@ -2726,7 +2695,7 @@ fun LedgerContent(
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
     val scrollAccumPx = remember { mutableFloatStateOf(0f) }
 
-    // ★ 方案 1：50ms 節流，避免每幀寫 state
+    // ★ 50ms 節流，避免每幀寫 state
     val collapseScrollConnection = remember(collapseDistancePx) {
         object : NestedScrollConnection {
             private var pendingDelta = 0f
@@ -2916,7 +2885,7 @@ fun LedgerContent(
     val isFanActive = activeFanRecord != null
     val activeFanId = activeFanRecord?.id
 
-    // ★ 方案 3：移除 stickyHeader / spacer 嘅 animateItem
+    // ★ 移除 stickyHeader / spacer 嘅 animateItem
     val listContent: LazyListScope.() -> Unit = {
         displayGroups.forEach { (dateKey, dayRecords) ->
             var dayIncome = 0.0
@@ -2930,7 +2899,6 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id == deletingRecordId
 
             if (!isGroupDeleting) {
-                // ★ sticky header：唔再用 animateItem
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     FadingStickyHeader {
                         Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
@@ -2939,7 +2907,6 @@ fun LedgerContent(
                     }
                 }
 
-                // group item：保留 animateItem（插入/刪除需要動畫）
                 item(key = "group_$dateKey", contentType = "day_group") {
                     Box(modifier = Modifier.animateItem(
                         fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)) {
@@ -3015,7 +2982,6 @@ fun LedgerContent(
                     }
                 }
 
-                // ★ spacer：唔再用 animateItem
                 item(key = "spacer_$dateKey", contentType = "day_spacer") {
                     Spacer(modifier = Modifier.height(10.dp))
                 }
@@ -3053,8 +3019,7 @@ fun LedgerContent(
                 }
             }
 
-                        // ★ 用兩個獨立 AnimatedVisibility 取代 AnimatedContent
-            //    避免 SizeTransform 每幀測量兩個狀態
+            // ★ 用兩個獨立 AnimatedVisibility 取代 AnimatedContent
             Column(
                 modifier = Modifier
                     .zIndex(1f)
@@ -3070,7 +3035,6 @@ fun LedgerContent(
                             Spacer(Modifier.height(4.dp))
                             QuickInputSection(
                                 topNotes = topNotes, noteIconMap = noteIconMap,
-                                animatedQuickInputs = animatedQuickInputs,
                                 maxRowsPerPage = quickInputMaxRows,
                                 onClick = onQuickInputClick
                             )
@@ -3172,7 +3136,6 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // ★ magic_top_anchor：唔再用 animateItem
                         item(key = "magic_top_anchor", contentType = "anchor") {
                             Spacer(Modifier.height(1.dp))
                         }
@@ -3238,7 +3201,7 @@ fun CategoryStatChip(category: String) {
     }
 }
 
-// ★ 方案 2：FadingStickyHeader 加 100ms 節流
+// ★ FadingStickyHeader 加 100ms 節流
 @Composable
 fun FadingStickyHeader(content: @Composable () -> Unit) {
     var rootTop by remember { mutableFloatStateOf(100f) }
@@ -4709,178 +4672,7 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
-// ★ 1. 新增一個狀態類別同全域快取，用來追蹤每一粒 chip 獨立嘅 X、Y、闊度同埋進場進度
-// 呢個 Cache 確保就算 Pager 點樣重組，晶片嘅動畫座標都絕對唔會流失或重置
-private class ChipAnimState(initialX: Int, initialY: Int, initialWidth: Int, isNew: Boolean) {
-    val x = Animatable(initialX.toFloat())
-    val y = Animatable(initialY.toFloat())
-    val width = Animatable(initialWidth.toFloat())
-    val enterProgress = Animatable(if (isNew) 0f else 1f)
-}
-private val globalChipAnimStates = ConcurrentHashMap<String, ChipAnimState>()
-
-@Composable
-fun AnimatedStretchingFlowRow(
-    rows: List<List<Pair<String, Int>>>,
-    modifier: Modifier = Modifier,
-    horizontalSpacing: Dp = 8.dp,
-    verticalSpacing: Dp = 8.dp,
-    itemContent: @Composable (Pair<String, Int>) -> Unit
-) {
-    val density = LocalDensity.current
-    val hSpacingPx = remember(density, horizontalSpacing) { with(density) { horizontalSpacing.roundToPx() } }
-    val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
-    val slideOffsetPx = remember(density) { with(density) { (-20).dp.toPx() } }
-
-    val scope = rememberCoroutineScope()
-    val flatItems = remember(rows) { rows.flatten() }
-
-    androidx.compose.ui.layout.Layout(
-        content = {
-            flatItems.forEach { item ->
-                key(item.first) { itemContent(item) }
-            }
-        },
-        modifier = modifier
-    ) { measurables, constraints ->
-        if (measurables.isEmpty()) return@Layout layout(0, 0) {}
-
-        val safeMaxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 1000
-        if (safeMaxWidth < 50) return@Layout layout(safeMaxWidth, 0) {}
-
-        val rowMeasurableGroups = ArrayList<List<androidx.compose.ui.layout.Measurable>>(rows.size)
-        var mi = 0
-        for (row in rows) {
-            if (row.isEmpty()) { rowMeasurableGroups.add(emptyList()); continue }
-            rowMeasurableGroups.add(measurables.subList(mi, mi + row.size))
-            mi += row.size
-        }
-
-        // 1. 預先計算每一粒 chip 嘅最終目標位置同闊度（不進行實際測量）
-        class ItemTarget(
-            val measurable: androidx.compose.ui.layout.Measurable,
-            val name: String,
-            val targetX: Int,
-            val targetY: Int,
-            val targetWidth: Int
-        )
-        val targets = ArrayList<ItemTarget>(measurables.size)
-
-        var y = 0
-        for (ri in rows.indices) {
-            val row = rows[ri]
-            if (row.isEmpty()) continue
-            val rowMeasurables = rowMeasurableGroups[ri]
-
-            val widths = ArrayList<Int>(row.size)
-            var rowIntrinsicWidth = (row.size - 1) * hSpacingPx
-            for (m in rowMeasurables) {
-                val w = m.maxIntrinsicWidth(constraints.maxHeight)
-                widths.add(w)
-                rowIntrinsicWidth += w
-            }
-
-            val extraSpace = safeMaxWidth - rowIntrinsicWidth
-            val extraPerItem = if (extraSpace > 0) extraSpace / row.size else 0
-            var remainder = if (extraSpace > 0) extraSpace % row.size else 0
-
-            var x = 0
-            var rowMaxHeight = 0
-
-            for (i in rowMeasurables.indices) {
-                val h = rowMeasurables[i].maxIntrinsicHeight(widths[i])
-                if (h > rowMaxHeight) rowMaxHeight = h
-            }
-            if (rowMaxHeight == 0) rowMaxHeight = with(density) { 36.dp.roundToPx() }
-
-            for (i in rowMeasurables.indices) {
-                val extra = if (extraSpace > 0) {
-                    extraPerItem + if (remainder > 0) { remainder--; 1 } else 0
-                } else {
-                    val diff = -extraSpace
-                    -((diff.toFloat() / row.size).roundToInt())
-                }
-                val targetWidth = maxOf(0, widths[i] + extra)
-
-                targets.add(
-                    ItemTarget(
-                        measurable = rowMeasurables[i],
-                        name = row[i].first,
-                        targetX = x,
-                        targetY = y,
-                        targetWidth = targetWidth
-                    )
-                )
-                x += targetWidth + hSpacingPx
-            }
-            y += rowMaxHeight + vSpacingPx
-        }
-
-        val totalHeight = maxOf(0, y - vSpacingPx)
-
-        // 2. 結合「全域動畫數值」進行排版測量
-        class Placement(
-            val placeable: Placeable,
-            val animState: ChipAnimState
-        )
-        val placementsToDraw = ArrayList<Placement>(targets.size)
-
-        for (target in targets) {
-            val isNewGlobally = !chipAppearedOnce.contains(target.name)
-            if (isNewGlobally) chipAppearedOnce.add(target.name)
-
-            // 從全域 Cache 取得或初始化動畫狀態 (頁面重組時不會重置)
-            val animState = globalChipAnimStates.getOrPut(target.name) {
-                ChipAnimState(
-                    initialX = target.targetX,
-                    initialY = target.targetY,
-                    initialWidth = target.targetWidth,
-                    isNew = isNewGlobally
-                )
-            }
-
-            // ★ 觸發動畫：如果目標位置同當前唔同，就平滑過渡過去，舊 chips 絕對唔會瞬間「扽」
-            if (animState.width.targetValue != target.targetWidth.toFloat()) {
-                scope.launch { animState.width.animateTo(target.targetWidth.toFloat(), spring(dampingRatio = 0.85f, stiffness = 300f)) }
-            }
-            if (animState.x.targetValue != target.targetX.toFloat()) {
-                scope.launch { animState.x.animateTo(target.targetX.toFloat(), spring(dampingRatio = 0.85f, stiffness = 300f)) }
-            }
-            if (animState.y.targetValue != target.targetY.toFloat()) {
-                scope.launch { animState.y.animateTo(target.targetY.toFloat(), spring(dampingRatio = 0.85f, stiffness = 300f)) }
-            }
-            if (animState.enterProgress.targetValue < 1f) {
-                scope.launch { animState.enterProgress.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 350f)) }
-            }
-
-            // 實時讀取「動畫緊」嘅闊度來測量
-            val currentWidth = animState.width.value.roundToInt()
-            val placeable = target.measurable.measure(
-                constraints.copy(minWidth = currentWidth, maxWidth = currentWidth)
-            )
-
-            placementsToDraw.add(Placement(placeable, animState))
-        }
-
-        // 3. 繪製
-        layout(safeMaxWidth, totalHeight) {
-            for (p in placementsToDraw) {
-                // 讀取當前動畫幀的 X 同 Y
-                val currentX = p.animState.x.value.roundToInt()
-                val currentY = p.animState.y.value.roundToInt()
-                val progress = p.animState.enterProgress.value
-
-                // 利用 placeWithLayer 喺 GPU 層面做平滑位移同透明度
-                // 只有全新進場嘅 chip 會有 progress < 1f 嘅滑入效果
-                p.placeable.placeWithLayer(currentX, currentY) {
-                    translationY = (1f - progress) * slideOffsetPx
-                    alpha = progress.coerceIn(0f, 1f)
-                }
-            }
-        }
-    }
-}
-
+// ===== QuickInputChip（保留不變，交由外層 Row/weight 定位） =====
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val ctx = LocalContext.current
@@ -4921,8 +4713,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         }
     }
 
-    // ★ 進場動畫完全交由 AnimatedStretchingFlowRow 控制
-    //   QuickInputChip 本身唔再播任何進場動畫
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
@@ -4948,7 +4738,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-// 加喺 QuickInputSection 上面（top-level private）
+// ===== QuickInputSection：穩定版，用 Column + Row + weight，唔會再扽 =====
 private data class QuickChipSpec(val name: String, val weight: Float)
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -4956,7 +4746,6 @@ private data class QuickChipSpec(val name: String, val weight: Float)
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    animatedQuickInputs: MutableMap<String, Boolean>,
     maxRowsPerPage: Int = 4,
     onClick: (String) -> Unit
 ) {
@@ -4986,8 +4775,8 @@ fun QuickInputSection(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
-            // ★ 1) 一次過計好每一行 chip 嘅目標闊度（weight）
-            //     呢個列表同 maxRowsPerPage 完全無關，所以永遠穩定
+            // ★ 一次過計好每一行 chip 嘅目標闊度（weight）
+            //   呢個列表同 maxRowsPerPage 完全無關，所以永遠穩定
             val allFixedRows: List<List<QuickChipSpec>> =
                 remember(items, contentWidthPx, gapPx) {
                     val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
@@ -5017,7 +4806,6 @@ fun QuickInputSection(
                     }
                     if (currentRow.isNotEmpty()) intrinsicRows.add(currentRow)
 
-                    // 將每行剩餘空間平均攤做 weight；weight 總和 = 可用闊度 - spacing
                     intrinsicRows.map { row ->
                         val n = row.size
                         val spacingTotal = (n - 1).coerceAtLeast(0) * gapPx
