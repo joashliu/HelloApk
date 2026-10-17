@@ -3445,24 +3445,24 @@ fun SwipeableRecordItem(
     val maxLeft = -(leftTotal + edgePx)
     val maxRight = bwPx + edgePx
 
-        var targetOffset by remember { mutableFloatStateOf(0f) }
+    var targetOffset by remember { mutableFloatStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     val itemPosHolder = remember { OffsetHolder() }
     val lastPosUpdateMs = remember { longArrayOf(0L) }
 
-    val offsetAnim = remember { Animatable(0f) }
+    // ✅ 用 animateFloatAsState 取代 Animatable + snapshotFlow
+    //    - Drag 中：spec = snap()，即時跟手
+    //    - Drag end：spec = SWIPE_SPRING，由當前位置平滑彈去 targetOffset
+    val animatedOffset by animateFloatAsState(
+        targetValue = targetOffset,
+        animationSpec = if (isDragging) snap() else SWIPE_SPRING,
+        label = "swipeOffset"
+    )
 
-    // ✅ 合併成一個 effect
-    LaunchedEffect(isDragging) {
-        if (isDragging) {
-            snapshotFlow { targetOffset }.collect { offsetAnim.snapTo(it) }
-        } else {
-            offsetAnim.animateTo(targetOffset, SWIPE_SPRING)
-        }
-    }
-
-    val offsetX = if (isDragging) targetOffset else offsetAnim.value
+    // Drag 中用 targetOffset 顯示（零延遲跟手）；
+    // Drag end 後切到 animatedOffset（由最後拖到嘅位置開始 animate，唔會跳）
+    val offsetX = if (isDragging) targetOffset else animatedOffset
 
     val needsLayer = isFanMenuActive || isActiveItem || isOtherItem
 
