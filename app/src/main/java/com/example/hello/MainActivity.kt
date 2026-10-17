@@ -4722,18 +4722,6 @@ fun AnimatedStretchingFlowRow(
     val vSpacingPx = remember(density, verticalSpacing) { with(density) { verticalSpacing.roundToPx() } }
 
     val scope = rememberCoroutineScope()
-    val offsetAnimators = remember {
-        mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>()
-    }
-
-    // ★ 喺 composition 階段計算行數變化，只喺 rows.size 變化時重新計算
-    //   用 intArrayOf 儲存（唔係 state，唔會觸發 recomposition）
-    val prevRowsSize = remember { intArrayOf(rows.size) }
-    val rowsSizeChanged = remember(rows.size) {
-        val changed = prevRowsSize[0] != rows.size
-        prevRowsSize[0] = rows.size
-        changed
-    }
 
     val flatItems = remember(rows) { rows.flatten() }
 
@@ -4806,20 +4794,18 @@ fun AnimatedStretchingFlowRow(
 
         val totalHeight = maxOf(0, y - vSpacingPx)
 
-        val currentNames = placements.map { it.name }.toHashSet()
-        offsetAnimators.keys.retainAll(currentNames)
-
         layout(safeMaxWidth, totalHeight) {
             for (p in placements) {
-                val anim = offsetAnimators[p.name]
-                if (anim == null) {
-                    // ★ 全新 chip：從上方 20px 滑入（有進場動畫）
+                val seenBefore = chipAppearedOnce.contains(p.name)
+
+                if (!seenBefore) {
+                    // ★ 全新 chip：從上方 20px 滑入
+                    chipAppearedOnce.add(p.name)
                     val startOffset = IntOffset(p.target.x, p.target.y - 20)
-                    val newAnim = Animatable(startOffset, IntOffset.VectorConverter)
-                    offsetAnimators[p.name] = newAnim
+                    val anim = Animatable(startOffset, IntOffset.VectorConverter)
                     scope.launch {
                         try {
-                            newAnim.animateTo(
+                            anim.animateTo(
                                 targetValue = p.target,
                                 animationSpec = spring(dampingRatio = 0.75f, stiffness = 400f)
                             )
@@ -4827,25 +4813,8 @@ fun AnimatedStretchingFlowRow(
                     }
                     p.placeable.place(startOffset)
                 } else {
-                    if (rowsSizeChanged) {
-                        // ★ 行數變化：已有 chip 直接 snap 到目標位置，完全無動畫
-                        //    替換 animator 為新嘅 Animatable(target)，確保後續 layout 唔會再觸發 animateTo
-                        offsetAnimators[p.name] = Animatable(p.target, IntOffset.VectorConverter)
-                        p.placeable.place(p.target)
-                    } else {
-                        // 行數不變（同一 page 內重排，例如寬度變化）：保留平滑移動
-                        if (anim.targetValue != p.target) {
-                            scope.launch {
-                                try {
-                                    anim.animateTo(
-                                        targetValue = p.target,
-                                        animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                                    )
-                                } catch (_: Exception) {}
-                            }
-                        }
-                        p.placeable.place(anim.value)
-                    }
+                    // ★ 已出現過嘅 chip：直接 place，零動畫
+                    p.placeable.place(p.target)
                 }
             }
         }
@@ -4892,30 +4861,13 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
         }
     }
 
-    // ★ 只喺真正首次出現時播進場動畫；重建時直接以 1f 開始
-    val appearedBefore = remember { chipAppearedOnce.contains(name) }
-    val appearAnim = remember { Animatable(if (appearedBefore) 1f else 0f) }
-    LaunchedEffect(Unit) {
-        if (!appearedBefore) {
-            chipAppearedOnce.add(name)
-            appearAnim.animateTo(
-                targetValue = 1f,
-                animationSpec = spring(dampingRatio = 0.55f, stiffness = 550f)
-            )
-        }
-    }
-
+    // ★ 進場動畫完全交由 AnimatedStretchingFlowRow 控制
+    //   QuickInputChip 本身唔再播任何進場動畫
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
         modifier = modifier
             .height(36.dp)
-            .graphicsLayer {
-                val s = appearAnim.value
-                scaleX = s
-                scaleY = s
-                transformOrigin = TransformOrigin(0.5f, 0.5f)
-            }
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
