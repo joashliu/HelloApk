@@ -32,7 +32,19 @@
             </intent-filter>
         </activity>
 
-        <!-- ★★★ 新增：FileProvider，畀相機寫入臨時相片檔案 ★★★ -->
+        <!-- ★★★ 新增：快速記帳快捷開關磁貼 ★★★ -->
+        <service
+            android:name=".QuickAddTileService"
+            android:label="快速記帳"
+            android:icon="@drawable/ic_tile_add"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- FileProvider，畀相機寫入臨時相片檔案 -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
