@@ -3053,91 +3053,91 @@ fun LedgerContent(
             }
 
             AnimatedContent(
-                targetState = filterMode,
-                transitionSpec = {
-                    (expandVertically(tween(400, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(300))) togetherWith
-                    (shrinkVertically(tween(400, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) + fadeOut(tween(200))) using SizeTransform(
-                        clip = true, sizeAnimationSpec = { _, _ -> tween(400, easing = FastOutSlowInEasing) }
+    targetState = filterMode,
+    transitionSpec = {
+        (expandVertically(tween(250, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) +
+            fadeIn(tween(150))) togetherWith
+        (shrinkVertically(tween(250, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top) +
+            fadeOut(tween(120))) using SizeTransform(
+            clip = true, sizeAnimationSpec = { _, _ -> tween(250, easing = FastOutSlowInEasing) }
+        )
+    },
+    label = "bottomArea",
+    modifier = Modifier.zIndex(1f)
+) { isFilterMode ->
+    if (isFilterMode) {
+        Column(
+            Modifier
+                .padding(horizontal = 16.dp, vertical = 0.dp)
+                .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
+        ) {
+            Spacer(Modifier.height(4.dp))
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 72.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                userScrollEnabled = false
+            ) {
+                item(key = "__all__") {
+                    AnimatedFilterChip(
+                        modifier = Modifier.fillMaxWidth(),
+                        selected = filterCategory == null,
+                        label = "全部", fillWidth = true,
+                        onClick = { onFilterCategoryChange(null) }
                     )
-                },
-                label = "bottomArea",
-                modifier = Modifier
-                    .zIndex(1f)
-                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow), alignment = Alignment.TopCenter)
-            ) { isFilterMode ->
-                if (isFilterMode) {
-                    Column(
-                        Modifier
-                            .padding(horizontal = 16.dp, vertical = 0.dp)
-                            .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow))
-                    ) {
-                        Spacer(Modifier.height(4.dp))
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 72.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            userScrollEnabled = false
-                        ) {
-                            item(key = "__all__") {
-                                AnimatedFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部", fillWidth = true,
-                                    onClick = { onFilterCategoryChange(null) }
-                                )
-                            }
-                            items(items = visibleCategories, key = { it }) { cat ->
-                                AnimatedFilterChip(
-                                    modifier = Modifier.animateItem().fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat, fillWidth = true,
-                                    onClick = {
-                                        onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                                    }
-                                )
-                            }
+                }
+                items(items = visibleCategories, key = { it }) { cat ->
+                    AnimatedFilterChip(
+                        modifier = Modifier.fillMaxWidth(),   // ★ 移除 .animateItem()
+                        selected = filterCategory == cat,
+                        label = cat, fillWidth = true,
+                        onClick = {
+                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
                         }
-                        Spacer(Modifier.height(8.dp))
-                        if (availableMonths.isNotEmpty()) {
-                            FlowRow(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                AnimatedFilterChip(
-                                    selected = filterMonth == null, label = "全年",
-                                    fillWidth = false,
-                                    onClick = { onFilterMonthChange(null) }
-                                )
-                                availableMonths.forEach { m ->
-                                    AnimatedFilterChip(
-                                        selected = filterMonth == m,
-                                        label = formatMonthLabel(m), fillWidth = false,
-                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                    }
-                } else {
-                    Column(Modifier.fillMaxWidth()) {
-                        if (topNotes.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
-                            QuickInputSection(
-                                topNotes = topNotes, noteIconMap = noteIconMap,
-                                animatedQuickInputs = animatedQuickInputs,
-                                maxRowsPerPage = quickInputMaxRows,
-                                onClick = onQuickInputClick
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (availableMonths.isNotEmpty()) {
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow)),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    AnimatedFilterChip(
+                        selected = filterMonth == null, label = "全年",
+                        fillWidth = false,
+                        onClick = { onFilterMonthChange(null) }
+                    )
+                    availableMonths.forEach { m ->
+                        AnimatedFilterChip(
+                            selected = filterMonth == m,
+                            label = formatMonthLabel(m), fillWidth = false,
+                            onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                        )
                     }
                 }
             }
+            Spacer(Modifier.height(6.dp))
+        }
+    } else {
+        Column(Modifier.fillMaxWidth()) {
+            if (topNotes.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                QuickInputSection(
+                    topNotes = topNotes, noteIconMap = noteIconMap,
+                    animatedQuickInputs = animatedQuickInputs,
+                    maxRowsPerPage = quickInputMaxRows,
+                    onClick = onQuickInputClick
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+    }
+}
 
             Box(
                 Modifier
