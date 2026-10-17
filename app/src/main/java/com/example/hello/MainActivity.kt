@@ -2858,7 +2858,16 @@ fun LedgerContent(
     }
 
     LaunchedEffect(filterMode) {
-        if (!filterMode && preFilterIndex >= 0) {
+        if (filterMode) {
+            // 進入篩選模式，自動滾動到最頂
+            try {
+                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
+                listState.animateScrollToItem(0)
+            } catch (_: Exception) {
+                try { listState.scrollToItem(0) } catch (_: Exception) {}
+            }
+        } else if (preFilterIndex >= 0) {
+            // 退出篩選模式，還原之前嘅滾動位置
             try {
                 listState.requestScrollToItem(preFilterIndex, preFilterOffset)
             } catch (_: Exception) {
