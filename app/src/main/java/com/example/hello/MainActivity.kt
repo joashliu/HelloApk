@@ -4575,24 +4575,38 @@ fun AnimatedAmount(
     text: String, color: Color, fontSize: TextUnit,
     fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
 ) {
+    // ★ 固定最少 12 個槽位（9 位數字 + 小數點 + 2 位小數），
+    //   令每個位置嘅 AnimatedContent 一直存在，
+    //   輸入/刪除數字時可以穩定播放進入/退出動畫。
+    val maxSlots = remember { mutableIntStateOf(maxOf(text.length, 12)) }
+
+    LaunchedEffect(text.length) {
+        if (text.length > maxSlots.value) {
+            maxSlots.value = text.length
+        }
+    }
+
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        for (i in 0 until text.length.coerceAtLeast(1)) {
+        for (i in 0 until maxSlots.value) {
             val char = text.getOrNull(i)
             key(i) {
                 AnimatedContent(
                     targetState = char,
                     transitionSpec = {
                         if (targetState != null && initialState == null) {
+                            // 新增數字：由下往上滑入 + 放大
                             (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
                              fadeIn(tween(200)) +
                              scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith
                             fadeOut(tween(0))
                         } else if (targetState == null && initialState != null) {
+                            // 刪除數字：向下滑出 + 縮小
                             fadeIn(tween(0)) togetherWith
                             (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
                              fadeOut(tween(180)) +
                              scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
                         } else {
+                            // 替換數字：上下滑動
                             (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
                             (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
                         }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
