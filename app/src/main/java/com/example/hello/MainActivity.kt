@@ -4726,6 +4726,9 @@ fun AnimatedStretchingFlowRow(
         mutableMapOf<String, Animatable<IntOffset, AnimationVector2D>>()
     }
 
+    // ★ 記錄上一次嘅行數，用嚟判斷係咪「開新行 / 收行」
+    val prevRowsSizeRef = remember { intArrayOf(rows.size) }
+
     val flatItems = remember(rows) { rows.flatten() }
 
     androidx.compose.ui.layout.Layout(
@@ -4800,24 +4803,50 @@ fun AnimatedStretchingFlowRow(
         val currentNames = placements.map { it.name }.toHashSet()
         offsetAnimators.keys.retainAll(currentNames)
 
+        // ★ 判斷行數有冇變化（開新行 / 收行）
+        val rowsSizeChanged = prevRowsSizeRef[0] != rows.size
+        prevRowsSizeRef[0] = rows.size
+
         layout(safeMaxWidth, totalHeight) {
             for (p in placements) {
                 val anim = offsetAnimators[p.name]
                 if (anim == null) {
-                    offsetAnimators[p.name] = Animatable(p.target, IntOffset.VectorConverter)
-                    p.placeable.place(p.target)
+                    // ★ 全新 chip：從上方 20px 滑入（有進場動畫）
+                    val startOffset = IntOffset(p.target.x, p.target.y - 20)
+                    val newAnim = Animatable(startOffset, IntOffset.VectorConverter)
+                    offsetAnimators[p.name] = newAnim
+                    scope.launch {
+                        try {
+                            newAnim.animateTo(
+                                targetValue = p.target,
+                                animationSpec = spring(dampingRatio = 0.75f, stiffness = 400f)
+                            )
+                        } catch (_: Exception) {}
+                    }
+                    p.placeable.place(startOffset)
                 } else {
                     if (anim.targetValue != p.target) {
-                        scope.launch {
-                            try {
-                                anim.animateTo(
-                                    targetValue = p.target,
-                                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                                )
-                            } catch (_: Exception) {}
+                        if (rowsSizeChanged) {
+                            // ★ 行數變化：直接替換 animator（無移動動畫）
+                            //    避免「開新行 / 收行」時已有 chips 向下 / 向上移動
+                            val replacement = Animatable(p.target, IntOffset.VectorConverter)
+                            offsetAnimators[p.name] = replacement
+                            p.placeable.place(p.target)
+                        } else {
+                            // 行數不變（同一 page 內重排）：平滑移動
+                            scope.launch {
+                                try {
+                                    anim.animateTo(
+                                        targetValue = p.target,
+                                        animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                            p.placeable.place(anim.value)
                         }
+                    } else {
+                        p.placeable.place(anim.value)
                     }
-                    p.placeable.place(anim.value)
                 }
             }
         }
