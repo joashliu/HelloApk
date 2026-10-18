@@ -1884,7 +1884,8 @@ fun MainApp(
                     onDeleteClick = { deleteRecordWithUndo(it) },
                     onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                     onAddClick = { currentPage = 0; openKeyboardForNew() },
-                    deletingRecordId = filter.deletingId
+                    deletingRecordId = filter.deletingId,
+                    justAddedId = justAddedId // ★ 新增：傳遞復原觸發變數
                 )
             }
         }
@@ -3675,6 +3676,7 @@ fun DayDetailPanel(
     onChangeIcon: (Record) -> Unit,
     onDismiss: () -> Unit,
     deletingRecordId: String? = null,
+    justAddedId: String? = null, // ★ 新增呢行參數
     onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
     onFanMenuDrag: (Offset) -> Unit = {},
     onFanMenuEnd: () -> Unit = {},
@@ -3733,7 +3735,7 @@ fun DayDetailPanel(
             key(r.id) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     AnimatedRecordItem(
-                        animateOnMount = false,
+                        animateOnMount = r.id == justAddedId, // ★ 修改：觸發復原動畫
                         isDeleting = r.id == deletingRecordId
                     ) {
                         SwipeableRecordItem(
@@ -5237,7 +5239,8 @@ fun CalendarContent(
     onDeleteClick: (Record) -> Unit,
     onChangeIconClick: (Record) -> Unit,
     onAddClick: () -> Unit,
-    deletingRecordId: String? = null
+    deletingRecordId: String? = null,
+    justAddedId: String? = null // ★ 新增呢行
 ) {
     val today = remember { Calendar.getInstance() }
     val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
@@ -5611,6 +5614,7 @@ fun CalendarContent(
                                             detailExpandedId = null
                                         },
                                         deletingRecordId = deletingRecordId,
+                                        justAddedId = justAddedId, // ★ 新增：將變數接力傳入去
                                         onFanMenuStart = handleFanStart,
                                         onFanMenuDrag = handleFanDrag,
                                         onFanMenuEnd = handleFanEnd,
