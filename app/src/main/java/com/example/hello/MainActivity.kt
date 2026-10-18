@@ -4816,6 +4816,7 @@ fun QuickInputSection(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
+            // 保持原本精準嘅寬度計算，確保 Chips 完美填滿無空隙
             val allFixedRows: List<List<QuickChipSpec>> =
                 remember(items, contentWidthPx, gapPx) {
                     val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
@@ -4888,7 +4889,7 @@ fun QuickInputSection(
 
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeight,
-                animationSpec = spring(dampingRatio = 1f, stiffness = 400f),
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
                 label = "quickPanelHeight"
             )
 
@@ -4902,12 +4903,13 @@ fun QuickInputSection(
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f)),
                     verticalAlignment = Alignment.Top
                 ) { page ->
                     Column(
                         Modifier
                             .fillMaxWidth()
+                            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f)) // ★ 容器平滑動畫
                             .padding(
                                 start = 14.dp,
                                 end = 14.dp,
@@ -4922,15 +4924,42 @@ fun QuickInputSection(
                             Row(
                                 Modifier
                                     .fillMaxWidth()
-                                    .height(chipHeight),
+                                    .height(chipHeight)
+                                    .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f)), // ★ 橫向縮放平滑動畫
                                 horizontalArrangement = Arrangement.spacedBy(gapDp)
                             ) {
                                 row.forEach { chip ->
                                     key(chip.name) {
+                                        // ★ 1. 寬度比例 (Weight) 平滑過渡動畫
+                                        val animatedWeight by animateFloatAsState(
+                                            targetValue = chip.weight,
+                                            animationSpec = spring(dampingRatio = 0.75f, stiffness = 350f),
+                                            label = "w_${chip.name}"
+                                        )
+
+                                        // ★ 2. 新增 Chips 時嘅 Scale & Alpha 進場動畫
+                                        var appear by remember { mutableStateOf(false) }
+                                        LaunchedEffect(Unit) { appear = true }
+                                        val scale by animateFloatAsState(
+                                            targetValue = if (appear) 1f else 0.6f,
+                                            animationSpec = spring(dampingRatio = 0.65f, stiffness = 400f),
+                                            label = "s_${chip.name}"
+                                        )
+                                        val alpha by animateFloatAsState(
+                                            targetValue = if (appear) 1f else 0f,
+                                            animationSpec = tween(250),
+                                            label = "a_${chip.name}"
+                                        )
+
                                         Box(
                                             Modifier
-                                                .weight(chip.weight)
+                                                .weight(animatedWeight.coerceAtLeast(0.001f))
                                                 .fillMaxHeight()
+                                                .graphicsLayer { // 套用進場效果
+                                                    scaleX = scale
+                                                    scaleY = scale
+                                                    this.alpha = alpha
+                                                }
                                         ) {
                                             QuickInputChip(
                                                 name = chip.name,
@@ -4969,7 +4998,6 @@ fun QuickInputSection(
         }
     }
 }
-
 @Composable
 fun AnimatedInfoChip(
     label: String, valueText: String,
