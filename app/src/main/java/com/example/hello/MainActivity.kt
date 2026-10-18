@@ -4782,6 +4782,14 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
 
 private data class QuickChipSpec(val name: String, val weight: Float)
 
+// ★ 1. 新增：用來記錄每粒 Chip 絕對坐標嘅 Data Class
+private data class PlacedChip(
+    val name: String, 
+    val targetW: Float, 
+    val targetX: Float, 
+    val targetY: Float
+)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QuickInputSection(
@@ -4797,16 +4805,20 @@ fun QuickInputSection(
 
     val density = LocalDensity.current
     val gapDp = 8.dp
+    val verticalGapDp = 8.dp
+    val chipHeightDp = 36.dp
+    val panelVPaddingDp = 14.dp
+    val indicatorSpaceDp = 20.dp
+
+    // 預先計好所有常用嘅 Pixel 數值，提升效能
     val gapPx = remember(density) { with(density) { gapDp.toPx() } }
+    val verticalGapPx = remember(density) { with(density) { verticalGapDp.toPx() } }
+    val chipHeightPx = remember(density) { with(density) { chipHeightDp.toPx() } }
+    val baseItemPx = remember(density) { with(density) { 44.dp.toPx() } + 12f }
 
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
     val noteTextWidthCache = remember { mutableMapOf<String, Float>() }
-
-    val chipHeight = 36.dp
-    val verticalGap = 8.dp
-    val panelVPadding = 14.dp
-    val indicatorSpace = 20.dp
 
     Box(
         Modifier
@@ -4816,80 +4828,91 @@ fun QuickInputSection(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
-            // 保持原本精準嘅寬度計算，確保 Chips 完美填滿無空隙
-            val allFixedRows: List<List<QuickChipSpec>> =
-                remember(items, contentWidthPx, gapPx) {
-                    val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
-                    var currentRow = mutableListOf<Pair<String, Float>>()
-                    var currentRowWidth = 0f
+            // ★ 2. 坐標化排版：精準計算每粒 Chip 嘅 X, Y, W
+            val pagesWithChips = remember(items, contentWidthPx, gapPx, maxRowsPerPage, chipHeightPx, verticalGapPx, baseItemPx) {
+                val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
+                var currentRow = mutableListOf<Pair<String, Float>>()
+                var currentRowWidth = 0f
 
-                    for (item in items) {
-                        val name = item.first
-                        val textW = noteTextWidthCache.getOrPut(name) {
-                            textMeasurer.measure(name, textStyle).size.width.toFloat()
-                        }
-                        val itemPx = with(density) { 44.dp.toPx() } + textW + 12f
-
-                        val needed =
-                            if (currentRow.isEmpty()) itemPx
-                            else currentRowWidth + gapPx + itemPx
-
-                        if (currentRow.isNotEmpty() && needed > contentWidthPx) {
-                            intrinsicRows.add(currentRow)
-                            currentRow = mutableListOf()
-                            currentRowWidth = 0f
-                        }
-                        currentRow.add(name to itemPx)
-                        currentRowWidth =
-                            if (currentRow.size == 1) itemPx
-                            else currentRowWidth + gapPx + itemPx
+                // (A) 分行邏輯
+                for (item in items) {
+                    val name = item.first
+                    val textW = noteTextWidthCache.getOrPut(name) {
+                        textMeasurer.measure(name, textStyle).size.width.toFloat()
                     }
-                    if (currentRow.isNotEmpty()) intrinsicRows.add(currentRow)
+                    val itemPx = baseItemPx + textW
+                    val needed = if (currentRow.isEmpty()) itemPx else currentRowWidth + gapPx + itemPx
 
-                    intrinsicRows.map { row ->
-                        val n = row.size
-                        val spacingTotal = (n - 1).coerceAtLeast(0) * gapPx
-                        val intrinsicSum = row.fold(0f) { acc, p -> acc + p.second }
-                        val extra = contentWidthPx - intrinsicSum - spacingTotal
-                        if (extra <= 0f) {
-                            row.map { (name, w) -> QuickChipSpec(name, w) }
-                        } else {
-                            val perItem = extra / n
-                            row.map { (name, w) -> QuickChipSpec(name, w + perItem) }
-                        }
+                    if (currentRow.isNotEmpty() && needed > contentWidthPx) {
+                        intrinsicRows.add(currentRow)
+                        currentRow = mutableListOf()
+                        currentRowWidth = 0f
+                    }
+                    currentRow.add(name to itemPx)
+                    currentRowWidth = if (currentRow.size == 1) itemPx else currentRowWidth + gapPx + itemPx
+                }
+                if (currentRow.isNotEmpty()) intrinsicRows.add(currentRow)
+
+                // (B) 完美填滿空隙邏輯
+                val perfectlyFilledRows = intrinsicRows.map { row ->
+                    val n = row.size
+                    val spacingTotal = (n - 1).coerceAtLeast(0) * gapPx
+                    val intrinsicSum = row.fold(0f) { acc, p -> acc + p.second }
+                    val extra = contentWidthPx - intrinsicSum - spacingTotal
+                    if (extra <= 0f) {
+                        row.map { (name, w) -> name to w }
+                    } else {
+                        val perItem = extra / n
+                        row.map { (name, w) -> name to (w + perItem) }
                     }
                 }
 
-            val pages = remember(allFixedRows, maxRowsPerPage) {
-                if (allFixedRows.isEmpty()) emptyList()
-                else allFixedRows.chunked(maxRowsPerPage)
+                // (C) 分頁並轉換成絕對坐標 (X, Y)
+                perfectlyFilledRows.chunked(maxRowsPerPage).map { rowsInPage ->
+                    val chips = mutableListOf<PlacedChip>()
+                    rowsInPage.forEachIndexed { rowIdx, rowChips ->
+                        val y = rowIdx * (chipHeightPx + verticalGapPx)
+                        var x = 0f
+                        rowChips.forEach { (name, w) ->
+                            chips.add(PlacedChip(name, w, x, y))
+                            x += w + gapPx
+                        }
+                    }
+                    chips
+                }
             }
-            if (pages.isEmpty()) return@BoxWithConstraints
 
-            val pagerState = rememberPagerState(pageCount = { pages.size })
+            if (pagesWithChips.isEmpty()) return@BoxWithConstraints
 
-            LaunchedEffect(pages.size) {
-                val maxPage = (pages.size - 1).coerceAtLeast(0)
+            val pagerState = rememberPagerState(pageCount = { pagesWithChips.size })
+
+            LaunchedEffect(pagesWithChips.size) {
+                val maxPage = (pagesWithChips.size - 1).coerceAtLeast(0)
                 if (pagerState.currentPage > maxPage) {
                     pagerState.scrollToPage(maxPage)
                 }
             }
 
-            val hasIndicator = pages.size > 1
-            val safeCurrentPage = pagerState.currentPage.coerceIn(0, pages.lastIndex)
-            val currentRowCount = remember(pages, safeCurrentPage) {
-                pages[safeCurrentPage].size
+            val hasIndicator = pagesWithChips.size > 1
+            val safeCurrentPage = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
+            
+            // ★ 3. 計算動態高度
+            val targetHeightDp = remember(pagesWithChips, safeCurrentPage, hasIndicator) {
+                val currentRowCount = pagesWithChips[safeCurrentPage].let { chips ->
+                    if (chips.isEmpty()) 1 else {
+                        val maxY = chips.maxOf { it.targetY }
+                        ((maxY / (chipHeightPx + verticalGapPx)).roundToInt() + 1)
+                    }
+                }
+                chipHeightDp * currentRowCount +
+                verticalGapDp * (currentRowCount - 1).coerceAtLeast(0) +
+                panelVPaddingDp * 2 +
+                (if (hasIndicator) indicatorSpaceDp else 0.dp)
             }
 
-            val targetHeight =
-                chipHeight * currentRowCount +
-                verticalGap * (currentRowCount - 1).coerceAtLeast(0) +
-                panelVPadding * 2 +
-                (if (hasIndicator) indicatorSpace else 0.dp)
-
             val animatedHeight by animateDpAsState(
-                targetValue = targetHeight,
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+                targetValue = targetHeightDp,
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
                 label = "quickPanelHeight"
             )
 
@@ -4903,72 +4926,52 @@ fun QuickInputSection(
             ) {
                 HorizontalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize().animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f)),
+                    modifier = Modifier.fillMaxSize(),
                     verticalAlignment = Alignment.Top
                 ) { page ->
-                    Column(
+                    val chips = pagesWithChips.getOrNull(page) ?: emptyList()
+
+                    // ★ 4. 絕對定位容器：所有 Chip 喺同一個 Box 入面自由飛
+                    Box(
                         Modifier
                             .fillMaxWidth()
-                            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f)) // ★ 容器平滑動畫
-                            .padding(
-                                start = 14.dp,
-                                end = 14.dp,
-                                top = panelVPadding,
-                                bottom = if (hasIndicator)
-                                    panelVPadding + indicatorSpace
-                                else panelVPadding
-                            ),
-                        verticalArrangement = Arrangement.spacedBy(verticalGap)
+                            .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)
                     ) {
-                        pages[page].forEach { row ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(chipHeight)
-                                    .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f)), // ★ 橫向縮放平滑動畫
-                                horizontalArrangement = Arrangement.spacedBy(gapDp)
-                            ) {
-                                row.forEach { chip ->
-                                    key(chip.name) {
-                                        // ★ 1. 寬度比例 (Weight) 平滑過渡動畫
-                                        val animatedWeight by animateFloatAsState(
-                                            targetValue = chip.weight,
-                                            animationSpec = spring(dampingRatio = 0.75f, stiffness = 350f),
-                                            label = "w_${chip.name}"
-                                        )
+                        chips.forEach { chip ->
+                            key(chip.name) {
+                                // 高性能狀態管理：X, Y, 寬度
+                                val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = 0.82f, stiffness = 320f), label="x")
+                                val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = 0.82f, stiffness = 320f), label="y")
+                                val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = 0.82f, stiffness = 320f), label="w")
 
-                                        // ★ 2. 新增 Chips 時嘅 Scale & Alpha 進場動畫
-                                        var appear by remember { mutableStateOf(false) }
-                                        LaunchedEffect(Unit) { appear = true }
-                                        val scale by animateFloatAsState(
-                                            targetValue = if (appear) 1f else 0.6f,
-                                            animationSpec = spring(dampingRatio = 0.65f, stiffness = 400f),
-                                            label = "s_${chip.name}"
-                                        )
-                                        val alpha by animateFloatAsState(
-                                            targetValue = if (appear) 1f else 0f,
-                                            animationSpec = tween(250),
-                                            label = "a_${chip.name}"
-                                        )
+                                var appear by remember { mutableStateOf(false) }
+                                LaunchedEffect(Unit) { appear = true }
+                                val scale by animateFloatAsState(if (appear) 1f else 0.6f, spring(0.65f, 400f), label="s")
+                                val alpha by animateFloatAsState(if (appear) 1f else 0f, tween(250), label="a")
 
-                                        Box(
-                                            Modifier
-                                                .weight(animatedWeight.coerceAtLeast(0.001f))
-                                                .fillMaxHeight()
-                                                .graphicsLayer { // 套用進場效果
-                                                    scaleX = scale
-                                                    scaleY = scale
-                                                    this.alpha = alpha
-                                                }
-                                        ) {
-                                            QuickInputChip(
-                                                name = chip.name,
-                                                iconUrl = noteIconMap[chip.name] ?: "",
-                                                modifier = Modifier.fillMaxSize(),
-                                                onClick = { onClick(chip.name) }
-                                            )
+                                Box(
+                                    Modifier
+                                        // 用 offset 設定 X, Y 唔會觸發 Recomposition，絕對跟手同順滑
+                                        .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
+                                        // 用 layout 設定寬度，同樣避開 Recomposition 帶來的卡頓
+                                        .layout { measurable, constraints ->
+                                            val w = animW.value.roundToInt()
+                                            val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+                                            layout(w, placeable.height) { placeable.placeRelative(0, 0) }
                                         }
-                                    }
+                                        .height(chipHeightDp)
+                                        .graphicsLayer {
+                                            scaleX = scale
+                                            scaleY = scale
+                                            this.alpha = alpha
+                                        }
+                                ) {
+                                    QuickInputChip(
+                                        name = chip.name,
+                                        iconUrl = noteIconMap[chip.name] ?: "",
+                                        modifier = Modifier.fillMaxSize(),
+                                        onClick = { onClick(chip.name) }
+                                    )
                                 }
                             }
                         }
@@ -4982,8 +4985,8 @@ fun QuickInputSection(
                             .padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        val safeCurrent = pagerState.currentPage.coerceIn(0, pages.lastIndex)
-                        repeat(pages.size) { i ->
+                        val safeCurrent = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
+                        repeat(pagesWithChips.size) { i ->
                             val isSelected = safeCurrent == i
                             Box(
                                 Modifier
