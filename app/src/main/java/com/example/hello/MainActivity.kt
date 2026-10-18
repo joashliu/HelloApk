@@ -6105,17 +6105,23 @@ fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
 }
 
-// ★ 修改：修正 await() 嘅正確寫法
+// ★ 修改：加入強制轉換做 ARGB_8888 嘅保險機制
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     try {
+        // 確保輸入畀 ML Kit 嘅圖有 ARGB_8888 同透明通道，否則 AI 去背後可能會變白底
+        val argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap 
+                         else bitmap.copy(Bitmap.Config.ARGB_8888, true)
+                         
         val options = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
             .enableForegroundBitmap() // 啟用前景分離
             .build()
         val segmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(options)
-        val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+        val image = com.google.mlkit.vision.common.InputImage.fromBitmap(argbBitmap, 0)
         
-        // 正確語法：直接喺 Task 後面加上 .await()
         val result = segmenter.process(image).await()
+        
+        if (argbBitmap !== bitmap) argbBitmap.recycle()
+        
         result.foregroundBitmap ?: bitmap
     } catch (e: Exception) {
         e.printStackTrace()
@@ -6123,37 +6129,44 @@ suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.D
     }
 }
 
-suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE): ByteArray? =
+// ★ 修改：先以高解像度去背，然後先縮放剪裁，確保 AI 睇得清主體
+suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZE): ByteArray? =
     withContext(Dispatchers.IO) {
         try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
             val w = bounds.outWidth; val h = bounds.outHeight
             if (w <= 0 || h <= 0) return@withContext null
-            var s = 1; val md = minOf(w, h)
-            while (md / (s * 2) >= maxSize) s *= 2
-            val opts = BitmapFactory.Options().apply { inSampleSize = s }
+            
+            // 1. 先用較高解像度讀取（例如最高 800px），方便 AI 準確去背
+            var s = 1; val md = maxOf(w, h)
+            while (md / (s * 2) >= 800) s *= 2
+            
+            val opts = BitmapFactory.Options().apply { 
+                inSampleSize = s 
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
             val src = context.contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, opts)
             } ?: return@withContext null
 
-            val processed = if (src.width > src.height) {
-                scaleKeepAspectWidth(src, maxSize)
+            // 2. 進行自動去背 (高解像度下 AI 會準確好多)
+            val bgRemovedBitmap = removeBackground(src)
+            
+            // 3. 去背後，先至將圖片縮放同剪裁到目標尺寸 (100x100)
+            val processed = if (bgRemovedBitmap.width > bgRemovedBitmap.height) {
+                scaleKeepAspectWidth(bgRemovedBitmap, targetSize)
             } else {
-                scaleCropCenter(src, maxSize)
+                scaleCropCenter(bgRemovedBitmap, targetSize)
             }
-            if (processed !== src) src.recycle()
-
-            // ★ 修改：進行自動去背
-            val finalBitmap = removeBackground(processed)
 
             val baos = ByteArrayOutputStream()
-            // ★ 修改：轉用 PNG 格式以保留透明背景
-            finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+            processed.compress(Bitmap.CompressFormat.PNG, 100, baos)
             
             // 清理記憶體
-            if (finalBitmap !== processed) finalBitmap.recycle()
-            processed.recycle()
+            if (processed !== bgRemovedBitmap) processed.recycle()
+            if (bgRemovedBitmap !== src) bgRemovedBitmap.recycle()
+            src.recycle()
             
             baos.toByteArray()
         } catch (e: Exception) { null }
@@ -6198,6 +6211,7 @@ suspend fun removeIconFromSameName(context: Context, db: FirebaseFirestore, name
     } catch (e: Exception) { Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show() }
 }
 
+// ★ 修改：加入 format=png 強制參數，並過濾返回嘅 URL
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dispatchers.IO) {
     try {
         val endpoint = "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
@@ -6212,7 +6226,12 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
             o.write(("Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd").toByteArray())
             o.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
             o.write("--$boundary$lineEnd".toByteArray())
-            // ★ 修改：由 icon.jpg 改做 icon.png，image/jpeg 改做 image/png
+            
+            // 強制 Cloudinary 用 PNG 格式，防止 Preset 將圖片變做 JPG 產生白底
+            o.write(("Content-Disposition: form-data; name=\"format\"$lineEnd$lineEnd").toByteArray())
+            o.write("png$lineEnd".toByteArray())
+            o.write("--$boundary$lineEnd".toByteArray())
+            
             o.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.png\"$lineEnd").toByteArray())
             o.write("Content-Type: image/png$lineEnd$lineEnd".toByteArray())
             o.write(bytes); o.write("$lineEnd".toByteArray())
@@ -6221,7 +6240,11 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
         val code = conn.responseCode
         val text = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() }
                    else conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-        if (code in 200..299) JSONObject(text).optString("secure_url").takeIf { it.isNotBlank() } else null
+        if (code in 200..299) {
+            val url = JSONObject(text).optString("secure_url")
+            // 確保返回嘅 URL 強制讀取 PNG 版本
+            if (url.isNotBlank()) url.replace(".jpg", ".png").replace(".jpeg", ".png") else null
+        } else null
     } catch (e: Exception) { null }
 }
 
