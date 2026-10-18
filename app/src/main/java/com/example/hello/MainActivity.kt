@@ -2695,45 +2695,33 @@ fun LedgerContent(
     val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
-    val scrollAccumPx = remember { mutableFloatStateOf(0f) }
-
-    // ★ 50ms 節流，避免每幀寫 state
-    val collapseScrollConnection = remember(collapseDistancePx) {
+   // ★ 絕對跟手優化：改用普通 FloatArray 紀錄滑動距離，徹底避開每幀寫入 State 觸發 Recomposition
+    val scrollStateData = remember { floatArrayOf(0f) }
+    
+    val collapseScrollConnection = remember(collapseDistancePx, oneRowPx) {
         object : NestedScrollConnection {
-            private var pendingDelta = 0f
-            private var lastWriteMs = 0L
-
             override fun onPreScroll(
                 available: Offset,
                 source: NestedScrollSource
             ): Offset {
-                pendingDelta += available.y
-                val now = System.currentTimeMillis()
-                if (now - lastWriteMs < 50L) return Offset.Zero
-                lastWriteMs = now
-
-                val next = (scrollAccumPx.value - pendingDelta)
-                    .coerceIn(0f, collapseDistancePx)
-                pendingDelta = 0f
-                if (next != scrollAccumPx.value) scrollAccumPx.value = next
+                val prev = scrollStateData[0]
+                val next = (prev - available.y).coerceIn(0f, collapseDistancePx)
+                scrollStateData[0] = next
+                
+                val rawTarget = when {
+                    next < oneRowPx * 0.5f -> 4
+                    next < oneRowPx * 1.5f -> 3
+                    next < oneRowPx * 2.5f -> 2
+                    else -> 1
+                }
+                // 只有跨越邊界（例如由 4 行變 3 行）嗰一瞬間，先會寫入 State
+                // 令到 99.9% 嘅滑動時間都係零負載，完全跟手！
+                if (rawTarget != quickInputMaxRows) {
+                    quickInputMaxRows = rawTarget
+                }
                 return Offset.Zero
             }
         }
-    }
-
-    LaunchedEffect(oneRowPx) {
-        snapshotFlow { scrollAccumPx.value }
-            .distinctUntilChanged()
-            .collect { v ->
-                val prev = quickInputMaxRows
-                val rawTarget = when {
-                    v < oneRowPx * 0.5f -> 4
-                    v < oneRowPx * 1.5f -> 3
-                    v < oneRowPx * 2.5f -> 2
-                    else -> 1
-                }
-                if (rawTarget != prev) quickInputMaxRows = rawTarget
-            }
     }
 
     LaunchedEffect(listState) {
@@ -2744,7 +2732,7 @@ fun LedgerContent(
             .distinctUntilChanged()
             .collect { atTop ->
                 if (atTop) {
-                    if (scrollAccumPx.value != 0f) scrollAccumPx.value = 0f
+                    scrollStateData[0] = 0f
                     if (quickInputMaxRows != 4) quickInputMaxRows = 4
                 }
             }
@@ -2913,10 +2901,8 @@ fun LedgerContent(
 
             if (!isGroupDeleting) {
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
-                    FadingStickyHeader {
-                        Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
-                            DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
-                        }
+                    Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
+                        DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                     }
                 }
 
@@ -3223,33 +3209,6 @@ fun CategoryStatChip(category: String) {
             Text(category, fontSize = 20.sp, color = TEXT_PRIMARY,
                 fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
         }
-    }
-}
-
-// ★ FadingStickyHeader 加 100ms 節流
-@Composable
-fun FadingStickyHeader(content: @Composable () -> Unit) {
-    var rootTop by remember { mutableFloatStateOf(100f) }
-    val lastUpdateMs = remember { longArrayOf(0L) }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .onGloballyPositioned { coords ->
-                val now = System.currentTimeMillis()
-                if (now - lastUpdateMs[0] < 100L) return@onGloballyPositioned
-                lastUpdateMs[0] = now
-                val top = coords.boundsInRoot().top
-                if (top <= 2f || rootTop <= 2f) {
-                    rootTop = top
-                }
-            }
-            .graphicsLayer {
-                val fadeDist = 60f
-                val a = if (rootTop >= 0f) 1f else (1f + rootTop / fadeDist).coerceIn(0f, 1f)
-                alpha = a
-            }
-    ) {
-        content()
     }
 }
 
