@@ -2892,19 +2892,14 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
-                    Box(modifier = Modifier.animateItem(
-                        fadeInSpec = ITEM_FADE_SPEC, fadeOutSpec = ITEM_FADE_SPEC, placementSpec = ITEM_ANIM_SPEC)) {
+                    Box {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .shadow(8.dp, RoundedCornerShape(20.dp),
-                                    ambientColor = Color(0x04000000),
-                                    spotColor = Color(0x0A000000), clip = false)
+                                .shadow(4.dp, RoundedCornerShape(20.dp), clip = true) // 用原生硬體加速陰影
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                .clip(RoundedCornerShape(20.dp))
-                                // ★ 絕對跟手優化 3：移除 .animateContentSize(...) 確保清單 Recycle 極速重繪
                         ) {
                             val activeCount = if (deletingRecordId == null) dayRecords.size
                                               else dayRecords.count { it.id != deletingRecordId }
@@ -3412,8 +3407,7 @@ fun SwipeableRecordItem(
     var targetOffset by remember { mutableFloatStateOf(0f) }
     var startOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    val itemPosHolder = remember { OffsetHolder() }
-    val lastPosUpdateMs = remember { longArrayOf(0L) }
+    val layoutCoordsHolder = remember { arrayOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
 
     // ✅ 用 animateFloatAsState 取代 Animatable + snapshotFlow
     //    - Drag 中：spec = snap()，即時跟手
@@ -3482,10 +3476,7 @@ fun SwipeableRecordItem(
             )
             .background(backgroundColor)
             .onGloballyPositioned { coords ->
-                val now = System.currentTimeMillis()
-                if (now - lastPosUpdateMs[0] < 200L) return@onGloballyPositioned
-                lastPosUpdateMs[0] = now
-                itemPosHolder.value = coords.boundsInRoot().topLeft
+                layoutCoordsHolder[0] = coords
             }
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
@@ -3527,7 +3518,8 @@ fun SwipeableRecordItem(
             .pointerInput("longPress_${record.id}") {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { localOffset ->
-                        latestOnFanStart(itemPosHolder.value + localOffset)
+                        val globalTopLeft = layoutCoordsHolder[0]?.boundsInRoot()?.topLeft ?: Offset.Zero
+                        latestOnFanStart(globalTopLeft + localOffset)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
