@@ -133,6 +133,9 @@ import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.firestore
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -2209,8 +2212,8 @@ fun MainApp(
                             scope.launch {
                                 uploading = true
                                 try {
-                                    val bytes = withContext(Dispatchers.IO) {
-                                        if (url.startsWith("data:image")) {
+                                    val finalBytes = withContext(Dispatchers.IO) {
+                                        val rawBytes = if (url.startsWith("data:image")) {
                                             val base64 = url.substringAfter(",")
                                             android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
                                         } else {
@@ -2220,8 +2223,19 @@ fun MainApp(
                                             conn.readTimeout = 10000
                                             conn.inputStream.readBytes()
                                         }
+                                        
+                                        // ★ 網上圖片自動去背 + 轉 PNG
+                                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                                        val processedBitmap = removeBackground(srcBitmap)
+                                        val baos = ByteArrayOutputStream()
+                                        processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                                        
+                                        if (processedBitmap !== srcBitmap) processedBitmap.recycle()
+                                        srcBitmap.recycle()
+                                        
+                                        baos.toByteArray()
                                     }
-                                    val cloudUrl = uploadBytesToCloudinary(bytes)
+                                    val cloudUrl = uploadBytesToCloudinary(finalBytes)
                                     if (cloudUrl != null) {
                                         applyUrlToSameName(context, db, target.note, cloudUrl)
                                     } else {
@@ -4533,8 +4547,6 @@ fun TopStats(
             contentAlignment = Alignment.Center) {
             Column(Modifier.padding(horizontal = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                // ✅ Crossfade 冇 contentAlignment，用外層 Box 置中
-                //    只做 alpha 動畫，零尺寸測量
                 Box(contentAlignment = Alignment.Center) {
                     Crossfade(
                         targetState = isFilterMode,
@@ -4586,9 +4598,6 @@ fun AnimatedAmount(
     text: String, color: Color, fontSize: TextUnit,
     fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
 ) {
-    // ★ 固定最少 12 個槽位（9 位數字 + 小數點 + 2 位小數），
-    //   令每個位置嘅 AnimatedContent 一直存在，
-    //   輸入/刪除數字時可以穩定播放進入/退出動畫。
     val maxSlots = remember { mutableIntStateOf(maxOf(text.length, 12)) }
 
     LaunchedEffect(text.length) {
@@ -4605,19 +4614,16 @@ fun AnimatedAmount(
                     targetState = char,
                     transitionSpec = {
                         if (targetState != null && initialState == null) {
-                            // 新增數字：由下往上滑入 + 放大
                             (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
                              fadeIn(tween(200)) +
                              scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith
                             fadeOut(tween(0))
                         } else if (targetState == null && initialState != null) {
-                            // 刪除數字：向下滑出 + 縮小
                             fadeIn(tween(0)) togetherWith
                             (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
                              fadeOut(tween(180)) +
                              scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
                         } else {
-                            // 替換數字：上下滑動
                             (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
                             (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
                         }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
@@ -4707,7 +4713,6 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
-// ===== QuickInputChip（保留不變，交由外層 Row/weight 定位） =====
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val ctx = LocalContext.current
@@ -4773,7 +4778,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-// ===== QuickInputSection：穩定版，用 Column + Row + weight，唔會再扽 =====
 private data class QuickChipSpec(val name: String, val weight: Float)
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -4810,8 +4814,6 @@ fun QuickInputSection(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
-            // ★ 一次過計好每一行 chip 嘅目標闊度（weight）
-            //   呢個列表同 maxRowsPerPage 完全無關，所以永遠穩定
             val allFixedRows: List<List<QuickChipSpec>> =
                 remember(items, contentWidthPx, gapPx) {
                     val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
@@ -4882,7 +4884,6 @@ fun QuickInputSection(
                 panelVPadding * 2 +
                 (if (hasIndicator) indicatorSpace else 0.dp)
 
-            // ★ critical damping，避免高度 overshoot 造成視覺抖動
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeight,
                 animationSpec = spring(dampingRatio = 1f, stiffness = 400f),
@@ -4915,7 +4916,6 @@ fun QuickInputSection(
                             ),
                         verticalArrangement = Arrangement.spacedBy(verticalGap)
                     ) {
-                        // ★ 每一行就係一個 Row，chip 用 weight 定位，唔會再 re-measure 到第二個位置
                         pages[page].forEach { row ->
                             Row(
                                 Modifier
@@ -6087,6 +6087,42 @@ fun createTempImageUri(context: Context): Uri? {
     }
 }
 
+fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
+    val w = src.width; val h = src.height; val md = minOf(w, h)
+    val x = (w - md) / 2; val y = (h - md) / 2
+    val cropped = if (x == 0 && y == 0 && w == md && h == md) src
+                  else Bitmap.createBitmap(src, x, y, md, md)
+    val scaled = if (cropped.width == size && cropped.height == size) cropped
+                 else Bitmap.createScaledBitmap(cropped, size, size, true)
+    if (cropped !== src && cropped !== scaled) cropped.recycle()
+    return scaled
+}
+
+fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
+    if (src.width <= maxWidth) return src
+    val ratio = maxWidth.toFloat() / src.width
+    val newH = (src.height * ratio).roundToInt().coerceAtLeast(1)
+    return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
+}
+
+// ★ 新增：ML Kit 自動去背 Function
+suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+    try {
+        val options = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
+            .enableForegroundBitmap() // 啟用前景分離
+            .build()
+        val segmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(options)
+        val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+        
+        // 呼叫 ML Kit 去背 (利用 tasks.await() 轉換 Task 為 Coroutine)
+        val result = kotlinx.coroutines.tasks.await(segmenter.process(image))
+        result.foregroundBitmap ?: bitmap
+    } catch (e: Exception) {
+        e.printStackTrace()
+        bitmap // 如果失敗，保留原本張圖
+    }
+}
+
 suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE): ByteArray? =
     withContext(Dispatchers.IO) {
         try {
@@ -6108,29 +6144,20 @@ suspend fun compressImage(context: Context, uri: Uri, maxSize: Int = ICON_SIZE):
             }
             if (processed !== src) src.recycle()
 
+            // ★ 修改：進行自動去背
+            val finalBitmap = removeBackground(processed)
+
             val baos = ByteArrayOutputStream()
-            processed.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-            processed.recycle(); baos.toByteArray()
+            // ★ 修改：轉用 PNG 格式以保留透明背景
+            finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+            
+            // 清理記憶體
+            if (finalBitmap !== processed) finalBitmap.recycle()
+            processed.recycle()
+            
+            baos.toByteArray()
         } catch (e: Exception) { null }
     }
-
-fun scaleCropCenter(src: Bitmap, size: Int): Bitmap {
-    val w = src.width; val h = src.height; val md = minOf(w, h)
-    val x = (w - md) / 2; val y = (h - md) / 2
-    val cropped = if (x == 0 && y == 0 && w == md && h == md) src
-                  else Bitmap.createBitmap(src, x, y, md, md)
-    val scaled = if (cropped.width == size && cropped.height == size) cropped
-                 else Bitmap.createScaledBitmap(cropped, size, size, true)
-    if (cropped !== src && cropped !== scaled) cropped.recycle()
-    return scaled
-}
-
-fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
-    if (src.width <= maxWidth) return src
-    val ratio = maxWidth.toFloat() / src.width
-    val newH = (src.height * ratio).roundToInt().coerceAtLeast(1)
-    return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
-}
 
 suspend fun uploadIconAndApplyToSameName(context: Context, db: FirebaseFirestore,
     recordId: String, recordName: String, uri: Uri) {
@@ -6185,8 +6212,9 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
             o.write(("Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd").toByteArray())
             o.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
             o.write("--$boundary$lineEnd".toByteArray())
-            o.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.jpg\"$lineEnd").toByteArray())
-            o.write("Content-Type: image/jpeg$lineEnd$lineEnd".toByteArray())
+            // ★ 修改：由 icon.jpg 改做 icon.png，image/jpeg 改做 image/png
+            o.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.png\"$lineEnd").toByteArray())
+            o.write("Content-Type: image/png$lineEnd$lineEnd".toByteArray())
             o.write(bytes); o.write("$lineEnd".toByteArray())
             o.write("--$boundary--$lineEnd".toByteArray()); o.flush()
         }
