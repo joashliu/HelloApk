@@ -2860,7 +2860,8 @@ fun LedgerContent(
 
     LaunchedEffect(filterMode) {
         if (filterMode) {
-            // 進入篩選模式，自動滾動到最頂
+            // 等待頂部 AnimatedContent 展開動畫（約 120ms）完成，避免 CPU 瞬間過載
+            delay(150)
             try {
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
@@ -2868,7 +2869,8 @@ fun LedgerContent(
                 try { listState.scrollToItem(0) } catch (_: Exception) {}
             }
         } else if (preFilterIndex >= 0) {
-            // 退出篩選模式，還原之前嘅滾動位置
+            // 退出時同樣等待頂部收起動畫完成，先至還原之前嘅捲動位置
+            delay(150)
             try {
                 listState.requestScrollToItem(preFilterIndex, preFilterOffset)
             } catch (_: Exception) {
