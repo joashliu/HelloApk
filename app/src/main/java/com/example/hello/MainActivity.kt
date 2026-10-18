@@ -2853,19 +2853,13 @@ fun LedgerContent(
         }
     }
 
-    // ★ 獨立處理進入 filterMode 嘅邏輯，確保無條件回頂
+    // ★ 瞬間回頂版本，無動畫，無 Delay
     LaunchedEffect(filterMode) {
         if (filterMode) {
-            delay(150)
             try {
-                // 如果滑得太落，先跳近啲頂部，再平滑滾動。無條件執行 animateScrollToItem(0)
-                if (listState.firstVisibleItemIndex > 10) {
-                    listState.scrollToItem(10)
-                }
-                listState.animateScrollToItem(0)
-            } catch (_: Exception) {
-                try { listState.scrollToItem(0) } catch (_: Exception) {}
-            }
+                // 直接瞬間切換到第 0 項
+                listState.scrollToItem(0)
+            } catch (_: Exception) {}
         }
     }
 
