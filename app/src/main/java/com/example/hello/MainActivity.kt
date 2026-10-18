@@ -4152,7 +4152,7 @@ fun LedgerKeyboardPanel(
                             }
                         }
                 ) {
-                    if (state.editingNote) {
+                    if (state.editingNote || state.noteText.isNotBlank()) {
                         var tfValue by remember {
                             mutableStateOf(TextFieldValue(text = state.noteText,
                                 selection = TextRange(0, state.noteText.length)))
