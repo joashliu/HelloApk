@@ -1759,6 +1759,11 @@ fun MainApp(
 
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
+            // ★ 防卡頓機制：延遲 250ms
+            // 等待 Android 系統嘅「App 視窗打開動畫」播完，
+            // 以及 Compose 完成冷啟動嘅第一次排版，確保鍵盤彈出動畫可以獨佔資源，維持 60fps/120fps 絲滑過渡。
+            delay(250)
+
             if (filter.modeOn) vm.setFilterModeOn(false)
             if (currentPage != 0) currentPage = 0
 
