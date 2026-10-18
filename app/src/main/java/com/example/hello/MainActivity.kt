@@ -4161,10 +4161,14 @@ fun LedgerKeyboardPanel(
                         LaunchedEffect(state.editingNote) {
                             if (state.editingNote) focusReq.requestFocus()
                         }
-                        LaunchedEffect(nameFlashTrigger) {
-                            if (state.editingNote) {
-                                tfValue = TextFieldValue(text = state.noteText,
-                                    selection = TextRange(0, state.noteText.length))
+                        // 監聽外部狀態變化，只要你撳咗其他 Chips，就會即時更新輸入框內容
+                        LaunchedEffect(state.noteText) {
+                            if (state.noteText != tfValue.text) {
+                                tfValue = TextFieldValue(
+                                    text = state.noteText,
+                                    // 預設全選文字，方便一打字就覆蓋
+                                    selection = TextRange(0, state.noteText.length)
+                                )
                             }
                         }
 
