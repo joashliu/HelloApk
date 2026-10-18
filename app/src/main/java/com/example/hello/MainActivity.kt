@@ -3115,8 +3115,8 @@ fun LedgerContent(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
-                            .fillMaxSize(),
-                            // .nestedScroll(collapseScrollConnection), // 暫時拎走佢
+                            .fillMaxSize()
+                            .nestedScroll(collapseScrollConnection), // <--- 加返呢句！
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
