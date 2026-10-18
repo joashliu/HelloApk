@@ -6105,31 +6105,38 @@ fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
 }
 
-// ★ 修改：加入強制轉換做 ARGB_8888 嘅保險機制
+// ★ 1. 抽離 Segmenter 變成全局變數，提升效能，避免每次都要重新初始化
+private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
+    .enableForegroundBitmap()
+    .build()
+private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(segmenterOptions)
+
+// ★ 2. 終極穩定版去背函數
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+    var argbBitmap: Bitmap? = null
     try {
-        // 確保輸入畀 ML Kit 嘅圖有 ARGB_8888 同透明通道，否則 AI 去背後可能會變白底
-        val argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap 
-                         else bitmap.copy(Bitmap.Config.ARGB_8888, true)
-                         
-        val options = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
-            .enableForegroundBitmap() // 啟用前景分離
-            .build()
-        val segmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(options)
+        // 確保圖片係 ARGB_8888 格式以支援透明通道
+        argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap 
+                     else bitmap.copy(Bitmap.Config.ARGB_8888, true)
+                     
+        if (argbBitmap == null) return@withContext bitmap
+
         val image = com.google.mlkit.vision.common.InputImage.fromBitmap(argbBitmap, 0)
-        
-        val result = segmenter.process(image).await()
-        
-        if (argbBitmap !== bitmap) argbBitmap.recycle()
+        val result = subjectSegmenter.process(image).await()
         
         result.foregroundBitmap ?: bitmap
     } catch (e: Exception) {
         e.printStackTrace()
-        bitmap // 如果失敗，保留原本張圖
+        bitmap // 失敗時安全退回原本圖片
+    } finally {
+        // 安全清理記憶體
+        if (argbBitmap != null && argbBitmap !== bitmap) {
+            argbBitmap.recycle()
+        }
     }
 }
 
-// ★ 修改：先以高解像度去背，然後先縮放剪裁，確保 AI 睇得清主體
+// ★ 3. 處理圖片大小及呼叫去背
 suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZE): ByteArray? =
     withContext(Dispatchers.IO) {
         try {
@@ -6138,7 +6145,6 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
             val w = bounds.outWidth; val h = bounds.outHeight
             if (w <= 0 || h <= 0) return@withContext null
             
-            // 1. 先用較高解像度讀取（例如最高 800px），方便 AI 準確去背
             var s = 1; val md = maxOf(w, h)
             while (md / (s * 2) >= 800) s *= 2
             
@@ -6150,10 +6156,10 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
                 BitmapFactory.decodeStream(it, null, opts)
             } ?: return@withContext null
 
-            // 2. 進行自動去背 (高解像度下 AI 會準確好多)
+            // 進行去背
             val bgRemovedBitmap = removeBackground(src)
             
-            // 3. 去背後，先至將圖片縮放同剪裁到目標尺寸 (100x100)
+            // 去背後裁切
             val processed = if (bgRemovedBitmap.width > bgRemovedBitmap.height) {
                 scaleKeepAspectWidth(bgRemovedBitmap, targetSize)
             } else {
@@ -6161,15 +6167,18 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
             }
 
             val baos = ByteArrayOutputStream()
-            processed.compress(Bitmap.CompressFormat.PNG, 100, baos)
+            processed.compress(Bitmap.CompressFormat.PNG, 100, baos) // 強制轉 PNG
             
-            // 清理記憶體
-            if (processed !== bgRemovedBitmap) processed.recycle()
+            // 安全清理所有相關 Bitmap
+            if (processed !== bgRemovedBitmap && processed !== src) processed.recycle()
             if (bgRemovedBitmap !== src) bgRemovedBitmap.recycle()
             src.recycle()
             
             baos.toByteArray()
-        } catch (e: Exception) { null }
+        } catch (e: Exception) { 
+            e.printStackTrace()
+            null 
+        }
     }
 
 suspend fun uploadIconAndApplyToSameName(context: Context, db: FirebaseFirestore,
@@ -6211,7 +6220,7 @@ suspend fun removeIconFromSameName(context: Context, db: FirebaseFirestore, name
     } catch (e: Exception) { Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show() }
 }
 
-// ★ 修改：加入 format=png 強制參數，並過濾返回嘅 URL
+// ★ 4. 修復 Cloudinary 拒絕上傳嘅問題
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dispatchers.IO) {
     try {
         val endpoint = "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
@@ -6227,11 +6236,7 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
             o.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
             o.write("--$boundary$lineEnd".toByteArray())
             
-            // 強制 Cloudinary 用 PNG 格式，防止 Preset 將圖片變做 JPG 產生白底
-            o.write(("Content-Disposition: form-data; name=\"format\"$lineEnd$lineEnd").toByteArray())
-            o.write("png$lineEnd".toByteArray())
-            o.write("--$boundary$lineEnd".toByteArray())
-            
+            // 移除咗強制 format 參數，改以 filename=icon.png 及 image/png 令 Cloudinary 自然接受 PNG
             o.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.png\"$lineEnd").toByteArray())
             o.write("Content-Type: image/png$lineEnd$lineEnd".toByteArray())
             o.write(bytes); o.write("$lineEnd".toByteArray())
@@ -6241,11 +6246,14 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
         val text = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() }
                    else conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
         if (code in 200..299) {
-            val url = JSONObject(text).optString("secure_url")
-            // 確保返回嘅 URL 強制讀取 PNG 版本
+            val url = org.json.JSONObject(text).optString("secure_url")
+            // 直接喺 URL 替換副檔名，確保 Cloudinary 交出透明去背圖
             if (url.isNotBlank()) url.replace(".jpg", ".png").replace(".jpeg", ".png") else null
         } else null
-    } catch (e: Exception) { null }
+    } catch (e: Exception) { 
+        e.printStackTrace()
+        null 
+    }
 }
 
 private val AVATAR_TEXT_STYLE_BASE = TextStyle(
