@@ -6105,7 +6105,7 @@ fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
 }
 
-// ★ 新增：ML Kit 自動去背 Function
+// ★ 修改：修正 await() 嘅正確寫法
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     try {
         val options = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
@@ -6114,8 +6114,8 @@ suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.D
         val segmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(options)
         val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
         
-        // 呼叫 ML Kit 去背 (利用 tasks.await() 轉換 Task 為 Coroutine)
-        val result = kotlinx.coroutines.tasks.await(segmenter.process(image))
+        // 正確語法：直接喺 Task 後面加上 .await()
+        val result = segmenter.process(image).await()
         result.foregroundBitmap ?: bitmap
     } catch (e: Exception) {
         e.printStackTrace()
