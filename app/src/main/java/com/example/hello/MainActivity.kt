@@ -2695,27 +2695,23 @@ fun LedgerContent(
     val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
-   // ★ 絕對跟手優化：改用普通 FloatArray 紀錄滑動距離，徹底避開每幀寫入 State 觸發 Recomposition
+
+    // ★ 絕對跟手優化 1：用普通 FloatArray 紀錄滑動距離，徹底避開每幀寫入 State 觸發 Recomposition
     val scrollStateData = remember { floatArrayOf(0f) }
     
     val collapseScrollConnection = remember(collapseDistancePx, oneRowPx) {
         object : NestedScrollConnection {
-            override fun onPreScroll(
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val prev = scrollStateData[0]
                 val next = (prev - available.y).coerceIn(0f, collapseDistancePx)
                 scrollStateData[0] = next
-                
+
                 val rawTarget = when {
                     next < oneRowPx * 0.5f -> 4
                     next < oneRowPx * 1.5f -> 3
                     next < oneRowPx * 2.5f -> 2
                     else -> 1
                 }
-                // 只有跨越邊界（例如由 4 行變 3 行）嗰一瞬間，先會寫入 State
-                // 令到 99.9% 嘅滑動時間都係零負載，完全跟手！
                 if (rawTarget != quickInputMaxRows) {
                     quickInputMaxRows = rawTarget
                 }
@@ -2729,13 +2725,13 @@ fun LedgerContent(
             listState.firstVisibleItemIndex == 0 &&
             listState.firstVisibleItemScrollOffset == 0
         }
-            .distinctUntilChanged()
-            .collect { atTop ->
-                if (atTop) {
-                    scrollStateData[0] = 0f
-                    if (quickInputMaxRows != 4) quickInputMaxRows = 4
-                }
+        .distinctUntilChanged()
+        .collect { atTop ->
+            if (atTop) {
+                scrollStateData[0] = 0f
+                if (quickInputMaxRows != 4) quickInputMaxRows = 4
             }
+        }
     }
 
     val fanMenuProgress = animateFloatAsState(
@@ -2847,18 +2843,7 @@ fun LedgerContent(
     }
 
     LaunchedEffect(filterMode) {
-        if (filterMode) {
-            // 等待頂部 AnimatedContent 展開動畫（約 120ms）完成，避免 CPU 瞬間過載
-            delay(150)
-            try {
-                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
-                listState.animateScrollToItem(0)
-            } catch (_: Exception) {
-                try { listState.scrollToItem(0) } catch (_: Exception) {}
-            }
-        } else if (preFilterIndex >= 0) {
-            // 退出時同樣等待頂部收起動畫完成，先至還原之前嘅捲動位置
-            delay(150)
+        if (!filterMode && preFilterIndex >= 0) {
             try {
                 listState.requestScrollToItem(preFilterIndex, preFilterOffset)
             } catch (_: Exception) {
@@ -2886,7 +2871,6 @@ fun LedgerContent(
     val isFanActive = activeFanRecord != null
     val activeFanId = activeFanRecord?.id
 
-    // ★ 移除 stickyHeader / spacer 嘅 animateItem
     val listContent: LazyListScope.() -> Unit = {
         displayGroups.forEach { (dateKey, dayRecords) ->
             var dayIncome = 0.0
@@ -2901,6 +2885,7 @@ fun LedgerContent(
 
             if (!isGroupDeleting) {
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
+                    // ★ 絕對跟手優化 2：移除拖慢滑動效能嘅 FadingStickyHeader 包裝，直接用 Box 顯示
                     Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
                         DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                     }
@@ -2919,7 +2904,7 @@ fun LedgerContent(
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                                 .clip(RoundedCornerShape(20.dp))
-                                .animateContentSize(animationSpec = ITEM_SIZE_SPEC)
+                                // ★ 絕對跟手優化 3：移除 .animateContentSize(...) 確保清單 Recycle 極速重繪
                         ) {
                             val activeCount = if (deletingRecordId == null) dayRecords.size
                                               else dayRecords.count { it.id != deletingRecordId }
@@ -3018,9 +3003,6 @@ fun LedgerContent(
                 }
             }
 
-            // ★ 單一 AnimatedContent + 短 SizeTransform 取代兩個 AnimatedVisibility
-            //    - 同一時間只有一組內容存在，避免同時測量 4 個狀態
-            //    - filter chips 用 Row + weight 取代 LazyVerticalGrid，測量開銷大減
             Column(
                 modifier = Modifier
                     .zIndex(1f)
@@ -3056,7 +3038,6 @@ fun LedgerContent(
                         ) {
                             Spacer(Modifier.height(4.dp))
 
-                            // ★ Row + weight 取代 LazyVerticalGrid（固定每行 4 個等寬 chip）
                             val allCategories: List<String?> = remember(visibleCategories) {
                                 listOf(null) + visibleCategories
                             }
@@ -3086,7 +3067,6 @@ fun LedgerContent(
 
                             Spacer(Modifier.height(4.dp))
                             if (availableMonths.isNotEmpty()) {
-                                // 將 FlowRow 換成可以橫向滑動嘅 Row
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
