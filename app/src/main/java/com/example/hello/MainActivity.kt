@@ -4202,7 +4202,8 @@ fun LedgerKeyboardPanel(
                                                 indication = null
                                             ) {
                                                 tfValue = TextFieldValue("")
-                                                onStateChange(state.copy(noteText = ""))
+                                                // 原本係咁：
+                                                // onStateChange(state.copy(noteText = ""))
                                             }
                                     )
                                 }
