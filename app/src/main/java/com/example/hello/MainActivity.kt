@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
@@ -4153,65 +4154,69 @@ fun LedgerKeyboardPanel(
                         }
                 ) {
                     if (state.editingNote || state.noteText.isNotBlank()) {
-                        var tfValue by remember {
-                            mutableStateOf(TextFieldValue(text = state.noteText,
-                                selection = TextRange(0, state.noteText.length)))
-                        }
-                        val focusReq = remember { FocusRequester() }
-                        LaunchedEffect(state.editingNote) {
-                            if (state.editingNote) focusReq.requestFocus()
-                        }
-                        // 監聽外部狀態變化，只要你撳咗其他 Chips，就會即時更新輸入框內容
-                        LaunchedEffect(state.noteText) {
-                            if (state.noteText != tfValue.text) {
-                                tfValue = TextFieldValue(
-                                    text = state.noteText,
-                                    // 預設全選文字，方便一打字就覆蓋
-                                    selection = TextRange(0, state.noteText.length)
-                                )
-                            }
-                        }
+        var tfValue by remember {
+            mutableStateOf(TextFieldValue(text = state.noteText,
+                selection = TextRange(0, state.noteText.length)))
+        }
+        val focusReq = remember { FocusRequester() }
+        // 1. 獲取鍵盤控制器
+        val keyboardController = LocalSoftwareKeyboardController.current
 
-                        TextField(
-                            value = tfValue,
-                            onValueChange = { nv ->
-                                tfValue = nv
-                                onStateChange(state.copy(noteText = nv.text))
-                            },
-                            placeholder = { Text("名稱") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = SURFACE_ELEVATED,
-                                unfocusedContainerColor = SURFACE_ELEVATED,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent
-                            ),
-                            // 加咗呢段 trailingIcon 顯示交叉掣
-                            trailingIcon = {
-                                if (state.noteText.isNotEmpty()) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "清除",
-                                        tint = TEXT_SECONDARY,
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null
-                                            ) {
-                                                tfValue = TextFieldValue("")
-                                                // 原本係咁：
-                                                // onStateChange(state.copy(noteText = ""))
-                                            }
-                                    )
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                            modifier = Modifier.fillMaxSize().focusRequester(focusReq)
-                        )
+        LaunchedEffect(state.editingNote) {
+            if (state.editingNote) focusReq.requestFocus()
+        }
+        
+        LaunchedEffect(state.noteText) {
+            if (state.noteText != tfValue.text) {
+                tfValue = TextFieldValue(
+                    text = state.noteText,
+                    selection = TextRange(0, state.noteText.length)
+                )
+            }
+        }
+
+        TextField(
+            value = tfValue,
+            onValueChange = { nv ->
+                tfValue = nv
+                onStateChange(state.copy(noteText = nv.text))
+            },
+            placeholder = { Text("名稱") },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = SURFACE_ELEVATED,
+                unfocusedContainerColor = SURFACE_ELEVATED,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent
+            ),
+            trailingIcon = {
+                if (state.noteText.isNotEmpty()) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "清除",
+                        tint = TEXT_SECONDARY,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                tfValue = TextFieldValue("")
+                                onStateChange(state.copy(noteText = "", editingNote = true))
+                                
+                                // 2. 直接強制攞焦點同彈出系統鍵盤！
+                                focusReq.requestFocus()
+                                keyboardController?.show()
+                            }
+                    )
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+            modifier = Modifier.fillMaxSize().focusRequester(focusReq)
+        )
 
                         val suggestions = remember(state.noteText, allNoteNames) {
                             filterNoteSuggestions(state.noteText, allNoteNames)
