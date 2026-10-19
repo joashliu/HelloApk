@@ -216,7 +216,6 @@ val NAV_BOTTOM_PADDING = 20.dp
 val ROW_ALT_COLOR = Color(0xFFF4F7FC)
 const val FILTER_ANIM_MS = 250
 
-// ★ 提升到 top-level：動畫 spec 只建一次
 private val ITEM_ANIM_SPEC = spring<IntOffset>(dampingRatio = 0.75f, stiffness = 300f)
 private val ITEM_FADE_SPEC = spring<Float>(dampingRatio = 0.8f, stiffness = 250f)
 private val ITEM_SIZE_SPEC = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
@@ -357,7 +356,6 @@ data class CalendarUiState(
     val avgPerDay: Double = 0.0,
 )
 
-// ===== 最近 7 日每日支出（棒形圖用） =====
 @Immutable
 data class WeeklyExpenseDay(
     val dayOfMonth: Int,
@@ -461,8 +459,6 @@ private fun getTodayStartMillis(): Long {
 
 // =========================================================
 //  ★ LedgerViewModel
-//    - _justAddedIds / _deletingIds 統一管理本地 + 遠端動畫
-//    - ghostRecordsById 讓「已被遠端刪除」嘅記錄繼續留喺列表播退出動畫
 // =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -470,7 +466,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
 
     private val recordsById = HashMap<String, Record>()
-    // ★ 已被資料源移除、但 UI 仲要顯示嚟播退出動畫嘅記錄
     private val ghostRecordsById = HashMap<String, Record>()
 
     private val _records = MutableStateFlow<List<Record>>(emptyList())
@@ -488,7 +483,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun setFilterSearch(v: String)      { _filter.update { it.copy(search = v) } }
     fun setShowFuture(v: Boolean)       { _filter.update { it.copy(showFuture = v) } }
 
-    // ★ 動畫狀態：本地 + 遠端共用，UI 只讀
     private val _justAddedIds = MutableStateFlow<Set<String>>(emptySet())
     val justAddedIds: StateFlow<Set<String>> = _justAddedIds.asStateFlow()
 
@@ -593,8 +587,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                             DocumentChange.Type.ADDED -> {
                                 val existed = recordsById.containsKey(r.id)
                                 recordsById[r.id] = r
-                                // ★ 只有真正嚟自其他裝置嘅新增才觸發動畫；
-                                //    本地 addRecord 已經自己放咗入 justAddedIds，Firestore 回聲要跳過。
                                 if (!existed) remoteAdded.add(r.id)
                             }
                             DocumentChange.Type.MODIFIED -> {
@@ -602,8 +594,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                             }
                             DocumentChange.Type.REMOVED -> {
                                 val existing = recordsById.remove(r.id)
-                                // ★ 只有喺 recordsById 仍然存在，先代表係遠端刪除；
-                                //    本地 commitDelete 已先移除，Firestore 回聲 remove 會攞到 null → 忽略。
                                 if (existing != null) {
                                     ghostRecordsById[r.id] = existing
                                     remoteRemoved.add(r.id)
@@ -637,8 +627,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                         viewModelScope.launch {
                             delay(900)
                             for (id in ids) ghostRecordsById.remove(id)
-                            _deletingIds.update { it - ids }
+                            // ★ 關鍵修復：先從 records 移除 ghost，再清 deletingIds。
+                            //    咁樣 combine 任何時刻最多只會見到
+                            //    「records 冇咗記錄、deletingIds 有孤立 id」呢個無害狀態，
+                            //    唔會出現「records 仍有記錄、但 deletingIds 冇標記」嘅
+                            //    中間態（嗰個中間態會令 AnimatedRecordItem 走快速路徑
+                            //    重新顯示 72dp，造成「消失完又閃返」）。
                             emitSorted()
+                            _deletingIds.update { it - ids }
                         }
                     }
                 }
@@ -682,17 +678,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ★ 標記為「刪除中」（UI 立即播退出動畫），記錄暫時仍留喺 recordsById
     fun markAsDeleting(id: String) {
         _deletingIds.update { it + id }
     }
 
-    // ★ 取消刪除（undo）
     fun cancelDelete(id: String) {
         _deletingIds.update { it - id }
     }
 
-    // ★ 真正刪除（900ms 後由 UI 呼叫），同時清 ghost
     fun commitDelete(id: String) {
         _deletingIds.update { it - id }
         recordsById.remove(id)
@@ -704,7 +697,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // 保留舊 API，內部走 commitDelete
     fun deleteRecord(id: String) {
         commitDelete(id)
     }
@@ -1043,7 +1035,6 @@ private fun computeCalendarUiState(
     )
 }
 
-// ===== 計算最近 7 日每日支出（棒形圖用） =====
 fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
     val todayStart = getTodayStartMillis()
     val dayMs = 86_400_000L
@@ -1615,11 +1606,9 @@ fun MainApp(
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
 
-    // ★ 動畫狀態：全部嚟自 VM，本地同遠端共用
     val justAddedIds by vm.justAddedIds.collectAsState()
     val deletingIds by vm.deletingIds.collectAsState()
 
-    // ===== 最近 7 日支出棒形圖資料 =====
     val rawRecords by vm.records.collectAsState()
     val weeklyExpenses = remember(rawRecords) { computeWeeklyExpenses(rawRecords) }
     var hasPlayedWeeklyIntro by rememberSaveable { mutableStateOf(false) }
@@ -1640,7 +1629,6 @@ fun MainApp(
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
 
-    // ★ 手動輸入金額時間戳（避免 quick chip 覆蓋使用者親手打嘅數字）
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
 
     val keyboardAnimProgress = remember { Animatable(0f) }
@@ -3411,9 +3399,6 @@ fun LedgerContent(
     }
 }
 
-// =========================================================
-//  ★ 最近 7 日每日支出棒形圖
-// =========================================================
 @Composable
 fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
@@ -3598,13 +3583,29 @@ private val PARTICLE_COLORS = listOf(
     BRAND_PRIMARY, BRAND_PRIMARY_DARK, Color(0xFF818CF8), Color(0xFFFBBF24), Color(0xFF34D399)
 )
 
+// =========================================================
+//  ★ AnimatedRecordItem
+//    加入 everDeleting 保護：一旦播過刪除動畫就唔會回頭，直到組件被銷毀
+// =========================================================
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
     isDeleting: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    if (!animateOnMount && !isDeleting) {
+    // ★ 關鍵修復：一旦進入刪除動畫，就維持「刪除態」直到組件被銷毀。
+    //    咁樣就算父層 VM 更新時序抖動（先清 deletingIds、後才從 records 移除 ghost），
+    //    都唔會中途走快速路徑而閃返 72dp 高度。
+    //    只有 animateOnMount 變 true（即撤銷還原）才重置。
+    var everDeleting by remember { mutableStateOf(isDeleting) }
+    LaunchedEffect(animateOnMount, isDeleting) {
+        when {
+            animateOnMount -> everDeleting = false
+            isDeleting -> everDeleting = true
+        }
+    }
+
+    if (!animateOnMount && !everDeleting) {
         Box(Modifier.fillMaxWidth().height(72.dp)) {
             content()
         }
