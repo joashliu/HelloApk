@@ -2901,6 +2901,46 @@ fun LedgerContent(
     val isFanActive = activeFanRecord != null
     val activeFanId = activeFanRecord?.id
 
+    // ★ 智能運算：最近 7 日支出資料 (自動跟隨 filtered 更新)
+    val last7DaysData = remember(filtered, deletingRecordId) {
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = System.currentTimeMillis()
+        
+        val keys = mutableListOf<String>()
+        val labels = mutableListOf<String>()
+        
+        cal.add(java.util.Calendar.DAY_OF_YEAR, -6)
+        
+        for (i in 0..6) {
+            val y = cal.get(java.util.Calendar.YEAR)
+            val m = cal.get(java.util.Calendar.MONTH) + 1
+            val d = cal.get(java.util.Calendar.DAY_OF_MONTH)
+            val dow = cal.get(java.util.Calendar.DAY_OF_WEEK)
+            val weekChars = arrayOf("日", "一", "二", "三", "四", "五", "六")
+            val wd = weekChars[dow - 1]
+            
+            keys.add(String.format("%04d-%02d-%02d", y, m, d))
+            labels.add(if (i == 6) "今日" else wd)
+            
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        }
+        
+        val amounts = DoubleArray(7) { 0.0 }
+        filtered.forEach { r ->
+            if (r.category != INCOME_CATEGORY && r.id != deletingRecordId) {
+                val rCal = java.util.Calendar.getInstance().apply { timeInMillis = r.timestamp }
+                val ry = rCal.get(java.util.Calendar.YEAR)
+                val rm = rCal.get(java.util.Calendar.MONTH) + 1
+                val rd = rCal.get(java.util.Calendar.DAY_OF_MONTH)
+                val rKey = String.format("%04d-%02d-%02d", ry, rm, rd)
+                
+                val idx = keys.indexOf(rKey)
+                if (idx != -1) amounts[idx] += r.amount
+            }
+        }
+        keys.indices.map { labels[it] to amounts[it] }
+    }
+
     val listContent: LazyListScope.() -> Unit = {
         displayGroups.forEachIndexed { index, (dateKey, dayRecords) ->
             var dayIncome = 0.0
@@ -3203,6 +3243,112 @@ fun LedgerContent(
                         item(key = "magic_top_anchor", contentType = "anchor") {
                             Spacer(Modifier.height(1.dp))
                         }
+
+                        // ★ 完美插入：七日動態棒形圖
+                        if (!filterMode) {
+                            item(key = "expense_chart", contentType = "chart") {
+                                // 記住播放狀態，切換 Tab 返嚟唔會重新升起
+                                var chartHasPlayed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+                                val enterAnim = remember { Animatable(if (chartHasPlayed) 1f else 0f) }
+                                
+                                LaunchedEffect(Unit) {
+                                    if (!chartHasPlayed) {
+                                        delay(150)
+                                        enterAnim.animateTo(1f, tween(800, easing = FastOutSlowInEasing))
+                                        chartHasPlayed = true
+                                    }
+                                }
+
+                                val maxAmt = remember(last7DaysData) { last7DaysData.maxOf { it.second }.coerceAtLeast(10.0) }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        .graphicsLayer {
+                                            val info = listState.layoutInfo.visibleItemsInfo.find { it.key == "expense_chart" }
+                                            val offset = info?.offset?.toFloat() ?: 0f
+                                            if (offset < 0) {
+                                                val h = info?.size?.toFloat() ?: 1f
+                                                val progress = (abs(offset) / h).coerceIn(0f, 1f)
+                                                
+                                                // 1. 減速滯留視差 (向下推，等佢退場慢過文字)
+                                                translationY = abs(offset) * 0.75f 
+                                                
+                                                // 2. 高速漸隱，未完全離開畫面就已經隱形
+                                                alpha = (1f - progress * 1.5f).coerceIn(0f, 1f)
+                                                
+                                                // 3. 微量縮細
+                                                val s = 1f - progress * 0.15f
+                                                scaleX = s
+                                                scaleY = s
+                                                
+                                                // 4. 動態垂直模糊，好似融入背景霧氣咁消失
+                                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && progress > 0.02f) {
+                                                    val blur = progress * 25f
+                                                    renderEffect = androidx.compose.ui.graphics.BlurEffect(blur, blur * 1.5f)
+                                                }
+                                            }
+                                        }
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .shadow(4.dp, RoundedCornerShape(20.dp))
+                                            .background(SURFACE_CARD, RoundedCornerShape(20.dp))
+                                            .padding(16.dp)
+                                    ) {
+                                        Text("最近七日支出", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().height(110.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.Bottom
+                                        ) {
+                                            last7DaysData.forEachIndexed { index, (label, amt) ->
+                                                val targetRatio = (amt / maxAmt).toFloat()
+                                                // ★ 彈性高度：當有新數字加入，其他棒形會自動縮短讓位，完美過渡
+                                                val animatedRatio by animateFloatAsState(
+                                                    targetValue = targetRatio * enterAnim.value,
+                                                    animationSpec = spring(dampingRatio = 0.65f, stiffness = 300f),
+                                                    label = "bar_$index"
+                                                )
+                                                
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Bottom,
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    if (amt > 0) {
+                                                        val displayAmt = if (amt >= 1000) String.format(java.util.Locale.US, "%.1fk", amt/1000.0) else amt.toInt().toString()
+                                                        Text(displayAmt, fontSize = 9.sp, color = TEXT_TERTIARY, maxLines = 1)
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                    } else {
+                                                        Spacer(modifier = Modifier.height(14.dp))
+                                                    }
+                                                    
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .width(16.dp)
+                                                            .fillMaxHeight(animatedRatio.coerceAtLeast(0.03f))
+                                                            .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                                            .background(
+                                                                Brush.verticalGradient(
+                                                                    colors = listOf(COLOR_EXPENSE.copy(alpha = 0.9f), COLOR_EXPENSE.copy(alpha = 0.4f))
+                                                                )
+                                                            )
+                                                    )
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    Text(label, fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = if (label == "今日") FontWeight.Bold else FontWeight.Medium)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         if (displayGroups.isEmpty() && !showKeyboard) {
                             item(key = "__empty__", contentType = "empty") {
                                 Box(Modifier.fillParentMaxWidth().padding(top = 80.dp),
