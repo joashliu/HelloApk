@@ -1519,6 +1519,9 @@ fun MainApp(
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             keyboardAnimProgress.snapTo(0f)
+            // ★ 終極防疾機制 2：畀 30ms 緩衝
+            // 等主線程處理完狀態更新，確保動畫 100% 由第 0 幀開始順滑播放
+            delay(30) 
             keyboardAnimProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
         } else {
             keyboardAnimProgress.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
@@ -1759,10 +1762,9 @@ fun MainApp(
 
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
-            // ★ 防卡頓機制：延遲 250ms
-            // 等待 Android 系統嘅「App 視窗打開動畫」播完，
-            // 以及 Compose 完成冷啟動嘅第一次排版，確保鍵盤彈出動畫可以獨佔資源，維持 60fps/120fps 絲滑過渡。
-            delay(250)
+            // ★ 終極防疾機制 3：加長至 400ms
+            // Android 系統冷啟動視窗動畫約需 350ms，等系統完全安靜落嚟，先至完美接力彈出鍵盤
+            delay(400)
 
             if (filter.modeOn) vm.setFilterModeOn(false)
             if (currentPage != 0) currentPage = 0
@@ -2507,56 +2509,52 @@ private fun AnimatedKeyboardLayer(
     nameFlashTrigger: Int,
     modifier: Modifier = Modifier
 ) {
-    var shouldRender by remember { mutableStateOf(showKeyboard) }
+    // ★ 終極防疾機制 1：不再動態卸載鍵盤
+    // 讓鍵盤長駐記憶體，避開每次彈出時「首次排版 (Measure & Layout)」嘅龐大開銷
+    val currentP = progressProvider()
+    val isActive = currentP > 0f || showKeyboard
 
-    LaunchedEffect(showKeyboard) {
-        if (showKeyboard) {
-            shouldRender = true
-        } else {
-            delay(500)
-            if (progressProvider() < 0.001f) shouldRender = false
-        }
-    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
+            // 當完全隱藏時，將鍵盤移去畫面之外，避免阻擋點擊
+            .offset {
+                if (!isActive) IntOffset(10000, 10000) else IntOffset(0, 0)
+            }
+            .graphicsLayer {
+                alpha = currentP
 
-    if (shouldRender) {
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
-                .graphicsLayer {
-                    val currentP = progressProvider()
-                    alpha = currentP
-
-                    val w = size.width
-                    val h = size.height
-                    if (w > 0f && h > 0f) {
-                        val ox = (1f - (32.dp.toPx() / w)).coerceIn(0.02f, 0.98f)
-                        val oy = (1f - (100.dp.toPx() / h)).coerceIn(0.02f, 0.98f)
-                        transformOrigin = TransformOrigin(ox, oy)
-                    } else {
-                        transformOrigin = TransformOrigin(1f, 1f)
-                    }
-
-                    val s = 0.13f + 0.87f * currentP
-                    scaleX = s
-                    scaleY = s
+                val w = size.width
+                val h = size.height
+                if (w > 0f && h > 0f) {
+                    val ox = (1f - (32.dp.toPx() / w)).coerceIn(0.02f, 0.98f)
+                    val oy = (1f - (100.dp.toPx() / h)).coerceIn(0.02f, 0.98f)
+                    transformOrigin = TransformOrigin(ox, oy)
+                } else {
+                    transformOrigin = TransformOrigin(1f, 1f)
                 }
-        ) {
-            LedgerKeyboardPanel(
-                state = keyboardState,
-                onStateChange = onKeyboardStateChange,
-                onDismiss = onKeyboardDismiss,
-                onConfirm = onKeyboardConfirm,
-                onNext = onKeyboardNext,
-                onPickCategory = { },
-                allNoteNames = allNoteNames,
-                noteCategoryMap = noteCategoryMap,
-                nameFlashTrigger = nameFlashTrigger,
-                showKeyboard = showKeyboard,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+
+                val s = 0.13f + 0.87f * currentP
+                scaleX = s
+                scaleY = s
+            }
+    ) {
+        LedgerKeyboardPanel(
+            state = keyboardState,
+            onStateChange = onKeyboardStateChange,
+            onDismiss = onKeyboardDismiss,
+            onConfirm = onKeyboardConfirm,
+            onNext = onKeyboardNext,
+            onPickCategory = { },
+            allNoteNames = allNoteNames,
+            noteCategoryMap = noteCategoryMap,
+            nameFlashTrigger = nameFlashTrigger,
+            showKeyboard = showKeyboard,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
+}
 }
 
 @Composable
