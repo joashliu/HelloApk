@@ -450,7 +450,7 @@ private fun getTodayStartMillis(): Long {
 }
 
 // =========================================================
-//  ★ LedgerViewModel（HashMap source of truth 版本）
+//  ★ LedgerViewModel
 // =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -644,9 +644,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-// =========================================================
-//  ★ NoteIndex 相關（只依賴 records）
-// =========================================================
 private fun buildNoteIndex(records: List<Record>): NoteIndex {
     if (records.isEmpty()) return NoteIndex()
 
@@ -707,9 +704,6 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
     )
 }
 
-// =========================================================
-//  ★ computeLedgerUiState（拆分版：只做 filter 相關）
-// =========================================================
 private fun computeLedgerUiState(
     records: List<Record>,
     noteIndex: NoteIndex,
@@ -951,9 +945,6 @@ private fun computeCalendarUiState(
     )
 }
 
-// =========================================================
-//  Helpers
-// =========================================================
 object AboveAnchorPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
@@ -1295,9 +1286,6 @@ fun FanMenuOverlay(
     }
 }
 
-// =========================================================
-//  ★ MainActivity（通知防抖 + 磁貼持久化版本）
-// =========================================================
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -1396,7 +1384,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ★ 將 topQuickNotesInfo 持久化，等磁貼服務可以讀取
     private fun persistTopQuickNotes(infos: List<QuickNoteInfo>) {
         try {
             val prefs = getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
@@ -1519,8 +1506,6 @@ fun MainApp(
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             keyboardAnimProgress.snapTo(0f)
-            // ★ 終極防疾機制 2：畀 30ms 緩衝
-            // 等主線程處理完狀態更新，確保動畫 100% 由第 0 幀開始順滑播放
             delay(30) 
             keyboardAnimProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
         } else {
@@ -1762,8 +1747,6 @@ fun MainApp(
 
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
-            // ★ 終極防疾機制 3：加長至 400ms
-            // Android 系統冷啟動視窗動畫約需 350ms，等系統完全安靜落嚟，先至完美接力彈出鍵盤
             delay(400)
 
             if (filter.modeOn) vm.setFilterModeOn(false)
@@ -1893,7 +1876,7 @@ fun MainApp(
                     onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                     onAddClick = { currentPage = 0; openKeyboardForNew() },
                     deletingRecordId = filter.deletingId,
-                    justAddedId = justAddedId // ★ 新增：傳遞復原觸發變數
+                    justAddedId = justAddedId
                 )
             }
         }
@@ -2233,7 +2216,6 @@ fun MainApp(
                                             conn.inputStream.readBytes()
                                         }
                                         
-                                        // ★ 網上圖片自動去背 + 轉 PNG
                                         val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
                                         val processedBitmap = removeBackground(srcBitmap)
                                         val baos = ByteArrayOutputStream()
@@ -2509,8 +2491,6 @@ private fun AnimatedKeyboardLayer(
     nameFlashTrigger: Int,
     modifier: Modifier = Modifier
 ) {
-    // ★ 終極防疾機制 1：不再動態卸載鍵盤
-    // 讓鍵盤長駐記憶體，避開每次彈出時「首次排版 (Measure & Layout)」嘅龐大開銷
     val currentP = progressProvider()
     val isActive = currentP > 0f || showKeyboard
 
@@ -2518,7 +2498,6 @@ private fun AnimatedKeyboardLayer(
         modifier = modifier
             .fillMaxWidth()
             .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
-            // 當完全隱藏時，將鍵盤移去畫面之外，避免阻擋點擊
             .offset {
                 if (!isActive) IntOffset(10000, 10000) else IntOffset(0, 0)
             }
@@ -2554,7 +2533,6 @@ private fun AnimatedKeyboardLayer(
             modifier = Modifier.fillMaxWidth()
         )
     }
-}
 }
 
 @Composable
@@ -2715,7 +2693,6 @@ fun LedgerContent(
 
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
 
-    // ★ 絕對跟手優化 1：用普通 FloatArray 紀錄滑動距離，徹底避開每幀寫入 State 觸發 Recomposition
     val scrollStateData = remember { floatArrayOf(0f) }
     
     val collapseScrollConnection = remember(collapseDistancePx, oneRowPx) {
@@ -2872,11 +2849,9 @@ fun LedgerContent(
         }
     }
 
-    // ★ 瞬間回頂版本，無動畫，無 Delay
     LaunchedEffect(filterMode) {
         if (filterMode) {
             try {
-                // 直接瞬間切換到第 0 項
                 listState.scrollToItem(0)
             } catch (_: Exception) {}
         }
@@ -2914,7 +2889,6 @@ fun LedgerContent(
 
             if (!isGroupDeleting) {
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
-                    // ★ 絕對跟手優化 2：移除拖慢滑動效能嘅 FadingStickyHeader 包裝，直接用 Box 顯示
                     Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
                         DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                     }
@@ -2926,7 +2900,7 @@ fun LedgerContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .shadow(4.dp, RoundedCornerShape(20.dp), clip = true) // 用原生硬體加速陰影
+                                .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
                         ) {
@@ -3403,8 +3377,6 @@ fun TrianglePointer(
     }
 }
 
-private class OffsetHolder(var value: Offset = Offset.Zero)
-
 @Composable
 fun SwipeableRecordItem(
     modifier: Modifier = Modifier,
@@ -3438,19 +3410,13 @@ fun SwipeableRecordItem(
     var isDragging by remember { mutableStateOf(false) }
     val layoutCoordsHolder = remember { arrayOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
 
-    // ✅ 用 animateFloatAsState 取代 Animatable + snapshotFlow
-    //    - Drag 中：spec = snap()，即時跟手
-    //    - Drag end：spec = SWIPE_SPRING，由當前位置平滑彈去 targetOffset
     val animatedOffset by animateFloatAsState(
         targetValue = targetOffset,
         animationSpec = if (isDragging) snap() else SWIPE_SPRING,
         label = "swipeOffset"
     )
 
-    // Drag 中用 targetOffset 顯示（零延遲跟手）；
-    // Drag end 後切到 animatedOffset（由最後拖到嘅位置開始 animate，唔會跳）
     val offsetX = if (isDragging) targetOffset else animatedOffset
-
     val needsLayer = isFanMenuActive || isActiveItem || isOtherItem
 
     val itemAlpha by animateFloatAsState(
@@ -3680,7 +3646,7 @@ fun DayDetailPanel(
     onChangeIcon: (Record) -> Unit,
     onDismiss: () -> Unit,
     deletingRecordId: String? = null,
-    justAddedId: String? = null, // ★ 新增呢行參數
+    justAddedId: String? = null,
     onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
     onFanMenuDrag: (Offset) -> Unit = {},
     onFanMenuEnd: () -> Unit = {},
@@ -3739,7 +3705,7 @@ fun DayDetailPanel(
             key(r.id) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     AnimatedRecordItem(
-                        animateOnMount = r.id == justAddedId, // ★ 修改：觸發復原動畫
+                        animateOnMount = r.id == justAddedId,
                         isDeleting = r.id == deletingRecordId
                     ) {
                         SwipeableRecordItem(
@@ -4117,69 +4083,66 @@ fun LedgerKeyboardPanel(
                         }
                 ) {
                     if (state.editingNote || state.noteText.isNotBlank()) {
-        var tfValue by remember {
-            mutableStateOf(TextFieldValue(text = state.noteText,
-                selection = TextRange(0, state.noteText.length)))
-        }
-        val focusReq = remember { FocusRequester() }
-        // 1. 獲取鍵盤控制器
-        val keyboardController = LocalSoftwareKeyboardController.current
+                        var tfValue by remember {
+                            mutableStateOf(TextFieldValue(text = state.noteText,
+                                selection = TextRange(0, state.noteText.length)))
+                        }
+                        val focusReq = remember { FocusRequester() }
+                        val keyboardController = LocalSoftwareKeyboardController.current
 
-        LaunchedEffect(state.editingNote) {
-            if (state.editingNote) focusReq.requestFocus()
-        }
-        
-        LaunchedEffect(state.noteText) {
-            if (state.noteText != tfValue.text) {
-                tfValue = TextFieldValue(
-                    text = state.noteText,
-                    selection = TextRange(0, state.noteText.length)
-                )
-            }
-        }
-
-        TextField(
-            value = tfValue,
-            onValueChange = { nv ->
-                tfValue = nv
-                onStateChange(state.copy(noteText = nv.text))
-            },
-            placeholder = { Text("名稱") },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = SURFACE_ELEVATED,
-                unfocusedContainerColor = SURFACE_ELEVATED,
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                disabledIndicatorColor = Color.Transparent
-            ),
-            trailingIcon = {
-                if (state.noteText.isNotEmpty()) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "清除",
-                        tint = TEXT_SECONDARY,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                tfValue = TextFieldValue("")
-                                onStateChange(state.copy(noteText = "", editingNote = true))
-                                
-                                // 2. 直接強制攞焦點同彈出系統鍵盤！
-                                focusReq.requestFocus()
-                                keyboardController?.show()
+                        LaunchedEffect(state.editingNote) {
+                            if (state.editingNote) focusReq.requestFocus()
+                        }
+                        
+                        LaunchedEffect(state.noteText) {
+                            if (state.noteText != tfValue.text) {
+                                tfValue = TextFieldValue(
+                                    text = state.noteText,
+                                    selection = TextRange(0, state.noteText.length)
+                                )
                             }
-                    )
-                }
-            },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-            modifier = Modifier.fillMaxSize().focusRequester(focusReq)
-        )
+                        }
+
+                        TextField(
+                            value = tfValue,
+                            onValueChange = { nv ->
+                                tfValue = nv
+                                onStateChange(state.copy(noteText = nv.text))
+                            },
+                            placeholder = { Text("名稱") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = SURFACE_ELEVATED,
+                                unfocusedContainerColor = SURFACE_ELEVATED,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent
+                            ),
+                            trailingIcon = {
+                                if (state.noteText.isNotEmpty()) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "清除",
+                                        tint = TEXT_SECONDARY,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null
+                                            ) {
+                                                tfValue = TextFieldValue("")
+                                                onStateChange(state.copy(noteText = "", editingNote = true))
+                                                focusReq.requestFocus()
+                                                keyboardController?.show()
+                                            }
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+                            modifier = Modifier.fillMaxSize().focusRequester(focusReq)
+                        )
 
                         val suggestions = remember(state.noteText, allNoteNames) {
                             filterNoteSuggestions(state.noteText, allNoteNames)
@@ -4784,9 +4747,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     }
 }
 
-private data class QuickChipSpec(val name: String, val weight: Float)
-
-// ★ 1. 新增：用來記錄每粒 Chip 絕對坐標嘅 Data Class
 private data class PlacedChip(
     val name: String, 
     val targetW: Float, 
@@ -4814,7 +4774,6 @@ fun QuickInputSection(
     val panelVPaddingDp = 14.dp
     val indicatorSpaceDp = 20.dp
 
-    // 預先計好所有常用嘅 Pixel 數值，提升效能
     val gapPx = remember(density) { with(density) { gapDp.toPx() } }
     val verticalGapPx = remember(density) { with(density) { verticalGapDp.toPx() } }
     val chipHeightPx = remember(density) { with(density) { chipHeightDp.toPx() } }
@@ -4832,13 +4791,11 @@ fun QuickInputSection(
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
-            // ★ 2. 坐標化排版：精準計算每粒 Chip 嘅 X, Y, W
             val pagesWithChips = remember(items, contentWidthPx, gapPx, maxRowsPerPage, chipHeightPx, verticalGapPx, baseItemPx) {
                 val intrinsicRows = mutableListOf<MutableList<Pair<String, Float>>>()
                 var currentRow = mutableListOf<Pair<String, Float>>()
                 var currentRowWidth = 0f
 
-                // (A) 分行邏輯
                 for (item in items) {
                     val name = item.first
                     val textW = noteTextWidthCache.getOrPut(name) {
@@ -4857,7 +4814,6 @@ fun QuickInputSection(
                 }
                 if (currentRow.isNotEmpty()) intrinsicRows.add(currentRow)
 
-                // (B) 完美填滿空隙邏輯
                 val perfectlyFilledRows = intrinsicRows.map { row ->
                     val n = row.size
                     val spacingTotal = (n - 1).coerceAtLeast(0) * gapPx
@@ -4871,7 +4827,6 @@ fun QuickInputSection(
                     }
                 }
 
-                // (C) 分頁並轉換成絕對坐標 (X, Y)
                 perfectlyFilledRows.chunked(maxRowsPerPage).map { rowsInPage ->
                     val chips = mutableListOf<PlacedChip>()
                     rowsInPage.forEachIndexed { rowIdx, rowChips ->
@@ -4900,7 +4855,6 @@ fun QuickInputSection(
             val hasIndicator = pagesWithChips.size > 1
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
             
-            // ★ 3. 計算動態高度
             val targetHeightDp = remember(pagesWithChips, safeCurrentPage, hasIndicator) {
                 val currentRowCount = pagesWithChips[safeCurrentPage].let { chips ->
                     if (chips.isEmpty()) 1 else {
@@ -4935,7 +4889,6 @@ fun QuickInputSection(
                 ) { page ->
                     val chips = pagesWithChips.getOrNull(page) ?: emptyList()
 
-                    // ★ 4. 絕對定位容器：所有 Chip 喺同一個 Box 入面自由飛
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -4943,7 +4896,6 @@ fun QuickInputSection(
                     ) {
                         chips.forEach { chip ->
                             key(chip.name) {
-                                // 高性能狀態管理：X, Y, 寬度
                                 val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = 0.82f, stiffness = 320f), label="x")
                                 val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = 0.82f, stiffness = 320f), label="y")
                                 val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = 0.82f, stiffness = 320f), label="w")
@@ -4955,9 +4907,7 @@ fun QuickInputSection(
 
                                 Box(
                                     Modifier
-                                        // 用 offset 設定 X, Y 唔會觸發 Recomposition，絕對跟手同順滑
                                         .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
-                                        // 用 layout 設定寬度，同樣避開 Recomposition 帶來的卡頓
                                         .layout { measurable, constraints ->
                                             val w = animW.value.roundToInt()
                                             val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
@@ -5005,6 +4955,7 @@ fun QuickInputSection(
         }
     }
 }
+
 @Composable
 fun AnimatedInfoChip(
     label: String, valueText: String,
@@ -5275,7 +5226,7 @@ fun CalendarContent(
     onChangeIconClick: (Record) -> Unit,
     onAddClick: () -> Unit,
     deletingRecordId: String? = null,
-    justAddedId: String? = null // ★ 新增呢行
+    justAddedId: String? = null
 ) {
     val today = remember { Calendar.getInstance() }
     val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
@@ -5649,7 +5600,7 @@ fun CalendarContent(
                                             detailExpandedId = null
                                         },
                                         deletingRecordId = deletingRecordId,
-                                        justAddedId = justAddedId, // ★ 新增：將變數接力傳入去
+                                        justAddedId = justAddedId,
                                         onFanMenuStart = handleFanStart,
                                         onFanMenuDrag = handleFanDrag,
                                         onFanMenuEnd = handleFanEnd,
@@ -6144,17 +6095,14 @@ fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
 }
 
-// ★ 1. 抽離 Segmenter 變成全局變數，提升效能，避免每次都要重新初始化
 private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
     .enableForegroundBitmap()
     .build()
 private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(segmenterOptions)
 
-// ★ 2. 終極穩定版去背函數
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     var argbBitmap: Bitmap? = null
     try {
-        // 確保圖片係 ARGB_8888 格式以支援透明通道
         argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap 
                      else bitmap.copy(Bitmap.Config.ARGB_8888, true)
                      
@@ -6166,16 +6114,14 @@ suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.D
         result.foregroundBitmap ?: bitmap
     } catch (e: Exception) {
         e.printStackTrace()
-        bitmap // 失敗時安全退回原本圖片
+        bitmap
     } finally {
-        // 安全清理記憶體
         if (argbBitmap != null && argbBitmap !== bitmap) {
             argbBitmap.recycle()
         }
     }
 }
 
-// ★ 3. 處理圖片大小及呼叫去背
 suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZE): ByteArray? =
     withContext(Dispatchers.IO) {
         try {
@@ -6195,10 +6141,8 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
                 BitmapFactory.decodeStream(it, null, opts)
             } ?: return@withContext null
 
-            // 進行去背
             val bgRemovedBitmap = removeBackground(src)
             
-            // 去背後裁切
             val processed = if (bgRemovedBitmap.width > bgRemovedBitmap.height) {
                 scaleKeepAspectWidth(bgRemovedBitmap, targetSize)
             } else {
@@ -6206,9 +6150,8 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
             }
 
             val baos = ByteArrayOutputStream()
-            processed.compress(Bitmap.CompressFormat.PNG, 100, baos) // 強制轉 PNG
+            processed.compress(Bitmap.CompressFormat.PNG, 100, baos)
             
-            // 安全清理所有相關 Bitmap
             if (processed !== bgRemovedBitmap && processed !== src) processed.recycle()
             if (bgRemovedBitmap !== src) bgRemovedBitmap.recycle()
             src.recycle()
@@ -6259,7 +6202,6 @@ suspend fun removeIconFromSameName(context: Context, db: FirebaseFirestore, name
     } catch (e: Exception) { Toast.makeText(context, "失敗:${e.message}", Toast.LENGTH_LONG).show() }
 }
 
-// ★ 4. 修復 Cloudinary 拒絕上傳嘅問題
 suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dispatchers.IO) {
     try {
         val endpoint = "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
@@ -6274,8 +6216,6 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
             o.write(("Content-Disposition: form-data; name=\"upload_preset\"$lineEnd$lineEnd").toByteArray())
             o.write("$CLOUDINARY_UPLOAD_PRESET$lineEnd".toByteArray())
             o.write("--$boundary$lineEnd".toByteArray())
-            
-            // 移除咗強制 format 參數，改以 filename=icon.png 及 image/png 令 Cloudinary 自然接受 PNG
             o.write(("Content-Disposition: form-data; name=\"file\"; filename=\"icon.png\"$lineEnd").toByteArray())
             o.write("Content-Type: image/png$lineEnd$lineEnd".toByteArray())
             o.write(bytes); o.write("$lineEnd".toByteArray())
@@ -6286,7 +6226,6 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
                    else conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
         if (code in 200..299) {
             val url = org.json.JSONObject(text).optString("secure_url")
-            // 直接喺 URL 替換副檔名，確保 Cloudinary 交出透明去背圖
             if (url.isNotBlank()) url.replace(".jpg", ".png").replace(".jpeg", ".png") else null
         } else null
     } catch (e: Exception) { 
