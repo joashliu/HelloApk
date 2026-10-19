@@ -4716,23 +4716,40 @@ fun SmartElement(
                     ty = -currentOffset // 完全跟手，鎖死喺原地
                     a = 1f
                 } else {
-                    ty = -currentOffset * 0.35f // 微微向上滑
-                    a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f)) // 優雅淡出，唔需要靠遮罩
+                    ty = -currentOffset * 0.35f 
+                    a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f)) 
                 }
             } 
             // 當前 Header 正喺度推走上一個 Header (由下往上推入)
             else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
                 if (isStaticWithPrev) {
                     ty = -currentOffset
-                    a = 0f // ★ 秘技 1：隱藏自己！等上一個 Header 嘅字顯示，完美解決重疊變粗嘅問題！
+                    a = 0f 
                 } else {
-                    ty = -currentOffset * 0.35f // 微微向下滑入
-                    a = 1f - (currentOffset / (headerHeightPx * 0.6f)) // 優雅淡入
+                    ty = -currentOffset * 0.35f 
+                    a = 1f - (currentOffset / (headerHeightPx * 0.6f)) 
                 }
             }
             
             translationY = ty
-            alpha = a.coerceIn(0f, 1f)
+            val finalAlpha = a.coerceIn(0f, 1f)
+            alpha = finalAlpha
+
+            // ★ 終極特效：加入動態模糊 (Motion Blur)
+            // 淨係針對 Android 12 (API 31) 或以上版本生效，確保舊機唔會 Crash
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                if (finalAlpha < 1f && finalAlpha > 0f) {
+                    // 透明度越低 (即係越接近消失)，模糊程度越高
+                    val blur = (1f - finalAlpha) * 14f 
+                    renderEffect = androidx.compose.ui.graphics.RenderEffect.blurEffect(
+                        radiusX = blur * 0.3f, // 橫向輕微模糊
+                        radiusY = blur * 1.5f  // 縱向加強模糊，產生「高速上下滑動」嘅殘影速度感
+                    )
+                } else {
+                    // 靜止狀態，或者完全透明時，取消模糊以節省效能
+                    renderEffect = null
+                }
+            }
         }
     ) {
         content()
@@ -4777,11 +4794,9 @@ fun DayHeader(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-            // ★ 刪除咗原本呢度嘅 drawWithContent 漸進遮罩，解放所有靜止字元！
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // ★ 秘技 2：統一距離！固定寬度 46dp，確保右邊嘅月份永遠唔會因為日子嘅寬度而移位
             Box(modifier = Modifier.width(46.dp), contentAlignment = Alignment.CenterStart) {
                 Row {
                     dayStr.forEachIndexed { i, char ->
@@ -4798,7 +4813,6 @@ fun DayHeader(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
                                 letterSpacing = (-1).sp,
-                                // ★ 秘技 3：等寬數字字體特性 (TabularNums)，數字由 1 變 8 嗰陣字元寬度都絕對一樣！
                                 style = TextStyle(fontFeatureSettings = "tnum")
                             )
                         }
