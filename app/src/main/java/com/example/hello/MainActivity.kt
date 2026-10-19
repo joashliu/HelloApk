@@ -2901,7 +2901,7 @@ fun LedgerContent(
     val activeFanId = activeFanRecord?.id
 
     val listContent: LazyListScope.() -> Unit = {
-        displayGroups.forEach { (dateKey, dayRecords) ->
+        displayGroups.forEachIndexed { index, (dateKey, dayRecords) ->
             var dayIncome = 0.0
             var dayExpense = 0.0
             for (r in dayRecords) {
@@ -2913,18 +2913,34 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id == deletingRecordId
 
             if (!isGroupDeleting) {
+                val prevGroup = displayGroups.getOrNull(index - 1)
+                val nextGroup = displayGroups.getOrNull(index + 1)
+
+                val prevDateKey = prevGroup?.first
+                var prevIncome = 0.0; var prevExpense = 0.0
+                prevGroup?.second?.forEach { if (it.id != deletingRecordId) { if (it.category == INCOME_CATEGORY) prevIncome += it.amount else prevExpense += it.amount } }
+
+                val nextDateKey = nextGroup?.first
+                var nextIncome = 0.0; var nextExpense = 0.0
+                nextGroup?.second?.forEach { if (it.id != deletingRecordId) { if (it.category == INCOME_CATEGORY) nextIncome += it.amount else nextExpense += it.amount } }
+
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     Box(modifier = Modifier
                         .fillMaxWidth()
+                        .height(64.dp)
                         .background(SURFACE_BG)
                         .animateItem(
                             fadeInSpec = tween(250, easing = FastOutSlowInEasing),
                             fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
-                            // ★ 優化：加快上下位移嘅速度，令空隙迅速填補
                             placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
                         )
                     ) {
-                        DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
+                        DayHeader(
+                            dateKey = dateKey, income = dayIncome, expense = dayExpense,
+                            listState = listState,
+                            prevDateKey = prevDateKey, prevIncome = prevIncome, prevExpense = prevExpense,
+                            nextDateKey = nextDateKey, nextIncome = nextIncome, nextExpense = nextExpense
+                        )
                     }
                 }
 
@@ -2941,16 +2957,12 @@ fun LedgerContent(
                                 .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                // ★ 優化：剷走咗呢度嘅 animateContentSize，避免雙重延遲
                         ) {
                             AnimatedContent(
                                 targetState = dayRecords,
                                 transitionSpec = {
-                                    // 縮短 Fade in/out 時間，令視覺更爽快
                                     (fadeIn(tween(200)) + slideInVertically(spring(dampingRatio = 0.8f, stiffness = 450f)) { it / 6 }) togetherWith
                                     (fadeOut(tween(150)) + slideOutVertically(spring(dampingRatio = 0.8f, stiffness = 450f)) { -it / 6 }) using
-                                    // ★ 終極優化：加入 SizeTransform，令高度縮短與漸變同步進行！
-                                    // stiffness = 500f 係黃金比例，做到「瞬間極速縮短，但結尾帶有微微緩衝」嘅高級感。
                                     SizeTransform(clip = false) { _, _ ->
                                         spring(dampingRatio = 0.85f, stiffness = 500f)
                                     }
@@ -3181,7 +3193,7 @@ fun LedgerContent(
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .nestedScroll(collapseScrollConnection), // <--- 加返呢句！
+                            .nestedScroll(collapseScrollConnection),
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
@@ -4674,36 +4686,131 @@ fun AnimatedAmount(
 }
 
 @Composable
-fun DayHeader(dateKey: String, income: Double, expense: Double) {
-    val parsed = remember(dateKey) { parseDateHeader(dateKey) }
-    val dayStr = remember(parsed, dateKey) {
-        if (parsed != null) pad2(parsed.day) else dateKey
+fun SmartElement(
+    listState: LazyListState?,
+    dateKey: String,
+    isStaticWithNext: Boolean,
+    isStaticWithPrev: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    if (listState == null) {
+        Box(modifier) { content() }
+        return
     }
-    val monthStr = remember(parsed) {
-        if (parsed != null) "${parsed.month}月" else ""
+    val density = LocalDensity.current
+    val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
+
+    Box(
+        modifier = modifier.graphicsLayer {
+            val scrollTrigger = listState.firstVisibleItemScrollOffset
+            val itemInfo = listState.layoutInfo.visibleItemsInfo.find { it.key == "header_$dateKey" }
+            val currentOffset = itemInfo?.offset?.toFloat() ?: 0f
+
+            var ty = 0f
+            var a = 1f
+
+            // 當前 Header 被下一個 Header 推走 (向上滑出)
+            if (currentOffset <= 0f && currentOffset > -headerHeightPx) {
+                if (isStaticWithNext) {
+                    ty = -currentOffset // 反向位移，抵消滾動，將字元鎖定喺 Y=0
+                } else {
+                    a = 1f - (abs(currentOffset) / headerHeightPx) // 產生柔和淡出
+                }
+            } 
+            // 當前 Header 正喺度推走上一個 Header (由下往上推)
+            else if (currentOffset > 0f && currentOffset < headerHeightPx) {
+                if (isStaticWithPrev) {
+                    ty = -currentOffset // 反向位移，提早將字元鎖定喺 Y=0
+                } else {
+                    a = 1f - (currentOffset / headerHeightPx) // 產生柔和淡入
+                }
+            }
+            
+            translationY = ty
+            alpha = a.coerceIn(0f, 1f)
+        }
+    ) {
+        content()
     }
-    val weekStr = remember(parsed) {
-        if (parsed != null) "週${parsed.weekdayChar}" else ""
-    }
+}
+
+@Composable
+fun DayHeader(
+    dateKey: String, income: Double, expense: Double,
+    listState: LazyListState? = null,
+    prevDateKey: String? = null, prevIncome: Double? = null, prevExpense: Double? = null,
+    nextDateKey: String? = null, nextIncome: Double? = null, nextExpense: Double? = null
+) {
+    val parsed = parseDateHeader(dateKey)
+    val dayStr = if (parsed != null) pad2(parsed.day) else dateKey
+    val monthStr = if (parsed != null) "${parsed.month}月" else ""
+    val weekStr = if (parsed != null) (if (parsed.dayTag == "今日") "今天" else "週${parsed.weekdayChar}") else ""
+    val incStr = if (income > 0) "+$${formatAmountNoDecimal(income)}" else ""
+    val expStr = if (expense > 0) "-$${formatAmountNoDecimal(expense)}" else ""
     val isToday = parsed?.dayTag == "今日"
 
+    val nextParsed = nextDateKey?.let { parseDateHeader(it) }
+    val nextDayStr = if (nextParsed != null) pad2(nextParsed.day) else nextDateKey ?: ""
+    val nextMonthStr = if (nextParsed != null) "${nextParsed.month}月" else ""
+    val nextWeekStr = if (nextParsed != null) (if (nextParsed.dayTag == "今日") "今天" else "週${nextParsed.weekdayChar}") else ""
+    val nextIncStr = if ((nextIncome ?: 0.0) > 0) "+$${formatAmountNoDecimal(nextIncome!!)}" else ""
+    val nextExpStr = if ((nextExpense ?: 0.0) > 0) "-$${formatAmountNoDecimal(nextExpense!!)}" else ""
+
+    val prevParsed = prevDateKey?.let { parseDateHeader(it) }
+    val prevDayStr = if (prevParsed != null) pad2(prevParsed.day) else prevDateKey ?: ""
+    val prevMonthStr = if (prevParsed != null) "${prevParsed.month}月" else ""
+    val prevWeekStr = if (prevParsed != null) (if (prevParsed.dayTag == "今日") "今天" else "週${prevParsed.weekdayChar}") else ""
+    val prevIncStr = if ((prevIncome ?: 0.0) > 0) "+$${formatAmountNoDecimal(prevIncome!!)}" else ""
+    val prevExpStr = if ((prevExpense ?: 0.0) > 0) "-$${formatAmountNoDecimal(prevExpense!!)}" else ""
+
+    val nextIsToday = nextParsed?.dayTag == "今日"
+    val prevIsToday = prevParsed?.dayTag == "今日"
+    val colorMatchNext = isToday == nextIsToday
+    val colorMatchPrev = isToday == prevIsToday
+
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = dayStr, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold,
-                color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
-                letterSpacing = (-1).sp)
+            // ★ 將日子 (例如 18) 逐個字元拆解，進行聰明比對
+            Row {
+                dayStr.forEachIndexed { i, char ->
+                    val nextChar = nextDayStr.getOrNull(i)
+                    val prevChar = prevDayStr.getOrNull(i)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = char == nextChar && colorMatchNext,
+                        isStaticWithPrev = char == prevChar && colorMatchPrev
+                    ) {
+                        Text(text = char.toString(), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold,
+                            color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
+                            letterSpacing = (-1).sp)
+                    }
+                }
+            }
+
             if (monthStr.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(verticalArrangement = Arrangement.Center) {
-                    Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = monthStr == nextMonthStr && colorMatchNext,
+                        isStaticWithPrev = monthStr == prevMonthStr && colorMatchPrev
+                    ) {
+                        Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                            color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
+                    }
                     Spacer(modifier = Modifier.height(1.dp))
-                    Text(if (isToday) "今天" else weekStr, fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = weekStr == nextWeekStr && colorMatchNext,
+                        isStaticWithPrev = weekStr == prevWeekStr && colorMatchPrev
+                    ) {
+                        Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                            color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY)
+                    }
                 }
             }
         }
@@ -4713,18 +4820,40 @@ fun DayHeader(dateKey: String, income: Double, expense: Double) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("收入", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = (nextIncome ?: 0.0) > 0,
+                        isStaticWithPrev = (prevIncome ?: 0.0) > 0
+                    ) {
+                        Text("收入", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    }
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text("+$${formatAmountNoDecimal(income)}", fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold, color = COLOR_INCOME)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = incStr == nextIncStr,
+                        isStaticWithPrev = incStr == prevIncStr
+                    ) {
+                        Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
+                    }
                 }
             }
             if (expense > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = (nextExpense ?: 0.0) > 0,
+                        isStaticWithPrev = (prevExpense ?: 0.0) > 0
+                    ) {
+                        Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    }
                     Spacer(modifier = Modifier.height(2.dp))
-                    Text("-$${formatAmountNoDecimal(expense)}", fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
+                    SmartElement(
+                        listState = listState, dateKey = dateKey,
+                        isStaticWithNext = expStr == nextExpStr,
+                        isStaticWithPrev = expStr == prevExpStr
+                    ) {
+                        Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
+                    }
                 }
             }
         }
