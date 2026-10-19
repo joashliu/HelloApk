@@ -1562,6 +1562,7 @@ fun MainApp(
     }
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
+    var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var justAddedId by remember { mutableStateOf<String?>(null) }
@@ -1653,30 +1654,42 @@ fun MainApp(
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
-        val amtText = amount?.let {
+    val now = System.currentTimeMillis()
+
+    // ★ 只有「鍵盤已經開住」「金額非空」「15 秒內手動輸入過」先保留
+    val keepManualAmount = showKeyboard &&
+        keyboardState.amountText.isNotBlank() &&
+        lastManualAmountInputMs > 0L &&
+        (now - lastManualAmountInputMs) < 15_000L
+
+    val amtText = if (keepManualAmount) {
+        keyboardState.amountText              // ← 保留使用者親手打嘅數字
+    } else {
+        amount?.let {
             if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
         } ?: ""
-
-        val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
-        val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
-
-        if (!showKeyboard) {
-            keyboardState = KeyboardState(
-                noteText = note, amountText = amtText,
-                category = defaultCategory, currency = defaultCurrency,
-                selectAmountOnInput = amount != null
-            )
-            showKeyboard = true
-        } else {
-            keyboardState = keyboardState.copy(
-                noteText = note,
-                amountText = amtText.ifBlank { keyboardState.amountText },
-                category = defaultCategory, currency = defaultCurrency,
-                selectAmountOnInput = amount != null
-            )
-        }
-        if (note.isNotBlank()) nameFlashTrigger++
     }
+
+    val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+    val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
+
+    if (!showKeyboard) {
+        keyboardState = KeyboardState(
+            noteText = note, amountText = amtText,
+            category = defaultCategory, currency = defaultCurrency,
+            selectAmountOnInput = amount != null && !keepManualAmount
+        )
+        showKeyboard = true
+    } else {
+        keyboardState = keyboardState.copy(
+            noteText = note,
+            amountText = amtText.ifBlank { keyboardState.amountText },
+            category = defaultCategory, currency = defaultCurrency,
+            selectAmountOnInput = if (keepManualAmount) false else (amount != null)
+        )
+    }
+    if (note.isNotBlank()) nameFlashTrigger++
+}
 
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
@@ -2050,7 +2063,14 @@ fun MainApp(
                 }
             },
             keyboardState = keyboardState,
-            onKeyboardStateChange = { keyboardState = it },
+            onKeyboardStateChange = { newState ->
+    // ★ 鍵盤內部「金額文字」有變（數字鍵 / 退格 / 小數點）＝使用者手動輸入
+    //   分類、日期、匯率、note 等改動都唔會郁 amountText，所以唔會誤觸
+    if (newState.amountText != keyboardState.amountText) {
+        lastManualAmountInputMs = System.currentTimeMillis()
+    }
+    keyboardState = newState
+},
             onKeyboardDismiss = { dismissKeyboard() },
             onKeyboardConfirm = { saveFromKeyboard() },
             onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
