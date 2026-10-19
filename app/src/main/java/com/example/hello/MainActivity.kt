@@ -3308,7 +3308,6 @@ fun LedgerContent(
                                         ) {
                                             last7DaysData.forEachIndexed { index, (label, amt) ->
                                                 val targetRatio = (amt / maxAmt).toFloat()
-                                                // ★ 彈性高度：當有新數字加入，其他棒形會自動縮短讓位，完美過渡
                                                 val animatedRatio by animateFloatAsState(
                                                     targetValue = targetRatio * enterAnim.value,
                                                     animationSpec = spring(dampingRatio = 0.65f, stiffness = 300f),
@@ -3317,28 +3316,41 @@ fun LedgerContent(
                                                 
                                                 Column(
                                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.Bottom,
-                                                    modifier = Modifier.weight(1f)
+                                                    // ★ 秘技 1：加入 fillMaxHeight() 撐滿 110dp
+                                                    modifier = Modifier.weight(1f).fillMaxHeight() 
                                                 ) {
-                                                    if (amt > 0) {
-                                                        val displayAmt = if (amt >= 1000) String.format(java.util.Locale.US, "%.1fk", amt/1000.0) else amt.toInt().toString()
-                                                        Text(displayAmt, fontSize = 9.sp, color = TEXT_TERTIARY, maxLines = 1)
-                                                        Spacer(modifier = Modifier.height(4.dp))
-                                                    } else {
-                                                        Spacer(modifier = Modifier.height(14.dp))
+                                                    // ★ 秘技 2：用固定高度嘅 Box 包住文字，確保起跑線一致
+                                                    Box(
+                                                        modifier = Modifier.fillMaxWidth().height(14.dp),
+                                                        contentAlignment = Alignment.BottomCenter
+                                                    ) {
+                                                        if (amt > 0) {
+                                                            val displayAmt = if (amt >= 1000) String.format(java.util.Locale.US, "%.1fk", amt/1000.0) else amt.toInt().toString()
+                                                            Text(displayAmt, fontSize = 9.sp, color = TEXT_TERTIARY, maxLines = 1)
+                                                        }
                                                     }
                                                     
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    
+                                                    // ★ 秘技 3：用 weight(1f) 劃出專屬保護區！
+                                                    // 條棒只會喺呢個 Box 裡面縮放，無論幾高都絕對唔會壓到下面嘅字
                                                     Box(
-                                                        modifier = Modifier
-                                                            .width(16.dp)
-                                                            .fillMaxHeight(animatedRatio.coerceAtLeast(0.03f))
-                                                            .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                                                            .background(
-                                                                Brush.verticalGradient(
-                                                                    colors = listOf(COLOR_EXPENSE.copy(alpha = 0.9f), COLOR_EXPENSE.copy(alpha = 0.4f))
+                                                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                                                        contentAlignment = Alignment.BottomCenter
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .width(16.dp)
+                                                                .fillMaxHeight(animatedRatio.coerceAtLeast(0.03f))
+                                                                .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                                                .background(
+                                                                    Brush.verticalGradient(
+                                                                        colors = listOf(COLOR_EXPENSE.copy(alpha = 0.9f), COLOR_EXPENSE.copy(alpha = 0.4f))
+                                                                    )
                                                                 )
-                                                            )
-                                                    )
+                                                        )
+                                                    }
+                                                    
                                                     Spacer(modifier = Modifier.height(6.dp))
                                                     Text(label, fontSize = 11.sp, color = TEXT_SECONDARY, fontWeight = if (label == "今日") FontWeight.Bold else FontWeight.Medium)
                                                 }
@@ -3347,7 +3359,6 @@ fun LedgerContent(
                                     }
                                 }
                             }
-                        }
 
                         if (displayGroups.isEmpty() && !showKeyboard) {
                             item(key = "__empty__", contentType = "empty") {
