@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
