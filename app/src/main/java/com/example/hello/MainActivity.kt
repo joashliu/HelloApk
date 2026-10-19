@@ -295,7 +295,6 @@ data class FilterState(
     val month: String? = null,
     val search: String = "",
     val showFuture: Boolean = false,
-    val deletingId: String? = null,
 )
 
 @Immutable
@@ -462,6 +461,8 @@ private fun getTodayStartMillis(): Long {
 
 // =========================================================
 //  ★ LedgerViewModel
+//    - _justAddedIds / _deletingIds 統一管理本地 + 遠端動畫
+//    - ghostRecordsById 讓「已被遠端刪除」嘅記錄繼續留喺列表播退出動畫
 // =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -469,6 +470,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
 
     private val recordsById = HashMap<String, Record>()
+    // ★ 已被資料源移除、但 UI 仲要顯示嚟播退出動畫嘅記錄
+    private val ghostRecordsById = HashMap<String, Record>()
 
     private val _records = MutableStateFlow<List<Record>>(emptyList())
     val records: StateFlow<List<Record>> = _records.asStateFlow()
@@ -484,7 +487,13 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun setFilterMonth(v: String?)      { _filter.update { it.copy(month = v) } }
     fun setFilterSearch(v: String)      { _filter.update { it.copy(search = v) } }
     fun setShowFuture(v: Boolean)       { _filter.update { it.copy(showFuture = v) } }
-    fun setDeletingId(v: String?)       { _filter.update { it.copy(deletingId = v) } }
+
+    // ★ 動畫狀態：本地 + 遠端共用，UI 只讀
+    private val _justAddedIds = MutableStateFlow<Set<String>>(emptySet())
+    val justAddedIds: StateFlow<Set<String>> = _justAddedIds.asStateFlow()
+
+    private val _deletingIds = MutableStateFlow<Set<String>>(emptySet())
+    val deletingIds: StateFlow<Set<String>> = _deletingIds.asStateFlow()
 
     private val _defaultMonthA = monthKeyFromTimestamp(System.currentTimeMillis())
     private val _defaultMonthB = shiftMonthKey(_defaultMonthA, -1)
@@ -522,9 +531,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NoteIndex())
 
     val ledgerUiState: StateFlow<LedgerUiState> = combine(
-        _records, noteIndexState, _loading, _filter
-    ) { records, noteIndex, loading, filter ->
-        computeLedgerUiState(records, noteIndex, loading, filter)
+        _records, noteIndexState, _loading, _filter, _deletingIds
+    ) { records, noteIndex, loading, filter, deletingIds ->
+        computeLedgerUiState(records, noteIndex, loading, filter, deletingIds)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
@@ -548,8 +557,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     init { listenToFirestore() }
 
     private fun buildSortedList(): List<Record> {
-        val list = ArrayList<Record>(recordsById.size)
+        val list = ArrayList<Record>(recordsById.size + ghostRecordsById.size)
         list.addAll(recordsById.values)
+        list.addAll(ghostRecordsById.values)
         list.sortWith(
             compareByDescending<Record> { it.timestamp }.thenByDescending { it.id }
         )
@@ -571,19 +581,66 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 if (changes.isEmpty()) return@addSnapshotListener
 
                 viewModelScope.launch(Dispatchers.Default) {
+                    val remoteAdded = ArrayList<String>(changes.size)
+                    val remoteRemoved = ArrayList<String>(changes.size)
+
                     for (change in changes) {
                         val r = change.document.toObject(Record::class.java)
                             ?.copy(id = change.document.id) ?: continue
                         getTimestampMeta(r.timestamp)
 
                         when (change.type) {
-                            DocumentChange.Type.ADDED,
-                            DocumentChange.Type.MODIFIED -> recordsById[r.id] = r
-                            DocumentChange.Type.REMOVED -> recordsById.remove(r.id)
+                            DocumentChange.Type.ADDED -> {
+                                val existed = recordsById.containsKey(r.id)
+                                recordsById[r.id] = r
+                                // ★ 只有真正嚟自其他裝置嘅新增才觸發動畫；
+                                //    本地 addRecord 已經自己放咗入 justAddedIds，Firestore 回聲要跳過。
+                                if (!existed) remoteAdded.add(r.id)
+                            }
+                            DocumentChange.Type.MODIFIED -> {
+                                recordsById[r.id] = r
+                            }
+                            DocumentChange.Type.REMOVED -> {
+                                val existing = recordsById.remove(r.id)
+                                // ★ 只有喺 recordsById 仍然存在，先代表係遠端刪除；
+                                //    本地 commitDelete 已先移除，Firestore 回聲 remove 會攞到 null → 忽略。
+                                if (existing != null) {
+                                    ghostRecordsById[r.id] = existing
+                                    remoteRemoved.add(r.id)
+                                }
+                            }
                         }
                     }
-                    val newList = buildSortedList()
-                    _records.value = newList
+
+                    if (remoteAdded.isEmpty() && remoteRemoved.isEmpty()) {
+                        emitSorted()
+                        return@launch
+                    }
+
+                    if (remoteAdded.isNotEmpty()) {
+                        _justAddedIds.update { it + remoteAdded.toSet() }
+                    }
+                    if (remoteRemoved.isNotEmpty()) {
+                        _deletingIds.update { it + remoteRemoved.toSet() }
+                    }
+                    emitSorted()
+
+                    if (remoteAdded.isNotEmpty()) {
+                        val ids = remoteAdded.toSet()
+                        viewModelScope.launch {
+                            delay(800)
+                            _justAddedIds.update { it - ids }
+                        }
+                    }
+                    if (remoteRemoved.isNotEmpty()) {
+                        val ids = remoteRemoved.toSet()
+                        viewModelScope.launch {
+                            delay(900)
+                            for (id in ids) ghostRecordsById.remove(id)
+                            _deletingIds.update { it - ids }
+                            emitSorted()
+                        }
+                    }
                 }
             }
     }
@@ -594,13 +651,18 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         getTimestampMeta(toSave.timestamp)
 
         recordsById[newId] = toSave
+        _justAddedIds.update { it + newId }
         emitSorted()
+        onIdReady(newId)
 
+        viewModelScope.launch {
+            delay(800)
+            _justAddedIds.update { it - newId }
+        }
         viewModelScope.launch {
             try { db.collection("records").document(newId).set(toSave) }
             catch (_: Exception) {}
         }
-        onIdReady(newId)
     }
 
     fun updateRecord(id: String, amount: Double, note: String,
@@ -620,8 +682,21 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun deleteRecord(id: String) {
+    // ★ 標記為「刪除中」（UI 立即播退出動畫），記錄暫時仍留喺 recordsById
+    fun markAsDeleting(id: String) {
+        _deletingIds.update { it + id }
+    }
+
+    // ★ 取消刪除（undo）
+    fun cancelDelete(id: String) {
+        _deletingIds.update { it - id }
+    }
+
+    // ★ 真正刪除（900ms 後由 UI 呼叫），同時清 ghost
+    fun commitDelete(id: String) {
+        _deletingIds.update { it - id }
         recordsById.remove(id)
+        ghostRecordsById.remove(id)
         emitSorted()
         viewModelScope.launch {
             try { db.collection("records").document(id).delete() }
@@ -629,10 +704,22 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // 保留舊 API，內部走 commitDelete
+    fun deleteRecord(id: String) {
+        commitDelete(id)
+    }
+
     fun restoreRecord(record: Record) {
         getTimestampMeta(record.timestamp)
         recordsById[record.id] = record
+        ghostRecordsById.remove(record.id)
+        _deletingIds.update { it - record.id }
+        _justAddedIds.update { it + record.id }
         emitSorted()
+        viewModelScope.launch {
+            delay(800)
+            _justAddedIds.update { it - record.id }
+        }
         viewModelScope.launch {
             try { db.collection("records").document(record.id).set(record) }
             catch (_: Exception) {}
@@ -720,6 +807,7 @@ private fun computeLedgerUiState(
     noteIndex: NoteIndex,
     loading: Boolean,
     filter: FilterState,
+    deletingIds: Set<String>,
 ): LedgerUiState {
     val now = System.currentTimeMillis()
 
@@ -752,7 +840,6 @@ private fun computeLedgerUiState(
     val ledgerRecords = if (filter.showFuture) base
                         else base.filter { it.timestamp <= futureCutoff }
 
-    val deletingId = filter.deletingId
     var hasIncome = false
     var hasExpense = false
     var totalIncome = 0.0
@@ -763,7 +850,7 @@ private fun computeLedgerUiState(
     var allSameNote = true
 
     for (r in ledgerRecords) {
-        if (r.id != deletingId) {
+        if (r.id !in deletingIds) {
             if (r.category == INCOME_CATEGORY) {
                 hasIncome = true
                 totalIncome += r.amount
@@ -1528,10 +1615,13 @@ fun MainApp(
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
 
+    // ★ 動畫狀態：全部嚟自 VM，本地同遠端共用
+    val justAddedIds by vm.justAddedIds.collectAsState()
+    val deletingIds by vm.deletingIds.collectAsState()
+
     // ===== 最近 7 日支出棒形圖資料 =====
     val rawRecords by vm.records.collectAsState()
     val weeklyExpenses = remember(rawRecords) { computeWeeklyExpenses(rawRecords) }
-    // 冷啟動只播一次進場動畫；切換頁面回來不會重播
     var hasPlayedWeeklyIntro by rememberSaveable { mutableStateOf(false) }
 
     var expandedId by remember { mutableStateOf<String?>(null) }
@@ -1550,6 +1640,9 @@ fun MainApp(
     var uploading by remember { mutableStateOf(false) }
     var showKeyboard by remember { mutableStateOf(false) }
 
+    // ★ 手動輸入金額時間戳（避免 quick chip 覆蓋使用者親手打嘅數字）
+    var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
+
     val keyboardAnimProgress = remember { Animatable(0f) }
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
@@ -1562,10 +1655,8 @@ fun MainApp(
     }
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
-    var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
-    var justAddedId by remember { mutableStateOf<String?>(null) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
 
@@ -1654,42 +1745,41 @@ fun MainApp(
     }
 
     fun openKeyboardForNew(note: String = "", amount: Double? = null) {
-    val now = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
 
-    // ★ 只有「鍵盤已經開住」「金額非空」「15 秒內手動輸入過」先保留
-    val keepManualAmount = showKeyboard &&
-        keyboardState.amountText.isNotBlank() &&
-        lastManualAmountInputMs > 0L &&
-        (now - lastManualAmountInputMs) < 15_000L
+        val keepManualAmount = showKeyboard &&
+            keyboardState.amountText.isNotBlank() &&
+            lastManualAmountInputMs > 0L &&
+            (now - lastManualAmountInputMs) < 15_000L
 
-    val amtText = if (keepManualAmount) {
-        keyboardState.amountText              // ← 保留使用者親手打嘅數字
-    } else {
-        amount?.let {
-            if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
-        } ?: ""
+        val amtText = if (keepManualAmount) {
+            keyboardState.amountText
+        } else {
+            amount?.let {
+                if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
+            } ?: ""
+        }
+
+        val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
+
+        if (!showKeyboard) {
+            keyboardState = KeyboardState(
+                noteText = note, amountText = amtText,
+                category = defaultCategory, currency = defaultCurrency,
+                selectAmountOnInput = amount != null && !keepManualAmount
+            )
+            showKeyboard = true
+        } else {
+            keyboardState = keyboardState.copy(
+                noteText = note,
+                amountText = amtText.ifBlank { keyboardState.amountText },
+                category = defaultCategory, currency = defaultCurrency,
+                selectAmountOnInput = if (keepManualAmount) false else (amount != null)
+            )
+        }
+        if (note.isNotBlank()) nameFlashTrigger++
     }
-
-    val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
-    val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
-
-    if (!showKeyboard) {
-        keyboardState = KeyboardState(
-            noteText = note, amountText = amtText,
-            category = defaultCategory, currency = defaultCurrency,
-            selectAmountOnInput = amount != null && !keepManualAmount
-        )
-        showKeyboard = true
-    } else {
-        keyboardState = keyboardState.copy(
-            noteText = note,
-            amountText = amtText.ifBlank { keyboardState.amountText },
-            category = defaultCategory, currency = defaultCurrency,
-            selectAmountOnInput = if (keepManualAmount) false else (amount != null)
-        )
-    }
-    if (note.isNotBlank()) nameFlashTrigger++
-}
 
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
@@ -1736,17 +1826,16 @@ fun MainApp(
 
     fun deleteRecordWithUndo(r: Record) {
         deleteJob?.cancel()
-        vm.setDeletingId(r.id)
+        vm.markAsDeleting(r.id)
         recentlyDeletedRecord = r
         showUndoToast = true
         deleteJob = scope.launch {
             delay(900)
-            vm.deleteRecord(r.id)
+            vm.commitDelete(r.id)
             delay(4100)
             if (recentlyDeletedRecord?.id == r.id) {
                 showUndoToast = false
                 recentlyDeletedRecord = null
-                vm.setDeletingId(null)
             }
         }
     }
@@ -1756,11 +1845,9 @@ fun MainApp(
         deleteJob?.cancel(); deleteJob = null
         showUndoToast = false
         recentlyDeletedRecord = null
-        vm.setDeletingId(null)
 
+        vm.cancelDelete(target.id)
         vm.restoreRecord(target)
-        justAddedId = target.id
-        scope.launch { delay(800); if (justAddedId == target.id) justAddedId = null }
     }
 
     fun saveFromKeyboard() {
@@ -1795,9 +1882,7 @@ fun MainApp(
                 Record(amount = amt, note = note, category = category,
                        timestamp = ts, iconUrl = inherited)
             ) { newId ->
-                justAddedId = newId
                 afterSaveHint = AfterSaveHint(newId, category, totalThisMonth)
-                scope.launch { delay(800); if (justAddedId == newId) justAddedId = null }
             }
         }
 
@@ -1884,12 +1969,11 @@ fun MainApp(
                 showFuture = filter.showFuture,
                 onShowFutureChange = { vm.setShowFuture(it) },
                 scrollToTopTrigger = scrollToTopTrigger,
-                justAddedId = justAddedId,
-                deletingRecordId = filter.deletingId,
+                justAddedIds = justAddedIds,
+                deletingIds = deletingIds,
                 afterSaveHint = afterSaveHint,
                 afterSaveHintVisible = afterSaveHintVisible,
                 keyboardProgressProvider = keyboardProgressProvider,
-                // ===== 新加：最近 7 日支出棒形圖 =====
                 weeklyExpenses = weeklyExpenses,
                 shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
                 onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true }
@@ -1940,8 +2024,8 @@ fun MainApp(
                     onDeleteClick = { deleteRecordWithUndo(it) },
                     onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                     onAddClick = { currentPage = 0; openKeyboardForNew() },
-                    deletingRecordId = filter.deletingId,
-                    justAddedId = justAddedId
+                    deletingIds = deletingIds,
+                    justAddedIds = justAddedIds
                 )
             }
         }
@@ -2064,13 +2148,11 @@ fun MainApp(
             },
             keyboardState = keyboardState,
             onKeyboardStateChange = { newState ->
-    // ★ 鍵盤內部「金額文字」有變（數字鍵 / 退格 / 小數點）＝使用者手動輸入
-    //   分類、日期、匯率、note 等改動都唔會郁 amountText，所以唔會誤觸
-    if (newState.amountText != keyboardState.amountText) {
-        lastManualAmountInputMs = System.currentTimeMillis()
-    }
-    keyboardState = newState
-},
+                if (newState.amountText != keyboardState.amountText) {
+                    lastManualAmountInputMs = System.currentTimeMillis()
+                }
+                keyboardState = newState
+            },
             onKeyboardDismiss = { dismissKeyboard() },
             onKeyboardConfirm = { saveFromKeyboard() },
             onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
@@ -2750,19 +2832,17 @@ fun LedgerContent(
     showFuture: Boolean,
     onShowFutureChange: (Boolean) -> Unit,
     scrollToTopTrigger: Int,
-    justAddedId: String?,
-    deletingRecordId: String?,
+    justAddedIds: Set<String>,
+    deletingIds: Set<String>,
     afterSaveHint: AfterSaveHint?,
     afterSaveHintVisible: Boolean,
     keyboardProgressProvider: () -> Float,
-    // ===== 新加：最近 7 日支出棒形圖 =====
     weeklyExpenses: List<WeeklyExpenseDay> = emptyList(),
     shouldPlayWeeklyIntro: Boolean = false,
     onWeeklyIntroFinished: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
-    // ===== 進場動畫：冷啟動播放一次，切頁面回來不重播 =====
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
     LaunchedEffect(shouldPlayWeeklyIntro) {
@@ -2985,12 +3065,12 @@ fun LedgerContent(
             var dayIncome = 0.0
             var dayExpense = 0.0
             for (r in dayRecords) {
-                if (r.id != deletingRecordId) {
+                if (r.id !in deletingIds) {
                     if (r.category == INCOME_CATEGORY) dayIncome += r.amount
                     else dayExpense += r.amount
                 }
             }
-            val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id == deletingRecordId
+            val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id in deletingIds
 
             if (!isGroupDeleting) {
                 val prevGroup = displayGroups.getOrNull(index - 1)
@@ -2998,11 +3078,11 @@ fun LedgerContent(
 
                 val prevDateKey = prevGroup?.first
                 var prevIncome = 0.0; var prevExpense = 0.0
-                prevGroup?.second?.forEach { if (it.id != deletingRecordId) { if (it.category == INCOME_CATEGORY) prevIncome += it.amount else prevExpense += it.amount } }
+                prevGroup?.second?.forEach { if (it.id !in deletingIds) { if (it.category == INCOME_CATEGORY) prevIncome += it.amount else prevExpense += it.amount } }
 
                 val nextDateKey = nextGroup?.first
                 var nextIncome = 0.0; var nextExpense = 0.0
-                nextGroup?.second?.forEach { if (it.id != deletingRecordId) { if (it.category == INCOME_CATEGORY) nextIncome += it.amount else nextExpense += it.amount } }
+                nextGroup?.second?.forEach { if (it.id !in deletingIds) { if (it.category == INCOME_CATEGORY) nextIncome += it.amount else nextExpense += it.amount } }
 
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     Box(modifier = Modifier
@@ -3050,19 +3130,19 @@ fun LedgerContent(
                                 label = "filter_anim_$dateKey"
                             ) { currentRecords ->
                                 Column(modifier = Modifier.fillMaxWidth()) {
-                                    val activeCount = if (deletingRecordId == null) currentRecords.size
-                                                      else currentRecords.count { it.id != deletingRecordId }
+                                    val activeCount = if (deletingIds.isEmpty()) currentRecords.size
+                                                      else currentRecords.count { it.id !in deletingIds }
                                     var renderedVisibleIdx = 0
 
                                     for (r in currentRecords) {
-                                        val isRecDeleting = r.id == deletingRecordId
+                                        val isRecDeleting = r.id in deletingIds
                                         if (!isRecDeleting) renderedVisibleIdx++
                                         val showDividerBelow = !isRecDeleting && renderedVisibleIdx < activeCount
 
                                         key(r.id) {
                                             Column(modifier = Modifier.fillMaxWidth()) {
                                                 AnimatedRecordItem(
-                                                    animateOnMount = r.id == justAddedId,
+                                                    animateOnMount = r.id in justAddedIds,
                                                     isDeleting = isRecDeleting
                                                 ) {
                                                     SwipeableRecordItem(
@@ -3279,7 +3359,6 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // ===== 最近 7 日支出棒形圖（LazyColumn 第一項，隨滾動自然消失） =====
                         if (!filterMode && weeklyExpenses.isNotEmpty()) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
                                 WeeklyExpenseChart(
@@ -3334,9 +3413,6 @@ fun LedgerContent(
 
 // =========================================================
 //  ★ 最近 7 日每日支出棒形圖
-//    - 每個柱子從底部對齊，不會遮蓋下方星期字
-//    - 進場從 0 流暢生長，資料變動平滑過渡
-//    - 隨 LazyColumn 滾動，用 alpha + scaleY + 位移 + 模糊做「融化消失」
 // =========================================================
 @Composable
 fun WeeklyExpenseChart(
@@ -3350,7 +3426,6 @@ fun WeeklyExpenseChart(
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
     val maxBarHeight = 62.dp
 
-    // 監聽此 item 在 LazyColumn 中被推走嘅比例 0→1
     val scrollProgress by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -3400,7 +3475,7 @@ fun WeeklyExpenseChart(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Bottom
             ) {
-                data.forEachIndexed { index, day ->
+                data.forEachIndexed { _, day ->
                     WeeklyExpenseBar(
                         day = day,
                         maxAmount = maxAmount,
@@ -3426,14 +3501,12 @@ fun WeeklyExpenseBar(
 ) {
     val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
 
-    // 資料改變時，平滑過渡到新高度（新入帳 / 編輯 / 刪除都適用）
     val animatedRatio by animateFloatAsState(
         targetValue = targetRatio,
         animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
         label = "weeklyBarRatio_${day.dayOfMonth}"
     )
 
-    // 進場從 0 → 1；有支出嘅日子即使比例極細，都最少顯示 4dp，方便肉眼可見
     val minBarHeight = 4.dp
     val minRatio = if (maxBarHeight.value > 0f) (minBarHeight.value / maxBarHeight.value) else 0f
     val displayRatio: Float = if (day.amount > 0.0) {
@@ -3450,14 +3523,12 @@ fun WeeklyExpenseBar(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Bottom
     ) {
-        // 柱子容器：固定高度，內容底部對齊，確保唔會壓住下方星期文字
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(maxBarHeight),
             contentAlignment = Alignment.BottomCenter
         ) {
-            // 背景淡軌，顯示每日都存在
             Box(
                 modifier = Modifier
                     .width(16.dp)
@@ -3465,7 +3536,6 @@ fun WeeklyExpenseBar(
                     .clip(RoundedCornerShape(8.dp))
                     .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f))
             )
-            // 實際柱子
             if (displayRatio > 0.0005f) {
                 Box(
                     modifier = Modifier
@@ -3979,8 +4049,8 @@ fun DayDetailPanel(
     onDelete: (Record) -> Unit,
     onChangeIcon: (Record) -> Unit,
     onDismiss: () -> Unit,
-    deletingRecordId: String? = null,
-    justAddedId: String? = null,
+    deletingIds: Set<String> = emptySet(),
+    justAddedIds: Set<String> = emptySet(),
     onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
     onFanMenuDrag: (Offset) -> Unit = {},
     onFanMenuEnd: () -> Unit = {},
@@ -4039,8 +4109,8 @@ fun DayDetailPanel(
             key(r.id) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     AnimatedRecordItem(
-                        animateOnMount = r.id == justAddedId,
-                        isDeleting = r.id == deletingRecordId
+                        animateOnMount = r.id in justAddedIds,
+                        isDeleting = r.id in deletingIds
                     ) {
                         SwipeableRecordItem(
                             backgroundColor = SURFACE_CARD,
@@ -4061,7 +4131,7 @@ fun DayDetailPanel(
                             isActiveItem = activeFanId == r.id
                         )
                     }
-                    if (idx < sortedRecords.lastIndex && deletingRecordId != r.id) {
+                    if (idx < sortedRecords.lastIndex && r.id !in deletingIds) {
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 68.dp, end = 16.dp),
                             color = DIVIDER_COLOR.copy(alpha = 0.8f),
@@ -5697,8 +5767,8 @@ fun CalendarContent(
     onDeleteClick: (Record) -> Unit,
     onChangeIconClick: (Record) -> Unit,
     onAddClick: () -> Unit,
-    deletingRecordId: String? = null,
-    justAddedId: String? = null
+    deletingIds: Set<String> = emptySet(),
+    justAddedIds: Set<String> = emptySet()
 ) {
     val today = remember { Calendar.getInstance() }
     val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
@@ -6071,8 +6141,8 @@ fun CalendarContent(
                                             selectedColIdx = null
                                             detailExpandedId = null
                                         },
-                                        deletingRecordId = deletingRecordId,
-                                        justAddedId = justAddedId,
+                                        deletingIds = deletingIds,
+                                        justAddedIds = justAddedIds,
                                         onFanMenuStart = handleFanStart,
                                         onFanMenuDrag = handleFanDrag,
                                         onFanMenuEnd = handleFanEnd,
