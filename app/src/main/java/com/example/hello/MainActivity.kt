@@ -1944,25 +1944,23 @@ fun MainApp(
             }
         }
 
-        androidx.compose.animation.AnimatedVisibility(
-            visible = if (currentPage != 0) true else !showKeyboard,
-            enter = slideInVertically(
-                initialOffsetY = { it }, // 從下方滑入
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 350f)
-            ) + scaleIn(
-                initialScale = 0.7f, // 由 70% 大小開始放大
-                transformOrigin = TransformOrigin(0.5f, 1f), // 以正下方為縮放軸心
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 350f)
-            ) + fadeIn(tween(250)),
-            exit = slideOutVertically(
-                targetOffsetY = { it }, // 向下沉
-                animationSpec = tween(220, easing = FastOutSlowInEasing)
-            ) + scaleOut(
-                targetScale = 0.7f, // 向下收縮至 70%
-                transformOrigin = TransformOrigin(0.5f, 1f), // 以正下方為縮放軸心
-                animationSpec = tween(220, easing = FastOutSlowInEasing)
-            ) + fadeOut(tween(200)),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = NAV_BOTTOM_PADDING)
+        // 👇 👇 👇 呢段就係你啱啱修改咗嘅導航欄 (取代咗舊嘅 AnimatedVisibility) 👇 👇 👇
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = NAV_BOTTOM_PADDING)
+                .graphicsLayer {
+                    val p = keyboardProgressProvider()
+                    val effectiveP = if (currentPage == 0) p else 0f
+                    
+                    // 統一嘅下降與縮小公式
+                    alpha = (1f - effectiveP * 2.5f).coerceIn(0f, 1f)
+                    val s = 1f - (0.15f * effectiveP)
+                    scaleX = s
+                    scaleY = s
+                    translationY = effectiveP * 60.dp.toPx()
+                    transformOrigin = TransformOrigin(0.5f, 1f) // 以正下方為縮放軸心
+                }
         ) {
             FloatingNavBar(
                 items = MAIN_NAV_ITEMS,
@@ -1971,7 +1969,9 @@ fun MainApp(
                 modifier = Modifier
             )
         }
+        // 👆 👆 👆 修改部份結束 👆 👆 👆
 
+        // 🔽 上下文：對下就係 KeyboardAndFabLayer 嘅呼叫
         KeyboardAndFabLayer(
             showKeyboard = showKeyboard,
             progressProvider = keyboardProgressProvider,
@@ -2300,11 +2300,14 @@ private fun BoxScope.KeyboardAndFabLayer(
             .height(56.dp)
             .graphicsLayer {
                 val p = progressProvider()
-                val rowAlpha = (1f - (p / 0.25f)).coerceIn(0f, 1f)
-                alpha = rowAlpha
-                val scale = 0.9f + 0.1f * rowAlpha
-                scaleX = scale; scaleY = scale
-                translationY = p * 50.dp.toPx()
+                
+                // 統一嘅下降與縮小公式 (同 FloatingNavBar 一模一樣)
+                alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                val s = 1f - (0.15f * p)
+                scaleX = s
+                scaleY = s
+                translationY = p * 60.dp.toPx()
+                transformOrigin = TransformOrigin(0.5f, 1f) // 以正下方為縮放軸心
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
