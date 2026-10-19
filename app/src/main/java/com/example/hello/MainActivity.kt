@@ -4736,17 +4736,15 @@ fun SmartElement(
             alpha = finalAlpha
 
             // ★ 終極特效：加入動態模糊 (Motion Blur)
-            // 淨係針對 Android 12 (API 31) 或以上版本生效，確保舊機唔會 Crash
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 if (finalAlpha < 1f && finalAlpha > 0f) {
-                    // 透明度越低 (即係越接近消失)，模糊程度越高
                     val blur = (1f - finalAlpha) * 14f 
-                    renderEffect = androidx.compose.ui.graphics.RenderEffect.blurEffect(
-                        radiusX = blur * 0.3f, // 橫向輕微模糊
-                        radiusY = blur * 1.5f  // 縱向加強模糊，產生「高速上下滑動」嘅殘影速度感
+                    // ★ 修正：Jetpack Compose 專屬寫法 BlurEffect
+                    renderEffect = androidx.compose.ui.graphics.BlurEffect(
+                        radiusX = blur * 0.3f, 
+                        radiusY = blur * 1.5f 
                     )
                 } else {
-                    // 靜止狀態，或者完全透明時，取消模糊以節省效能
                     renderEffect = null
                 }
             }
