@@ -2913,14 +2913,28 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id == deletingRecordId
 
             if (!isGroupDeleting) {
+                // ★ 動畫層次 3：日期標題嘅平滑進出與位移
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
-                    Box(modifier = Modifier.fillMaxWidth().background(SURFACE_BG)) {
+                    Box(modifier = Modifier
+                        .fillMaxWidth()
+                        .background(SURFACE_BG)
+                        .animateItem(
+                            fadeInSpec = tween(300, easing = FastOutSlowInEasing),
+                            fadeOutSpec = tween(250, easing = FastOutSlowInEasing),
+                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                        )
+                    ) {
                         DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
                     }
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
-                    Box {
+                    // ★ 動畫層次 3：成個卡片群組嘅平滑進出與位移
+                    Box(modifier = Modifier.animateItem(
+                        fadeInSpec = tween(300, easing = FastOutSlowInEasing),
+                        fadeOutSpec = tween(250, easing = FastOutSlowInEasing),
+                        placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                    )) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2928,59 +2942,73 @@ fun LedgerContent(
                                 .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                                // ★ 動畫層次 1：卡片高度會跟隨項目數量，好有彈性咁平滑拉長或縮短
+                                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 300f)) 
                         ) {
-                            val activeCount = if (deletingRecordId == null) dayRecords.size
-                                              else dayRecords.count { it.id != deletingRecordId }
-                            var renderedVisibleIdx = 0
+                            // ★ 動畫層次 2：內部項目嘅無縫交替過渡（消失時微微向上滑走，出現時向下滑入）
+                            AnimatedContent(
+                                targetState = dayRecords,
+                                transitionSpec = {
+                                    (fadeIn(tween(250)) + slideInVertically(spring(dampingRatio = 0.85f, stiffness = 300f)) { it / 6 }) togetherWith
+                                    (fadeOut(tween(200)) + slideOutVertically(spring(dampingRatio = 0.85f, stiffness = 300f)) { -it / 6 })
+                                },
+                                label = "filter_anim_$dateKey"
+                            ) { currentRecords ->
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    val activeCount = if (deletingRecordId == null) currentRecords.size
+                                                      else currentRecords.count { it.id != deletingRecordId }
+                                    var renderedVisibleIdx = 0
 
-                            for (r in dayRecords) {
-                                val isRecDeleting = r.id == deletingRecordId
-                                if (!isRecDeleting) renderedVisibleIdx++
-                                val showDividerBelow = !isRecDeleting && renderedVisibleIdx < activeCount
+                                    for (r in currentRecords) {
+                                        val isRecDeleting = r.id == deletingRecordId
+                                        if (!isRecDeleting) renderedVisibleIdx++
+                                        val showDividerBelow = !isRecDeleting && renderedVisibleIdx < activeCount
 
-                                key(r.id) {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        AnimatedRecordItem(
-                                            animateOnMount = r.id == justAddedId,
-                                            isDeleting = isRecDeleting
-                                        ) {
-                                            SwipeableRecordItem(
-                                                backgroundColor = SURFACE_CARD,
-                                                record = r,
-                                                isExpanded = expandedId == r.id,
-                                                hasAnyExpanded = expandedId != null,
-                                                onExpand = onExpandChange,
-                                                onCopy = { onCopyClick(r) },
-                                                onEdit = { onEditClick(r) },
-                                                onFilter = {
-                                                    if (!filterMode) {
-                                                        preFilterIndex = listState.firstVisibleItemIndex
-                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
-                                                    }
-                                                    onFilterByName(r.note)
-                                                },
-                                                onDelete = { onDeleteClick(r) },
-                                                onChangeIcon = { onChangeIconClick(r) },
-                                                hideCategory = isExactNoteFilter,
-                                                onFanMenuStart = { offset -> handleFanStart(r, offset) },
-                                                onFanMenuDrag = handleFanDrag,
-                                                onFanMenuEnd = handleFanEnd,
-                                                isFanMenuActive = isFanActive,
-                                                isOtherItem = isFanActive && activeFanId != r.id,
-                                                isActiveItem = activeFanId == r.id
-                                            )
-                                        }
+                                        key(r.id) {
+                                            Column(modifier = Modifier.fillMaxWidth()) {
+                                                AnimatedRecordItem(
+                                                    animateOnMount = r.id == justAddedId,
+                                                    isDeleting = isRecDeleting
+                                                ) {
+                                                    SwipeableRecordItem(
+                                                        backgroundColor = SURFACE_CARD,
+                                                        record = r,
+                                                        isExpanded = expandedId == r.id,
+                                                        hasAnyExpanded = expandedId != null,
+                                                        onExpand = onExpandChange,
+                                                        onCopy = { onCopyClick(r) },
+                                                        onEdit = { onEditClick(r) },
+                                                        onFilter = {
+                                                            if (!filterMode) {
+                                                                preFilterIndex = listState.firstVisibleItemIndex
+                                                                preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                            }
+                                                            onFilterByName(r.note)
+                                                        },
+                                                        onDelete = { onDeleteClick(r) },
+                                                        onChangeIcon = { onChangeIconClick(r) },
+                                                        hideCategory = isExactNoteFilter,
+                                                        onFanMenuStart = { offset -> handleFanStart(r, offset) },
+                                                        onFanMenuDrag = handleFanDrag,
+                                                        onFanMenuEnd = handleFanEnd,
+                                                        isFanMenuActive = isFanActive,
+                                                        isOtherItem = isFanActive && activeFanId != r.id,
+                                                        isActiveItem = activeFanId == r.id
+                                                    )
+                                                }
 
-                                        if (afterSaveHint?.recordId == r.id) {
-                                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
-                                        }
+                                                if (afterSaveHint?.recordId == r.id) {
+                                                    CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                                }
 
-                                        if (showDividerBelow) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                                                thickness = 0.8.dp
-                                            )
+                                                if (showDividerBelow) {
+                                                    HorizontalDivider(
+                                                        modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                                        color = DIVIDER_COLOR.copy(alpha = 0.8f),
+                                                        thickness = 0.8.dp
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -2990,7 +3018,13 @@ fun LedgerContent(
                 }
 
                 item(key = "spacer_$dateKey", contentType = "day_spacer") {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier
+                        .height(10.dp)
+                        .animateItem(
+                            fadeInSpec = tween(300), fadeOutSpec = tween(250),
+                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                        )
+                    )
                 }
             }
         }
