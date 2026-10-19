@@ -1946,8 +1946,22 @@ fun MainApp(
 
         androidx.compose.animation.AnimatedVisibility(
             visible = if (currentPage != 0) true else !showKeyboard,
-            enter = fadeIn(tween(220)),
-            exit = fadeOut(tween(200)),
+            enter = slideInVertically(
+                initialOffsetY = { it }, // 從下方滑入
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 350f)
+            ) + scaleIn(
+                initialScale = 0.7f, // 由 70% 大小開始放大
+                transformOrigin = TransformOrigin(0.5f, 1f), // 以正下方為縮放軸心
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 350f)
+            ) + fadeIn(tween(250)),
+            exit = slideOutVertically(
+                targetOffsetY = { it }, // 向下沉
+                animationSpec = tween(220, easing = FastOutSlowInEasing)
+            ) + scaleOut(
+                targetScale = 0.7f, // 向下收縮至 70%
+                transformOrigin = TransformOrigin(0.5f, 1f), // 以正下方為縮放軸心
+                animationSpec = tween(220, easing = FastOutSlowInEasing)
+            ) + fadeOut(tween(200)),
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = NAV_BOTTOM_PADDING)
         ) {
             FloatingNavBar(
