@@ -2291,23 +2291,39 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
+    // ★ 秘技 1：將鍵盤層移到最頂部呼叫，令佢墊底 (Z-Index 最低)。
+    // 噉樣鍵盤彈出放大嗰陣，就只會喺篩選制嘅「背後」出現，絕對唔會再覆蓋住陰影！
+    AnimatedKeyboardLayer(
+        showKeyboard = showKeyboard,
+        progressProvider = progressProvider,
+        keyboardState = keyboardState,
+        onKeyboardStateChange = onKeyboardStateChange,
+        onKeyboardDismiss = onKeyboardDismiss,
+        onKeyboardConfirm = onKeyboardConfirm,
+        onKeyboardNext = onKeyboardNext,
+        allNoteNames = allNoteNames,
+        noteCategoryMap = noteCategoryMap,
+        nameFlashTrigger = nameFlashTrigger,
+        modifier = Modifier.align(Alignment.BottomCenter)
+    )
+
+    // ★ 篩選制 Row
     Row(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 86.dp,
+            // ★ 秘技 2：將原本 end = 86.dp 改為 16.dp，放寬邊界限制，畫布變大，陰影就唔會被切走
+            .padding(start = 16.dp, end = 16.dp,
                 bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
             .height(56.dp)
             .graphicsLayer {
                 val p = progressProvider()
-                
-                // 統一嘅下降與縮小公式 (同 FloatingNavBar 一模一樣)
                 alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
                 val s = 1f - (0.15f * p)
                 scaleX = s
                 scaleY = s
                 translationY = p * 60.dp.toPx()
-                transformOrigin = TransformOrigin(0.5f, 1f) // 以正下方為縮放軸心
+                transformOrigin = TransformOrigin(0.5f, 1f)
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -2418,22 +2434,14 @@ private fun BoxScope.KeyboardAndFabLayer(
                 )
             }
         }
+
+        // ★ 秘技 3：新增一個 60dp 嘅隱形 Spacer。
+        // 原本右距 86dp，而家 Padding(16) + Gap(10) + Spacer(60) = 完美等如 86dp！
+        // 視覺排版完全冇變過，但因為 Spacer 係透明嘅，右邊嘅陰影終於可以完整咁顯示出嚟。
+        Spacer(modifier = Modifier.width(60.dp))
     }
 
-    AnimatedKeyboardLayer(
-        showKeyboard = showKeyboard,
-        progressProvider = progressProvider,
-        keyboardState = keyboardState,
-        onKeyboardStateChange = onKeyboardStateChange,
-        onKeyboardDismiss = onKeyboardDismiss,
-        onKeyboardConfirm = onKeyboardConfirm,
-        onKeyboardNext = onKeyboardNext,
-        allNoteNames = allNoteNames,
-        noteCategoryMap = noteCategoryMap,
-        nameFlashTrigger = nameFlashTrigger,
-        modifier = Modifier.align(Alignment.BottomCenter)
-    )
-
+    // ★ FAB 放最後，維持喺最頂層
     AnimatedFabLayer(
         progressProvider = progressProvider,
         onFabTap = onFabTap,
