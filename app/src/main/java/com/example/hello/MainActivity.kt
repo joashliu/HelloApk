@@ -4704,27 +4704,30 @@ fun SmartElement(
 
     Box(
         modifier = modifier.graphicsLayer {
-            val scrollTrigger = listState.firstVisibleItemScrollOffset
             val itemInfo = listState.layoutInfo.visibleItemsInfo.find { it.key == "header_$dateKey" }
             val currentOffset = itemInfo?.offset?.toFloat() ?: 0f
 
             var ty = 0f
             var a = 1f
 
-            // 當前 Header 被下一個 Header 推走 (向上滑出)
+            // 當前 Header (被向上推走)
             if (currentOffset <= 0f && currentOffset > -headerHeightPx) {
                 if (isStaticWithNext) {
-                    ty = -currentOffset // 反向位移，抵消滾動，將字元鎖定喺 Y=0
+                    ty = -currentOffset // 完全跟手，鎖死喺原地
+                    a = 1f
                 } else {
-                    a = 1f - (abs(currentOffset) / headerHeightPx) // 產生柔和淡出
+                    ty = -currentOffset * 0.35f // 微微向上滑，產生立體滾動感
+                    a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f)) // 加速淡出
                 }
             } 
-            // 當前 Header 正喺度推走上一個 Header (由下往上推)
+            // Next Header (由下往上滑入)
             else if (currentOffset > 0f && currentOffset < headerHeightPx) {
                 if (isStaticWithPrev) {
-                    ty = -currentOffset // 反向位移，提早將字元鎖定喺 Y=0
+                    ty = -currentOffset
+                    a = 0f // ★ 秘技 1：隱藏自己！等上一個 Header 嘅字顯示，完美解決重疊變粗嘅問題！
                 } else {
-                    a = 1f - (currentOffset / headerHeightPx) // 產生柔和淡入
+                    ty = -currentOffset * 0.35f // 微微向下滑入
+                    a = 1f - (currentOffset / (headerHeightPx * 0.6f)) // 加速淡入
                 }
             }
             
@@ -4771,29 +4774,55 @@ fun DayHeader(
     val colorMatchPrev = isToday == prevIsToday
 
     Row(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp)
+            // ★ 秘技 2：漸進模糊遮罩 (Progressive Fade Mask)
+            // 將整個 Row 變成一個獨立圖層，然後用 DstIn 混合模式畫一個漸變黑白遮罩
+            // 噉樣任何向上或向下滑動嘅文字，都會喺邊緣完美淡出，唔會出現硬切或者重疊
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.15f to Color.Black,
+                        0.85f to Color.Black,
+                        1f to Color.Transparent
+                    ),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn
+                )
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // ★ 將日子 (例如 18) 逐個字元拆解，進行聰明比對
-            Row {
-                dayStr.forEachIndexed { i, char ->
-                    val nextChar = nextDayStr.getOrNull(i)
-                    val prevChar = prevDayStr.getOrNull(i)
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = char == nextChar && colorMatchNext,
-                        isStaticWithPrev = char == prevChar && colorMatchPrev
-                    ) {
-                        Text(text = char.toString(), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold,
-                            color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
-                            letterSpacing = (-1).sp)
+            // ★ 秘技 3：統一距離！固定寬度 46dp，確保右邊嘅月份永遠唔會移位
+            Box(modifier = Modifier.width(46.dp), contentAlignment = Alignment.CenterStart) {
+                Row {
+                    dayStr.forEachIndexed { i, char ->
+                        val nextChar = nextDayStr.getOrNull(i)
+                        val prevChar = prevDayStr.getOrNull(i)
+                        SmartElement(
+                            listState = listState, dateKey = dateKey,
+                            isStaticWithNext = char == nextChar && colorMatchNext,
+                            isStaticWithPrev = char == prevChar && colorMatchPrev
+                        ) {
+                            Text(
+                                text = char.toString(), 
+                                fontSize = 34.sp, 
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
+                                letterSpacing = (-1).sp,
+                                // ★ 秘技 4：等寬數字字體特性 (TabularNums)，數字由 1 變 8 嗰陣寬度都唔會變
+                                style = TextStyle(fontFeatureSettings = "tnum")
+                            )
+                        }
                     }
                 }
             }
 
             if (monthStr.isNotEmpty()) {
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Column(verticalArrangement = Arrangement.Center) {
                     SmartElement(
                         listState = listState, dateKey = dateKey,
