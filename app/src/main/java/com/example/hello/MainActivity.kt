@@ -2913,15 +2913,15 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id == deletingRecordId
 
             if (!isGroupDeleting) {
-                // ★ 動畫層次 3：日期標題嘅平滑進出與位移
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     Box(modifier = Modifier
                         .fillMaxWidth()
                         .background(SURFACE_BG)
                         .animateItem(
-                            fadeInSpec = tween(300, easing = FastOutSlowInEasing),
-                            fadeOutSpec = tween(250, easing = FastOutSlowInEasing),
-                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                            fadeInSpec = tween(250, easing = FastOutSlowInEasing),
+                            fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
+                            // ★ 優化：加快上下位移嘅速度，令空隙迅速填補
+                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
                         )
                     ) {
                         DayHeader(dateKey = dateKey, income = dayIncome, expense = dayExpense)
@@ -2929,11 +2929,10 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
-                    // ★ 動畫層次 3：成個卡片群組嘅平滑進出與位移
                     Box(modifier = Modifier.animateItem(
-                        fadeInSpec = tween(300, easing = FastOutSlowInEasing),
-                        fadeOutSpec = tween(250, easing = FastOutSlowInEasing),
-                        placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                        fadeInSpec = tween(250, easing = FastOutSlowInEasing),
+                        fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
+                        placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
                     )) {
                         Column(
                             modifier = Modifier
@@ -2942,15 +2941,19 @@ fun LedgerContent(
                                 .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                // ★ 動畫層次 1：卡片高度會跟隨項目數量，好有彈性咁平滑拉長或縮短
-                                .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 300f)) 
+                                // ★ 優化：剷走咗呢度嘅 animateContentSize，避免雙重延遲
                         ) {
-                            // ★ 動畫層次 2：內部項目嘅無縫交替過渡（消失時微微向上滑走，出現時向下滑入）
                             AnimatedContent(
                                 targetState = dayRecords,
                                 transitionSpec = {
-                                    (fadeIn(tween(250)) + slideInVertically(spring(dampingRatio = 0.85f, stiffness = 300f)) { it / 6 }) togetherWith
-                                    (fadeOut(tween(200)) + slideOutVertically(spring(dampingRatio = 0.85f, stiffness = 300f)) { -it / 6 })
+                                    // 縮短 Fade in/out 時間，令視覺更爽快
+                                    (fadeIn(tween(200)) + slideInVertically(spring(dampingRatio = 0.8f, stiffness = 450f)) { it / 6 }) togetherWith
+                                    (fadeOut(tween(150)) + slideOutVertically(spring(dampingRatio = 0.8f, stiffness = 450f)) { -it / 6 }) using
+                                    // ★ 終極優化：加入 SizeTransform，令高度縮短與漸變同步進行！
+                                    // stiffness = 500f 係黃金比例，做到「瞬間極速縮短，但結尾帶有微微緩衝」嘅高級感。
+                                    SizeTransform(clip = false) { _, _ ->
+                                        spring(dampingRatio = 0.85f, stiffness = 500f)
+                                    }
                                 },
                                 label = "filter_anim_$dateKey"
                             ) { currentRecords ->
@@ -3021,8 +3024,8 @@ fun LedgerContent(
                     Spacer(modifier = Modifier
                         .height(10.dp)
                         .animateItem(
-                            fadeInSpec = tween(300), fadeOutSpec = tween(250),
-                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                            fadeInSpec = tween(250), fadeOutSpec = tween(200),
+                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
                         )
                     )
                 }
