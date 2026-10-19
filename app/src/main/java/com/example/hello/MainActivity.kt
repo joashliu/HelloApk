@@ -5,6 +5,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -355,6 +356,15 @@ data class CalendarUiState(
     val itemCount: Int = 0,
     val avgPerItem: Double = 0.0,
     val avgPerDay: Double = 0.0,
+)
+
+// ===== 最近 7 日每日支出（棒形圖用） =====
+@Immutable
+data class WeeklyExpenseDay(
+    val dayOfMonth: Int,
+    val weekdayChar: String,
+    val amount: Double,
+    val isToday: Boolean
 )
 
 @Immutable
@@ -946,6 +956,37 @@ private fun computeCalendarUiState(
     )
 }
 
+// ===== 計算最近 7 日每日支出（棒形圖用） =====
+fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
+    val todayStart = getTodayStartMillis()
+    val dayMs = 86_400_000L
+    val startDay = todayStart - 6 * dayMs
+
+    val amountByDay = HashMap<Long, Double>(7)
+    for (r in records) {
+        if (r.category == INCOME_CATEGORY) continue
+        val dayStart = getTimestampMeta(r.timestamp).startOfDayMillis
+        if (dayStart in startDay..todayStart) {
+            amountByDay[dayStart] = (amountByDay[dayStart] ?: 0.0) + r.amount
+        }
+    }
+
+    val result = ArrayList<WeeklyExpenseDay>(7)
+    for (i in 0..6) {
+        val dayStart = startDay + i * dayMs
+        val meta = getTimestampMeta(dayStart)
+        result.add(
+            WeeklyExpenseDay(
+                dayOfMonth = meta.dayOfMonth,
+                weekdayChar = WEEKDAY_CHARS[meta.dayOfWeek - 1],
+                amount = amountByDay[dayStart] ?: 0.0,
+                isToday = dayStart == todayStart
+            )
+        )
+    }
+    return result
+}
+
 object AboveAnchorPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
@@ -1487,6 +1528,12 @@ fun MainApp(
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
 
+    // ===== 最近 7 日支出棒形圖資料 =====
+    val rawRecords by vm.records.collectAsState()
+    val weeklyExpenses = remember(rawRecords) { computeWeeklyExpenses(rawRecords) }
+    // 冷啟動只播一次進場動畫；切換頁面回來不會重播
+    var hasPlayedWeeklyIntro by rememberSaveable { mutableStateOf(false) }
+
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
@@ -1507,7 +1554,7 @@ fun MainApp(
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             keyboardAnimProgress.snapTo(0f)
-            delay(30) 
+            delay(30)
             keyboardAnimProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
         } else {
             keyboardAnimProgress.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
@@ -1828,7 +1875,11 @@ fun MainApp(
                 deletingRecordId = filter.deletingId,
                 afterSaveHint = afterSaveHint,
                 afterSaveHintVisible = afterSaveHintVisible,
-                keyboardProgressProvider = keyboardProgressProvider
+                keyboardProgressProvider = keyboardProgressProvider,
+                // ===== 新加：最近 7 日支出棒形圖 =====
+                weeklyExpenses = weeklyExpenses,
+                shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
+                onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true }
             )
             1 -> {
                 val compareMonthA by vm.compareMonthA.collectAsState()
@@ -1945,7 +1996,6 @@ fun MainApp(
             }
         }
 
-        // 👇 👇 👇 呢段就係你啱啱修改咗嘅導航欄 (取代咗舊嘅 AnimatedVisibility) 👇 👇 👇
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -1953,14 +2003,13 @@ fun MainApp(
                 .graphicsLayer {
                     val p = keyboardProgressProvider()
                     val effectiveP = if (currentPage == 0) p else 0f
-                    
-                    // 統一嘅下降與縮小公式
+
                     alpha = (1f - effectiveP * 2.5f).coerceIn(0f, 1f)
                     val s = 1f - (0.15f * effectiveP)
                     scaleX = s
                     scaleY = s
                     translationY = effectiveP * 60.dp.toPx()
-                    transformOrigin = TransformOrigin(0.5f, 1f) // 以正下方為縮放軸心
+                    transformOrigin = TransformOrigin(0.5f, 1f)
                 }
         ) {
             FloatingNavBar(
@@ -1970,9 +2019,7 @@ fun MainApp(
                 modifier = Modifier
             )
         }
-        // 👆 👆 👆 修改部份結束 👆 👆 👆
 
-        // 🔽 上下文：對下就係 KeyboardAndFabLayer 嘅呼叫
         KeyboardAndFabLayer(
             showKeyboard = showKeyboard,
             progressProvider = keyboardProgressProvider,
@@ -2230,15 +2277,15 @@ fun MainApp(
                                             conn.readTimeout = 10000
                                             conn.inputStream.readBytes()
                                         }
-                                        
+
                                         val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
                                         val processedBitmap = removeBackground(srcBitmap)
                                         val baos = ByteArrayOutputStream()
                                         processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                                        
+
                                         if (processedBitmap !== srcBitmap) processedBitmap.recycle()
                                         srcBitmap.recycle()
-                                        
+
                                         baos.toByteArray()
                                     }
                                     val cloudUrl = uploadBytesToCloudinary(finalBytes)
@@ -2292,8 +2339,6 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    // ★ 秘技 1：將鍵盤層移到最頂部呼叫，令佢墊底 (Z-Index 最低)。
-    // 噉樣鍵盤彈出放大嗰陣，就只會喺篩選制嘅「背後」出現，絕對唔會再覆蓋住陰影！
     AnimatedKeyboardLayer(
         showKeyboard = showKeyboard,
         progressProvider = progressProvider,
@@ -2308,12 +2353,10 @@ private fun BoxScope.KeyboardAndFabLayer(
         modifier = Modifier.align(Alignment.BottomCenter)
     )
 
-    // ★ 篩選制 Row
     Row(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            // ★ 秘技 2：將原本 end = 86.dp 改為 16.dp，放寬邊界限制，畫布變大，陰影就唔會被切走
             .padding(start = 16.dp, end = 16.dp,
                 bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
             .height(56.dp)
@@ -2436,13 +2479,9 @@ private fun BoxScope.KeyboardAndFabLayer(
             }
         }
 
-        // ★ 秘技 3：新增一個 60dp 嘅隱形 Spacer。
-        // 原本右距 86dp，而家 Padding(16) + Gap(10) + Spacer(60) = 完美等如 86dp！
-        // 視覺排版完全冇變過，但因為 Spacer 係透明嘅，右邊嘅陰影終於可以完整咁顯示出嚟。
         Spacer(modifier = Modifier.width(60.dp))
     }
 
-    // ★ FAB 放最後，維持喺最頂層
     AnimatedFabLayer(
         progressProvider = progressProvider,
         onFabTap = onFabTap,
@@ -2695,9 +2734,29 @@ fun LedgerContent(
     deletingRecordId: String?,
     afterSaveHint: AfterSaveHint?,
     afterSaveHintVisible: Boolean,
-    keyboardProgressProvider: () -> Float
+    keyboardProgressProvider: () -> Float,
+    // ===== 新加：最近 7 日支出棒形圖 =====
+    weeklyExpenses: List<WeeklyExpenseDay> = emptyList(),
+    shouldPlayWeeklyIntro: Boolean = false,
+    onWeeklyIntroFinished: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
+
+    // ===== 進場動畫：冷啟動播放一次，切頁面回來不重播 =====
+    val weeklyIntroProgress = remember { Animatable(1f) }
+    var weeklyIntroTriggered by remember { mutableStateOf(false) }
+    LaunchedEffect(shouldPlayWeeklyIntro) {
+        if (shouldPlayWeeklyIntro && !weeklyIntroTriggered) {
+            weeklyIntroTriggered = true
+            weeklyIntroProgress.snapTo(0f)
+            delay(80)
+            weeklyIntroProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(820, easing = FastOutSlowInEasing)
+            )
+            onWeeklyIntroFinished()
+        }
+    }
 
     var preFilterIndex by remember { mutableIntStateOf(-1) }
     var preFilterOffset by remember { mutableIntStateOf(0) }
@@ -2720,7 +2779,7 @@ fun LedgerContent(
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
 
     val scrollStateData = remember { floatArrayOf(0f) }
-    
+
     val collapseScrollConnection = remember(collapseDistancePx, oneRowPx) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -3200,6 +3259,18 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
+                        // ===== 最近 7 日支出棒形圖（LazyColumn 第一項，隨滾動自然消失） =====
+                        if (!filterMode && weeklyExpenses.isNotEmpty()) {
+                            item(key = "weekly_chart", contentType = "weekly_chart") {
+                                WeeklyExpenseChart(
+                                    data = weeklyExpenses,
+                                    listState = listState,
+                                    introProgress = weeklyIntroProgress.value,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+
                         item(key = "magic_top_anchor", contentType = "anchor") {
                             Spacer(Modifier.height(1.dp))
                         }
@@ -3237,6 +3308,174 @@ fun LedgerContent(
             progressProvider = { fanMenuProgress.value },
             centerProvider = { fanMenuCenterState.value },
             touchProvider = { fanMenuTouchState.value }
+        )
+    }
+}
+
+// =========================================================
+//  ★ 最近 7 日每日支出棒形圖
+//    - 每個柱子從底部對齊，不會遮蓋下方星期字
+//    - 進場從 0 流暢生長，資料變動平滑過渡
+//    - 隨 LazyColumn 滾動，用 alpha + scaleY + 位移 + 模糊做「融化消失」
+// =========================================================
+@Composable
+fun WeeklyExpenseChart(
+    data: List<WeeklyExpenseDay>,
+    listState: LazyListState,
+    introProgress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val chartHeight = 108.dp
+    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
+    val maxBarHeight = 62.dp
+
+    // 監聽此 item 在 LazyColumn 中被推走嘅比例 0→1
+    val scrollProgress by remember(listState) {
+        derivedStateOf {
+            val info = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key == "weekly_chart" }
+            if (info == null) {
+                if (listState.firstVisibleItemIndex > 0) 1f else 0f
+            } else {
+                val offset = info.offset
+                if (offset >= 0) 0f
+                else (-offset / chartHeightPx).coerceIn(0f, 1f)
+            }
+        }
+    }
+
+    val maxAmount = remember(data) {
+        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(chartHeight)
+            .clipToBounds()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val p = scrollProgress
+                    alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
+                    scaleY = 1f - p * 0.35f
+                    scaleX = 1f - p * 0.08f
+                    translationY = -p * 14.dp.toPx()
+                    transformOrigin = TransformOrigin(0.5f, 0f)
+                    if (p > 0.03f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val blur = p * 9f
+                        renderEffect = androidx.compose.ui.graphics.BlurEffect(blur, blur)
+                    } else {
+                        renderEffect = null
+                    }
+                }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                data.forEachIndexed { index, day ->
+                    WeeklyExpenseBar(
+                        day = day,
+                        maxAmount = maxAmount,
+                        introProgress = introProgress,
+                        maxBarHeight = maxBarHeight,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun WeeklyExpenseBar(
+    day: WeeklyExpenseDay,
+    maxAmount: Double,
+    introProgress: Float,
+    maxBarHeight: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
+
+    // 資料改變時，平滑過渡到新高度（新入帳 / 編輯 / 刪除都適用）
+    val animatedRatio by animateFloatAsState(
+        targetValue = targetRatio,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
+        label = "weeklyBarRatio_${day.dayOfMonth}"
+    )
+
+    // 進場從 0 → 1；有支出嘅日子即使比例極細，都最少顯示 4dp，方便肉眼可見
+    val minBarHeight = 4.dp
+    val minRatio = if (maxBarHeight.value > 0f) (minBarHeight.value / maxBarHeight.value) else 0f
+    val displayRatio: Float = if (day.amount > 0.0) {
+        (animatedRatio * introProgress)
+            .coerceAtLeast(minRatio * introProgress)
+    } else {
+        animatedRatio * introProgress
+    }.coerceIn(0f, 1f)
+
+    val barHeight = maxBarHeight * displayRatio
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Bottom
+    ) {
+        // 柱子容器：固定高度，內容底部對齊，確保唔會壓住下方星期文字
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(maxBarHeight),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            // 背景淡軌，顯示每日都存在
+            Box(
+                modifier = Modifier
+                    .width(16.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f))
+            )
+            // 實際柱子
+            if (displayRatio > 0.0005f) {
+                Box(
+                    modifier = Modifier
+                        .width(16.dp)
+                        .height(barHeight)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                colors = if (day.isToday) {
+                                    listOf(BRAND_PRIMARY_DARK, BRAND_PRIMARY)
+                                } else {
+                                    listOf(
+                                        BRAND_PRIMARY.copy(alpha = 0.88f),
+                                        BRAND_PRIMARY.copy(alpha = 0.58f)
+                                    )
+                                }
+                            )
+                        )
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        Text(
+            text = day.weekdayChar,
+            fontSize = 11.sp,
+            color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
+            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1
         )
     }
 }
@@ -4168,7 +4407,7 @@ fun LedgerKeyboardPanel(
                         LaunchedEffect(state.editingNote) {
                             if (state.editingNote) focusReq.requestFocus()
                         }
-                        
+
                         LaunchedEffect(state.noteText) {
                             if (state.noteText != tfValue.text) {
                                 tfValue = TextFieldValue(
@@ -4430,9 +4669,9 @@ fun AnimatedFilterChip(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = label, 
-                textAlign = TextAlign.Center, 
-                fontSize = 13.sp, 
+                text = label,
+                textAlign = TextAlign.Center,
+                fontSize = 13.sp,
                 maxLines = 1,
                 color = textColor,
                 fontWeight = fontWeight,
@@ -4470,9 +4709,9 @@ fun CalendarFilterChip(
     ) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
             Text(
-                text = label, 
-                textAlign = TextAlign.Center, 
-                fontSize = 13.sp, 
+                text = label,
+                textAlign = TextAlign.Center,
+                fontSize = 13.sp,
                 maxLines = 1,
                 color = textColor,
                 fontWeight = fontWeight,
@@ -4710,39 +4949,34 @@ fun SmartElement(
             var ty = 0f
             var a = 1f
 
-            // 當前 Header 被下一個 Header 推走 (向上滑出)
             if (currentOffset <= 0f && currentOffset >= -headerHeightPx) {
                 if (isStaticWithNext) {
-                    ty = -currentOffset // 完全跟手，鎖死喺原地
+                    ty = -currentOffset
                     a = 1f
                 } else {
-                    ty = -currentOffset * 0.35f 
-                    a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f)) 
+                    ty = -currentOffset * 0.35f
+                    a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f))
                 }
-            } 
-            // 當前 Header 正喺度推走上一個 Header (由下往上推入)
-            else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
+            } else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
                 if (isStaticWithPrev) {
                     ty = -currentOffset
-                    a = 0f 
+                    a = 0f
                 } else {
-                    ty = -currentOffset * 0.35f 
-                    a = 1f - (currentOffset / (headerHeightPx * 0.6f)) 
+                    ty = -currentOffset * 0.35f
+                    a = 1f - (currentOffset / (headerHeightPx * 0.6f))
                 }
             }
-            
+
             translationY = ty
             val finalAlpha = a.coerceIn(0f, 1f)
             alpha = finalAlpha
 
-            // ★ 終極特效：加入動態模糊 (Motion Blur)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 if (finalAlpha < 1f && finalAlpha > 0f) {
-                    val blur = (1f - finalAlpha) * 14f 
-                    // ★ 修正：Jetpack Compose 專屬寫法 BlurEffect
+                    val blur = (1f - finalAlpha) * 14f
                     renderEffect = androidx.compose.ui.graphics.BlurEffect(
-                        radiusX = blur * 0.3f, 
-                        radiusY = blur * 1.5f 
+                        radiusX = blur * 0.3f,
+                        radiusY = blur * 1.5f
                     )
                 } else {
                     renderEffect = null
@@ -4806,8 +5040,8 @@ fun DayHeader(
                             isStaticWithPrev = char == prevChar && colorMatchPrev
                         ) {
                             Text(
-                                text = char.toString(), 
-                                fontSize = 34.sp, 
+                                text = char.toString(),
+                                fontSize = 34.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
                                 letterSpacing = (-1).sp,
@@ -4966,9 +5200,9 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
 }
 
 private data class PlacedChip(
-    val name: String, 
-    val targetW: Float, 
-    val targetX: Float, 
+    val name: String,
+    val targetW: Float,
+    val targetX: Float,
     val targetY: Float
 )
 
@@ -5072,7 +5306,7 @@ fun QuickInputSection(
 
             val hasIndicator = pagesWithChips.size > 1
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
-            
+
             val targetHeightDp = remember(pagesWithChips, safeCurrentPage, hasIndicator) {
                 val currentRowCount = pagesWithChips[safeCurrentPage].let { chips ->
                     if (chips.isEmpty()) 1 else {
@@ -6321,14 +6555,14 @@ private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.Subj
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     var argbBitmap: Bitmap? = null
     try {
-        argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap 
+        argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap
                      else bitmap.copy(Bitmap.Config.ARGB_8888, true)
-                     
+
         if (argbBitmap == null) return@withContext bitmap
 
         val image = com.google.mlkit.vision.common.InputImage.fromBitmap(argbBitmap, 0)
         val result = subjectSegmenter.process(image).await()
-        
+
         result.foregroundBitmap ?: bitmap
     } catch (e: Exception) {
         e.printStackTrace()
@@ -6347,12 +6581,12 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
             context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
             val w = bounds.outWidth; val h = bounds.outHeight
             if (w <= 0 || h <= 0) return@withContext null
-            
+
             var s = 1; val md = maxOf(w, h)
             while (md / (s * 2) >= 800) s *= 2
-            
-            val opts = BitmapFactory.Options().apply { 
-                inSampleSize = s 
+
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = s
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val src = context.contentResolver.openInputStream(uri)?.use {
@@ -6360,7 +6594,7 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
             } ?: return@withContext null
 
             val bgRemovedBitmap = removeBackground(src)
-            
+
             val processed = if (bgRemovedBitmap.width > bgRemovedBitmap.height) {
                 scaleKeepAspectWidth(bgRemovedBitmap, targetSize)
             } else {
@@ -6369,15 +6603,15 @@ suspend fun compressImage(context: Context, uri: Uri, targetSize: Int = ICON_SIZ
 
             val baos = ByteArrayOutputStream()
             processed.compress(Bitmap.CompressFormat.PNG, 100, baos)
-            
+
             if (processed !== bgRemovedBitmap && processed !== src) processed.recycle()
             if (bgRemovedBitmap !== src) bgRemovedBitmap.recycle()
             src.recycle()
-            
+
             baos.toByteArray()
-        } catch (e: Exception) { 
+        } catch (e: Exception) {
             e.printStackTrace()
-            null 
+            null
         }
     }
 
@@ -6446,9 +6680,9 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
             val url = org.json.JSONObject(text).optString("secure_url")
             if (url.isNotBlank()) url.replace(".jpg", ".png").replace(".jpeg", ".png") else null
         } else null
-    } catch (e: Exception) { 
+    } catch (e: Exception) {
         e.printStackTrace()
-        null 
+        null
     }
 }
 
