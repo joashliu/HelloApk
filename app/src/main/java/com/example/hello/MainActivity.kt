@@ -255,7 +255,7 @@ object NotificationCaptureBridge {
 
 // ===== 通知渠道常數（頂層，供所有函數共用） =====
 private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add"
-private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm"
+private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v3"
 private const val QUICK_ADD_NOTIFICATION_ID = 1001
 private const val CONFIRM_NOTIFICATION_BASE_ID = 2000
 
@@ -372,39 +372,26 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
 
         ensureNotificationChannels(context)
 
-        // 🟢 固定通知 ID：所有確認通知共用，新通知會取代舊通知
+        // 🟢 固定 ID：永遠只有一條確認通知
         val notifId = CONFIRM_NOTIFICATION_BASE_ID
-
-        // 🟢 先 cancel 舊通知，再 notify → 系統會視為「新通知」，重新觸發 HUN
-        nm.cancel(notifId)
 
         val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
 
-        // ===== 「記賬」→ 開 MainActivity 並預填 =====
+        // 🟢 PendingIntent 固定 requestCode + FLAG_UPDATE_CURRENT，確保內容更新
+        val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+
         val addIntent = buildLaunchIntentForMain(
             context, captured.note, captured.amount, captured.category
         )
-        val addPi = PendingIntent.getActivity(
-            context, notifId + 1, addIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val addPi = PendingIntent.getActivity(context, notifId + 1, addIntent, piFlags)
+        val fullScreenPi = PendingIntent.getActivity(context, notifId + 1, addIntent, piFlags)
 
-        // ===== 「忽略」→ 廣播畀 NotificationActionReceiver 取消呢個通知 =====
         val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
             action = "com.example.hello.ACTION_IGNORE_CAPTURE"
             putExtra("notif_id", notifId)
         }
-        val ignorePi = PendingIntent.getBroadcast(
-            context, notifId + 2, ignoreIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        // ===== fullScreenIntent：App 喺背景時都能彈出浮動橫幅 =====
-        val fullScreenPi = PendingIntent.getActivity(
-            context, notifId + 3, addIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val ignorePi = PendingIntent.getBroadcast(context, notifId + 2, ignoreIntent, piFlags)
 
         val builder = NotificationCompat.Builder(context, CONFIRM_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -415,18 +402,19 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
                     .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
             )
             .setContentIntent(addPi)
-            .setFullScreenIntent(fullScreenPi, true)   // 背景時都可彈出
+            .setFullScreenIntent(fullScreenPi, true)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_CALL)  // HUN 優先級最高
+            .setCategory(NotificationCompat.CATEGORY_CALL)
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
-            // 🟢 5 分鐘後自動消失，避免長期霸佔通知欄
             .setTimeoutAfter(5 * 60 * 1000L)
             .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
 
+        // 🟢 直接 notify 固定 ID，系統會自動替換內容並重新觸發 HUN
+        //    唔好 cancel 再 notify，否則會撞車顯示舊內容
         nm.notify(notifId, builder.build())
     } catch (_: Exception) {}
 }
