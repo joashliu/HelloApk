@@ -37,7 +37,23 @@
             </intent-filter>
         </activity>
 
-        <!-- ★★★ 新增：快速記帳快捷開關磁貼 ★★★ -->
+        <!-- ★★★ 新增：監控易乘碼通知服務 ★★★ -->
+        <service
+            android:name=".PaymentNotificationListener"
+            android:label="易乘碼記賬助手"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- ★★★ 新增：處理系統通知按鈕廣播 ★★★ -->
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false" />
+
+        <!-- ★★★ 原有：快速記帳快捷開關磁貼 ★★★ -->
         <service
             android:name=".QuickAddTileService"
             android:label="快速記帳"
