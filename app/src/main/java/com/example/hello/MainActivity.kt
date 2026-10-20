@@ -2438,20 +2438,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    AnimatedKeyboardLayer(
-        showKeyboard = showKeyboard,
-        progressProvider = progressProvider,
-        keyboardState = keyboardState,
-        onKeyboardStateChange = onKeyboardStateChange,
-        onKeyboardDismiss = onKeyboardDismiss,
-        onKeyboardConfirm = onKeyboardConfirm,
-        onKeyboardNext = onKeyboardNext,
-        allNoteNames = allNoteNames,
-        noteCategoryMap = noteCategoryMap,
-        nameFlashTrigger = nameFlashTrigger,
-        modifier = Modifier.align(Alignment.BottomCenter)
-    )
-
+    // 1. 篩選列 (放置於最底層)
     Row(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -2581,10 +2568,26 @@ private fun BoxScope.KeyboardAndFabLayer(
         Spacer(modifier = Modifier.width(60.dp))
     }
 
+    // 2. FAB 懸浮按鈕 (放置於中層)
     AnimatedFabLayer(
         progressProvider = progressProvider,
         onFabTap = onFabTap,
         modifier = Modifier.align(Alignment.BottomEnd)
+    )
+
+    // 3. 鍵盤 Keyboard (放置於最頂層，確保唔會被遮擋)
+    AnimatedKeyboardLayer(
+        showKeyboard = showKeyboard,
+        progressProvider = progressProvider,
+        keyboardState = keyboardState,
+        onKeyboardStateChange = onKeyboardStateChange,
+        onKeyboardDismiss = onKeyboardDismiss,
+        onKeyboardConfirm = onKeyboardConfirm,
+        onKeyboardNext = onKeyboardNext,
+        allNoteNames = allNoteNames,
+        noteCategoryMap = noteCategoryMap,
+        nameFlashTrigger = nameFlashTrigger,
+        modifier = Modifier.align(Alignment.BottomCenter)
     )
 }
 
@@ -4205,6 +4208,8 @@ fun LedgerKeyboardPanel(
                 ambientColor = Color(0x33000000), spotColor = Color(0x33000000))
             .clip(panelShape)
             .background(SURFACE_CARD)
+            // 🟢 加入呢行防穿透
+            .pointerInput(Unit) { detectTapGestures { } }
     ) {
         Column(
             Modifier
