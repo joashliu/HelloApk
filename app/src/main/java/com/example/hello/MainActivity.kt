@@ -285,6 +285,23 @@ fun ensureNotificationChannels(context: Context) {
     if (Build.VERSION.SDK_INT < 26) return
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
+    // 🟢 主動刪除所有舊渠道 ID，避免系統設定顯示多個「消費確認」
+    try {
+        val staleIds = listOf(
+            "ledger_capture_confirm",
+            "ledger_capture_confirm_v2",
+            "ledger_capture_confirm_v3_old"
+        )
+        for (oldId in staleIds) {
+            if (oldId == CONFIRM_CHANNEL_ID) continue
+            try {
+                if (nm.getNotificationChannel(oldId) != null) {
+                    nm.deleteNotificationChannel(oldId)
+                }
+            } catch (_: Exception) {}
+        }
+    } catch (_: Exception) {}
+
     val quick = NotificationChannel(
         QUICK_ADD_CHANNEL_ID,
         "快速記帳",
@@ -307,6 +324,29 @@ fun ensureNotificationChannels(context: Context) {
     nm.createNotificationChannel(quick)
     nm.createNotificationChannel(confirm)
 }
+//                      ⬇⬇⬇ 呢個就係 ensureNotificationChannels 嘅結尾大括號
+
+//                      ⬇⬇⬇ 喺呢個位置插入新函數（緊接上一行 } 之後、留一個空行）
+
+/**
+ * 清理確認通知嘅殘留（含舊動態 ID 範圍）。
+ * 由 MainActivity.onCreate 呼叫一次。
+ */
+fun cleanupStaleConfirmNotifications(context: Context) {
+    try {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        // 舊版動態 ID 範圍：2000 + (timestamp/1000 % 100000) → 可能出現 2000~101999
+        // 保守起見，清理 2000..102000 範圍
+        // （常駐通知用 1001，唔受影響）
+        for (id in 2000..102000) {
+            try { nm.cancel(id) } catch (_: Exception) {}
+        }
+        // 當前固定 ID 都清一次（避免啟動瞬間殘留）
+        try { nm.cancel(CONFIRM_NOTIFICATION_BASE_ID) } catch (_: Exception) {}
+    } catch (_: Exception) {}
+}
+
+//                      ⬆⬆⬆ 新函數到此為止
 
 fun buildLaunchIntentForMain(
     context: Context,
@@ -1707,6 +1747,7 @@ class MainActivity : ComponentActivity() {
 
         NotificationCaptureBridge.init(this)
         ensureNotificationChannels(this)
+        cleanupStaleConfirmNotifications(this)   // 🟢 新增：清理舊通知殘留
         createQuickAddChannel()
         askNotificationPermissionIfNeeded()
 
