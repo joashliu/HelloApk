@@ -212,7 +212,17 @@ object NotificationCaptureBridge {
     }
 
     fun pushCaptured(note: String, amount: Double, category: String) {
-        if (note.isBlank() || amount <= 0.0) return
+    if (note.isBlank() || amount <= 0.0) return
+
+    val now = System.currentTimeMillis()
+    // 如果 5 秒內已經有相同名稱+金額嘅捕獲，唔重複彈
+    val last = topLatestCapturedNotification.value
+    if (last != null
+        && last.note == note.trim()
+        && abs(last.amount - amount) < 0.01
+        && (now - last.timestamp) < 5_000L) {
+        return
+    }
 
         val captured = CapturedNotification(
             note = note.trim(),
