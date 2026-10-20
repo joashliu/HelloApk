@@ -1,5 +1,13 @@
 package com.example.hello
 
+import androidx.core.app.NotificationManagerCompat
+import android.provider.Settings
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+// 如果你 Compose BOM >= 2024 用呢個：
+import androidx.lifecycle.compose.LocalLifecycleOwner
+// 如果編譯唔到，改用以下其中一個（視乎你版本）：
+// import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -172,6 +180,7 @@ import kotlin.math.roundToInt
 private val keyboardLaunchToken = mutableStateOf(0)
 private val keyboardPrefillNote = mutableStateOf<String?>(null)
 private val keyboardPrefillAmount = mutableStateOf<Double?>(null)
+private val keyboardPrefillCategory = mutableStateOf<String?>(null) // 🟢 新增：通知預填分類
 
 // ===== 供通知顯示嘅最近項目資訊 =====
 @Immutable
@@ -1163,6 +1172,81 @@ fun formatMonthLabel(ym: String): String {
     return if (y == cachedCurrentYear) "${m}月" else "${y % 100}年${m}月"
 }
 
+// ===== 通知存取權限引導 =====
+@Composable
+fun NotificationAccessGuide(context: Context) {
+    var isGranted by remember {
+        mutableStateOf(
+            NotificationManagerCompat
+                .getEnabledListenerPackages(context)
+                .contains(context.packageName)
+        )
+    }
+
+    // 當用戶從設定頁返回時重新檢查權限
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isGranted = NotificationManagerCompat
+                    .getEnabledListenerPackages(context)
+                    .contains(context.packageName)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 未開權限時顯示引導
+    if (!isGranted) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        )
+                    } catch (_: Exception) { }
+                },
+            shape = RoundedCornerShape(12.dp),
+            color = BRAND_PRIMARY_LIGHT
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.NotificationsActive,
+                    contentDescription = "開啟通知",
+                    tint = BRAND_PRIMARY
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "開啟自動記賬功能",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = BRAND_PRIMARY_DARK
+                    )
+                    Text(
+                        "點擊前往授權讀取通知，自動捕捉易乘碼消費",
+                        fontSize = 12.sp,
+                        color = BRAND_PRIMARY
+                    )
+                }
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = BRAND_PRIMARY
+                )
+            }
+        }
+    }
+}
+
 fun formatDateHeader(dateKey: String): String {
     val info = parseDateHeader(dateKey) ?: return dateKey
     val wk = "週${info.weekdayChar}"
@@ -1422,6 +1506,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
         const val EXTRA_PREFILL_NOTE = "extra_prefill_note"
         const val EXTRA_PREFILL_AMOUNT = "extra_prefill_amount"
+        const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category" // 🟢 新增
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
@@ -1438,6 +1523,7 @@ class MainActivity : ComponentActivity() {
         if (fromNotification) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
+            keyboardPrefillCategory.value = intent?.getStringExtra(EXTRA_PREFILL_CATEGORY) // 🟢 新增
             keyboardPrefillAmount.value = if (intent?.hasExtra(EXTRA_PREFILL_AMOUNT) == true)
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
         }
@@ -1449,6 +1535,7 @@ class MainActivity : ComponentActivity() {
             val token = keyboardLaunchToken.value
             val prefillNote = keyboardPrefillNote.value
             val prefillAmount = keyboardPrefillAmount.value
+            val prefillCategory = keyboardPrefillCategory.value // 🟢 新增
             val notesInfo = topQuickNotesInfo.value
 
             LaunchedEffect(notesInfo) {
@@ -1462,9 +1549,11 @@ class MainActivity : ComponentActivity() {
                         keyboardLaunchToken = token,
                         prefillNoteOnLaunch = prefillNote,
                         prefillAmountOnLaunch = prefillAmount,
+                        prefillCategoryOnLaunch = prefillCategory, // 🟢 新增
                         onKeyboardLaunchConsumed = {
                             keyboardPrefillNote.value = null
                             keyboardPrefillAmount.value = null
+                            keyboardPrefillCategory.value = null // 🟢 新增
                         }
                     )
                 }
@@ -1484,6 +1573,7 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
+            keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY) // 🟢 新增
             keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
         }
@@ -1503,11 +1593,16 @@ class MainActivity : ComponentActivity() {
         if (!granted) notificationPermissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
     }
 
-    private fun buildLaunchIntent(prefillNote: String?, prefillAmount: Double? = null): Intent {
+    private fun buildLaunchIntent(
+        prefillNote: String?,
+        prefillAmount: Double? = null,
+        prefillCategory: String? = null
+    ): Intent {
         return Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_KEYBOARD, true)
             if (!prefillNote.isNullOrBlank()) putExtra(EXTRA_PREFILL_NOTE, prefillNote)
+            if (!prefillCategory.isNullOrBlank()) putExtra(EXTRA_PREFILL_CATEGORY, prefillCategory)
             if (prefillAmount != null && prefillAmount > 0.0) {
                 putExtra(EXTRA_PREFILL_AMOUNT, prefillAmount)
             }
@@ -1563,7 +1658,8 @@ class MainActivity : ComponentActivity() {
             if (first != null && first.note.isNotBlank()) {
                 val noteIntent = buildLaunchIntent(
                     prefillNote = first.note,
-                    prefillAmount = first.amount
+                    prefillAmount = first.amount,
+                    prefillCategory = first.category // 🟢 新增：預填分類
                 )
                 val notePi = PendingIntent.getActivity(
                     this, 1, noteIntent,
@@ -1600,6 +1696,7 @@ fun MainApp(
     keyboardLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
     prefillAmountOnLaunch: Double? = null,
+    prefillCategoryOnLaunch: String? = null, // 🟢 新增
     onKeyboardLaunchConsumed: () -> Unit = {},
     vm: LedgerViewModel = viewModel()
 ) {
@@ -1742,7 +1839,11 @@ fun MainApp(
         }
     }
 
-    fun openKeyboardForNew(note: String = "", amount: Double? = null) {
+        fun openKeyboardForNew(
+        note: String = "",
+        amount: Double? = null,
+        forceCategory: String? = null // 🟢 新增
+    ) {
         val now = System.currentTimeMillis()
 
         val keepManualAmount = showKeyboard &&
@@ -1758,7 +1859,9 @@ fun MainApp(
             } ?: ""
         }
 
-        val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        // 🟢 優先使用 forceCategory（例如通知帶入「交通」），否則用舊有邏輯
+        val defaultCategory = forceCategory
+            ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
 
         if (!showKeyboard) {
@@ -1889,7 +1992,7 @@ fun MainApp(
         scrollToTopTrigger++
     }
 
-    LaunchedEffect(keyboardLaunchToken) {
+        LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
 
@@ -1898,14 +2001,16 @@ fun MainApp(
 
             val note = prefillNoteOnLaunch
             val amt = prefillAmountOnLaunch
+            val cat = prefillCategoryOnLaunch // 🟢 拎取 Category
 
             when {
-                note.isNullOrBlank() -> openKeyboardForce(null)
-                amt != null && amt > 0.0 -> openKeyboardForNew(note, amt)
+                note.isNullOrBlank() && amt == null -> openKeyboardForce(null)
+                amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat) // 🟢 傳入 cat
                 else -> openKeyboardForce(note)
             }
 
             onKeyboardLaunchConsumed()
+            keyboardPrefillCategory.value = null // 🟢 保險清理
         }
     }
 
@@ -3247,6 +3352,9 @@ fun LedgerContent(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
+            // 🟢 通知權限引導（未授權時自動顯示，已授權則不佔位）
+            NotificationAccessGuide(context = LocalContext.current)
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
