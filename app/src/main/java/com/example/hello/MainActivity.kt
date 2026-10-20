@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.horizontalScroll
@@ -2864,8 +2865,35 @@ fun LedgerContent(
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
     val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
+    
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
+    
+    val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
+
+    // 🟢 自動黏附最近的 Header，防止停留在模糊的過渡狀態
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress) {
+            val transitioningHeader = listState.layoutInfo.visibleItemsInfo.find {
+                it.contentType == "day_header" && it.offset < -2 && it.offset > -(headerHeightPx - 2)
+            }
+
+            if (transitioningHeader != null) {
+                val offset = transitioningHeader.offset.toFloat()
+                val distanceToScroll = if (offset < -headerHeightPx / 2) {
+                    headerHeightPx + offset
+                } else {
+                    offset
+                }
+                try {
+                    listState.animateScrollBy(
+                        value = distanceToScroll,
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
@@ -3101,7 +3129,6 @@ fun LedgerContent(
                 var nextIncome = 0.0; var nextExpense = 0.0
                 nextGroup?.second?.forEach { if (it.id !in deletingIds) { if (it.category == INCOME_CATEGORY) nextIncome += it.amount else nextExpense += it.amount } }
 
-                // ★ 修復：stickyHeader 移除 animateItem，避免放置動畫干擾貼頂行為
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     Box(modifier = Modifier
                         .fillMaxWidth()
