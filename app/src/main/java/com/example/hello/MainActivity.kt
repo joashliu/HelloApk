@@ -1,13 +1,5 @@
 package com.example.hello
 
-import androidx.core.app.NotificationManagerCompat
-import android.provider.Settings
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-// 如果你 Compose BOM >= 2024 用呢個：
-import androidx.lifecycle.compose.LocalLifecycleOwner
-// 如果編譯唔到，改用以下其中一個（視乎你版本）：
-// import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -20,10 +12,13 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.compose.foundation.BorderStroke
 import android.app.Application
+import android.app.Notification
+import android.provider.Settings
 import androidx.compose.ui.layout.layout
 import android.app.DatePickerDialog
 import android.app.NotificationChannel
@@ -135,6 +130,9 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -180,7 +178,7 @@ import kotlin.math.roundToInt
 private val keyboardLaunchToken = mutableStateOf(0)
 private val keyboardPrefillNote = mutableStateOf<String?>(null)
 private val keyboardPrefillAmount = mutableStateOf<Double?>(null)
-private val keyboardPrefillCategory = mutableStateOf<String?>(null) // 🟢 新增：通知預填分類
+private val keyboardPrefillCategory = mutableStateOf<String?>(null)
 
 // ===== 供通知顯示嘅最近項目資訊 =====
 @Immutable
@@ -191,7 +189,7 @@ data class QuickNoteInfo(
 )
 private val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
 
-// ===== 最近捕獲嘅手機通知（例如：地鐵 · 4.9） =====
+// ===== 最近捕獲嘅手機消費通知（例如：地鐵 · 4.9） =====
 @Immutable
 data class CapturedNotification(
     val note: String,
@@ -199,32 +197,202 @@ data class CapturedNotification(
     val category: String,
     val timestamp: Long = System.currentTimeMillis()
 )
-
 private val topLatestCapturedNotification = mutableStateOf<CapturedNotification?>(null)
 
 /**
- * 供 NotificationListenerService 呼叫，推送最近捕獲嘅消費通知。
- * 只有今日嘅會被顯示喺通知按鈕上。
+ * 通知捕獲橋接：由 PaymentNotificationListener 呼叫 pushCaptured。
+ * 收到即刻刷新常駐通知 + 彈出確認通知（唔依賴 Activity / Compose 生命周期）。
  */
 object NotificationCaptureBridge {
+
+    private var appContext: Context? = null
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
     fun pushCaptured(note: String, amount: Double, category: String) {
         if (note.isBlank() || amount <= 0.0) return
-        topLatestCapturedNotification.value = CapturedNotification(
+
+        val captured = CapturedNotification(
             note = note.trim(),
             amount = amount,
             category = category,
             timestamp = System.currentTimeMillis()
         )
+        topLatestCapturedNotification.value = captured
+
+        val ctx = appContext ?: return
+        try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
+        try { showCaptureConfirmNotification(ctx, captured) } catch (_: Exception) {}
     }
 
     fun clear() {
         topLatestCapturedNotification.value = null
+        appContext?.let {
+            try { refreshQuickAddNotification(it) } catch (_: Exception) {}
+        }
     }
 
-    /** 通知按鈕顯示用：4.9 → "4.9"，5.0 → "5"，12.34 → "12.34" */
     fun formatAmountForLabel(v: Double): String =
         String.format(java.util.Locale.US, "%.2f", v)
             .trimEnd('0').trimEnd('.').ifEmpty { "0" }
+}
+
+// ===== 通知渠道常數（頂層，供所有函數共用） =====
+private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add"
+private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm"
+private const val QUICK_ADD_NOTIFICATION_ID = 1001
+private const val CONFIRM_NOTIFICATION_BASE_ID = 2000
+
+fun ensureNotificationChannels(context: Context) {
+    if (Build.VERSION.SDK_INT < 26) return
+    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+    val quick = NotificationChannel(
+        QUICK_ADD_CHANNEL_ID,
+        "快速記帳",
+        NotificationManager.IMPORTANCE_LOW
+    ).apply {
+        description = "常駐快速記賬入口"
+        setShowBadge(false)
+    }
+
+    val confirm = NotificationChannel(
+        CONFIRM_CHANNEL_ID,
+        "消費確認",
+        NotificationManager.IMPORTANCE_HIGH
+    ).apply {
+        description = "檢測到消費通知時，詢問你是否記賬"
+        enableVibration(true)
+        enableLights(true)
+    }
+
+    nm.createNotificationChannel(quick)
+    nm.createNotificationChannel(confirm)
+}
+
+fun buildLaunchIntentForMain(
+    context: Context,
+    prefillNote: String?,
+    prefillAmount: Double? = null,
+    prefillCategory: String? = null
+): Intent {
+    return Intent(context, MainActivity::class.java).apply {
+        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(MainActivity.EXTRA_OPEN_KEYBOARD, true)
+        if (!prefillNote.isNullOrBlank()) putExtra(MainActivity.EXTRA_PREFILL_NOTE, prefillNote)
+        if (!prefillCategory.isNullOrBlank()) putExtra(MainActivity.EXTRA_PREFILL_CATEGORY, prefillCategory)
+        if (prefillAmount != null && prefillAmount > 0.0) {
+            putExtra(MainActivity.EXTRA_PREFILL_AMOUNT, prefillAmount)
+        }
+    }
+}
+
+fun refreshQuickAddNotification(context: Context) {
+    try {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val granted = context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+                PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+        ensureNotificationChannels(context)
+
+        val normalIntent = buildLaunchIntentForMain(context, prefillNote = null)
+        val normalPi = PendingIntent.getActivity(
+            context, 0, normalIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val infos = topQuickNotesInfo.value
+        val first = infos.firstOrNull()
+
+        val builder = NotificationCompat.Builder(context, QUICK_ADD_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_input_add)
+            .setContentTitle("快速記帳")
+            .setContentText("撳一下即開鍵盤記一筆")
+            .setContentIntent(normalPi)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+
+        // Action 1：最近使用項目
+        if (first != null && first.note.isNotBlank()) {
+            val noteIntent = buildLaunchIntentForMain(context, first.note, first.amount, first.category)
+            val notePi = PendingIntent.getActivity(
+                context, 1, noteIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
+        }
+
+        // Action 2：今日最近捕獲（地鐵 · 4.9）
+        val captured = topLatestCapturedNotification.value
+        if (captured != null && captured.note.isNotBlank()) {
+            val todayStart = getTimestampMeta(System.currentTimeMillis()).startOfDayMillis
+            val capturedStart = getTimestampMeta(captured.timestamp).startOfDayMillis
+            if (capturedStart == todayStart) {
+                val label = "${captured.note} · ${NotificationCaptureBridge.formatAmountForLabel(captured.amount)}"
+                val capturedIntent = buildLaunchIntentForMain(context, captured.note, captured.amount, captured.category)
+                val capturedPi = PendingIntent.getActivity(
+                    context, 2, capturedIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(android.R.drawable.ic_menu_recent_history, label, capturedPi)
+            }
+        }
+
+        nm.notify(QUICK_ADD_NOTIFICATION_ID, builder.build())
+    } catch (_: Exception) {}
+}
+
+fun showCaptureConfirmNotification(context: Context, captured: CapturedNotification) {
+    try {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val granted = context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+                PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+        ensureNotificationChannels(context)
+
+        val notifId = CONFIRM_NOTIFICATION_BASE_ID +
+            ((captured.timestamp / 1000) % 100000).toInt()
+
+        val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
+        val title = "檢測到消費：${captured.note} · HKD $amountStr"
+
+        val addIntent = buildLaunchIntentForMain(context, captured.note, captured.amount, captured.category)
+        val addPi = PendingIntent.getActivity(
+            context, notifId + 1, addIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+            action = "com.example.hello.ACTION_IGNORE_CAPTURE"
+            putExtra("notif_id", notifId)
+        }
+        val ignorePi = PendingIntent.getBroadcast(
+            context, notifId + 2, ignoreIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CONFIRM_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText("是否新增這筆記錄？（分類：${captured.category}）")
+            .setContentIntent(addPi)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
+
+        nm.notify(notifId, builder.build())
+    } catch (_: Exception) {}
 }
 
 // ===== 配色 =====
@@ -502,6 +670,8 @@ private fun getTodayStartMillis(): Long {
     cachedTodayCheckMillis = now
     return meta.startOfDayMillis
 }
+
+// === PART 1 END ===
 
 // =========================================================
 //  ★ LedgerViewModel
@@ -924,18 +1094,15 @@ private fun computeLedgerUiState(
     val visibleCategories =
         (if (hasIncForCat) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
 
-    // 處理快速輸入項目顯示邏輯
     val finalTopNotes = if (filter.showFuture) {
         noteIndex.topNotes
     } else {
         val notesWithPast = HashSet<String>()
-        // 掃描所有記錄，搵出曾於「過去」或「現在」出現過嘅項目名稱
         for (r in records) {
             if (r.timestamp <= futureCutoff && r.note.isNotBlank()) {
                 notesWithPast.add(r.note)
             }
         }
-        // 只保留有過去記錄嘅項目
         noteIndex.topNotes.filter { it.first in notesWithPast }
     }
 
@@ -1208,81 +1375,6 @@ fun formatMonthLabel(ym: String): String {
     return if (y == cachedCurrentYear) "${m}月" else "${y % 100}年${m}月"
 }
 
-// ===== 通知存取權限引導 =====
-@Composable
-fun NotificationAccessGuide(context: Context) {
-    var isGranted by remember {
-        mutableStateOf(
-            NotificationManagerCompat
-                .getEnabledListenerPackages(context)
-                .contains(context.packageName)
-        )
-    }
-
-    // 當用戶從設定頁返回時重新檢查權限
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                isGranted = NotificationManagerCompat
-                    .getEnabledListenerPackages(context)
-                    .contains(context.packageName)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    // 未開權限時顯示引導
-    if (!isGranted) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .clickable {
-                    try {
-                        context.startActivity(
-                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                        )
-                    } catch (_: Exception) { }
-                },
-            shape = RoundedCornerShape(12.dp),
-            color = BRAND_PRIMARY_LIGHT
-        ) {
-            Row(
-                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.NotificationsActive,
-                    contentDescription = "開啟通知",
-                    tint = BRAND_PRIMARY
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "開啟自動記賬功能",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = BRAND_PRIMARY_DARK
-                    )
-                    Text(
-                        "點擊前往授權讀取通知，自動捕捉易乘碼消費",
-                        fontSize = 12.sp,
-                        color = BRAND_PRIMARY
-                    )
-                }
-                Icon(
-                    Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = BRAND_PRIMARY
-                )
-            }
-        }
-    }
-}
-
 fun formatDateHeader(dateKey: String): String {
     val info = parseDateHeader(dateKey) ?: return dateKey
     val wk = "週${info.weekdayChar}"
@@ -1536,21 +1628,24 @@ fun FanMenuOverlay(
     }
 }
 
+// === PART 2 END ===
+
+// =========================================================
+//  ★ MainActivity（完整版：已包含通知渠道 + Bridge.init + wrapper）
+// =========================================================
 class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_KEYBOARD = "extra_open_keyboard"
         const val EXTRA_PREFILL_NOTE = "extra_prefill_note"
         const val EXTRA_PREFILL_AMOUNT = "extra_prefill_amount"
-        const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category" // 🟢 新增
+        const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category"
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
-
-    private var lastNotificationBuildMs = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -1559,11 +1654,13 @@ class MainActivity : ComponentActivity() {
         if (fromNotification) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
-            keyboardPrefillCategory.value = intent?.getStringExtra(EXTRA_PREFILL_CATEGORY) // 🟢 新增
+            keyboardPrefillCategory.value = intent?.getStringExtra(EXTRA_PREFILL_CATEGORY)
             keyboardPrefillAmount.value = if (intent?.hasExtra(EXTRA_PREFILL_AMOUNT) == true)
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
         }
 
+        NotificationCaptureBridge.init(this)
+        ensureNotificationChannels(this)
         createQuickAddChannel()
         askNotificationPermissionIfNeeded()
 
@@ -1571,9 +1668,8 @@ class MainActivity : ComponentActivity() {
             val token = keyboardLaunchToken.value
             val prefillNote = keyboardPrefillNote.value
             val prefillAmount = keyboardPrefillAmount.value
-            val prefillCategory = keyboardPrefillCategory.value // 🟢 新增
+            val prefillCategory = keyboardPrefillCategory.value
             val notesInfo = topQuickNotesInfo.value
-            val captured = topLatestCapturedNotification.value
 
             LaunchedEffect(notesInfo) {
                 persistTopQuickNotes(notesInfo)
@@ -1586,11 +1682,11 @@ class MainActivity : ComponentActivity() {
                         keyboardLaunchToken = token,
                         prefillNoteOnLaunch = prefillNote,
                         prefillAmountOnLaunch = prefillAmount,
-                        prefillCategoryOnLaunch = prefillCategory, // 🟢 新增
+                        prefillCategoryOnLaunch = prefillCategory,
                         onKeyboardLaunchConsumed = {
                             keyboardPrefillNote.value = null
                             keyboardPrefillAmount.value = null
-                            keyboardPrefillCategory.value = null // 🟢 新增
+                            keyboardPrefillCategory.value = null
                         }
                     )
                 }
@@ -1600,7 +1696,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        lastNotificationBuildMs = 0L
         showQuickAddNotification()
     }
 
@@ -1610,7 +1705,7 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
-            keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY) // 🟢 新增
+            keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY)
             keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
         }
@@ -1630,22 +1725,6 @@ class MainActivity : ComponentActivity() {
         if (!granted) notificationPermissionLauncher.launch("android.permission.POST_NOTIFICATIONS")
     }
 
-    private fun buildLaunchIntent(
-        prefillNote: String?,
-        prefillAmount: Double? = null,
-        prefillCategory: String? = null
-    ): Intent {
-        return Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_OPEN_KEYBOARD, true)
-            if (!prefillNote.isNullOrBlank()) putExtra(EXTRA_PREFILL_NOTE, prefillNote)
-            if (!prefillCategory.isNullOrBlank()) putExtra(EXTRA_PREFILL_CATEGORY, prefillCategory)
-            if (prefillAmount != null && prefillAmount > 0.0) {
-                putExtra(EXTRA_PREFILL_AMOUNT, prefillAmount)
-            }
-        }
-    }
-
     private fun persistTopQuickNotes(infos: List<QuickNoteInfo>) {
         try {
             val prefs = getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
@@ -1661,85 +1740,15 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
-        private fun showQuickAddNotification() {
-        val now = System.currentTimeMillis()
-        if (now - lastNotificationBuildMs < 1000L) return
-        lastNotificationBuildMs = now
-
-        try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                val granted = checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
-                    PackageManager.PERMISSION_GRANTED
-                if (!granted) return
-            }
-
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-
-            val normalIntent = buildLaunchIntent(prefillNote = null)
-            val normalPi = PendingIntent.getActivity(
-                this, 0, normalIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val infos = topQuickNotesInfo.value
-            val first = infos.firstOrNull()
-
-            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_input_add)
-                .setContentTitle("快速記帳")
-                .setContentText("撳一下即開鍵盤記一筆")
-                .setContentIntent(normalPi)
-                .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-
-            // ===== Action 1：最近使用項目（原有邏輯） =====
-            if (first != null && first.note.isNotBlank()) {
-                val noteIntent = buildLaunchIntent(
-                    prefillNote = first.note,
-                    prefillAmount = first.amount,
-                    prefillCategory = first.category
-                )
-                val notePi = PendingIntent.getActivity(
-                    this, 1, noteIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
-            }
-
-            // ===== Action 2：今日最近捕獲嘅手機通知（例如：地鐵 · 4.9） =====
-            val captured = topLatestCapturedNotification.value
-            if (captured != null && captured.note.isNotBlank()) {
-                val todayStart = getTimestampMeta(System.currentTimeMillis()).startOfDayMillis
-                val capturedStart = getTimestampMeta(captured.timestamp).startOfDayMillis
-                val isToday = capturedStart == todayStart
-
-                if (isToday) {
-                    val label = "${captured.note} · ${
-                        NotificationCaptureBridge.formatAmountForLabel(captured.amount)
-                    }"
-
-                    val capturedIntent = buildLaunchIntent(
-                        prefillNote = captured.note,
-                        prefillAmount = captured.amount,
-                        prefillCategory = captured.category
-                    )
-                    val capturedPi = PendingIntent.getActivity(
-                        this, 2, capturedIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                    builder.addAction(
-                        android.R.drawable.ic_menu_recent_history,
-                        label,
-                        capturedPi
-                    )
-                }
-            }
-
-            nm.notify(NOTIFICATION_ID, builder.build())
-        } catch (_: Throwable) {}
+    /** 由 Activity 生命週期觸發嘅刷新（真正嘅即時刷新喺 NotificationCaptureBridge.pushCaptured 內部） */
+    private fun showQuickAddNotification() {
+        refreshQuickAddNotification(this)
     }
 }
 
+// =========================================================
+//  導航 & 模糊緩存
+// =========================================================
 private val MAIN_NAV_ITEMS = listOf(
     NavItem("記帳", Icons.Default.Receipt),
     NavItem("比較", Icons.Default.CompareArrows),
@@ -1758,12 +1767,15 @@ private fun getCachedBlurEffect(radiusPx: Int): androidx.compose.ui.graphics.Ren
     }
 }
 
+// =========================================================
+//  ★ MainApp
+// =========================================================
 @Composable
 fun MainApp(
     keyboardLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
     prefillAmountOnLaunch: Double? = null,
-    prefillCategoryOnLaunch: String? = null, // 🟢 新增
+    prefillCategoryOnLaunch: String? = null,
     onKeyboardLaunchConsumed: () -> Unit = {},
     vm: LedgerViewModel = viewModel()
 ) {
@@ -1906,10 +1918,10 @@ fun MainApp(
         }
     }
 
-        fun openKeyboardForNew(
+    fun openKeyboardForNew(
         note: String = "",
         amount: Double? = null,
-        forceCategory: String? = null // 🟢 新增
+        forceCategory: String? = null
     ) {
         val now = System.currentTimeMillis()
 
@@ -1926,7 +1938,6 @@ fun MainApp(
             } ?: ""
         }
 
-        // 🟢 優先使用 forceCategory（例如通知帶入「交通」），否則用舊有邏輯
         val defaultCategory = forceCategory
             ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
@@ -1964,8 +1975,9 @@ fun MainApp(
         showKeyboard = true
     }
 
-    fun openKeyboardForce(note: String?) {
-        val defaultCategory = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+    fun openKeyboardForce(note: String?, forceCategory: String? = null) {
+        val defaultCategory = forceCategory
+            ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
 
         if (note == null) {
@@ -2059,7 +2071,7 @@ fun MainApp(
         scrollToTopTrigger++
     }
 
-        LaunchedEffect(keyboardLaunchToken) {
+    LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
 
@@ -2068,16 +2080,16 @@ fun MainApp(
 
             val note = prefillNoteOnLaunch
             val amt = prefillAmountOnLaunch
-            val cat = prefillCategoryOnLaunch // 🟢 拎取 Category
+            val cat = prefillCategoryOnLaunch
 
             when {
                 note.isNullOrBlank() && amt == null -> openKeyboardForce(null)
-                amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat) // 🟢 傳入 cat
-                else -> openKeyboardForce(note)
+                amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat)
+                else -> openKeyboardForce(note, cat)
             }
 
             onKeyboardLaunchConsumed()
-            keyboardPrefillCategory.value = null // 🟢 保險清理
+            keyboardPrefillCategory.value = null
         }
     }
 
@@ -2589,6 +2601,9 @@ fun MainApp(
     }
 }
 
+// =========================================================
+//  ★ KeyboardAndFabLayer
+// =========================================================
 @Composable
 private fun BoxScope.KeyboardAndFabLayer(
     showKeyboard: Boolean,
@@ -2611,7 +2626,6 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    // 1. 篩選列 (放置於最底層)
     Row(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -2741,14 +2755,12 @@ private fun BoxScope.KeyboardAndFabLayer(
         Spacer(modifier = Modifier.width(60.dp))
     }
 
-    // 2. FAB 懸浮按鈕 (放置於中層)
     AnimatedFabLayer(
         progressProvider = progressProvider,
         onFabTap = onFabTap,
         modifier = Modifier.align(Alignment.BottomEnd)
     )
 
-    // 3. 鍵盤 Keyboard (放置於最頂層，確保唔會被遮擋)
     AnimatedKeyboardLayer(
         showKeyboard = showKeyboard,
         progressProvider = progressProvider,
@@ -2973,6 +2985,85 @@ fun FloatingNavBar(
     }
 }
 
+// =========================================================
+//  ★ NotificationAccessGuide（通知存取權限引導）
+// =========================================================
+@Composable
+fun NotificationAccessGuide(context: Context) {
+    var isGranted by remember {
+        mutableStateOf(
+            NotificationManagerCompat
+                .getEnabledListenerPackages(context)
+                .contains(context.packageName)
+        )
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isGranted = NotificationManagerCompat
+                    .getEnabledListenerPackages(context)
+                    .contains(context.packageName)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    if (!isGranted) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        )
+                    } catch (_: Exception) { }
+                },
+            shape = RoundedCornerShape(12.dp),
+            color = BRAND_PRIMARY_LIGHT
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.NotificationsActive,
+                    contentDescription = "開啟通知",
+                    tint = BRAND_PRIMARY
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "開啟自動記賬功能",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = BRAND_PRIMARY_DARK
+                    )
+                    Text(
+                        "點擊前往授權讀取通知，自動捕捉易乘碼消費",
+                        fontSize = 12.sp,
+                        color = BRAND_PRIMARY
+                    )
+                }
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = BRAND_PRIMARY
+                )
+            }
+        }
+    }
+}
+
+// === PART 3 END ===
+// =========================================================
+//  ★ LedgerContent
+// =========================================================
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -3037,19 +3128,17 @@ fun LedgerContent(
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
     val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
-    
+
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    
+
     val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
 
-    // 🟢 自動黏附最近的 Header，防止停留在模糊的過渡狀態
     LaunchedEffect(listState.isScrollInProgress) {
         if (!listState.isScrollInProgress) {
             val transitioningHeader = listState.layoutInfo.visibleItemsInfo.find {
                 it.contentType == "day_header" && it.offset < -2 && it.offset > -(headerHeightPx - 2)
             }
-
             if (transitioningHeader != null) {
                 val offset = transitioningHeader.offset.toFloat()
                 val distanceToScroll = if (offset < -headerHeightPx / 2) {
@@ -3077,7 +3166,6 @@ fun LedgerContent(
     val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
     var quickInputMaxRows by remember { mutableIntStateOf(4) }
-
     val scrollStateData = remember { floatArrayOf(0f) }
 
     val collapseScrollConnection = remember(collapseDistancePx, oneRowPx) {
@@ -3086,16 +3174,13 @@ fun LedgerContent(
                 val prev = scrollStateData[0]
                 val next = (prev - available.y).coerceIn(0f, collapseDistancePx)
                 scrollStateData[0] = next
-
                 val rawTarget = when {
                     next < oneRowPx * 0.5f -> 4
                     next < oneRowPx * 1.5f -> 3
                     next < oneRowPx * 2.5f -> 2
                     else -> 1
                 }
-                if (rawTarget != quickInputMaxRows) {
-                    quickInputMaxRows = rawTarget
-                }
+                if (rawTarget != quickInputMaxRows) quickInputMaxRows = rawTarget
                 return Offset.Zero
             }
         }
@@ -3140,21 +3225,6 @@ fun LedgerContent(
     val latestOnChangeIcon by rememberUpdatedState(onChangeIconClick)
     val latestOnExpand by rememberUpdatedState(onExpandChange)
 
-    val handleCopyClick = remember { { r: Record -> latestOnCopy(r) } }
-    val handleEditClick = remember { { r: Record -> latestOnEdit(r) } }
-    val handleFilterClick = remember(listState) { 
-        { r: Record -> 
-            if (!latestFilterMode) {
-                preFilterIndex = listState.firstVisibleItemIndex
-                preFilterOffset = listState.firstVisibleItemScrollOffset
-            }
-            latestOnFilterByName(r.note)
-        }
-    }
-    val handleDeleteClick = remember { { r: Record -> latestOnDelete(r) } }
-    val handleChangeIconClick = remember { { r: Record -> latestOnChangeIcon(r) } }
-    val handleExpandClick = remember { { id: String? -> latestOnExpand(id) } }
-
     val handleFanEnd = remember {
         {
             val center = fanMenuCenterState.value
@@ -3172,7 +3242,6 @@ fun LedgerContent(
                 else -> 0f
             }
             val arcCenterAngle = -90f + rotation
-
             val hovered = getHoveredActionIndexWithCenter(
                 center = center,
                 touch = fanMenuTouchState.value,
@@ -3252,11 +3321,7 @@ fun LedgerContent(
     }
 
     LaunchedEffect(filterMode) {
-        if (filterMode) {
-            try {
-                listState.scrollToItem(0)
-            } catch (_: Exception) {}
-        }
+        if (filterMode) { try { listState.scrollToItem(0) } catch (_: Exception) {} }
     }
 
     val singleCategory by remember(filterMode, filtered) {
@@ -3419,7 +3484,7 @@ fun LedgerContent(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-            // 🟢 通知權限引導（未授權時自動顯示，已授權則不佔位）
+            // 🟢 通知存取權限引導
             NotificationAccessGuide(context = LocalContext.current)
 
             Row(
@@ -3479,21 +3544,15 @@ fun LedgerContent(
                             Spacer(Modifier.height(4.dp))
                         }
                     } else {
-                        Column(
-                            Modifier
-                                .padding(horizontal = 16.dp, vertical = 0.dp)
-                        ) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
                             Spacer(Modifier.height(4.dp))
-
                             val allCategories: List<String?> = remember(visibleCategories) {
                                 listOf(null) + visibleCategories
                             }
                             val rows = remember(allCategories) { allCategories.chunked(4) }
                             rows.forEach { row ->
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
+                                Row(Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     row.forEach { cat ->
                                         AnimatedFilterChip(
                                             modifier = Modifier.weight(1f),
@@ -3515,9 +3574,7 @@ fun LedgerContent(
                             Spacer(Modifier.height(4.dp))
                             if (availableMonths.isNotEmpty()) {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -3566,9 +3623,7 @@ fun LedgerContent(
                 } else {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .nestedScroll(collapseScrollConnection),
+                        modifier = Modifier.fillMaxSize().nestedScroll(collapseScrollConnection),
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
@@ -3626,6 +3681,9 @@ fun LedgerContent(
     }
 }
 
+// =========================================================
+//  週支出圖表
+// =========================================================
 @Composable
 fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
@@ -3638,7 +3696,6 @@ fun WeeklyExpenseChart(
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
     val maxBarHeight = 62.dp
 
-    // ★ 修復：用 derivedStateOf 只讀取必要的狀態；移除圖表淡出時嘅動態模糊（BlurEffect 每幀重建成本高，容易掉幀）
     val scrollProgress by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -3657,40 +3714,28 @@ fun WeeklyExpenseChart(
         data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(chartHeight)
-            .clipToBounds()
-    ) {
+    Box(modifier = modifier.fillMaxWidth().height(chartHeight).clipToBounds()) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    val p = scrollProgress
-                    alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
-                    scaleY = 1f - p * 0.35f
-                    scaleX = 1f - p * 0.08f
-                    translationY = -p * 14.dp.toPx()
-                    transformOrigin = TransformOrigin(0.5f, 0f)
-                }
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                val p = scrollProgress
+                alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
+                scaleY = 1f - p * 0.35f
+                scaleX = 1f - p * 0.08f
+                translationY = -p * 14.dp.toPx()
+                transformOrigin = TransformOrigin(0.5f, 0f)
+            }
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.Bottom
             ) {
-                data.forEachIndexed { _, day ->
+                data.forEach { day ->
                     WeeklyExpenseBar(
-                        day = day,
-                        maxAmount = maxAmount,
+                        day = day, maxAmount = maxAmount,
                         introProgress = introProgress,
                         maxBarHeight = maxBarHeight,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
                 }
             }
@@ -3700,14 +3745,10 @@ fun WeeklyExpenseChart(
 
 @Composable
 fun WeeklyExpenseBar(
-    day: WeeklyExpenseDay,
-    maxAmount: Double,
-    introProgress: Float,
-    maxBarHeight: Dp,
-    modifier: Modifier = Modifier,
+    day: WeeklyExpenseDay, maxAmount: Double, introProgress: Float,
+    maxBarHeight: Dp, modifier: Modifier = Modifier,
 ) {
     val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
-
     val animatedRatio by animateFloatAsState(
         targetValue = targetRatio,
         animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
@@ -3717,8 +3758,7 @@ fun WeeklyExpenseBar(
     val minBarHeight = 4.dp
     val minRatio = if (maxBarHeight.value > 0f) (minBarHeight.value / maxBarHeight.value) else 0f
     val displayRatio: Float = if (day.amount > 0.0) {
-        (animatedRatio * introProgress)
-            .coerceAtLeast(minRatio * introProgress)
+        (animatedRatio * introProgress).coerceAtLeast(minRatio * introProgress)
     } else {
         animatedRatio * introProgress
     }.coerceIn(0f, 1f)
@@ -3731,23 +3771,17 @@ fun WeeklyExpenseBar(
         verticalArrangement = Arrangement.Bottom
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(maxBarHeight),
+            modifier = Modifier.fillMaxWidth().height(maxBarHeight),
             contentAlignment = Alignment.BottomCenter
         ) {
             Box(
-                modifier = Modifier
-                    .width(16.dp)
-                    .fillMaxHeight()
+                modifier = Modifier.width(16.dp).fillMaxHeight()
                     .clip(RoundedCornerShape(8.dp))
                     .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f))
             )
             if (displayRatio > 0.0005f) {
                 Box(
-                    modifier = Modifier
-                        .width(16.dp)
-                        .height(barHeight)
+                    modifier = Modifier.width(16.dp).height(barHeight)
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             Brush.verticalGradient(
@@ -3764,9 +3798,7 @@ fun WeeklyExpenseBar(
                 )
             }
         }
-
         Spacer(Modifier.height(4.dp))
-
         Text(
             text = day.weekdayChar,
             fontSize = 11.sp,
@@ -3777,6 +3809,9 @@ fun WeeklyExpenseBar(
     }
 }
 
+// =========================================================
+//  CategoryStatChip + AnimatedRecordItem + CategoryTotalHint
+// =========================================================
 @Composable
 fun CategoryStatChip(category: String) {
     val style = CATEGORY_STYLES[category]
@@ -3820,9 +3855,7 @@ fun AnimatedRecordItem(
     }
 
     if (!animateOnMount && !everDeleting) {
-        Box(Modifier.fillMaxWidth().height(72.dp)) {
-            content()
-        }
+        Box(Modifier.fillMaxWidth().height(72.dp)) { content() }
         return
     }
 
@@ -3842,9 +3875,7 @@ fun AnimatedRecordItem(
                     animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f)
                 )
             }
-            launch {
-                alphaAnim.animateTo(0f, tween(320, easing = FastOutSlowInEasing))
-            }
+            launch { alphaAnim.animateTo(0f, tween(320, easing = FastOutSlowInEasing)) }
             delay(260)
             launch {
                 heightAnim.animateTo(
@@ -3872,9 +3903,7 @@ fun AnimatedRecordItem(
                     animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
                 )
             }
-            launch {
-                alphaAnim.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
-            }
+            launch { alphaAnim.animateTo(1f, tween(300, easing = FastOutSlowInEasing)) }
             launch {
                 translateYAnim.animateTo(
                     targetValue = 0f,
@@ -3888,18 +3917,13 @@ fun AnimatedRecordItem(
 
     Box(Modifier.fillMaxWidth().height(heightDp).clipToBounds()) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(72.dp)
-                .graphicsLayer {
-                    alpha = alphaAnim.value
-                    scaleX = scaleAnim.value
-                    scaleY = scaleAnim.value
-                    translationY = translateYAnim.value
-                }
-        ) {
-            content()
-        }
+            modifier = Modifier.fillMaxWidth().height(72.dp).graphicsLayer {
+                alpha = alphaAnim.value
+                scaleX = scaleAnim.value
+                scaleY = scaleAnim.value
+                translationY = translateYAnim.value
+            }
+        ) { content() }
 
         if (isDeleting) {
             val particleProgress = remember { Animatable(0f) }
@@ -3969,13 +3993,13 @@ fun CategoryTotalHint(hint: AfterSaveHint, visible: Boolean) {
     }
 }
 
+// =========================================================
+//  TrianglePointer + SwipeableRecordItem + AnimatedActionButton
+// =========================================================
 @Composable
 fun TrianglePointer(
-    colIndex: Int,
-    cellWidth: Dp,
-    color: Color = SURFACE_CARD,
-    triangleWidth: Dp = 22.dp,
-    triangleHeight: Dp = 11.dp,
+    colIndex: Int, cellWidth: Dp, color: Color = SURFACE_CARD,
+    triangleWidth: Dp = 22.dp, triangleHeight: Dp = 11.dp,
 ) {
     val targetX = cellWidth * colIndex + cellWidth / 2 - triangleWidth / 2
     val animatedX by animateDpAsState(
@@ -4070,7 +4094,6 @@ fun SwipeableRecordItem(
     val amtColor = remember(record.category) { amountColor(record.category) }
     val headlineText = remember(record.note) { record.note.ifBlank { "(無名稱)" } }
 
-    // 緩存所有最新的狀態，避免 Lambda 捕捉到舊資料
     val latestRecord by rememberUpdatedState(record)
     val latestOnExpand by rememberUpdatedState(onExpand)
     val latestOnCopy by rememberUpdatedState(onCopy)
@@ -4088,18 +4111,12 @@ fun SwipeableRecordItem(
             .wrapContentHeight()
             .zIndex(if (isActiveItem) 10f else 0f)
             .then(
-                if (needsLayer) {
-                    Modifier.graphicsLayer {
-                        scaleX = itemScale
-                        scaleY = itemScale
-                        alpha = itemAlpha
-                    }
+                if (needsLayer) Modifier.graphicsLayer {
+                    scaleX = itemScale; scaleY = itemScale; alpha = itemAlpha
                 } else Modifier
             )
             .background(backgroundColor)
-            .onGloballyPositioned { coords ->
-                layoutCoordsHolder[0] = coords
-            }
+            .onGloballyPositioned { coords -> layoutCoordsHolder[0] = coords }
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
                     onDragStart = {
@@ -4158,8 +4175,7 @@ fun SwipeableRecordItem(
     ) {
         if (leftProgress > 0.005f) {
             Row(
-                Modifier
-                    .matchParentSize()
+                Modifier.matchParentSize()
                     .offset {
                         val overscroll = if (offsetX < maxLeft) (offsetX - maxLeft).roundToInt() else 0
                         IntOffset(overscroll, 0)
@@ -4172,17 +4188,17 @@ fun SwipeableRecordItem(
                     iconTint = Color(0xFF64748B), width = bw, height = bh,
                     progress = leftProgress, delay = 0f
                 ) { targetOffset = 0f; onExpand(null); onCopy(record) }
-                
+
                 AnimatedActionButton(Icons.Default.Edit, "編輯",
                     iconTint = Color(0xFF3B82F6), width = bw, height = bh,
                     progress = leftProgress, delay = 0.12f
                 ) { targetOffset = 0f; onExpand(null); onEdit(record) }
-                
+
                 AnimatedActionButton(Icons.Default.FilterList, "篩選",
                     iconTint = Color(0xFF8B5CF6), width = bw, height = bh,
                     progress = leftProgress, delay = 0.24f
                 ) { targetOffset = 0f; onExpand(null); onFilter(record) }
-                
+
                 AnimatedActionButton(Icons.Default.Delete, "刪除",
                     iconTint = COLOR_EXPENSE, width = bw, height = bh,
                     progress = leftProgress, delay = 0.36f
@@ -4192,8 +4208,7 @@ fun SwipeableRecordItem(
 
         if (rightProgress > 0.005f) {
             Row(
-                Modifier
-                    .matchParentSize()
+                Modifier.matchParentSize()
                     .offset {
                         val overscroll = if (offsetX > maxRight) (offsetX - maxRight).roundToInt() else 0
                         IntOffset(overscroll, 0)
@@ -4236,10 +4251,8 @@ fun SwipeableRecordItem(
 
 @Composable
 private fun AnimatedActionButton(
-    icon: ImageVector, label: String,
-    iconTint: Color,
-    width: Dp, height: Dp,
-    progress: Float, delay: Float,
+    icon: ImageVector, label: String, iconTint: Color,
+    width: Dp, height: Dp, progress: Float, delay: Float,
     onClick: () -> Unit,
 ) {
     if (progress < 0.01f) {
@@ -4263,18 +4276,16 @@ private fun AnimatedActionButton(
     }
 }
 
+// =========================================================
+//  DayDetailPanel
+// =========================================================
 @Composable
 fun DayDetailPanel(
-    dateKey: String,
-    records: List<Record>,
-    expandedId: String?,
-    onExpandChange: (String?) -> Unit,
-    onCopy: (Record) -> Unit,
-    onEdit: (Record) -> Unit,
-    onFilter: (Record) -> Unit,
-    onDelete: (Record) -> Unit,
-    onChangeIcon: (Record) -> Unit,
-    onDismiss: () -> Unit,
+    dateKey: String, records: List<Record>,
+    expandedId: String?, onExpandChange: (String?) -> Unit,
+    onCopy: (Record) -> Unit, onEdit: (Record) -> Unit,
+    onFilter: (Record) -> Unit, onDelete: (Record) -> Unit,
+    onChangeIcon: (Record) -> Unit, onDismiss: () -> Unit,
     deletingIds: Set<String> = emptySet(),
     justAddedIds: Set<String> = emptySet(),
     onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
@@ -4371,6 +4382,9 @@ fun DayDetailPanel(
     }
 }
 
+// =========================================================
+//  LedgerKeyboardPanel + KeyboardKey
+// =========================================================
 private val KEYBOARD_ROWS = listOf(
     listOf("1", "2", "3"), listOf("4", "5", "6"),
     listOf("7", "8", "9"), listOf(".", "0", "backspace")
@@ -4380,16 +4394,11 @@ private val CHUNKED_CATEGORIES = CATEGORIES.chunked(2)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerKeyboardPanel(
-    state: KeyboardState,
-    onStateChange: (KeyboardState) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-    onNext: () -> Unit,
+    state: KeyboardState, onStateChange: (KeyboardState) -> Unit,
+    onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
     onPickCategory: () -> Unit,
-    allNoteNames: List<String>,
-    noteCategoryMap: Map<String, String>,
-    nameFlashTrigger: Int,
-    showKeyboard: Boolean = true,
+    allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
+    nameFlashTrigger: Int, showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -4410,12 +4419,10 @@ fun LedgerKeyboardPanel(
                 ambientColor = Color(0x33000000), spotColor = Color(0x33000000))
             .clip(panelShape)
             .background(SURFACE_CARD)
-            // 🟢 加入呢行防穿透
             .pointerInput(Unit) { detectTapGestures { } }
     ) {
         Column(
-            Modifier
-                .fillMaxWidth()
+            Modifier.fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
@@ -4427,9 +4434,7 @@ fun LedgerKeyboardPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Surface(
-                    modifier = Modifier
-                        .weight(1.4f)
-                        .fillMaxHeight()
+                    modifier = Modifier.weight(1.4f).fillMaxHeight()
                         .clip(RoundedCornerShape(14.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
@@ -4457,9 +4462,7 @@ fun LedgerKeyboardPanel(
                     }
                 }
                 Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                    modifier = Modifier.weight(1f).fillMaxHeight()
                         .clip(RoundedCornerShape(14.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
@@ -4509,9 +4512,7 @@ fun LedgerKeyboardPanel(
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
-                                        ) {
-                                            onStateChange(state.copy(currency = "HKD", focusedField = "amount"))
-                                        }
+                                        ) { onStateChange(state.copy(currency = "HKD", focusedField = "amount")) }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
                                     Text("HKD", fontSize = 13.sp, fontWeight = FontWeight.Bold,
@@ -4524,9 +4525,7 @@ fun LedgerKeyboardPanel(
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
-                                        ) {
-                                            onStateChange(state.copy(currency = "JPY", focusedField = "amount"))
-                                        }
+                                        ) { onStateChange(state.copy(currency = "JPY", focusedField = "amount")) }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
                                     Text("JPY", fontSize = 13.sp, fontWeight = FontWeight.Bold,
@@ -4557,11 +4556,9 @@ fun LedgerKeyboardPanel(
                                         ) { onStateChange(state.copy(focusedField = "rate")) }
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
-                                    Text(
-                                        text = state.exchangeRateText.ifEmpty { "0" },
+                                    Text(state.exchangeRateText.ifEmpty { "0" },
                                         fontSize = 14.sp, fontWeight = FontWeight.Bold,
-                                        color = BRAND_PRIMARY
-                                    )
+                                        color = BRAND_PRIMARY)
                                 }
                                 Spacer(Modifier.width(8.dp))
                                 val jpyAmt = state.amountText.toDoubleOrNull() ?: 0.0
@@ -4578,8 +4575,7 @@ fun LedgerKeyboardPanel(
             Surface(Modifier.fillMaxWidth().height(76.dp),
                 shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(
-                    Modifier
-                        .fillMaxSize()
+                    Modifier.fillMaxSize()
                         .clip(RoundedCornerShape(16.dp))
                         .border(2.dp,
                             if (state.focusedField == "amount" && state.currency == "JPY") BRAND_PRIMARY_LIGHT
@@ -4598,13 +4594,11 @@ fun LedgerKeyboardPanel(
                         modifier = Modifier.align(Alignment.CenterStart)
                     )
                     val showText = if (state.amountText.isEmpty()) "0" else state.amountText
-
                     val highlightColor = if (state.selectAmountOnInput) Color(0xFFDBEAFE)
                                          else Color.Transparent
 
                     Box(
-                        modifier = Modifier
-                            .padding(end = 44.dp)
+                        modifier = Modifier.padding(end = 44.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(highlightColor)
                             .padding(horizontal = 10.dp, vertical = 2.dp)
@@ -4697,9 +4691,7 @@ fun LedgerKeyboardPanel(
                 val glowShape = RoundedCornerShape(14.dp)
 
                 Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
+                    Modifier.weight(1f).fillMaxHeight()
                         .clip(glowShape)
                         .drawWithContent {
                             drawContent()
@@ -4725,7 +4717,6 @@ fun LedgerKeyboardPanel(
                         LaunchedEffect(state.editingNote) {
                             if (state.editingNote) focusReq.requestFocus()
                         }
-
                         LaunchedEffect(state.noteText) {
                             if (state.noteText != tfValue.text) {
                                 tfValue = TextFieldValue(
@@ -4863,9 +4854,7 @@ fun LedgerKeyboardPanel(
                                         val sel = cat == state.category
                                         val chipShape = RoundedCornerShape(12.dp)
                                         Row(
-                                            Modifier
-                                                .weight(1f)
-                                                .height(44.dp)
+                                            Modifier.weight(1f).height(44.dp)
                                                 .clip(chipShape)
                                                 .background(
                                                     if (sel) (s?.fgColor ?: BRAND_PRIMARY)
@@ -4956,6 +4945,9 @@ fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
+// =========================================================
+//  FilterChips + TopStats + AnimatedAmount
+// =========================================================
 @Composable
 fun AnimatedFilterChip(
     selected: Boolean, label: String, onClick: () -> Unit,
@@ -4975,26 +4967,17 @@ fun AnimatedFilterChip(
 
     Surface(
         onClick = onClick,
-        modifier = modifier
-            .height(34.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale },
-        shape = RoundedCornerShape(12.dp),
-        color = bgColor,
+        modifier = modifier.height(34.dp).graphicsLayer { scaleX = scale; scaleY = scale },
+        shape = RoundedCornerShape(12.dp), color = bgColor,
         interactionSource = src
     ) {
         Box(
             modifier = if (fillWidth) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 14.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = label,
-                textAlign = TextAlign.Center,
-                fontSize = 13.sp,
-                maxLines = 1,
-                color = textColor,
-                fontWeight = fontWeight,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
+            Text(label, textAlign = TextAlign.Center, fontSize = 13.sp, maxLines = 1,
+                color = textColor, fontWeight = fontWeight,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
         }
     }
 }
@@ -5011,30 +4994,20 @@ fun CalendarFilterChip(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "cs"
     )
-
     val bgColor = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED
     val textColor = if (selected) Color.White else Color.Black
     val fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
 
     Surface(
         onClick = onClick,
-        modifier = modifier
-            .height(34.dp)
-            .graphicsLayer { scaleX = scale; scaleY = scale },
-        shape = RoundedCornerShape(12.dp),
-        color = bgColor,
+        modifier = modifier.height(34.dp).graphicsLayer { scaleX = scale; scaleY = scale },
+        shape = RoundedCornerShape(12.dp), color = bgColor,
         interactionSource = src
     ) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                textAlign = TextAlign.Center,
-                fontSize = 13.sp,
-                maxLines = 1,
-                color = textColor,
-                fontWeight = fontWeight,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
+            Text(label, textAlign = TextAlign.Center, fontSize = 13.sp, maxLines = 1,
+                color = textColor, fontWeight = fontWeight,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
         }
     }
 }
@@ -5076,9 +5049,7 @@ fun TopStats(
                     alpha = alphaScale
                     scaleX = 0.85f + 0.15f * alphaScale
                     scaleY = 0.85f + 0.15f * alphaScale
-                }) {
-                    CategoryStatChip(category = categoryName)
-                }
+                }) { CategoryStatChip(category = categoryName) }
             }
         }
 
@@ -5175,9 +5146,7 @@ fun TopStats(
                         }
                     }
                 }
-
                 Spacer(Modifier.height(4.dp))
-
                 Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
                     contentAlignment = Alignment.Center) {
                     AnimatedAmount(text = thirdBlockText, color = thirdBlockColor,
@@ -5200,11 +5169,8 @@ fun AnimatedAmount(
     fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
 ) {
     val maxSlots = remember { mutableIntStateOf(maxOf(text.length, 12)) }
-
     LaunchedEffect(text.length) {
-        if (text.length > maxSlots.value) {
-            maxSlots.value = text.length
-        }
+        if (text.length > maxSlots.value) maxSlots.value = text.length
     }
 
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
@@ -5243,14 +5209,14 @@ fun AnimatedAmount(
     }
 }
 
+// =========================================================
+//  SmartElement + DayHeader + IconSourceOption
+// =========================================================
 @Composable
 fun SmartElement(
-    listState: LazyListState?,
-    dateKey: String,
-    isStaticWithNext: Boolean,
-    isStaticWithPrev: Boolean,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+    listState: LazyListState?, dateKey: String,
+    isStaticWithNext: Boolean, isStaticWithPrev: Boolean,
+    modifier: Modifier = Modifier, content: @Composable () -> Unit
 ) {
     if (listState == null) {
         Box(modifier) { content() }
@@ -5263,35 +5229,18 @@ fun SmartElement(
         modifier = modifier.graphicsLayer {
             val itemInfo = listState.layoutInfo.visibleItemsInfo.find { it.key == "header_$dateKey" }
             val currentOffset = itemInfo?.offset?.toFloat() ?: 0f
-
             var ty = 0f
             var a = 1f
 
             if (currentOffset <= 0f && currentOffset >= -headerHeightPx) {
-                // 已貼頂，被下一個 sticky header 推走
-                if (isStaticWithNext) {
-                    ty = -currentOffset
-                    a = 1f
-                } else {
+                if (isStaticWithNext) { ty = -currentOffset; a = 1f }
+                else {
                     ty = -currentOffset * 0.35f
                     a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f))
                 }
             } else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
-                // 從下方滾入
-                if (isStaticWithPrev) {
-                    // 內容與上一個 header 相同，被上一個 sticky header 覆蓋
-                    ty = -currentOffset
-                    a = 0f
-                } else {
-                    // ★ 修復：完全跟隨自然滾動，唔加額外 ty 偏移
-                    //   咁樣由 currentOffset > 64dp → <= 64dp → = 0 全程連續，
-                    //   唔會再喺臨界點跳一下
-                    ty = 0f
-                    a = 1f
-                }
+                if (isStaticWithPrev) { ty = -currentOffset; a = 0f }
             }
-            // currentOffset > headerHeightPx：兩個分支都唔命中，
-            // ty 保持 0f、a 保持 1f，同上面修復後邏輯完全連續
 
             translationY = ty
             val finalAlpha = a.coerceIn(0f, 1f)
@@ -5309,9 +5258,7 @@ fun SmartElement(
                 }
             }
         }
-    ) {
-        content()
-    }
+    ) { content() }
 }
 
 @Composable
@@ -5349,9 +5296,7 @@ fun DayHeader(
     val colorMatchPrev = isToday == prevIsToday
 
     Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -5460,6 +5405,9 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
+// =========================================================
+//  QuickInputChip + QuickInputSection + AnimatedInfoChip
+// =========================================================
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val ctx = LocalContext.current
@@ -5503,19 +5451,15 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        modifier = modifier
-            .height(36.dp)
-            .clip(RoundedCornerShape(12.dp))
+        modifier = modifier.height(36.dp).clip(RoundedCornerShape(12.dp))
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
         shadowElevation = 1.dp
     ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp),
+        Row(Modifier.padding(horizontal = 10.dp),
             horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+            verticalAlignment = Alignment.CenterVertically) {
             IconView(iconUrl, name, size = 18.dp)
             Spacer(Modifier.width(6.dp))
             Text(name, fontSize = 13.sp, color = TEXT_PRIMARY,
@@ -5526,10 +5470,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
 }
 
 private data class PlacedChip(
-    val name: String,
-    val targetW: Float,
-    val targetX: Float,
-    val targetY: Float
+    val name: String, val targetW: Float, val targetX: Float, val targetY: Float
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -5561,11 +5502,7 @@ fun QuickInputSection(
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
     val noteTextWidthCache = remember { mutableMapOf<String, Float>() }
 
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-    ) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
@@ -5625,9 +5562,7 @@ fun QuickInputSection(
 
             LaunchedEffect(pagesWithChips.size) {
                 val maxPage = (pagesWithChips.size - 1).coerceAtLeast(0)
-                if (pagerState.currentPage > maxPage) {
-                    pagerState.scrollToPage(maxPage)
-                }
+                if (pagerState.currentPage > maxPage) pagerState.scrollToPage(maxPage)
             }
 
             val hasIndicator = pagesWithChips.size > 1
@@ -5653,9 +5588,7 @@ fun QuickInputSection(
             )
 
             Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(animatedHeight)
+                Modifier.fillMaxWidth().height(animatedHeight)
                     .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
                     .clip(RoundedCornerShape(18.dp))
                     .background(SURFACE_CARD)
@@ -5667,11 +5600,8 @@ fun QuickInputSection(
                 ) { page ->
                     val chips = pagesWithChips.getOrNull(page) ?: emptyList()
 
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)
-                    ) {
+                    Box(Modifier.fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
                         chips.forEach { chip ->
                             key(chip.name) {
                                 val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = 0.82f, stiffness = 320f), label="x")
@@ -5692,11 +5622,7 @@ fun QuickInputSection(
                                             layout(w, placeable.height) { placeable.placeRelative(0, 0) }
                                         }
                                         .height(chipHeightDp)
-                                        .graphicsLayer {
-                                            scaleX = scale
-                                            scaleY = scale
-                                            this.alpha = alpha
-                                        }
+                                        .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
                                 ) {
                                     QuickInputChip(
                                         name = chip.name,
@@ -5711,21 +5637,15 @@ fun QuickInputSection(
                 }
 
                 if (hasIndicator) {
-                    Row(
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                    Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         val safeCurrent = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
                         repeat(pagesWithChips.size) { i ->
                             val isSelected = safeCurrent == i
-                            Box(
-                                Modifier
-                                    .size(if (isSelected) 6.dp else 4.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR)
-                            )
+                            Box(Modifier
+                                .size(if (isSelected) 6.dp else 4.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR))
                         }
                     }
                 }
@@ -5754,6 +5674,9 @@ fun AnimatedInfoChip(
     }
 }
 
+// =========================================================
+//  CalendarRow + CalendarDayCell + CalendarContent + SegmentedModeControl
+// =========================================================
 @Composable
 fun CalendarRow(
     rowIdx: Int, firstDayOffset: Int, daysInMonth: Int, today: Calendar,
@@ -5828,11 +5751,8 @@ fun CalendarRow(
 
 @Immutable
 private data class DayCellSummary(
-    val net: Double,
-    val absNet: Double,
-    val compactNet: String,
-    val sortedAsc: List<Record>,
-    val chunked3: List<List<Record>>
+    val net: Double, val absNet: Double, val compactNet: String,
+    val sortedAsc: List<Record>, val chunked3: List<List<Record>>
 )
 
 @Composable
@@ -5856,11 +5776,9 @@ fun CalendarDayCell(
             val absNet = abs(net)
             val sorted = records.sortedBy { it.timestamp }
             DayCellSummary(
-                net = net,
-                absNet = absNet,
+                net = net, absNet = absNet,
                 compactNet = if (absNet > 0) compactAmount(net) else "",
-                sortedAsc = sorted,
-                chunked3 = records.chunked(3)
+                sortedAsc = sorted, chunked3 = records.chunked(3)
             )
         }
     }
@@ -5897,7 +5815,6 @@ fun CalendarDayCell(
     }
     val borderWidth = if (isSelected) 2.dp else 0.5.dp
     val borderColor = if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR
-
     val elevation = if (hasRecords || isToday || isSelected) 1.dp else 0.dp
 
     val barRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
@@ -5906,13 +5823,10 @@ fun CalendarDayCell(
     val barColor = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG
 
     Box(
-        Modifier
-            .fillMaxSize()
+        Modifier.fillMaxSize()
             .graphicsLayer {
                 val s = selectionScale * visibilityScale
-                scaleX = s
-                scaleY = s
-                alpha = visibilityScale
+                scaleX = s; scaleY = s; alpha = visibilityScale
             }
             .shadow(elevation, shape, clip = false,
                 ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000))
@@ -6073,12 +5987,9 @@ fun CalendarContent(
                 else -> 0f
             }
             val arcCenterAngle = -90f + rotation
-
             val hovered = getHoveredActionIndexWithCenter(
-                center = center,
-                touch = fanMenuTouchState.value,
-                minRadiusPx = minFanRadiusPx,
-                arcCenterAngle = arcCenterAngle
+                center = center, touch = fanMenuTouchState.value,
+                minRadiusPx = minFanRadiusPx, arcCenterAngle = arcCenterAngle
             )
             val targetRecord = activeFanRecord
             activeFanRecord = null
@@ -6152,10 +6063,7 @@ fun CalendarContent(
 
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Surface(
-                        onClick = {
-                            monthDirection = -1
-                            onMonthChange(shiftMonthKey(currentMonthKey, -1))
-                        },
+                        onClick = { monthDirection = -1; onMonthChange(shiftMonthKey(currentMonthKey, -1)) },
                         modifier = Modifier.size(36.dp),
                         shape = CircleShape, color = SURFACE_ELEVATED
                     ) {
@@ -6202,10 +6110,7 @@ fun CalendarContent(
 
                     Spacer(Modifier.width(10.dp))
                     Surface(
-                        onClick = {
-                            monthDirection = 1
-                            onMonthChange(shiftMonthKey(currentMonthKey, 1))
-                        },
+                        onClick = { monthDirection = 1; onMonthChange(shiftMonthKey(currentMonthKey, 1)) },
                         modifier = Modifier.size(36.dp),
                         shape = CircleShape, color = SURFACE_ELEVATED
                     ) {
@@ -6296,8 +6201,7 @@ fun CalendarContent(
                 val cellWidth = (screenWidthDp - 20.dp) / 7
 
                 Column(
-                    Modifier
-                        .fillMaxSize()
+                    Modifier.fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
                         .padding(top = 10.dp)
@@ -6428,25 +6332,23 @@ fun SegmentedModeControl(
 
     Surface(shape = RoundedCornerShape(12.dp), color = SURFACE_ELEVATED) {
         Box(
-            Modifier
-                .padding(3.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { dragAccum = 0f },
-                        onDragEnd = { dragAccum = 0f },
-                        onDragCancel = { dragAccum = 0f },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragAccum += dragAmount.x
-                            val steps = (dragAccum / itemWidthPx).toInt()
-                            if (steps != 0) {
-                                val newMode = (latestMode + steps).coerceIn(0, 2)
-                                if (newMode != latestMode) latestOnChange(newMode)
-                                dragAccum -= steps * itemWidthPx
-                            }
+            Modifier.padding(3.dp).pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { dragAccum = 0f },
+                    onDragEnd = { dragAccum = 0f },
+                    onDragCancel = { dragAccum = 0f },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragAccum += dragAmount.x
+                        val steps = (dragAccum / itemWidthPx).toInt()
+                        if (steps != 0) {
+                            val newMode = (latestMode + steps).coerceIn(0, 2)
+                            if (newMode != latestMode) latestOnChange(newMode)
+                            dragAccum -= steps * itemWidthPx
                         }
-                    )
-                }
+                    }
+                )
+            }
         ) {
             val indicatorOffset by animateDpAsState(
                 targetValue = itemWidth * displayMode,
@@ -6456,8 +6358,7 @@ fun SegmentedModeControl(
             )
 
             Box(
-                Modifier
-                    .offset(x = indicatorOffset)
+                Modifier.offset(x = indicatorOffset)
                     .width(itemWidth).height(itemHeight)
                     .shadow(2.dp, RoundedCornerShape(9.dp), clip = false)
                     .clip(RoundedCornerShape(9.dp))
@@ -6468,8 +6369,7 @@ fun SegmentedModeControl(
                 SEGMENTED_MODES.forEach { (label, icon, mode) ->
                     val selected = displayMode == mode
                     Row(
-                        modifier = Modifier
-                            .width(itemWidth).height(itemHeight)
+                        modifier = Modifier.width(itemWidth).height(itemHeight)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
@@ -6493,6 +6393,9 @@ fun SegmentedModeControl(
     }
 }
 
+// =========================================================
+//  FadedText + MiniHistogram + CompareValueCell + CompareContent + MonthDropdown
+// =========================================================
 @Composable
 fun FadedText(
     text: String, color: Color, fontSize: TextUnit,
@@ -6609,9 +6512,7 @@ fun CompareContent(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
+            Modifier.fillMaxSize().padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
             Text("月份比較", fontSize = 26.sp, fontWeight = FontWeight.Bold,
@@ -6625,8 +6526,7 @@ fun CompareContent(
             ) {
                 Column(Modifier.fillMaxSize()) {
                     Row(
-                        Modifier.fillMaxWidth()
-                            .background(SURFACE_ELEVATED)
+                        Modifier.fillMaxWidth().background(SURFACE_ELEVATED)
                             .padding(horizontal = 10.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -6673,10 +6573,7 @@ fun CompareContent(
                                 val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
 
                                 LazyColumn(Modifier.fillMaxSize(), userScrollEnabled = false) {
-                                    itemsIndexed(
-                                        items = displayCategories,
-                                        key = { _, cat -> cat }
-                                    ) { idx, cat ->
+                                    itemsIndexed(items = displayCategories, key = { _, cat -> cat }) { idx, cat ->
                                         val amtA = sumLocal(cat, selectedMonthA)
                                         val amtB = sumLocal(cat, selectedMonthB)
                                         val style = CATEGORY_STYLES[cat]
@@ -6688,21 +6585,17 @@ fun CompareContent(
                                             (amtB / incomeB * 100.0) else null
 
                                         Column(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .animateItem(
-                                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
-                                                    fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
-                                                    placementSpec = spring(
-                                                        stiffness = Spring.StiffnessMediumLow,
-                                                        dampingRatio = Spring.DampingRatioLowBouncy
-                                                    )
+                                            Modifier.fillMaxWidth().animateItem(
+                                                fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                                fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
+                                                placementSpec = spring(
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                    dampingRatio = Spring.DampingRatioLowBouncy
                                                 )
+                                            )
                                         ) {
                                             Row(
-                                                Modifier
-                                                    .fillMaxWidth()
-                                                    .height(rowHeight)
+                                                Modifier.fillMaxWidth().height(rowHeight)
                                                     .background(SURFACE_CARD)
                                                     .padding(horizontal = 10.dp),
                                                 verticalAlignment = Alignment.CenterVertically
@@ -6770,8 +6663,7 @@ fun CompareContent(
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.dp)
 
                     Row(
-                        Modifier.fillMaxWidth()
-                            .background(SURFACE_ELEVATED)
+                        Modifier.fillMaxWidth().background(SURFACE_ELEVATED)
                             .padding(horizontal = 10.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -6809,7 +6701,7 @@ fun CompareContent(
 
 @Composable
 fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Unit,
-                   modifier: Modifier = Modifier) {
+                  modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
     val labelText = remember(value) { formatMonthLabel(value) }
     Box(modifier) {
@@ -6840,6 +6732,9 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
     }
 }
 
+// =========================================================
+//  圖片處理函數
+// =========================================================
 fun createTempImageUri(context: Context): Uri? {
     return try {
         val dir = File(context.cacheDir, "camera").apply { if (!exists()) mkdirs() }
@@ -7012,6 +6907,9 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
     }
 }
 
+// =========================================================
+//  IconView + IconViewAdaptive
+// =========================================================
 private val AVATAR_TEXT_STYLE_BASE = TextStyle(
     platformStyle = PlatformTextStyle(includeFontPadding = false),
     lineHeightStyle = LineHeightStyle(
@@ -7088,3 +6986,6 @@ fun IconViewAdaptive(
         }
     }
 }
+
+// === PART 4 END ===
+// === MainActivity.kt 完整版結束 ===
