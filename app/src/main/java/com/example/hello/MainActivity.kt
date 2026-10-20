@@ -358,18 +358,23 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
 
         ensureNotificationChannels(context)
 
+        // 唯一通知 ID：基數 + 時間戳尾數，避免多筆捕獲互相覆蓋
         val notifId = CONFIRM_NOTIFICATION_BASE_ID +
             ((captured.timestamp / 1000) % 100000).toInt()
 
         val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
 
-        val addIntent = buildLaunchIntentForMain(context, captured.note, captured.amount, captured.category)
+        // ===== 「記賬」→ 開 MainActivity 並預填 =====
+        val addIntent = buildLaunchIntentForMain(
+            context, captured.note, captured.amount, captured.category
+        )
         val addPi = PendingIntent.getActivity(
             context, notifId + 1, addIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // ===== 「忽略」→ 廣播畀 NotificationActionReceiver 取消呢個通知 =====
         val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
             action = "com.example.hello.ACTION_IGNORE_CAPTURE"
             putExtra("notif_id", notifId)
@@ -379,15 +384,36 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // ===== 🟢 新增：fullScreenIntent，強制以浮動/全屏形式彈出 =====
+        // 與 addIntent 內容一致（撳全屏通知本身 = 撳「記賬」）
+        val fullScreenIntent = buildLaunchIntentForMain(
+            context, captured.note, captured.amount, captured.category
+        )
+        val fullScreenPi = PendingIntent.getActivity(
+            context, notifId + 3, fullScreenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(context, CONFIRM_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText("是否新增這筆記錄？（分類：${captured.category}）")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
+            )
             .setContentIntent(addPi)
+            // 🟢 關鍵 1：全屏意圖，App 喺背景時都能彈出浮動橫幅（螢幕熄滅時會點亮螢幕）
+            .setFullScreenIntent(fullScreenPi, true)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            // 🟢 關鍵 2：歸類為「來電」級別，HUN 優先級最高，避免被消費 App 通知排喺後面
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            // 🟢 關鍵 3：即使系統嘗試靜音，都強制用預設提示音 + 震動
+            .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
+            .setVibrate(longArrayOf(0, 300, 200, 300))
+            // 兩個動作按鈕
             .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
 
