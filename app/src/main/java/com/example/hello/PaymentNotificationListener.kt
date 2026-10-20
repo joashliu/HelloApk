@@ -4,22 +4,22 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import java.util.concurrent.ConcurrentHashMap
 
 class PaymentNotificationListener : NotificationListenerService() {
 
     companion object {
         private const val TAG = "PaymentNotif"
 
-        // 🟢 唔再限制邊個 App，任何 App 嘅通知都會處理
-        // （如果你想日後再加白名單，喺 onNotificationPosted 內加 if 判斷即可）
+        // 🟢 通知級去重：10 秒內相同內容只處理一次
+        private val recentKeys = ConcurrentHashMap<String, Long>(32)
+        private const val DEDUP_WINDOW_MS = 10_000L
 
-        // 🟢 修正：同時支援 HKD / HK$ / $ 三種寫法，支援大小寫
         private val AMOUNT_PATTERN = Regex(
             """(?:HKD|HK\$|\$)\s*(\d+(?:\.\d{1,2})?)""",
             RegexOption.IGNORE_CASE
         )
 
-        // 🟢 必須包含以下至少一個關鍵字，避免促銷 / 廣告通知誤觸發
         private val DEDUCT_KEYWORDS = listOf(
             "扣款", "已付款", "付款", "消費", "交易",
             "易乘碼", "地鐵", "港鐵", "入閘", "出閘",
@@ -39,19 +39,15 @@ class PaymentNotificationListener : NotificationListenerService() {
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
 
         val combined = "$title $text $bigText $subText".trim()
-
-        // 🟢 調試用：每次收到通知都 log 低，方便排查
         Log.d(TAG, "收到通知 | pkg=$pkg | 內容=$combined")
 
         if (combined.isBlank()) return
 
-        // 關鍵詞過濾
         if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) {
             Log.d(TAG, "跳過：無消費關鍵字")
             return
         }
 
-        // 金額解析
         val match = AMOUNT_PATTERN.find(combined)
         if (match == null) {
             Log.d(TAG, "跳過：搵唔到金額")
@@ -64,7 +60,22 @@ class PaymentNotificationListener : NotificationListenerService() {
             return
         }
 
-        // 名稱判斷
+        // 🟢 通知級去重：用 pkg + 金額 + 文本 hash 做 key
+        val contentKey = "$pkg|$amount|${combined.take(150)}"
+        val now = System.currentTimeMillis()
+
+        // 清理過期記錄，防止 map 無限增長
+        if (recentKeys.size > 100) {
+            recentKeys.entries.removeAll { it.value < now - DEDUP_WINDOW_MS * 2 }
+        }
+
+        val lastTime = recentKeys[contentKey]
+        if (lastTime != null && (now - lastTime) < DEDUP_WINDOW_MS) {
+            Log.d(TAG, "跳過重複通知 (${now - lastTime}ms 內): $contentKey")
+            return
+        }
+        recentKeys[contentKey] = now
+
         val note = when {
             combined.contains("地鐵", true) || combined.contains("港鐵", true)
                 || combined.contains("易乘碼", true) -> "地鐵"
@@ -72,7 +83,6 @@ class PaymentNotificationListener : NotificationListenerService() {
             else -> "消費"
         }
 
-        // 分類判斷
         val category = when {
             combined.contains("地鐵", true) || combined.contains("港鐵", true)
                 || combined.contains("易乘碼", true) -> "交通"
@@ -85,11 +95,8 @@ class PaymentNotificationListener : NotificationListenerService() {
         }
 
         Log.d(TAG, "✅ 捕獲成功：$note · $amount · $category（來自 $pkg）")
-
         NotificationCaptureBridge.pushCaptured(note, amount, category)
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // 唔需要處理
-    }
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {}
 }
