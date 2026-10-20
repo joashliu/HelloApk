@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -11,17 +12,43 @@
     <!-- 通知權限（Android 13+ 需要） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        ⚠️ 下面呢個係「系統保護權限」，第三方 App 無法直接申請，
+        真正授權由用戶喺「設定 → 通知存取權」開啟。
+        喺呢度聲明只係為咗 lint 靜音，加 tools:ignore 避免警告。
+    -->
+    <uses-permission
+        android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+        tools:ignore="ProtectedPermissions" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+
+    <!--
+        ★ 新增：Android 11+ 查詢已安裝 App
+        如果你喺代碼用 packageManager.getPackageInfo("com.mtr.mobile", 0) 檢查 App 有冇裝，
+        就需要喺呢度聲明，否則會拋 NameNotFoundException。
+    -->
+    <queries>
+        <package android:name="com.mtr.mobile" />
+        <package android:name="com.octopus.card" />
+        <package android:name="com.octopuscards.oepay" />
+        <package android:name="com.hsbc.hsbc_hk" />
+        <package android:name="com.hangsengbank.hangseng" />
+        <intent>
+            <action android:name="android.service.notification.NotificationListenerService" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"
         android:label="記帳"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- ★★★ 新增：強制 App 安裝時自動下載 ML Kit 去背模型 ★★★ -->
+        <!-- ML Kit 去背模型 -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="subject_segment" />
@@ -37,7 +64,7 @@
             </intent-filter>
         </activity>
 
-        <!-- ★★★ 新增：監控易乘碼通知服務 ★★★ -->
+        <!-- 監控易乘碼 / 八達通 / 銀行通知 -->
         <service
             android:name=".PaymentNotificationListener"
             android:label="易乘碼記賬助手"
@@ -48,12 +75,12 @@
             </intent-filter>
         </service>
 
-        <!-- ★★★ 新增：處理系統通知按鈕廣播 ★★★ -->
+        <!-- 處理通知按鈕廣播（例如快速記賬按鈕） -->
         <receiver
             android:name=".NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- ★★★ 原有：快速記帳快捷開關磁貼 ★★★ -->
+        <!-- 快速記帳快捷磁貼 -->
         <service
             android:name=".QuickAddTileService"
             android:label="快速記帳"
@@ -63,6 +90,9 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
         </service>
 
         <!-- FileProvider，畀相機寫入臨時相片檔案 -->
