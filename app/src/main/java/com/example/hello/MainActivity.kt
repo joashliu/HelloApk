@@ -4993,10 +4993,6 @@ fun AnimatedAmount(
     }
 }
 
-// ★ 關鍵修復：SmartElement
-//  - isStaticWithPrev = false 且 currentOffset > 0（header 自然滾入）時，保持 alpha = 1
-//    （原本會按 1 - offset/38.4 遞減到 0，令 header 未貼頂就淡出變透明）
-//  - 只有 isStaticWithPrev = true（內容與上一個 header 相同、被上一個 sticky header 推走）時才隱藏
 @Composable
 fun SmartElement(
     listState: LazyListState?,
@@ -5022,7 +5018,7 @@ fun SmartElement(
             var a = 1f
 
             if (currentOffset <= 0f && currentOffset >= -headerHeightPx) {
-                // 已在貼頂位置或以上，被下一個 sticky header 推走
+                // 已貼頂，被下一個 sticky header 推走
                 if (isStaticWithNext) {
                     ty = -currentOffset
                     a = 1f
@@ -5031,17 +5027,21 @@ fun SmartElement(
                     a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f))
                 }
             } else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
-                // 未貼頂，正常從下方自然滾入
+                // 從下方滾入
                 if (isStaticWithPrev) {
-                    // 內容同上一個 header 相同，被上一個 header 推走時平滑隱藏
+                    // 內容與上一個 header 相同，被上一個 sticky header 覆蓋
                     ty = -currentOffset
                     a = 0f
                 } else {
-                    // ★ 修復：自然滾入時保持可見，避免 Header 中途閃走
-                    ty = -currentOffset * 0.35f
+                    // ★ 修復：完全跟隨自然滾動，唔加額外 ty 偏移
+                    //   咁樣由 currentOffset > 64dp → <= 64dp → = 0 全程連續，
+                    //   唔會再喺臨界點跳一下
+                    ty = 0f
                     a = 1f
                 }
             }
+            // currentOffset > headerHeightPx：兩個分支都唔命中，
+            // ty 保持 0f、a 保持 1f，同上面修復後邏輯完全連續
 
             translationY = ty
             val finalAlpha = a.coerceIn(0f, 1f)
