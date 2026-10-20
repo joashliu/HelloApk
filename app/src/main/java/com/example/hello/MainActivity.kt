@@ -2919,6 +2919,23 @@ fun LedgerContent(
     val latestOnEdit by rememberUpdatedState(onEditClick)
     val latestOnFilterByName by rememberUpdatedState(onFilterByName)
     val latestOnDelete by rememberUpdatedState(onDeleteClick)
+    val latestOnChangeIcon by rememberUpdatedState(onChangeIconClick)
+    val latestOnExpand by rememberUpdatedState(onExpandChange)
+
+    val handleCopyClick = remember { { r: Record -> latestOnCopy(r) } }
+    val handleEditClick = remember { { r: Record -> latestOnEdit(r) } }
+    val handleFilterClick = remember(listState) { 
+        { r: Record -> 
+            if (!latestFilterMode) {
+                preFilterIndex = listState.firstVisibleItemIndex
+                preFilterOffset = listState.firstVisibleItemScrollOffset
+            }
+            latestOnFilterByName(r.note)
+        }
+    }
+    val handleDeleteClick = remember { { r: Record -> latestOnDelete(r) } }
+    val handleChangeIconClick = remember { { r: Record -> latestOnChangeIcon(r) } }
+    val handleExpandClick = remember { { id: String? -> latestOnExpand(id) } }
 
     val handleFanEnd = remember {
         {
@@ -3768,10 +3785,13 @@ fun SwipeableRecordItem(
     isExpanded: Boolean = expandedId == record.id,
     hasAnyExpanded: Boolean = expandedId != null,
     onExpand: (String?) -> Unit,
-    onCopy: () -> Unit, onEdit: () -> Unit,
-    onFilter: () -> Unit, onDelete: () -> Unit, onChangeIcon: () -> Unit,
+    onCopy: (Record) -> Unit,
+    onEdit: (Record) -> Unit,
+    onFilter: (Record) -> Unit,
+    onDelete: (Record) -> Unit,
+    onChangeIcon: (Record) -> Unit,
     hideCategory: Boolean = false,
-    onFanMenuStart: (Offset) -> Unit = {},
+    onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
     onFanMenuDrag: (Offset) -> Unit = {},
     onFanMenuEnd: () -> Unit = {},
     isFanMenuActive: Boolean = false,
@@ -3830,8 +3850,13 @@ fun SwipeableRecordItem(
     val amtColor = remember(record.category) { amountColor(record.category) }
     val headlineText = remember(record.note) { record.note.ifBlank { "(無名稱)" } }
 
+    // 緩存所有最新的狀態，避免 Lambda 捕捉到舊資料
     val latestRecord by rememberUpdatedState(record)
     val latestOnExpand by rememberUpdatedState(onExpand)
+    val latestOnCopy by rememberUpdatedState(onCopy)
+    val latestOnEdit by rememberUpdatedState(onEdit)
+    val latestOnFilter by rememberUpdatedState(onFilter)
+    val latestOnDelete by rememberUpdatedState(onDelete)
     val latestOnChangeIcon by rememberUpdatedState(onChangeIcon)
     val latestOnFanStart by rememberUpdatedState(onFanMenuStart)
     val latestOnFanDrag by rememberUpdatedState(onFanMenuDrag)
@@ -3879,7 +3904,7 @@ fun SwipeableRecordItem(
                         }
                         targetOffset = newOffset
                         if (newOffset == 0f) latestOnExpand(null)
-                        if (shouldTriggerIconAction) latestOnChangeIcon()
+                        if (shouldTriggerIconAction) latestOnChangeIcon(latestRecord)
                     },
                     onDragCancel = { isDragging = false; targetOffset = 0f; latestOnExpand(null) },
                     onHorizontalDrag = { c, d ->
@@ -3896,7 +3921,7 @@ fun SwipeableRecordItem(
                 detectDragGesturesAfterLongPress(
                     onDragStart = { localOffset ->
                         val globalTopLeft = layoutCoordsHolder[0]?.boundsInRoot()?.topLeft ?: Offset.Zero
-                        latestOnFanStart(globalTopLeft + localOffset)
+                        latestOnFanStart(latestRecord, globalTopLeft + localOffset)
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
@@ -3926,19 +3951,22 @@ fun SwipeableRecordItem(
                 AnimatedActionButton(Icons.Default.ContentCopy, "複製",
                     iconTint = Color(0xFF64748B), width = bw, height = bh,
                     progress = leftProgress, delay = 0f
-                ) { targetOffset = 0f; onExpand(null); onCopy() }
+                ) { targetOffset = 0f; onExpand(null); onCopy(record) }
+                
                 AnimatedActionButton(Icons.Default.Edit, "編輯",
                     iconTint = Color(0xFF3B82F6), width = bw, height = bh,
                     progress = leftProgress, delay = 0.12f
-                ) { targetOffset = 0f; onExpand(null); onEdit() }
+                ) { targetOffset = 0f; onExpand(null); onEdit(record) }
+                
                 AnimatedActionButton(Icons.Default.FilterList, "篩選",
                     iconTint = Color(0xFF8B5CF6), width = bw, height = bh,
                     progress = leftProgress, delay = 0.24f
-                ) { targetOffset = 0f; onExpand(null); onFilter() }
+                ) { targetOffset = 0f; onExpand(null); onFilter(record) }
+                
                 AnimatedActionButton(Icons.Default.Delete, "刪除",
                     iconTint = COLOR_EXPENSE, width = bw, height = bh,
                     progress = leftProgress, delay = 0.36f
-                ) { targetOffset = 0f; onExpand(null); onDelete() }
+                ) { targetOffset = 0f; onExpand(null); onDelete(record) }
             }
         }
 
@@ -3957,7 +3985,7 @@ fun SwipeableRecordItem(
                 AnimatedActionButton(Icons.Default.Image, "改圖標",
                     iconTint = Color(0xFF10B981), width = bw, height = bh,
                     progress = rightProgress, delay = 0f
-                ) { targetOffset = 0f; onExpand(null); onChangeIcon() }
+                ) { targetOffset = 0f; onExpand(null); onChangeIcon(record) }
             }
         }
 
