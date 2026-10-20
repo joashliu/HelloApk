@@ -878,6 +878,21 @@ private fun computeLedgerUiState(
     val visibleCategories =
         (if (hasIncForCat) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
 
+    // 處理快速輸入項目顯示邏輯
+    val finalTopNotes = if (filter.showFuture) {
+        noteIndex.topNotes
+    } else {
+        val notesWithPast = HashSet<String>()
+        // 掃描所有記錄，搵出曾於「過去」或「現在」出現過嘅項目名稱
+        for (r in records) {
+            if (r.timestamp <= futureCutoff && r.note.isNotBlank()) {
+                notesWithPast.add(r.note)
+            }
+        }
+        // 只保留有過去記錄嘅項目
+        noteIndex.topNotes.filter { it.first in notesWithPast }
+    }
+
     return LedgerUiState(
         loading = loading,
         ledgerRecords = ledgerRecords,
@@ -887,7 +902,7 @@ private fun computeLedgerUiState(
         totalIncome = totalIncome,
         totalExpense = totalExpense,
         isExactNoteFilter = isExactNoteFilter,
-        topNotes = noteIndex.topNotes,
+        topNotes = finalTopNotes,
         recentAmountByNote = noteIndex.recentAmountByNote,
         noteIconMap = noteIndex.noteIconMap,
         allNoteNames = noteIndex.allNoteNames,
