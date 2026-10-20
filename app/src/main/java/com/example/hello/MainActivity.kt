@@ -199,30 +199,20 @@ data class CapturedNotification(
 )
 private val topLatestCapturedNotification = mutableStateOf<CapturedNotification?>(null)
 
-/**
- * 通知捕獲橋接：由 PaymentNotificationListener 呼叫 pushCaptured。
- * 收到即刻刷新常駐通知 + 彈出確認通知（唔依賴 Activity / Compose 生命周期）。
- */
 object NotificationCaptureBridge {
 
     private var appContext: Context? = null
+
+    // 🟢 Debounce：避免短時間內多次觸發 HUN 衝突
+    private val confirmHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingConfirmRunnable: Runnable? = null
 
     fun init(context: Context) {
         appContext = context.applicationContext
     }
 
     fun pushCaptured(note: String, amount: Double, category: String) {
-    if (note.isBlank() || amount <= 0.0) return
-
-    val now = System.currentTimeMillis()
-    // 如果 5 秒內已經有相同名稱+金額嘅捕獲，唔重複彈
-    val last = topLatestCapturedNotification.value
-    if (last != null
-        && last.note == note.trim()
-        && abs(last.amount - amount) < 0.01
-        && (now - last.timestamp) < 5_000L) {
-        return
-    }
+        if (note.isBlank() || amount <= 0.0) return
 
         val captured = CapturedNotification(
             note = note.trim(),
@@ -233,11 +223,25 @@ object NotificationCaptureBridge {
         topLatestCapturedNotification.value = captured
 
         val ctx = appContext ?: return
+
+        // ① 常駐通知：即時刷新（不受 debounce 影響）
         try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
-        try { showCaptureConfirmNotification(ctx, captured) } catch (_: Exception) {}
+
+        // ② 確認通知：延遲 400ms + debounce
+        //    - 延遲：避開與消費 App 通知同時發送嘅 HUN 衝突
+        //    - debounce：400ms 內多次觸發，只保留最新一條
+        pendingConfirmRunnable?.let { confirmHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingConfirmRunnable = null
+            try { showCaptureConfirmNotification(ctx, captured) } catch (_: Exception) {}
+        }
+        pendingConfirmRunnable = runnable
+        confirmHandler.postDelayed(runnable, 400L)
     }
 
     fun clear() {
+        pendingConfirmRunnable?.let { confirmHandler.removeCallbacks(it) }
+        pendingConfirmRunnable = null
         topLatestCapturedNotification.value = null
         appContext?.let {
             try { refreshQuickAddNotification(it) } catch (_: Exception) {}
@@ -368,9 +372,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
 
         ensureNotificationChannels(context)
 
-        // 唯一通知 ID：基數 + 時間戳尾數，避免多筆捕獲互相覆蓋
-        val notifId = CONFIRM_NOTIFICATION_BASE_ID +
-            ((captured.timestamp / 1000) % 100000).toInt()
+        // 🟢 固定通知 ID：所有確認通知共用，新通知會取代舊通知
+        val notifId = CONFIRM_NOTIFICATION_BASE_ID
+
+        // 🟢 先 cancel 舊通知，再 notify → 系統會視為「新通知」，重新觸發 HUN
+        nm.cancel(notifId)
 
         val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
@@ -394,13 +400,9 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // ===== 🟢 新增：fullScreenIntent，強制以浮動/全屏形式彈出 =====
-        // 與 addIntent 內容一致（撳全屏通知本身 = 撳「記賬」）
-        val fullScreenIntent = buildLaunchIntentForMain(
-            context, captured.note, captured.amount, captured.category
-        )
+        // ===== fullScreenIntent：App 喺背景時都能彈出浮動橫幅 =====
         val fullScreenPi = PendingIntent.getActivity(
-            context, notifId + 3, fullScreenIntent,
+            context, notifId + 3, addIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -413,17 +415,15 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
                     .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
             )
             .setContentIntent(addPi)
-            // 🟢 關鍵 1：全屏意圖，App 喺背景時都能彈出浮動橫幅（螢幕熄滅時會點亮螢幕）
-            .setFullScreenIntent(fullScreenPi, true)
+            .setFullScreenIntent(fullScreenPi, true)   // 背景時都可彈出
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            // 🟢 關鍵 2：歸類為「來電」級別，HUN 優先級最高，避免被消費 App 通知排喺後面
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            // 🟢 關鍵 3：即使系統嘗試靜音，都強制用預設提示音 + 震動
+            .setCategory(NotificationCompat.CATEGORY_CALL)  // HUN 優先級最高
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
-            // 兩個動作按鈕
+            // 🟢 5 分鐘後自動消失，避免長期霸佔通知欄
+            .setTimeoutAfter(5 * 60 * 1000L)
             .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
 
