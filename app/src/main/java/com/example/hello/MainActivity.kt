@@ -203,9 +203,14 @@ object NotificationCaptureBridge {
 
     private var appContext: Context? = null
 
-    // 🟢 Debounce：避免短時間內多次觸發 HUN 衝突
+    // Debounce handler
     private val confirmHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var pendingConfirmRunnable: Runnable? = null
+
+    // 🟢 內容級去重：30 秒內相同 note+amount 只處理一次
+    @Volatile private var lastNote: String? = null
+    @Volatile private var lastAmount: Double = 0.0
+    @Volatile private var lastPushMs: Long = 0L
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -214,35 +219,52 @@ object NotificationCaptureBridge {
     fun pushCaptured(note: String, amount: Double, category: String) {
         if (note.isBlank() || amount <= 0.0) return
 
+        val trimmed = note.trim()
+        val now = System.currentTimeMillis()
+
+        // 🟢 內容級去重：30 秒內相同 note+amount 直接忽略
+        if (lastNote == trimmed
+            && abs(lastAmount - amount) < 0.01
+            && (now - lastPushMs) < 30_000L) {
+            return
+        }
+
+        lastNote = trimmed
+        lastAmount = amount
+        lastPushMs = now
+
         val captured = CapturedNotification(
-            note = note.trim(),
+            note = trimmed,
             amount = amount,
             category = category,
-            timestamp = System.currentTimeMillis()
+            timestamp = now
         )
         topLatestCapturedNotification.value = captured
 
         val ctx = appContext ?: return
 
-        // ① 常駐通知：即時刷新（不受 debounce 影響）
+        // 常駐通知即時刷新
         try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
 
-        // ② 確認通知：延遲 400ms + debounce
-        //    - 延遲：避開與消費 App 通知同時發送嘅 HUN 衝突
-        //    - debounce：400ms 內多次觸發，只保留最新一條
+        // 🟢 確認通知：800ms debounce，避免與消費 App 通知競爭 HUN
         pendingConfirmRunnable?.let { confirmHandler.removeCallbacks(it) }
         val runnable = Runnable {
             pendingConfirmRunnable = null
-            try { showCaptureConfirmNotification(ctx, captured) } catch (_: Exception) {}
+            // 🟢 關鍵：執行時讀最新值，避免舊金額 bug
+            val latest = topLatestCapturedNotification.value ?: return@Runnable
+            try { showCaptureConfirmNotification(ctx, latest) } catch (_: Exception) {}
         }
         pendingConfirmRunnable = runnable
-        confirmHandler.postDelayed(runnable, 400L)
+        confirmHandler.postDelayed(runnable, 800L)
     }
 
     fun clear() {
         pendingConfirmRunnable?.let { confirmHandler.removeCallbacks(it) }
         pendingConfirmRunnable = null
         topLatestCapturedNotification.value = null
+        lastNote = null
+        lastAmount = 0.0
+        lastPushMs = 0L
         appContext?.let {
             try { refreshQuickAddNotification(it) } catch (_: Exception) {}
         }
