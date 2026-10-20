@@ -191,6 +191,42 @@ data class QuickNoteInfo(
 )
 private val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
 
+// ===== 最近捕獲嘅手機通知（例如：地鐵 · 4.9） =====
+@Immutable
+data class CapturedNotification(
+    val note: String,
+    val amount: Double,
+    val category: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+private val topLatestCapturedNotification = mutableStateOf<CapturedNotification?>(null)
+
+/**
+ * 供 NotificationListenerService 呼叫，推送最近捕獲嘅消費通知。
+ * 只有今日嘅會被顯示喺通知按鈕上。
+ */
+object NotificationCaptureBridge {
+    fun pushCaptured(note: String, amount: Double, category: String) {
+        if (note.isBlank() || amount <= 0.0) return
+        topLatestCapturedNotification.value = CapturedNotification(
+            note = note.trim(),
+            amount = amount,
+            category = category,
+            timestamp = System.currentTimeMillis()
+        )
+    }
+
+    fun clear() {
+        topLatestCapturedNotification.value = null
+    }
+
+    /** 通知按鈕顯示用：4.9 → "4.9"，5.0 → "5"，12.34 → "12.34" */
+    fun formatAmountForLabel(v: Double): String =
+        String.format(java.util.Locale.US, "%.2f", v)
+            .trimEnd('0').trimEnd('.').ifEmpty { "0" }
+}
+
 // ===== 配色 =====
 val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
@@ -1537,6 +1573,7 @@ class MainActivity : ComponentActivity() {
             val prefillAmount = keyboardPrefillAmount.value
             val prefillCategory = keyboardPrefillCategory.value // 🟢 新增
             val notesInfo = topQuickNotesInfo.value
+            val captured = topLatestCapturedNotification.value
 
             LaunchedEffect(notesInfo) {
                 persistTopQuickNotes(notesInfo)
@@ -1624,7 +1661,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
-    private fun showQuickAddNotification() {
+        private fun showQuickAddNotification() {
         val now = System.currentTimeMillis()
         if (now - lastNotificationBuildMs < 1000L) return
         lastNotificationBuildMs = now
@@ -1655,17 +1692,47 @@ class MainActivity : ComponentActivity() {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
 
+            // ===== Action 1：最近使用項目（原有邏輯） =====
             if (first != null && first.note.isNotBlank()) {
                 val noteIntent = buildLaunchIntent(
                     prefillNote = first.note,
                     prefillAmount = first.amount,
-                    prefillCategory = first.category // 🟢 新增：預填分類
+                    prefillCategory = first.category
                 )
                 val notePi = PendingIntent.getActivity(
                     this, 1, noteIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
                 builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
+            }
+
+            // ===== Action 2：今日最近捕獲嘅手機通知（例如：地鐵 · 4.9） =====
+            val captured = topLatestCapturedNotification.value
+            if (captured != null && captured.note.isNotBlank()) {
+                val todayStart = getTimestampMeta(System.currentTimeMillis()).startOfDayMillis
+                val capturedStart = getTimestampMeta(captured.timestamp).startOfDayMillis
+                val isToday = capturedStart == todayStart
+
+                if (isToday) {
+                    val label = "${captured.note} · ${
+                        NotificationCaptureBridge.formatAmountForLabel(captured.amount)
+                    }"
+
+                    val capturedIntent = buildLaunchIntent(
+                        prefillNote = captured.note,
+                        prefillAmount = captured.amount,
+                        prefillCategory = captured.category
+                    )
+                    val capturedPi = PendingIntent.getActivity(
+                        this, 2, capturedIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    builder.addAction(
+                        android.R.drawable.ic_menu_recent_history,
+                        label,
+                        capturedPi
+                    )
+                }
             }
 
             nm.notify(NOTIFICATION_ID, builder.build())
