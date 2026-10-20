@@ -627,12 +627,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                         viewModelScope.launch {
                             delay(900)
                             for (id in ids) ghostRecordsById.remove(id)
-                            // ★ 關鍵修復：先從 records 移除 ghost，再清 deletingIds。
-                            //    咁樣 combine 任何時刻最多只會見到
-                            //    「records 冇咗記錄、deletingIds 有孤立 id」呢個無害狀態，
-                            //    唔會出現「records 仍有記錄、但 deletingIds 冇標記」嘅
-                            //    中間態（嗰個中間態會令 AnimatedRecordItem 走快速路徑
-                            //    重新顯示 72dp，造成「消失完又閃返」）。
                             emitSorted()
                             _deletingIds.update { it - ids }
                         }
@@ -3072,16 +3066,12 @@ fun LedgerContent(
                 var nextIncome = 0.0; var nextExpense = 0.0
                 nextGroup?.second?.forEach { if (it.id !in deletingIds) { if (it.category == INCOME_CATEGORY) nextIncome += it.amount else nextExpense += it.amount } }
 
+                // ★ 修復：stickyHeader 移除 animateItem，避免放置動畫干擾貼頂行為
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
                     Box(modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp)
                         .background(SURFACE_BG)
-                        .animateItem(
-                            fadeInSpec = tween(250, easing = FastOutSlowInEasing),
-                            fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
-                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
-                        )
                     ) {
                         DayHeader(
                             dateKey = dateKey, income = dayIncome, expense = dayExpense,
@@ -3411,6 +3401,7 @@ fun WeeklyExpenseChart(
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
     val maxBarHeight = 62.dp
 
+    // ★ 修復：用 derivedStateOf 只讀取必要的狀態；移除圖表淡出時嘅動態模糊（BlurEffect 每幀重建成本高，容易掉幀）
     val scrollProgress by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -3445,12 +3436,6 @@ fun WeeklyExpenseChart(
                     scaleX = 1f - p * 0.08f
                     translationY = -p * 14.dp.toPx()
                     transformOrigin = TransformOrigin(0.5f, 0f)
-                    if (p > 0.03f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val blur = p * 9f
-                        renderEffect = androidx.compose.ui.graphics.BlurEffect(blur, blur)
-                    } else {
-                        renderEffect = null
-                    }
                 }
         ) {
             Row(
@@ -3583,20 +3568,12 @@ private val PARTICLE_COLORS = listOf(
     BRAND_PRIMARY, BRAND_PRIMARY_DARK, Color(0xFF818CF8), Color(0xFFFBBF24), Color(0xFF34D399)
 )
 
-// =========================================================
-//  ★ AnimatedRecordItem
-//    加入 everDeleting 保護：一旦播過刪除動畫就唔會回頭，直到組件被銷毀
-// =========================================================
 @Composable
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
     isDeleting: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    // ★ 關鍵修復：一旦進入刪除動畫，就維持「刪除態」直到組件被銷毀。
-    //    咁樣就算父層 VM 更新時序抖動（先清 deletingIds、後才從 records 移除 ghost），
-    //    都唔會中途走快速路徑而閃返 72dp 高度。
-    //    只有 animateOnMount 變 true（即撤銷還原）才重置。
     var everDeleting by remember { mutableStateOf(isDeleting) }
     LaunchedEffect(animateOnMount, isDeleting) {
         when {
@@ -5016,6 +4993,10 @@ fun AnimatedAmount(
     }
 }
 
+// ★ 關鍵修復：SmartElement
+//  - isStaticWithPrev = false 且 currentOffset > 0（header 自然滾入）時，保持 alpha = 1
+//    （原本會按 1 - offset/38.4 遞減到 0，令 header 未貼頂就淡出變透明）
+//  - 只有 isStaticWithPrev = true（內容與上一個 header 相同、被上一個 sticky header 推走）時才隱藏
 @Composable
 fun SmartElement(
     listState: LazyListState?,
@@ -5041,6 +5022,7 @@ fun SmartElement(
             var a = 1f
 
             if (currentOffset <= 0f && currentOffset >= -headerHeightPx) {
+                // 已在貼頂位置或以上，被下一個 sticky header 推走
                 if (isStaticWithNext) {
                     ty = -currentOffset
                     a = 1f
@@ -5049,12 +5031,15 @@ fun SmartElement(
                     a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f))
                 }
             } else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
+                // 未貼頂，正常從下方自然滾入
                 if (isStaticWithPrev) {
+                    // 內容同上一個 header 相同，被上一個 header 推走時平滑隱藏
                     ty = -currentOffset
                     a = 0f
                 } else {
+                    // ★ 修復：自然滾入時保持可見，避免 Header 中途閃走
                     ty = -currentOffset * 0.35f
-                    a = 1f - (currentOffset / (headerHeightPx * 0.6f))
+                    a = 1f
                 }
             }
 
@@ -5198,7 +5183,7 @@ fun DayHeader(
                     ) {
                         Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(Modifier.height(2.dp))
                     SmartElement(
                         listState = listState, dateKey = dateKey,
                         isStaticWithNext = expStr == nextExpStr,
