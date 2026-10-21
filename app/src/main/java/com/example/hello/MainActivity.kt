@@ -2564,128 +2564,130 @@ fun MainApp(
     }
 
     if (webSearchTarget != null) {
-        val target = webSearchTarget!!
-        var selectedImageUrl by remember { mutableStateOf<String?>(null) }
+    val target = webSearchTarget!!
+    var selectedImageUrl by remember { mutableStateOf<String?>(null) }
 
-        BackHandler { webSearchTarget = null }
+    BackHandler { webSearchTarget = null }
 
-        Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
-            Column(Modifier.fillMaxSize()) {
-                Surface(color = SURFACE_CARD, shadowElevation = 4.dp) {
-                    Row(
-                        Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { webSearchTarget = null }) {
-                            Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
-                        }
-                        Text("長按圖片設定圖標", fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+    Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
+        Column(Modifier.fillMaxSize()) {
+            Surface(color = SURFACE_CARD, shadowElevation = 4.dp) {
+                Row(
+                    Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { webSearchTarget = null }) {
+                        Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
                     }
+                    Text("長按圖片設定圖標", fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
                 }
-
-                androidx.compose.ui.viewinterop.AndroidView(
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            webViewClient = android.webkit.WebViewClient()
-
-                            setOnLongClickListener { v ->
-                                val result = (v as android.webkit.WebView).hitTestResult
-                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
-                                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                                    val url = result.extra
-                                    if (!url.isNullOrBlank()) {
-                                        selectedImageUrl = url
-                                        true
-                                    } else false
-                                } else false
-                            }
-
-                            val q = Uri.encode(target.note + " icon")
-                            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
-                        }
-                    },
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                )
             }
 
-            if (selectedImageUrl != null) {
-                AlertDialog(
-                    onDismissRequest = { selectedImageUrl = null },
-                    title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
-                    text = {
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("將會設為「${target.note}」的專屬圖標",
-                                color = TEXT_SECONDARY, fontSize = 14.sp)
-                            Spacer(Modifier.height(16.dp))
-                            AsyncImage(
-                                model = selectedImageUrl,
-                                contentDescription = null,
-                                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            val url = selectedImageUrl!!
-                            selectedImageUrl = null
-                            webSearchTarget = null
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        webViewClient = android.webkit.WebViewClient()
 
-                            scope.launch {
-                                uploading = true
-                                try {
-                                    val finalBytes = withContext(Dispatchers.IO) {
-                                        val rawBytes = if (url.startsWith("data:image")) {
-                                            val base64 = url.substringAfter(",")
-                                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                                        } else {
-                                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                                            conn.connectTimeout = 10000
-                                            conn.readTimeout = 10000
-                                            conn.inputStream.readBytes()
-                                        }
-
-                                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
-                                        val processedBitmap = removeBackground(srcBitmap)
-                                        val baos = ByteArrayOutputStream()
-                                        processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-
-                                        if (processedBitmap !== srcBitmap) processedBitmap.recycle()
-                                        srcBitmap.recycle()
-
-                                        baos.toByteArray()
-                                    }
-                                    val cloudUrl = uploadBytesToCloudinary(finalBytes)
-                                    if (cloudUrl != null) {
-                                        applyUrlToSameName(context, db, target.note, cloudUrl)
-                                    } else {
-                                        Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
-                                            Toast.LENGTH_SHORT).show()
-                                    }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "下載失敗，這張圖片可能有版權保護",
-                                        Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    uploading = false
+                        // 🟢 方案一：長按命中圖片時記錄 URL，但一律返回 false
+                        //    返回 false 讓 WebView 繼續消費後續手勢，唔會鎖死滾動
+                        setOnLongClickListener { v ->
+                            val result = (v as android.webkit.WebView).hitTestResult
+                            if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
+                                result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                                val url = result.extra
+                                if (!url.isNullOrBlank()) {
+                                    selectedImageUrl = url
                                 }
                             }
-                        }) { Text("使用", fontWeight = FontWeight.Bold) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { selectedImageUrl = null }) {
-                            Text("取消", color = TEXT_SECONDARY)
+                            false
                         }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = SURFACE_CARD
-                )
-            }
+
+                        val q = Uri.encode(target.note + " icon")
+                        loadUrl("https://www.google.com/search?tbm=isch&q=$q")
+                    }
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            )
+        }
+
+        if (selectedImageUrl != null) {
+            AlertDialog(
+                onDismissRequest = { selectedImageUrl = null },
+                title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("將會設為「${target.note}」的專屬圖標",
+                            color = TEXT_SECONDARY, fontSize = 14.sp)
+                        Spacer(Modifier.height(16.dp))
+                        AsyncImage(
+                            model = selectedImageUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val url = selectedImageUrl!!
+                        selectedImageUrl = null
+                        webSearchTarget = null
+
+                        scope.launch {
+                            uploading = true
+                            try {
+                                val finalBytes = withContext(Dispatchers.IO) {
+                                    val rawBytes = if (url.startsWith("data:image")) {
+                                        val base64 = url.substringAfter(",")
+                                        android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                                    } else {
+                                        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                                        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                                        conn.connectTimeout = 10000
+                                        conn.readTimeout = 10000
+                                        conn.inputStream.readBytes()
+                                    }
+
+                                    val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                                    val processedBitmap = removeBackground(srcBitmap)
+                                    val baos = ByteArrayOutputStream()
+                                    processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+
+                                    if (processedBitmap !== srcBitmap) processedBitmap.recycle()
+                                    srcBitmap.recycle()
+
+                                    baos.toByteArray()
+                                }
+                                val cloudUrl = uploadBytesToCloudinary(finalBytes)
+                                if (cloudUrl != null) {
+                                    applyUrlToSameName(context, db, target.note, cloudUrl)
+                                } else {
+                                    Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
+                                        Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "下載失敗，這張圖片可能有版權保護",
+                                    Toast.LENGTH_SHORT).show()
+                            } finally {
+                                uploading = false
+                            }
+                        }
+                    }) { Text("使用", fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { selectedImageUrl = null }) {
+                        Text("取消", color = TEXT_SECONDARY)
+                    }
+                },
+                shape = RoundedCornerShape(20.dp),
+                containerColor = SURFACE_CARD
+            )
         }
     }
+}
 }
 
 // =========================================================
