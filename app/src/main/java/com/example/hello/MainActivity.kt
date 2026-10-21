@@ -2585,32 +2585,48 @@ fun MainApp(
             }
 
             androidx.compose.ui.viewinterop.AndroidView(
-                factory = { ctx ->
-                    android.webkit.WebView(ctx).apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        webViewClient = android.webkit.WebViewClient()
+    factory = { ctx ->
+        android.webkit.WebView(ctx).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            webViewClient = android.webkit.WebViewClient()
 
-                        // 🟢 方案一：長按命中圖片時記錄 URL，但一律返回 false
-                        //    返回 false 讓 WebView 繼續消費後續手勢，唔會鎖死滾動
-                        setOnLongClickListener { v ->
-                            val result = (v as android.webkit.WebView).hitTestResult
-                            if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
-                                result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                                val url = result.extra
-                                if (!url.isNullOrBlank()) {
-                                    selectedImageUrl = url
-                                }
-                            }
-                            false
-                        }
-
-                        val q = Uri.encode(target.note + " icon")
-                        loadUrl("https://www.google.com/search?tbm=isch&q=$q")
+            // 🟢 核心修復：接管觸摸事件，防止父容器（Compose）搶走手勢
+            setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        // 手指按下，告訴父容器「不要攔截」，將手勢完全交給 WebView
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
                     }
-                },
-                modifier = Modifier.weight(1f).fillMaxWidth()
-            )
+                    android.view.MotionEvent.ACTION_UP,
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        // 手指抬起或取消，恢復父容器的攔截權
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
+                // 返回 false，讓 WebView 自身的滾動、縮放、長按邏輯繼續運作
+                false
+            }
+
+            // 長按命中圖片時記錄 URL，但返回 false（WebView 仍會處理手勢，但我們不消費事件）
+            setOnLongClickListener { v ->
+                val result = (v as android.webkit.WebView).hitTestResult
+                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
+                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                    val url = result.extra
+                    if (!url.isNullOrBlank()) {
+                        selectedImageUrl = url
+                    }
+                }
+                false
+            }
+
+            val q = Uri.encode(target.note + " icon")
+            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
+        }
+    },
+    modifier = Modifier.weight(1f).fillMaxWidth()
+)
         }
 
         if (selectedImageUrl != null) {
