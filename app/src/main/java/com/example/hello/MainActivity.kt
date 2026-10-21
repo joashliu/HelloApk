@@ -686,11 +686,12 @@ private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "�
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 
-// 🟢 新增：將 QuickInput 嘅文字寬度快取提升到全局，避免每次離開篩選時重測 42 個字串
+// 🟢 QuickInput 嘅文字寬度快取
 private val noteTextWidthCache = ConcurrentHashMap<String, Float>()
 
-// 🟢 新增：緩存日期的 Blur 效果，避免在滾動或動畫時每幀創建大量 BlurEffect
+// 🟢 緩存日期的 Blur 效果
 private val headerBlurEffectCache = ConcurrentHashMap<Int, androidx.compose.ui.graphics.RenderEffect>(32)
+
 private fun getCachedHeaderBlurEffect(blurRadiusInt: Int): androidx.compose.ui.graphics.RenderEffect? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || blurRadiusInt <= 0) return null
     return headerBlurEffectCache.getOrPut(blurRadiusInt) {
