@@ -686,6 +686,27 @@ private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "�
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 
+// 🟢 新增：將 QuickInput 嘅文字寬度快取提升到全局，避免每次離開篩選時重測 42 個字串
+private val noteTextWidthCache = ConcurrentHashMap<String, Float>()
+
+// 🟢 新增：緩存日期的 Blur 效果，避免在滾動或動畫時每幀創建大量 BlurEffect
+private val headerBlurEffectCache = ConcurrentHashMap<Int, androidx.compose.ui.graphics.RenderEffect>(32)
+private fun getCachedHeaderBlurEffect(blurRadiusInt: Int): androidx.compose.ui.graphics.RenderEffect? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || blurRadiusInt <= 0) return null
+    return headerBlurEffectCache.getOrPut(blurRadiusInt) {
+        val rx = blurRadiusInt * 0.3f
+        val ry = blurRadiusInt * 1.5f
+        android.graphics.RenderEffect.createBlurEffect(
+            rx, ry, android.graphics.Shader.TileMode.CLAMP
+        ).asComposeRenderEffect()
+    }
+}
+
+private val WEEKDAY_LABELS = arrayOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")
+private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
+private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
+private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
+
 private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
 }
@@ -3165,10 +3186,6 @@ fun NotificationAccessGuide(context: Context) {
     }
 }
 
-// === PART 3 END ===
-// =========================================================
-//  ★ LedgerContent
-// =========================================================
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -3499,73 +3516,61 @@ fun LedgerContent(
                                 .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                                .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
                         ) {
-                            AnimatedContent(
-                                targetState = dayRecords,
-                                transitionSpec = {
-                                    (fadeIn(tween(200)) + slideInVertically(spring(dampingRatio = 0.8f, stiffness = 450f)) { it / 6 }) togetherWith
-                                    (fadeOut(tween(150)) + slideOutVertically(spring(dampingRatio = 0.8f, stiffness = 450f)) { -it / 6 }) using
-                                    SizeTransform(clip = false) { _, _ ->
-                                        spring(dampingRatio = 0.85f, stiffness = 500f)
-                                    }
-                                },
-                                label = "filter_anim_$dateKey"
-                            ) { currentRecords ->
-                                Column(modifier = Modifier.fillMaxWidth()) {
-                                    val activeCount = if (deletingIds.isEmpty()) currentRecords.size
-                                                      else currentRecords.count { it.id !in deletingIds }
-                                    var renderedVisibleIdx = 0
+                            val currentRecords = dayRecords
+                            val activeCount = if (deletingIds.isEmpty()) currentRecords.size
+                                              else currentRecords.count { it.id !in deletingIds }
+                            var renderedVisibleIdx = 0
 
-                                    for (r in currentRecords) {
-                                        val isRecDeleting = r.id in deletingIds
-                                        if (!isRecDeleting) renderedVisibleIdx++
-                                        val showDividerBelow = !isRecDeleting && renderedVisibleIdx < activeCount
+                            for (r in currentRecords) {
+                                val isRecDeleting = r.id in deletingIds
+                                if (!isRecDeleting) renderedVisibleIdx++
+                                val showDividerBelow = !isRecDeleting && renderedVisibleIdx < activeCount
 
-                                        key(r.id) {
-                                            Column(modifier = Modifier.fillMaxWidth()) {
-                                                AnimatedRecordItem(
-                                                    animateOnMount = r.id in justAddedIds,
-                                                    isDeleting = isRecDeleting
-                                                ) {
-                                                    SwipeableRecordItem(
-                                                        backgroundColor = SURFACE_CARD,
-                                                        record = r,
-                                                        isExpanded = expandedId == r.id,
-                                                        hasAnyExpanded = expandedId != null,
-                                                        onExpand = onExpandChange,
-                                                        onCopy = { onCopyClick(r) },
-                                                        onEdit = { onEditClick(r) },
-                                                        onFilter = {
-                                                            if (!filterMode) {
-                                                                preFilterIndex = listState.firstVisibleItemIndex
-                                                                preFilterOffset = listState.firstVisibleItemScrollOffset
-                                                            }
-                                                            onFilterByName(r.note)
-                                                        },
-                                                        onDelete = { onDeleteClick(r) },
-                                                        onChangeIcon = { onChangeIconClick(r) },
-                                                        hideCategory = isExactNoteFilter,
-                                                        onFanMenuStart = { _, offset -> handleFanStart(r, offset) },
-                                                        onFanMenuDrag = handleFanDrag,
-                                                        onFanMenuEnd = handleFanEnd,
-                                                        isFanMenuActive = isFanActive,
-                                                        isOtherItem = isFanActive && activeFanId != r.id,
-                                                        isActiveItem = activeFanId == r.id
-                                                    )
-                                                }
+                                key(r.id) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        AnimatedRecordItem(
+                                            animateOnMount = r.id in justAddedIds,
+                                            isDeleting = isRecDeleting
+                                        ) {
+                                            SwipeableRecordItem(
+                                                backgroundColor = SURFACE_CARD,
+                                                record = r,
+                                                isExpanded = expandedId == r.id,
+                                                hasAnyExpanded = expandedId != null,
+                                                onExpand = onExpandChange,
+                                                onCopy = { onCopyClick(r) },
+                                                onEdit = { onEditClick(r) },
+                                                onFilter = {
+                                                    if (!filterMode) {
+                                                        preFilterIndex = listState.firstVisibleItemIndex
+                                                        preFilterOffset = listState.firstVisibleItemScrollOffset
+                                                    }
+                                                    onFilterByName(r.note)
+                                                },
+                                                onDelete = { onDeleteClick(r) },
+                                                onChangeIcon = { onChangeIconClick(r) },
+                                                hideCategory = isExactNoteFilter,
+                                                onFanMenuStart = { _, offset -> handleFanStart(r, offset) },
+                                                onFanMenuDrag = handleFanDrag,
+                                                onFanMenuEnd = handleFanEnd,
+                                                isFanMenuActive = isFanActive,
+                                                isOtherItem = isFanActive && activeFanId != r.id,
+                                                isActiveItem = activeFanId == r.id
+                                            )
+                                        }
 
-                                                if (afterSaveHint?.recordId == r.id) {
-                                                    CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
-                                                }
+                                        if (afterSaveHint?.recordId == r.id) {
+                                            CategoryTotalHint(hint = afterSaveHint, visible = afterSaveHintVisible)
+                                        }
 
-                                                if (showDividerBelow) {
-                                                    HorizontalDivider(
-                                                        modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                        color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                                                        thickness = 0.8.dp
-                                                    )
-                                                }
-                                            }
+                                        if (showDividerBelow) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(start = 68.dp, end = 16.dp),
+                                                color = DIVIDER_COLOR.copy(alpha = 0.8f),
+                                                thickness = 0.8.dp
+                                            )
                                         }
                                     }
                                 }
@@ -5314,9 +5319,6 @@ fun AnimatedAmount(
     }
 }
 
-// =========================================================
-//  SmartElement + DayHeader + IconSourceOption
-// =========================================================
 @Composable
 fun SmartElement(
     listState: LazyListState?, dateKey: String,
@@ -5354,10 +5356,14 @@ fun SmartElement(
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 if (finalAlpha < 1f && finalAlpha > 0f) {
                     val blur = (1f - finalAlpha) * 14f
-                    renderEffect = androidx.compose.ui.graphics.BlurEffect(
-                        radiusX = blur * 0.3f,
-                        radiusY = blur * 1.5f
-                    )
+                    val quantizedBlur = blur.roundToInt()
+                    
+                    // 🟢 核心優化：使用 Cache 獲取 BlurEffect，避免滾動時每幀建立新物件導致卡頓
+                    if (quantizedBlur > 0) {
+                        renderEffect = getCachedHeaderBlurEffect(quantizedBlur)
+                    } else {
+                        renderEffect = null
+                    }
                 } else {
                     renderEffect = null
                 }
@@ -5605,8 +5611,7 @@ fun QuickInputSection(
 
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    val noteTextWidthCache = remember { mutableMapOf<String, Float>() }
-
+    
     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
