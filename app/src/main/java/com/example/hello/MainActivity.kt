@@ -125,7 +125,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-// 🟢 引入 Splash Screen 與 Lifecycle 協程
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.Lifecycle
@@ -180,6 +179,11 @@ private val keyboardPrefillNote = mutableStateOf<String?>(null)
 private val keyboardPrefillAmount = mutableStateOf<Double?>(null)
 private val keyboardPrefillCategory = mutableStateOf<String?>(null)
 
+// 🟢 啟動狀態：等 Firestore 第一次回傳先收 Splash
+object AppStartupState {
+    @Volatile var isFirstDataReady = false
+}
+
 // ===== 供通知顯示嘅最近項目資訊 =====
 @Immutable
 data class QuickNoteInfo(
@@ -203,11 +207,9 @@ object NotificationCaptureBridge {
 
     private var appContext: Context? = null
 
-    // Debounce handler
     private val confirmHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var pendingConfirmRunnable: Runnable? = null
 
-    // 🟢 內容級去重：30 秒內相同 note+amount 只處理一次
     @Volatile private var lastNote: String? = null
     @Volatile private var lastAmount: Double = 0.0
     @Volatile private var lastPushMs: Long = 0L
@@ -319,13 +321,17 @@ fun ensureNotificationChannels(context: Context) {
     nm.createNotificationChannel(confirm)
 }
 
+// 🟢 只清已知固定 ID，唔好 loop 10 萬次
 fun cleanupStaleConfirmNotifications(context: Context) {
     try {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-        for (id in 2000..102000) {
+        val knownIds = listOf(CONFIRM_NOTIFICATION_BASE_ID, QUICK_ADD_NOTIFICATION_ID)
+        for (id in knownIds) {
             try { nm.cancel(id) } catch (_: Exception) {}
         }
-        try { nm.cancel(CONFIRM_NOTIFICATION_BASE_ID) } catch (_: Exception) {}
+        for (id in 2000..2100) {
+            try { nm.cancel(id) } catch (_: Exception) {}
+        }
     } catch (_: Exception) {}
 }
 
@@ -414,7 +420,6 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
         ensureNotificationChannels(context)
 
         val notifId = CONFIRM_NOTIFICATION_BASE_ID
-
         val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
 
@@ -658,10 +663,8 @@ private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "�
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 
-// 🟢 新增：將 QuickInput 嘅文字寬度快取提升到全局
 private val noteTextWidthCache = ConcurrentHashMap<String, Float>()
 
-// 🟢 新增：緩存日期的 Blur 效果，避免在滾動時每幀創建大量 BlurEffect
 private val headerBlurEffectCache = ConcurrentHashMap<Int, androidx.compose.ui.graphics.RenderEffect>(32)
 private fun getCachedHeaderBlurEffect(blurRadiusInt: Int): androidx.compose.ui.graphics.RenderEffect? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || blurRadiusInt <= 0) return null
@@ -745,21 +748,17 @@ private fun getTodayStartMillis(): Long {
     return meta.startOfDayMillis
 }
 
-// === PART 1 END ===
-
 // =========================================================
 //  ★ LedgerViewModel
 // =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
-    // 🟢 改為懶加載，避免阻塞主線程
     private val db by lazy { Firebase.firestore }
     private val prefs by lazy { app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
 
     private val recordsById = HashMap<String, Record>()
     private val ghostRecordsById = HashMap<String, Record>()
 
-    // 🟢 新增：將 lastCategory 狀態移入 ViewModel
     private val _lastSavedCategory = MutableStateFlow("飲食")
     val lastSavedCategory: StateFlow<String> = _lastSavedCategory.asStateFlow()
 
@@ -787,7 +786,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val _defaultMonthA = monthKeyFromTimestamp(System.currentTimeMillis())
     private val _defaultMonthB = shiftMonthKey(_defaultMonthA, -1)
 
-    // 延後初始化這些值，先給預設值
     private val _compareMonthA = MutableStateFlow(_defaultMonthA)
     val compareMonthA: StateFlow<String> = _compareMonthA.asStateFlow()
 
@@ -802,8 +800,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         _compareMonthB.value = v
         viewModelScope.launch(Dispatchers.IO) { prefs.edit().putString("compare_month_b", v).apply() }
     }
-    
-    // 🟢 提供更新上次分類的方法
+
     fun updateLastSavedCategory(category: String) {
         _lastSavedCategory.value = category
         viewModelScope.launch(Dispatchers.IO) {
@@ -850,17 +847,16 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
-    init { 
-        // 🟢 避免阻塞主線程，喺 IO 線程讀取設定，然後啟動 Firestore
+    init {
         viewModelScope.launch(Dispatchers.IO) {
             val savedCategory = prefs.getString("last_category", "飲食") ?: "飲食"
             val savedMonthA = prefs.getString("compare_month_a", _defaultMonthA) ?: _defaultMonthA
             val savedMonthB = prefs.getString("compare_month_b", _defaultMonthB) ?: _defaultMonthB
-            
+
             _lastSavedCategory.value = savedCategory
             _compareMonthA.value = savedMonthA
             _compareMonthB.value = savedMonthB
-            
+
             withContext(Dispatchers.Default) {
                 listenToFirestore()
             }
@@ -886,6 +882,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snap, err ->
                 _loading.value = false
+                AppStartupState.isFirstDataReady = true   // 🟢 第一次回傳就收 Splash
                 if (err != null || snap == null) return@addSnapshotListener
 
                 val changes = snap.documentChanges
@@ -1730,7 +1727,7 @@ fun FanMenuOverlay(
 }
 
 // =========================================================
-//  ★ MainActivity (極速啟動優化版)
+//  ★ MainActivity
 // =========================================================
 class MainActivity : ComponentActivity() {
 
@@ -1747,8 +1744,9 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 🟢 極速啟動：安裝官方 Splash Screen (必須喺 super.onCreate 前調用)
-        installSplashScreen()
+        // 🟢 安裝 Splash 並等第一次 Firestore 回傳先收
+        val splash = installSplashScreen()
+        splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
 
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
@@ -1760,16 +1758,13 @@ class MainActivity : ComponentActivity() {
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
         }
 
-        // 🟢 釋放主線程：將非必要嘅初始化操作丟入後台協程
+        // 🟢 非必要初始化全部丟去 IO
         lifecycleScope.launch(Dispatchers.IO) {
             NotificationCaptureBridge.init(applicationContext)
             ensureNotificationChannels(applicationContext)
             cleanupStaleConfirmNotifications(applicationContext)
             createQuickAddChannel()
         }
-        
-        // 權限請求因為係 callback 所以不會嚴重阻塞
-        askNotificationPermissionIfNeeded()
 
         setContent {
             val token = keyboardLaunchToken.value
@@ -1781,6 +1776,12 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(notesInfo) {
                 persistTopQuickNotes(notesInfo)
                 showQuickAddNotification()
+            }
+
+            // 🟢 等首帧穩定先請求通知權限，唔好搶走 Splash
+            LaunchedEffect(Unit) {
+                delay(800)
+                askNotificationPermissionIfNeeded()
             }
 
             MaterialTheme {
@@ -1847,8 +1848,12 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
+    // 🟢 移去 IO，避免主線程做 IPC
     private fun showQuickAddNotification() {
-        refreshQuickAddNotification(this)
+        val ctx = applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
+        }
     }
 }
 
@@ -1888,9 +1893,7 @@ fun MainApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val db = remember { Firebase.firestore }
 
-    // 🟢 從 ViewModel 讀取最後選擇的分類，不讀取 SharedPreferences
     val lastSavedCategory by vm.lastSavedCategory.collectAsState()
 
     val ui by vm.ledgerUiState.collectAsState()
@@ -1971,7 +1974,7 @@ fun MainApp(
         if (uri != null && target != null) {
             scope.launch {
                 uploading = true
-                val db = kotlinx.coroutines.withContext(Dispatchers.IO) { Firebase.firestore }
+                val db = withContext(Dispatchers.IO) { Firebase.firestore }   // 🟢 IO 取
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
             }
@@ -1985,7 +1988,7 @@ fun MainApp(
         if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
-                val db = kotlinx.coroutines.withContext(Dispatchers.IO) { Firebase.firestore }
+                val db = withContext(Dispatchers.IO) { Firebase.firestore }   // 🟢 IO 取
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
                 try {
@@ -2149,7 +2152,6 @@ fun MainApp(
         val note = keyboardState.noteText
         val category = keyboardState.category
 
-        // 🟢 改為透過 ViewModel 更新
         vm.updateLastSavedCategory(category)
 
         val editId = keyboardState.editingRecordId
@@ -2515,6 +2517,7 @@ fun MainApp(
                             if (target != null) {
                                 scope.launch {
                                     uploading = true
+                                    val db = withContext(Dispatchers.IO) { Firebase.firestore }   // 🟢 IO 取
                                     removeIconFromSameName(context, db, target.note)
                                     uploading = false
                                 }
@@ -2562,6 +2565,7 @@ fun MainApp(
                     if (target != null && url.isNotBlank() && valid) {
                         scope.launch {
                             uploading = true
+                            val db = withContext(Dispatchers.IO) { Firebase.firestore }   // 🟢 IO 取
                             applyUrlToSameName(context, db, target.note, url)
                             uploading = false
                         }
@@ -2581,146 +2585,142 @@ fun MainApp(
     }
 
     if (webSearchTarget != null) {
-    val target = webSearchTarget!!
-    var selectedImageUrl by remember { mutableStateOf<String?>(null) }
+        val target = webSearchTarget!!
+        var selectedImageUrl by remember { mutableStateOf<String?>(null) }
 
-    BackHandler { webSearchTarget = null }
+        BackHandler { webSearchTarget = null }
 
-    Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
-        Column(Modifier.fillMaxSize()) {
-            Surface(color = SURFACE_CARD, shadowElevation = 4.dp) {
-                Row(
-                    Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { webSearchTarget = null }) {
-                        Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
-                    }
-                    Text("長按圖片設定圖標", fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                }
-            }
-
-            androidx.compose.ui.viewinterop.AndroidView(
-    factory = { ctx ->
-        android.webkit.WebView(ctx).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            webViewClient = android.webkit.WebViewClient()
-
-            // 🟢 核心修復：接管觸摸事件，防止父容器（Compose）搶走手勢
-            setOnTouchListener { v, event ->
-                when (event.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
-                        // 手指按下，告訴父容器「不要攔截」，將手勢完全交給 WebView
-                        v.parent?.requestDisallowInterceptTouchEvent(true)
-                    }
-                    android.view.MotionEvent.ACTION_UP,
-                    android.view.MotionEvent.ACTION_CANCEL -> {
-                        // 手指抬起或取消，恢復父容器的攔截權
-                        v.parent?.requestDisallowInterceptTouchEvent(false)
-                    }
-                }
-                // 返回 false，讓 WebView 自身的滾動、縮放、長按邏輯繼續運作
-                false
-            }
-
-            // 長按命中圖片時記錄 URL，但返回 false（WebView 仍會處理手勢，但我們不消費事件）
-            setOnLongClickListener { v ->
-                val result = (v as android.webkit.WebView).hitTestResult
-                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
-                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                    val url = result.extra
-                    if (!url.isNullOrBlank()) {
-                        selectedImageUrl = url
-                    }
-                }
-                false
-            }
-
-            val q = Uri.encode(target.note + " icon")
-            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
-        }
-    },
-    modifier = Modifier.weight(1f).fillMaxWidth()
-)
-        }
-
-        if (selectedImageUrl != null) {
-            AlertDialog(
-                onDismissRequest = { selectedImageUrl = null },
-                title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("將會設為「${target.note}」的專屬圖標",
-                            color = TEXT_SECONDARY, fontSize = 14.sp)
-                        Spacer(Modifier.height(16.dp))
-                        AsyncImage(
-                            model = selectedImageUrl,
-                            contentDescription = null,
-                            modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val url = selectedImageUrl!!
-                        selectedImageUrl = null
-                        webSearchTarget = null
-
-                        scope.launch {
-                            uploading = true
-                            try {
-                                val finalBytes = withContext(Dispatchers.IO) {
-                                    val rawBytes = if (url.startsWith("data:image")) {
-                                        val base64 = url.substringAfter(",")
-                                        android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                                    } else {
-                                        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                                        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                                        conn.connectTimeout = 10000
-                                        conn.readTimeout = 10000
-                                        conn.inputStream.readBytes()
-                                    }
-
-                                    val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
-                                    val processedBitmap = removeBackground(srcBitmap)
-                                    val baos = ByteArrayOutputStream()
-                                    processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-
-                                    if (processedBitmap !== srcBitmap) processedBitmap.recycle()
-                                    srcBitmap.recycle()
-
-                                    baos.toByteArray()
-                                }
-                                val cloudUrl = uploadBytesToCloudinary(finalBytes)
-                                if (cloudUrl != null) {
-                                    applyUrlToSameName(context, db, target.note, cloudUrl)
-                                } else {
-                                    Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
-                                        Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "下載失敗，這張圖片可能有版權保護",
-                                    Toast.LENGTH_SHORT).show()
-                            } finally {
-                                uploading = false
-                            }
+        Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
+            Column(Modifier.fillMaxSize()) {
+                Surface(color = SURFACE_CARD, shadowElevation = 4.dp) {
+                    Row(
+                        Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { webSearchTarget = null }) {
+                            Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
                         }
-                    }) { Text("使用", fontWeight = FontWeight.Bold) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { selectedImageUrl = null }) {
-                        Text("取消", color = TEXT_SECONDARY)
+                        Text("長按圖片設定圖標", fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
                     }
-                },
-                shape = RoundedCornerShape(20.dp),
-                containerColor = SURFACE_CARD
-            )
+                }
+
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            webViewClient = android.webkit.WebViewClient()
+
+                            setOnTouchListener { v, event ->
+                                when (event.actionMasked) {
+                                    android.view.MotionEvent.ACTION_DOWN -> {
+                                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                                    }
+                                    android.view.MotionEvent.ACTION_UP,
+                                    android.view.MotionEvent.ACTION_CANCEL -> {
+                                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                                    }
+                                }
+                                false
+                            }
+
+                            setOnLongClickListener { v ->
+                                val result = (v as android.webkit.WebView).hitTestResult
+                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
+                                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                                    val url = result.extra
+                                    if (!url.isNullOrBlank()) {
+                                        selectedImageUrl = url
+                                    }
+                                }
+                                false
+                            }
+
+                            val q = Uri.encode(target.note + " icon")
+                            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
+                        }
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            }
+
+            if (selectedImageUrl != null) {
+                AlertDialog(
+                    onDismissRequest = { selectedImageUrl = null },
+                    title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("將會設為「${target.note}」的專屬圖標",
+                                color = TEXT_SECONDARY, fontSize = 14.sp)
+                            Spacer(Modifier.height(16.dp))
+                            AsyncImage(
+                                model = selectedImageUrl,
+                                contentDescription = null,
+                                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val url = selectedImageUrl!!
+                            selectedImageUrl = null
+                            webSearchTarget = null
+
+                            scope.launch {
+                                uploading = true
+                                try {
+                                    val finalBytes = withContext(Dispatchers.IO) {
+                                        val rawBytes = if (url.startsWith("data:image")) {
+                                            val base64 = url.substringAfter(",")
+                                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                                        } else {
+                                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                                            conn.connectTimeout = 10000
+                                            conn.readTimeout = 10000
+                                            conn.inputStream.readBytes()
+                                        }
+
+                                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                                        val processedBitmap = removeBackground(srcBitmap)
+                                        val baos = ByteArrayOutputStream()
+                                        processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+
+                                        if (processedBitmap !== srcBitmap) processedBitmap.recycle()
+                                        srcBitmap.recycle()
+
+                                        baos.toByteArray()
+                                    }
+                                    val cloudUrl = uploadBytesToCloudinary(finalBytes)
+                                    if (cloudUrl != null) {
+                                        val db = withContext(Dispatchers.IO) { Firebase.firestore }
+                                        applyUrlToSameName(context, db, target.note, cloudUrl)
+                                    } else {
+                                        Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
+                                            Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "下載失敗，這張圖片可能有版權保護",
+                                        Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    uploading = false
+                                }
+                            }
+                        }) { Text("使用", fontWeight = FontWeight.Bold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { selectedImageUrl = null }) {
+                            Text("取消", color = TEXT_SECONDARY)
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = SURFACE_CARD
+                )
+            }
         }
     }
-}
 }
 
 // =========================================================
@@ -2951,6 +2951,7 @@ private fun AnimatedFabLayer(
     }
 }
 
+// 🟢 條件渲染：收起時完全唔建 keyboard panel
 @Composable
 private fun AnimatedKeyboardLayer(
     showKeyboard: Boolean,
@@ -2968,16 +2969,15 @@ private fun AnimatedKeyboardLayer(
     val currentP = progressProvider()
     val isActive = currentP > 0f || showKeyboard
 
+    // 🟢 完全唔 render，連 Box 都唔建
+    if (!isActive) return
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
-            .offset {
-                if (!isActive) IntOffset(10000, 10000) else IntOffset(0, 0)
-            }
             .graphicsLayer {
                 alpha = currentP
-
                 val w = size.width
                 val h = size.height
                 if (w > 0f && h > 0f) {
@@ -3108,25 +3108,33 @@ fun FloatingNavBar(
 }
 
 // =========================================================
-//  ★ NotificationAccessGuide（通知存取權限引導）
+//  ★ NotificationAccessGuide（🟢 權限檢查移去 IO）
 // =========================================================
 @Composable
 fun NotificationAccessGuide(context: Context) {
-    var isGranted by remember {
-        mutableStateOf(
+    var isGranted by remember { mutableStateOf(false) }   // 首帧唔做 IPC
+
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        isGranted = withContext(Dispatchers.IO) {
             NotificationManagerCompat
                 .getEnabledListenerPackages(context)
                 .contains(context.packageName)
-        )
+        }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                isGranted = NotificationManagerCompat
-                    .getEnabledListenerPackages(context)
-                    .contains(context.packageName)
+                scope.launch {
+                    isGranted = withContext(Dispatchers.IO) {
+                        NotificationManagerCompat
+                            .getEnabledListenerPackages(context)
+                            .contains(context.packageName)
+                    }
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -3788,8 +3796,6 @@ fun WeeklyExpenseChart(
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
     val maxBarHeight = 62.dp
 
-    // 🟢 優化：嚴格使用 derivedStateOf 包裝對 listState 嘅讀取
-    // 這樣只會在 scrollProgress "值" 改變時才觸發重組
     val scrollProgress by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -3810,8 +3816,6 @@ fun WeeklyExpenseChart(
 
     Box(modifier = modifier.fillMaxWidth().height(chartHeight).clipToBounds()) {
         Box(
-            // 🟢 優化：將基於 scrollProgress 嘅動畫計算放入 graphicsLayer
-            // graphicsLayer 會跳過 Recomposition 同 Layout，直接在 Render Phase 執行，極度順滑
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 val p = scrollProgress
                 alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
@@ -3905,9 +3909,6 @@ fun WeeklyExpenseBar(
     }
 }
 
-// =========================================================
-//  CategoryStatChip + AnimatedRecordItem + CategoryTotalHint
-// =========================================================
 @Composable
 fun CategoryStatChip(category: String) {
     val style = CATEGORY_STYLES[category]
@@ -3950,9 +3951,6 @@ fun AnimatedRecordItem(
         }
     }
 
-    // 🟢 核心效能優化：
-    // 如果唔係啱啱新增，又唔係正在刪除，直接渲染內容然後 Return！
-    // 咁樣可以完全避免在普通滑動時為幾百個項目建立 Animatable 物件，大幅減少 GC 停頓。
     if (!animateOnMount && !everDeleting) {
         Box(Modifier.fillMaxWidth().height(72.dp)) { content() }
         return
@@ -4092,9 +4090,6 @@ fun CategoryTotalHint(hint: AfterSaveHint, visible: Boolean) {
     }
 }
 
-// =========================================================
-//  TrianglePointer + SwipeableRecordItem + AnimatedActionButton
-// =========================================================
 @Composable
 fun TrianglePointer(
     colIndex: Int, cellWidth: Dp, color: Color = SURFACE_CARD,
@@ -4375,9 +4370,6 @@ private fun AnimatedActionButton(
     }
 }
 
-// =========================================================
-//  DayDetailPanel
-// =========================================================
 @Composable
 fun DayDetailPanel(
     dateKey: String, records: List<Record>,
@@ -4481,9 +4473,6 @@ fun DayDetailPanel(
     }
 }
 
-// =========================================================
-//  LedgerKeyboardPanel + KeyboardKey
-// =========================================================
 private val KEYBOARD_ROWS = listOf(
     listOf("1", "2", "3"), listOf("4", "5", "6"),
     listOf("7", "8", "9"), listOf(".", "0", "backspace")
@@ -5044,9 +5033,6 @@ fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifie
     }
 }
 
-// =========================================================
-//  FilterChips + TopStats + AnimatedAmount
-// =========================================================
 @Composable
 fun AnimatedFilterChip(
     selected: Boolean, label: String, onClick: () -> Unit,
@@ -5308,16 +5294,17 @@ fun AnimatedAmount(
     }
 }
 
+// 🟢 簡化成純透傳：stickyHeader 本身嘅自然滾動已經係「整體推走」
 @Composable
 fun SmartElement(
     listState: LazyListState?, dateKey: String,
     isStaticWithNext: Boolean, isStaticWithPrev: Boolean,
     modifier: Modifier = Modifier, content: @Composable () -> Unit
 ) {
-    // 🟢 唔再補償 offset，唔再改 alpha / blur
-    //    stickyHeader 嘅自然滾動已經係「整體推走」
     Box(modifier) { content() }
 }
+
+// 🟢 DayHeader 簡化版：刪走 next/prev 比對，所有文字統一推走
 @Composable
 fun DayHeader(
     dateKey: String, income: Double, expense: Double,
@@ -5325,7 +5312,6 @@ fun DayHeader(
     prevDateKey: String? = null, prevIncome: Double? = null, prevExpense: Double? = null,
     nextDateKey: String? = null, nextIncome: Double? = null, nextExpense: Double? = null
 ) {
-    // 🟢 next/prev 參數保留但唔再用，避免改呼叫處
     val parsed = parseDateHeader(dateKey)
     val dayStr = if (parsed != null) pad2(parsed.day) else dateKey
     val monthStr = if (parsed != null) "${parsed.month}月" else ""
@@ -5359,7 +5345,7 @@ fun DayHeader(
                 Column(verticalArrangement = Arrangement.Center) {
                     Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
-                    Spacer(modifier = Modifier.height(1.dp))
+                    Spacer(Modifier.height(1.dp))
                     Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.Medium,
                         color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY)
                 }
@@ -5400,9 +5386,6 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
     }
 }
 
-// =========================================================
-//  QuickInputChip + QuickInputSection + AnimatedInfoChip
-// =========================================================
 @Composable
 fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val ctx = LocalContext.current
@@ -5495,7 +5478,7 @@ fun QuickInputSection(
 
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    
+
     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
@@ -5668,9 +5651,6 @@ fun AnimatedInfoChip(
     }
 }
 
-// =========================================================
-//  CalendarRow + CalendarDayCell + CalendarContent + SegmentedModeControl
-// =========================================================
 @Composable
 fun CalendarRow(
     rowIdx: Int, firstDayOffset: Int, daysInMonth: Int, today: Calendar,
@@ -6387,9 +6367,6 @@ fun SegmentedModeControl(
     }
 }
 
-// =========================================================
-//  FadedText + MiniHistogram + CompareValueCell + CompareContent + MonthDropdown
-// =========================================================
 @Composable
 fun FadedText(
     text: String, color: Color, fontSize: TextUnit,
@@ -6981,5 +6958,4 @@ fun IconViewAdaptive(
     }
 }
 
-// === PART 4 END ===
-// === MainActivity.kt 完整版結束 ===
+// === 文件結束 ===
