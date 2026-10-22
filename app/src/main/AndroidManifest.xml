@@ -21,6 +21,17 @@
         android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
         tools:ignore="ProtectedPermissions" />
 
+    <!--
+        ★ 新增：OCR 長按功能所需權限
+        - FOREGROUND_SERVICE：基礎前台服務權限（Android 9+）
+        - FOREGROUND_SERVICE_MEDIA_PROJECTION：Android 14+ 必須聲明，
+          否則 startForeground(FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) 會拋 SecurityException
+        - VIBRATE：長按磁貼震動回饋
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -64,6 +75,32 @@
             </intent-filter>
         </activity>
 
+        <!--
+            ★ 新增：OCR 授權中介 Activity
+            - 透明主題：用戶只會見到系統「允許螢幕截圖」對話框
+            - noHistory + excludeFromRecents：唔會殘留喺返回棧 / 最近任務
+            - exported=false：只由 QuickAddTileService 內部啟動
+            - configChanges：避免授權對話框開合時重建
+        -->
+        <activity
+            android:name=".OcrCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:launchMode="singleInstance"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!--
+            ★ 新增：OCR 前台服務
+            - foregroundServiceType="mediaProjection"：Android 14+ 必須
+            - exported=false：只由 App 內部（OcrCaptureActivity）啟動
+        -->
+        <service
+            android:name=".OcrForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <!-- 監控易乘碼 / 八達通 / 銀行通知 -->
         <service
             android:name=".PaymentNotificationListener"
@@ -80,7 +117,7 @@
             android:name=".NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- 快速記帳快捷磁貼 -->
+        <!-- 快速記帳快捷磁貼（短按邏輯不變；長按由 handleSecondaryClick 處理） -->
         <service
             android:name=".QuickAddTileService"
             android:label="快速記帳"
@@ -93,6 +130,13 @@
             <meta-data
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"
                 android:value="false" />
+            <!--
+                ★ 新增：提示系統此 Tile 支援長按（Android 14+）
+                冇呢個 meta-data 時，部分 ROM 唔會派發 handleSecondaryClick()
+            -->
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
         </service>
 
         <!-- FileProvider，畀相機寫入臨時相片檔案 -->
