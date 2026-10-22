@@ -22,24 +22,20 @@
         tools:ignore="ProtectedPermissions" />
 
     <!--
-        ★ 新增：OCR 長按功能所需權限
+        ★ OCR Shortcut 功能所需權限
         - FOREGROUND_SERVICE：基礎前台服務權限（Android 9+）
         - FOREGROUND_SERVICE_MEDIA_PROJECTION：Android 14+ 必須聲明，
           否則 startForeground(FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) 會拋 SecurityException
-        - VIBRATE：長按磁貼震動回饋
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.VIBRATE" />
 
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
 
     <!--
-        ★ 新增：Android 11+ 查詢已安裝 App
-        如果你喺代碼用 packageManager.getPackageInfo("com.mtr.mobile", 0) 檢查 App 有冇裝，
-        就需要喺呢度聲明，否則會拋 NameNotFoundException。
+        ★ Android 11+ 查詢已安裝 App
     -->
     <queries>
         <package android:name="com.mtr.mobile" />
@@ -73,29 +69,29 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- ★ 新增：註冊 App Shortcuts（長按 App 圖標彈出捷徑選單） -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!--
-            ★ 新增：OCR 授權中介 Activity
+            ★ OCR 授權中介 Activity
+            - exported="true"：Shortcut 由 Launcher 啟動，必須 exported
             - 透明主題：用戶只會見到系統「允許螢幕截圖」對話框
-            - noHistory + excludeFromRecents：唔會殘留喺返回棧 / 最近任務
-            - exported=false：只由 QuickAddTileService 內部啟動
+            - excludeFromRecents：唔會殘留喺最近任務
             - configChanges：避免授權對話框開合時重建
+            - ⚠️ 唔可以加 noHistory / launchMode="singleInstance"，否則授權回調會丟失
         -->
         <activity
             android:name=".OcrCaptureActivity"
-            android:exported="false"
+            android:exported="true"
             android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:launchMode="singleInstance"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <!--
-            ★ 新增：OCR 前台服務
-            - foregroundServiceType="mediaProjection"：Android 14+ 必須
-            - exported=false：只由 App 內部（OcrCaptureActivity）啟動
-        -->
+        <!-- OCR 前台服務（Android 14+ 必須聲明 mediaProjection 類型） -->
         <service
             android:name=".OcrForegroundService"
             android:exported="false"
@@ -117,7 +113,7 @@
             android:name=".NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- 快速記帳快捷磁貼（短按邏輯不變；長按由 handleSecondaryClick 處理） -->
+        <!-- 快速記帳快捷磁貼（短按邏輯不變） -->
         <service
             android:name=".QuickAddTileService"
             android:label="快速記帳"
@@ -130,13 +126,6 @@
             <meta-data
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"
                 android:value="false" />
-            <!--
-                ★ 新增：提示系統此 Tile 支援長按（Android 14+）
-                冇呢個 meta-data 時，部分 ROM 唔會派發 handleSecondaryClick()
-            -->
-            <meta-data
-                android:name="android.service.quicksettings.ACTIVE_TILE"
-                android:value="true" />
         </service>
 
         <!-- FileProvider，畀相機寫入臨時相片檔案 -->
