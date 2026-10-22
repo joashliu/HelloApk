@@ -3045,24 +3045,27 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
     val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (!listState.isScrollInProgress) {
-            val transitioningHeader = listState.layoutInfo.visibleItemsInfo.find {
-                it.contentType == "day_header" && it.offset < -2 && it.offset > -(headerHeightPx - 2)
+    LaunchedEffect(listState) { // ✅ 改為固定 Key，避免觸發 LedgerContent 重組
+        snapshotFlow { listState.isScrollInProgress } // ✅ 用 snapshotFlow 喺背景安全監聽
+            .collect { inProgress ->
+                if (!inProgress) {
+                    val transitioningHeader = listState.layoutInfo.visibleItemsInfo.find {
+                        it.contentType == "day_header" && it.offset < -2 && it.offset > -(headerHeightPx - 2)
+                    }
+                    if (transitioningHeader != null) {
+                        val offset = transitioningHeader.offset.toFloat()
+                        val distanceToScroll = if (offset < -headerHeightPx / 2) {
+                            headerHeightPx + offset
+                        } else offset
+                        try {
+                            listState.animateScrollBy(
+                                value = distanceToScroll,
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             }
-            if (transitioningHeader != null) {
-                val offset = transitioningHeader.offset.toFloat()
-                val distanceToScroll = if (offset < -headerHeightPx / 2) {
-                    headerHeightPx + offset
-                } else offset
-                try {
-                    listState.animateScrollBy(
-                        value = distanceToScroll,
-                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)
-                    )
-                } catch (_: Exception) {}
-            }
-        }
     }
 
     val configuration = LocalConfiguration.current
