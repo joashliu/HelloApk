@@ -5334,12 +5334,8 @@ fun SmartElement(
 
     Box(
         modifier = modifier.graphicsLayer {
-            // 🟢 優化：直接從 listState.layoutInfo 中嘗試快速定位，避免不必要的遍歷
-            // 如果列表很長，每幀執行 find 會嚴重掉幀
             val visibleItems = listState.layoutInfo.visibleItemsInfo
             var currentOffset = 0f
-            
-            // 優化遍歷：因為 visibleItemsInfo 通常只有幾十個，我哋可以快速尋找
             for (i in visibleItems.indices) {
                 if (visibleItems[i].key == "header_$dateKey") {
                     currentOffset = visibleItems[i].offset.toFloat()
@@ -5351,14 +5347,16 @@ fun SmartElement(
             var a = 1f
 
             if (currentOffset <= 0f && currentOffset >= -headerHeightPx) {
-                if (isStaticWithNext) { ty = -currentOffset; a = 1f }
-                else {
+                if (isStaticWithNext) {
+                    ty = -currentOffset   // 同下一組相同 → 保持視覺唔動
+                    a = 1f
+                } else {
                     ty = -currentOffset * 0.35f
                     a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f))
                 }
-            } else if (currentOffset > 0f && currentOffset <= headerHeightPx) {
-                if (isStaticWithPrev) { ty = -currentOffset; a = 0f }
             }
+            // 🟢 原本嘅 else if (currentOffset > 0f ...) 分支完全刪除
+            //    唔再預先將新 header 嘅相同元素 alpha 設做 0
 
             translationY = ty
             val finalAlpha = a.coerceIn(0f, 1f)
@@ -5368,9 +5366,7 @@ fun SmartElement(
                 if (finalAlpha < 1f && finalAlpha > 0f) {
                     val blur = (1f - finalAlpha) * 14f
                     val quantizedBlur = blur.roundToInt()
-                    
                     if (quantizedBlur > 0) {
-                        // 使用你之前加入的 Cache 函數
                         renderEffect = getCachedHeaderBlurEffect(quantizedBlur)
                     } else {
                         renderEffect = null
