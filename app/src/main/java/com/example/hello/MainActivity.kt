@@ -3473,28 +3473,18 @@ fun LedgerContent(
             val isGroupDeleting = dayRecords.size == 1 && dayRecords[0].id in deletingIds
 
             if (!isGroupDeleting) {
-                val prevGroup = displayGroups.getOrNull(index - 1)
-                val nextGroup = displayGroups.getOrNull(index + 1)
-
-                val prevDateKey = prevGroup?.first
-                var prevIncome = 0.0; var prevExpense = 0.0
-                prevGroup?.second?.forEach { if (it.id !in deletingIds) { if (it.category == INCOME_CATEGORY) prevIncome += it.amount else prevExpense += it.amount } }
-
-                val nextDateKey = nextGroup?.first
-                var nextIncome = 0.0; var nextExpense = 0.0
-                nextGroup?.second?.forEach { if (it.id !in deletingIds) { if (it.category == INCOME_CATEGORY) nextIncome += it.amount else nextExpense += it.amount } }
-
                 stickyHeader(key = "header_$dateKey", contentType = "day_header") {
+                    // 🟢 實色背景，令新 header 推上來時物理遮住舊 header
                     Box(modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp)
                         .background(SURFACE_BG)
                     ) {
                         DayHeader(
-                            dateKey = dateKey, income = dayIncome, expense = dayExpense,
-                            listState = listState,
-                            prevDateKey = prevDateKey, prevIncome = prevIncome, prevExpense = prevExpense,
-                            nextDateKey = nextDateKey, nextIncome = nextIncome, nextExpense = nextExpense
+                            dateKey = dateKey,
+                            income = dayIncome,
+                            expense = dayExpense,
+                            listState = listState
                         )
                     }
                 }
@@ -3590,7 +3580,6 @@ fun LedgerContent(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
-            // 🟢 通知存取權限引導
             NotificationAccessGuide(context = LocalContext.current)
 
             Row(
@@ -5325,58 +5314,9 @@ fun SmartElement(
     isStaticWithNext: Boolean, isStaticWithPrev: Boolean,
     modifier: Modifier = Modifier, content: @Composable () -> Unit
 ) {
-    if (listState == null) {
-        Box(modifier) { content() }
-        return
-    }
-    val density = LocalDensity.current
-    val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
-
-    Box(
-        modifier = modifier.graphicsLayer {
-            val visibleItems = listState.layoutInfo.visibleItemsInfo
-            var currentOffset = 0f
-            for (i in visibleItems.indices) {
-                if (visibleItems[i].key == "header_$dateKey") {
-                    currentOffset = visibleItems[i].offset.toFloat()
-                    break
-                }
-            }
-
-            var ty = 0f
-            var a = 1f
-
-            if (currentOffset <= 0f && currentOffset >= -headerHeightPx) {
-                if (isStaticWithNext) {
-                    ty = -currentOffset   // 同下一組相同 → 保持視覺唔動
-                    a = 1f
-                } else {
-                    ty = -currentOffset * 0.35f
-                    a = 1f - (abs(currentOffset) / (headerHeightPx * 0.6f))
-                }
-            }
-            // 🟢 原本嘅 else if (currentOffset > 0f ...) 分支完全刪除
-            //    唔再預先將新 header 嘅相同元素 alpha 設做 0
-
-            translationY = ty
-            val finalAlpha = a.coerceIn(0f, 1f)
-            alpha = finalAlpha
-
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                if (finalAlpha < 1f && finalAlpha > 0f) {
-                    val blur = (1f - finalAlpha) * 14f
-                    val quantizedBlur = blur.roundToInt()
-                    if (quantizedBlur > 0) {
-                        renderEffect = getCachedHeaderBlurEffect(quantizedBlur)
-                    } else {
-                        renderEffect = null
-                    }
-                } else {
-                    renderEffect = null
-                }
-            }
-        }
-    ) { content() }
+    // 🟢 唔再補償 offset，唔再改 alpha / blur
+    //    stickyHeader 嘅自然滾動已經係「整體推走」
+    Box(modifier) { content() }
 }
 @Composable
 fun DayHeader(
@@ -5385,6 +5325,7 @@ fun DayHeader(
     prevDateKey: String? = null, prevIncome: Double? = null, prevExpense: Double? = null,
     nextDateKey: String? = null, nextIncome: Double? = null, nextExpense: Double? = null
 ) {
+    // 🟢 next/prev 參數保留但唔再用，避免改呼叫處
     val parsed = parseDateHeader(dateKey)
     val dayStr = if (parsed != null) pad2(parsed.day) else dateKey
     val monthStr = if (parsed != null) "${parsed.month}月" else ""
@@ -5393,25 +5334,6 @@ fun DayHeader(
     val expStr = if (expense > 0) "-$${formatAmountNoDecimal(expense)}" else ""
     val isToday = parsed?.dayTag == "今日"
 
-    val nextParsed = nextDateKey?.let { parseDateHeader(it) }
-    val nextDayStr = if (nextParsed != null) pad2(nextParsed.day) else nextDateKey ?: ""
-    val nextMonthStr = if (nextParsed != null) "${nextParsed.month}月" else ""
-    val nextWeekStr = if (nextParsed != null) (if (nextParsed.dayTag == "今日") "今天" else "週${nextParsed.weekdayChar}") else ""
-    val nextIncStr = if ((nextIncome ?: 0.0) > 0) "+$${formatAmountNoDecimal(nextIncome!!)}" else ""
-    val nextExpStr = if ((nextExpense ?: 0.0) > 0) "-$${formatAmountNoDecimal(nextExpense!!)}" else ""
-
-    val prevParsed = prevDateKey?.let { parseDateHeader(it) }
-    val prevDayStr = if (prevParsed != null) pad2(prevParsed.day) else prevDateKey ?: ""
-    val prevMonthStr = if (prevParsed != null) "${prevParsed.month}月" else ""
-    val prevWeekStr = if (prevParsed != null) (if (prevParsed.dayTag == "今日") "今天" else "週${prevParsed.weekdayChar}") else ""
-    val prevIncStr = if ((prevIncome ?: 0.0) > 0) "+$${formatAmountNoDecimal(prevIncome!!)}" else ""
-    val prevExpStr = if ((prevExpense ?: 0.0) > 0) "-$${formatAmountNoDecimal(prevExpense!!)}" else ""
-
-    val nextIsToday = nextParsed?.dayTag == "今日"
-    val prevIsToday = prevParsed?.dayTag == "今日"
-    val colorMatchNext = isToday == nextIsToday
-    val colorMatchPrev = isToday == prevIsToday
-
     Row(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -5419,23 +5341,15 @@ fun DayHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.width(46.dp), contentAlignment = Alignment.CenterStart) {
                 Row {
-                    dayStr.forEachIndexed { i, char ->
-                        val nextChar = nextDayStr.getOrNull(i)
-                        val prevChar = prevDayStr.getOrNull(i)
-                        SmartElement(
-                            listState = listState, dateKey = dateKey,
-                            isStaticWithNext = char == nextChar && colorMatchNext,
-                            isStaticWithPrev = char == prevChar && colorMatchPrev
-                        ) {
-                            Text(
-                                text = char.toString(),
-                                fontSize = 34.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
-                                letterSpacing = (-1).sp,
-                                style = TextStyle(fontFeatureSettings = "tnum")
-                            )
-                        }
+                    dayStr.forEach { char ->
+                        Text(
+                            text = char.toString(),
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isToday) BRAND_PRIMARY else TEXT_PRIMARY,
+                            letterSpacing = (-1).sp,
+                            style = TextStyle(fontFeatureSettings = "tnum")
+                        )
                     }
                 }
             }
@@ -5443,23 +5357,11 @@ fun DayHeader(
             if (monthStr.isNotEmpty()) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Column(verticalArrangement = Arrangement.Center) {
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = monthStr == nextMonthStr && colorMatchNext,
-                        isStaticWithPrev = monthStr == prevMonthStr && colorMatchPrev
-                    ) {
-                        Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                            color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
-                    }
+                    Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                     Spacer(modifier = Modifier.height(1.dp))
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = weekStr == nextWeekStr && colorMatchNext,
-                        isStaticWithPrev = weekStr == prevWeekStr && colorMatchPrev
-                    ) {
-                        Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                            color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY)
-                    }
+                    Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.Medium,
+                        color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY)
                 }
             }
         }
@@ -5469,40 +5371,16 @@ fun DayHeader(
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = (nextIncome ?: 0.0) > 0,
-                        isStaticWithPrev = (prevIncome ?: 0.0) > 0
-                    ) {
-                        Text("收入", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = incStr == nextIncStr,
-                        isStaticWithPrev = incStr == prevIncStr
-                    ) {
-                        Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
-                    }
+                    Text("收入", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
                 }
             }
             if (expense > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = (nextExpense ?: 0.0) > 0,
-                        isStaticWithPrev = (prevExpense ?: 0.0) > 0
-                    ) {
-                        Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
-                    }
+                    Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(2.dp))
-                    SmartElement(
-                        listState = listState, dateKey = dateKey,
-                        isStaticWithNext = expStr == nextExpStr,
-                        isStaticWithPrev = expStr == prevExpStr
-                    ) {
-                        Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
-                    }
+                    Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
                 }
             }
         }
