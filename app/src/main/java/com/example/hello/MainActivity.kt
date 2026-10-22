@@ -2974,7 +2974,7 @@ fun NotificationAccessGuide(context: Context) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
-    isFirstShow: Boolean = false,   // 🟢 傳入
+    isFirstShow: Boolean = false,
     loading: Boolean,
     filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
@@ -3018,7 +3018,6 @@ fun LedgerContent(
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
 
-    // 🟢 等首幀穩定 + 用戶停手才播 intro；用戶已滑動則跳過
     LaunchedEffect(shouldPlayWeeklyIntro) {
         if (!shouldPlayWeeklyIntro || weeklyIntroTriggered) return@LaunchedEffect
         delay(150)
@@ -3046,8 +3045,9 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
     val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
 
-    LaunchedEffect(listState) { // ✅ 改為固定 Key，避免觸發 LedgerContent 重組
-        snapshotFlow { listState.isScrollInProgress } // ✅ 用 snapshotFlow 喺背景安全監聽
+    // ✅ 修正 2：改用 snapshotFlow，避免手指點擊屏幕時觸發 LedgerContent 大規模重組
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
             .collect { inProgress ->
                 if (!inProgress) {
                     val transitioningHeader = listState.layoutInfo.visibleItemsInfo.find {
@@ -3074,41 +3074,21 @@ fun LedgerContent(
     val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
-
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
-    val collapseDistancePx = remember(density) { with(density) { 400.dp.toPx() } }
 
-    var quickInputMaxRows by remember { mutableIntStateOf(4) }
-    val scrollStateData = remember { floatArrayOf(0f) }
-
-    val collapseScrollConnection = remember(collapseDistancePx, oneRowPx) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                val prev = scrollStateData[0]
-                val next = (prev - available.y).coerceIn(0f, collapseDistancePx)
-                scrollStateData[0] = next
-                val rawTarget = when {
-                    next < oneRowPx * 0.5f -> 4
-                    next < oneRowPx * 1.5f -> 3
-                    next < oneRowPx * 2.5f -> 2
-                    else -> 1
+    // ✅ 修正 4：刪除咗 collapseScrollConnection，改用 derivedStateOf 直接讀取 Offset，零效能負擔！
+    val quickInputMaxRows by remember(listState, oneRowPx) {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0) {
+                1
+            } else {
+                val offset = listState.firstVisibleItemScrollOffset
+                when {
+                    offset > oneRowPx * 2.5f -> 1
+                    offset > oneRowPx * 1.5f -> 2
+                    offset > oneRowPx * 0.5f -> 3
+                    else -> 4
                 }
-                if (rawTarget != quickInputMaxRows) quickInputMaxRows = rawTarget
-                return Offset.Zero
-            }
-        }
-    }
-
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            listState.firstVisibleItemIndex == 0 &&
-            listState.firstVisibleItemScrollOffset == 0
-        }
-        .distinctUntilChanged()
-        .collect { atTop ->
-            if (atTop) {
-                scrollStateData[0] = 0f
-                if (quickInputMaxRows != 4) quickInputMaxRows = 4
             }
         }
     }
@@ -3246,7 +3226,6 @@ fun LedgerContent(
     val isFanActive = activeFanRecord != null
     val activeFanId = activeFanRecord?.id
 
-    // 🟢 預計算每日收支（避免 lambda 內每次重組都重算）
     data class DayStat(val income: Double, val expense: Double, val isGroupDeleting: Boolean)
     val dayStats: Map<String, DayStat> = remember(displayGroups, deletingIds) {
         displayGroups.associate { (dateKey, records) ->
@@ -3299,7 +3278,7 @@ fun LedgerContent(
                                 .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                // ✅ 已經移除 .animateContentSize，避免 Measure Pass 卡頓
+                                // ✅ 修正 1：移除 animateContentSize
                         ) {
                             val currentRecords = dayRecords
                             val activeCount = if (deletingIds.isEmpty()) currentRecords.size
@@ -3428,7 +3407,7 @@ fun LedgerContent(
                                 QuickInputSection(
                                     topNotes = topNotes, noteIconMap = noteIconMap,
                                     maxRowsPerPage = quickInputMaxRows,
-                                    skipAppearAnimation = isFirstShow,   // 🟢 傳入
+                                    skipAppearAnimation = isFirstShow,
                                     onClick = onQuickInputClick
                                 )
                             }
@@ -3514,7 +3493,7 @@ fun LedgerContent(
                 } else {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize().nestedScroll(collapseScrollConnection),
+                        modifier = Modifier.fillMaxSize(), // ✅ 修正 4：解除 nestedScroll，釋放原生順滑效能
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
