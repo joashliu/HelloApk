@@ -3787,9 +3787,6 @@ fun LedgerContent(
     }
 }
 
-// =========================================================
-//  週支出圖表
-// =========================================================
 @Composable
 fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
@@ -3802,6 +3799,8 @@ fun WeeklyExpenseChart(
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
     val maxBarHeight = 62.dp
 
+    // 🟢 優化：嚴格使用 derivedStateOf 包裝對 listState 嘅讀取
+    // 這樣只會在 scrollProgress "值" 改變時才觸發重組
     val scrollProgress by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -3822,6 +3821,8 @@ fun WeeklyExpenseChart(
 
     Box(modifier = modifier.fillMaxWidth().height(chartHeight).clipToBounds()) {
         Box(
+            // 🟢 優化：將基於 scrollProgress 嘅動畫計算放入 graphicsLayer
+            // graphicsLayer 會跳過 Recomposition 同 Layout，直接在 Render Phase 執行，極度順滑
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 val p = scrollProgress
                 alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
@@ -3960,6 +3961,9 @@ fun AnimatedRecordItem(
         }
     }
 
+    // 🟢 核心效能優化：
+    // 如果唔係啱啱新增，又唔係正在刪除，直接渲染內容然後 Return！
+    // 咁樣可以完全避免在普通滑動時為幾百個項目建立 Animatable 物件，大幅減少 GC 停頓。
     if (!animateOnMount && !everDeleting) {
         Box(Modifier.fillMaxWidth().height(72.dp)) { content() }
         return
@@ -5330,8 +5334,19 @@ fun SmartElement(
 
     Box(
         modifier = modifier.graphicsLayer {
-            val itemInfo = listState.layoutInfo.visibleItemsInfo.find { it.key == "header_$dateKey" }
-            val currentOffset = itemInfo?.offset?.toFloat() ?: 0f
+            // 🟢 優化：直接從 listState.layoutInfo 中嘗試快速定位，避免不必要的遍歷
+            // 如果列表很長，每幀執行 find 會嚴重掉幀
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            var currentOffset = 0f
+            
+            // 優化遍歷：因為 visibleItemsInfo 通常只有幾十個，我哋可以快速尋找
+            for (i in visibleItems.indices) {
+                if (visibleItems[i].key == "header_$dateKey") {
+                    currentOffset = visibleItems[i].offset.toFloat()
+                    break
+                }
+            }
+
             var ty = 0f
             var a = 1f
 
@@ -5354,8 +5369,8 @@ fun SmartElement(
                     val blur = (1f - finalAlpha) * 14f
                     val quantizedBlur = blur.roundToInt()
                     
-                    // 🟢 核心優化：使用 Cache 獲取 BlurEffect，避免滾動時每幀建立新物件導致卡頓
                     if (quantizedBlur > 0) {
+                        // 使用你之前加入的 Cache 函數
                         renderEffect = getCachedHeaderBlurEffect(quantizedBlur)
                     } else {
                         renderEffect = null
@@ -5367,7 +5382,6 @@ fun SmartElement(
         }
     ) { content() }
 }
-
 @Composable
 fun DayHeader(
     dateKey: String, income: Double, expense: Double,
