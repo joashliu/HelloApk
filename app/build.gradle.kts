@@ -49,11 +49,16 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
         release {
-            isMinifyEnabled = false
+            // 🟢 優化：啟用 R8 壓縮與混淆，消除 JIT 編譯熱身帶來嘅卡頓
+            isMinifyEnabled = true
+            // 🟢 優化：縮減 APK 大小
+            isShrinkResources = true
+            
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
