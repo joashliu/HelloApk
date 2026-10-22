@@ -1,25 +1,6 @@
 package com.example.hello
 
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import kotlinx.coroutines.flow.distinctUntilChanged
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import androidx.compose.foundation.BorderStroke
 import android.app.Application
-import android.app.Notification
-import android.provider.Settings
-import androidx.compose.ui.layout.layout
 import android.app.DatePickerDialog
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -33,6 +14,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -52,15 +34,17 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -76,6 +60,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -97,6 +82,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
@@ -106,6 +94,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
@@ -129,10 +118,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+// 🟢 引入 Splash Screen 與 Lifecycle 協程
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -154,6 +150,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -222,7 +219,6 @@ object NotificationCaptureBridge {
         val trimmed = note.trim()
         val now = System.currentTimeMillis()
 
-        // 🟢 內容級去重：30 秒內相同 note+amount 直接忽略
         if (lastNote == trimmed
             && abs(lastAmount - amount) < 0.01
             && (now - lastPushMs) < 30_000L) {
@@ -243,14 +239,11 @@ object NotificationCaptureBridge {
 
         val ctx = appContext ?: return
 
-        // 常駐通知即時刷新
         try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
 
-        // 🟢 確認通知：800ms debounce，避免與消費 App 通知競爭 HUN
         pendingConfirmRunnable?.let { confirmHandler.removeCallbacks(it) }
         val runnable = Runnable {
             pendingConfirmRunnable = null
-            // 🟢 關鍵：執行時讀最新值，避免舊金額 bug
             val latest = topLatestCapturedNotification.value ?: return@Runnable
             try { showCaptureConfirmNotification(ctx, latest) } catch (_: Exception) {}
         }
@@ -275,7 +268,6 @@ object NotificationCaptureBridge {
             .trimEnd('0').trimEnd('.').ifEmpty { "0" }
 }
 
-// ===== 通知渠道常數（頂層，供所有函數共用） =====
 private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add"
 private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v3"
 private const val QUICK_ADD_NOTIFICATION_ID = 1001
@@ -285,7 +277,6 @@ fun ensureNotificationChannels(context: Context) {
     if (Build.VERSION.SDK_INT < 26) return
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
-    // 🟢 主動刪除所有舊渠道 ID，避免系統設定顯示多個「消費確認」
     try {
         val staleIds = listOf(
             "ledger_capture_confirm",
@@ -324,29 +315,16 @@ fun ensureNotificationChannels(context: Context) {
     nm.createNotificationChannel(quick)
     nm.createNotificationChannel(confirm)
 }
-//                      ⬇⬇⬇ 呢個就係 ensureNotificationChannels 嘅結尾大括號
 
-//                      ⬇⬇⬇ 喺呢個位置插入新函數（緊接上一行 } 之後、留一個空行）
-
-/**
- * 清理確認通知嘅殘留（含舊動態 ID 範圍）。
- * 由 MainActivity.onCreate 呼叫一次。
- */
 fun cleanupStaleConfirmNotifications(context: Context) {
     try {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-        // 舊版動態 ID 範圍：2000 + (timestamp/1000 % 100000) → 可能出現 2000~101999
-        // 保守起見，清理 2000..102000 範圍
-        // （常駐通知用 1001，唔受影響）
         for (id in 2000..102000) {
             try { nm.cancel(id) } catch (_: Exception) {}
         }
-        // 當前固定 ID 都清一次（避免啟動瞬間殘留）
         try { nm.cancel(CONFIRM_NOTIFICATION_BASE_ID) } catch (_: Exception) {}
     } catch (_: Exception) {}
 }
-
-//                      ⬆⬆⬆ 新函數到此為止
 
 fun buildLaunchIntentForMain(
     context: Context,
@@ -393,7 +371,6 @@ fun refreshQuickAddNotification(context: Context) {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
 
-        // Action 1：最近使用項目
         if (first != null && first.note.isNotBlank()) {
             val noteIntent = buildLaunchIntentForMain(context, first.note, first.amount, first.category)
             val notePi = PendingIntent.getActivity(
@@ -403,7 +380,6 @@ fun refreshQuickAddNotification(context: Context) {
             builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
         }
 
-        // Action 2：今日最近捕獲（地鐵 · 4.9）
         val captured = topLatestCapturedNotification.value
         if (captured != null && captured.note.isNotBlank()) {
             val todayStart = getTimestampMeta(System.currentTimeMillis()).startOfDayMillis
@@ -434,13 +410,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
 
         ensureNotificationChannels(context)
 
-        // 🟢 固定 ID：永遠只有一條確認通知
         val notifId = CONFIRM_NOTIFICATION_BASE_ID
 
         val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
 
-        // 🟢 PendingIntent 固定 requestCode + FLAG_UPDATE_CURRENT，確保內容更新
         val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
         val addIntent = buildLaunchIntentForMain(
@@ -475,8 +449,6 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
             .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
 
-        // 🟢 直接 notify 固定 ID，系統會自動替換內容並重新觸發 HUN
-        //    唔好 cancel 再 notify，否則會撞車顯示舊內容
         nm.notify(notifId, builder.build())
     } catch (_: Exception) {}
 }
@@ -515,14 +487,6 @@ val NAV_TAB_WIDTH = 96.dp
 val NAV_BOTTOM_PADDING = 20.dp
 val ROW_ALT_COLOR = Color(0xFFF4F7FC)
 const val FILTER_ANIM_MS = 250
-
-private val ITEM_ANIM_SPEC = spring<IntOffset>(dampingRatio = 0.75f, stiffness = 300f)
-private val ITEM_FADE_SPEC = spring<Float>(dampingRatio = 0.8f, stiffness = 250f)
-private val ITEM_SIZE_SPEC = spring<IntSize>(dampingRatio = 0.75f, stiffness = 300f)
-private val SWIPE_SPRING = spring<Float>(
-    stiffness = Spring.StiffnessMediumLow,
-    dampingRatio = Spring.DampingRatioNoBouncy
-)
 
 @Immutable
 data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
@@ -686,12 +650,11 @@ private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "�
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 
-// 🟢 QuickInput 嘅文字寬度快取
+// 🟢 新增：將 QuickInput 嘅文字寬度快取提升到全局
 private val noteTextWidthCache = ConcurrentHashMap<String, Float>()
 
-// 🟢 緩存日期的 Blur 效果
+// 🟢 新增：緩存日期的 Blur 效果，避免在滾動時每幀創建大量 BlurEffect
 private val headerBlurEffectCache = ConcurrentHashMap<Int, androidx.compose.ui.graphics.RenderEffect>(32)
-
 private fun getCachedHeaderBlurEffect(blurRadiusInt: Int): androidx.compose.ui.graphics.RenderEffect? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || blurRadiusInt <= 0) return null
     return headerBlurEffectCache.getOrPut(blurRadiusInt) {
@@ -781,11 +744,16 @@ private fun getTodayStartMillis(): Long {
 // =========================================================
 class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val db = Firebase.firestore
-    private val prefs = app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+    // 🟢 改為懶加載，避免阻塞主線程
+    private val db by lazy { Firebase.firestore }
+    private val prefs by lazy { app.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
 
     private val recordsById = HashMap<String, Record>()
     private val ghostRecordsById = HashMap<String, Record>()
+
+    // 🟢 新增：將 lastCategory 狀態移入 ViewModel
+    private val _lastSavedCategory = MutableStateFlow("飲食")
+    val lastSavedCategory: StateFlow<String> = _lastSavedCategory.asStateFlow()
 
     private val _records = MutableStateFlow<List<Record>>(emptyList())
     val records: StateFlow<List<Record>> = _records.asStateFlow()
@@ -811,21 +779,28 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val _defaultMonthA = monthKeyFromTimestamp(System.currentTimeMillis())
     private val _defaultMonthB = shiftMonthKey(_defaultMonthA, -1)
 
-    private val _compareMonthA = MutableStateFlow(
-        prefs.getString("compare_month_a", _defaultMonthA) ?: _defaultMonthA)
+    // 延後初始化這些值，先給預設值
+    private val _compareMonthA = MutableStateFlow(_defaultMonthA)
     val compareMonthA: StateFlow<String> = _compareMonthA.asStateFlow()
 
-    private val _compareMonthB = MutableStateFlow(
-        prefs.getString("compare_month_b", _defaultMonthB) ?: _defaultMonthB)
+    private val _compareMonthB = MutableStateFlow(_defaultMonthB)
     val compareMonthB: StateFlow<String> = _compareMonthB.asStateFlow()
 
     fun setCompareMonthA(v: String) {
         _compareMonthA.value = v
-        prefs.edit().putString("compare_month_a", v).apply()
+        viewModelScope.launch(Dispatchers.IO) { prefs.edit().putString("compare_month_a", v).apply() }
     }
     fun setCompareMonthB(v: String) {
         _compareMonthB.value = v
-        prefs.edit().putString("compare_month_b", v).apply()
+        viewModelScope.launch(Dispatchers.IO) { prefs.edit().putString("compare_month_b", v).apply() }
+    }
+    
+    // 🟢 提供更新上次分類的方法
+    fun updateLastSavedCategory(category: String) {
+        _lastSavedCategory.value = category
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.edit().putString("last_category", category).apply()
+        }
     }
 
     private val _calendarMonthKey = MutableStateFlow(
@@ -867,7 +842,22 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 
-    init { listenToFirestore() }
+    init { 
+        // 🟢 避免阻塞主線程，喺 IO 線程讀取設定，然後啟動 Firestore
+        viewModelScope.launch(Dispatchers.IO) {
+            val savedCategory = prefs.getString("last_category", "飲食") ?: "飲食"
+            val savedMonthA = prefs.getString("compare_month_a", _defaultMonthA) ?: _defaultMonthA
+            val savedMonthB = prefs.getString("compare_month_b", _defaultMonthB) ?: _defaultMonthB
+            
+            _lastSavedCategory.value = savedCategory
+            _compareMonthA.value = savedMonthA
+            _compareMonthB.value = savedMonthB
+            
+            withContext(Dispatchers.Default) {
+                listenToFirestore()
+            }
+        }
+    }
 
     private fun buildSortedList(): List<Record> {
         val list = ArrayList<Record>(recordsById.size + ghostRecordsById.size)
@@ -968,8 +958,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             delay(800)
             _justAddedIds.update { it - newId }
         }
-        viewModelScope.launch {
-            try { db.collection("records").document(newId).set(toSave) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { db.collection("records").document(newId).set(toSave).await() }
             catch (_: Exception) {}
         }
     }
@@ -982,11 +972,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             amount = amount, note = note, category = category, timestamp = timestamp
         )
         emitSorted()
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 db.collection("records").document(id).update(mapOf(
                     "amount" to amount, "note" to note,
-                    "category" to category, "timestamp" to timestamp))
+                    "category" to category, "timestamp" to timestamp)).await()
             } catch (_: Exception) {}
         }
     }
@@ -1004,8 +994,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         recordsById.remove(id)
         ghostRecordsById.remove(id)
         emitSorted()
-        viewModelScope.launch {
-            try { db.collection("records").document(id).delete() }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { db.collection("records").document(id).delete().await() }
             catch (_: Exception) {}
         }
     }
@@ -1025,8 +1015,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             delay(800)
             _justAddedIds.update { it - record.id }
         }
-        viewModelScope.launch {
-            try { db.collection("records").document(record.id).set(record) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try { db.collection("records").document(record.id).set(record).await() }
             catch (_: Exception) {}
         }
     }
@@ -1731,10 +1721,8 @@ fun FanMenuOverlay(
     }
 }
 
-// === PART 2 END ===
-
 // =========================================================
-//  ★ MainActivity（完整版：已包含通知渠道 + Bridge.init + wrapper）
+//  ★ MainActivity (極速啟動優化版)
 // =========================================================
 class MainActivity : ComponentActivity() {
 
@@ -1751,6 +1739,8 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 🟢 極速啟動：安裝官方 Splash Screen (必須喺 super.onCreate 前調用)
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
@@ -1762,10 +1752,15 @@ class MainActivity : ComponentActivity() {
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
         }
 
-        NotificationCaptureBridge.init(this)
-        ensureNotificationChannels(this)
-        cleanupStaleConfirmNotifications(this)   // 🟢 新增：清理舊通知殘留
-        createQuickAddChannel()
+        // 🟢 釋放主線程：將非必要嘅初始化操作丟入後台協程
+        lifecycleScope.launch(Dispatchers.IO) {
+            NotificationCaptureBridge.init(applicationContext)
+            ensureNotificationChannels(applicationContext)
+            cleanupStaleConfirmNotifications(applicationContext)
+            createQuickAddChannel()
+        }
+        
+        // 權限請求因為係 callback 所以不會嚴重阻塞
         askNotificationPermissionIfNeeded()
 
         setContent {
@@ -1844,7 +1839,6 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
-    /** 由 Activity 生命週期觸發嘅刷新（真正嘅即時刷新喺 NotificationCaptureBridge.pushCaptured 內部） */
     private fun showQuickAddNotification() {
         refreshQuickAddNotification(this)
     }
@@ -1883,15 +1877,12 @@ fun MainApp(
     onKeyboardLaunchConsumed: () -> Unit = {},
     vm: LedgerViewModel = viewModel()
 ) {
-    val db = remember { Firebase.firestore }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
-    val prefs = remember { context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE) }
-    var lastSavedCategory by remember {
-        mutableStateOf(prefs.getString("last_category", "飲食") ?: "飲食")
-    }
+    // 🟢 從 ViewModel 讀取最後選擇的分類，不讀取 SharedPreferences
+    val lastSavedCategory by vm.lastSavedCategory.collectAsState()
 
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
@@ -1971,6 +1962,7 @@ fun MainApp(
         if (uri != null && target != null) {
             scope.launch {
                 uploading = true
+                val db = kotlinx.coroutines.withContext(Dispatchers.IO) { Firebase.firestore }
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
             }
@@ -1984,6 +1976,7 @@ fun MainApp(
         if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
+                val db = kotlinx.coroutines.withContext(Dispatchers.IO) { Firebase.firestore }
                 uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
                 try {
@@ -2042,8 +2035,7 @@ fun MainApp(
             } ?: ""
         }
 
-        val defaultCategory = forceCategory
-            ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        val defaultCategory = forceCategory ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
 
         if (!showKeyboard) {
@@ -2080,8 +2072,7 @@ fun MainApp(
     }
 
     fun openKeyboardForce(note: String?, forceCategory: String? = null) {
-        val defaultCategory = forceCategory
-            ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        val defaultCategory = forceCategory ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
 
         if (note == null) {
@@ -2149,8 +2140,8 @@ fun MainApp(
         val note = keyboardState.noteText
         val category = keyboardState.category
 
-        lastSavedCategory = category
-        prefs.edit().putString("last_category", category).apply()
+        // 🟢 改為透過 ViewModel 更新
+        vm.updateLastSavedCategory(category)
 
         val editId = keyboardState.editingRecordId
         val ts = keyboardState.timestamp
