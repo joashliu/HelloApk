@@ -3076,10 +3076,10 @@ fun LedgerContent(
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
 
-    // ✅ 新增變數：判定圖表係咪存在，以及定義各個項目嘅高度
+    // ✅ 新增變數：判定圖表係咪存在，以及定義圖表高度
     val hasChart = !filterMode && weeklyExpenses.isNotEmpty()
     val chartHeightPx = remember(density) { with(density) { 108.dp.toPx() } }
-    val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
+    // ❌ 已經刪除咗重複嘅 val headerHeightPx = ...
     
     // ✅ 關鍵：設定每一次縮減行數，需要實打實滑動幾多距離（60dp 係最符合拇指自然推動嘅阻力）
     val collapseStepPx = remember(density) { with(density) { 60.dp.toPx() } }
