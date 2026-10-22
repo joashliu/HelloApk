@@ -3085,29 +3085,41 @@ fun LedgerContent(
     val collapseStepPx = remember(density) { with(density) { 60.dp.toPx() } }
 
     val quickInputMaxRows by remember(listState, hasChart, chartHeightPx, headerHeightPx, collapseStepPx) {
+        var previousRows = 4 // ✅ 記住上一次嘅行數，用嚟做防手震判斷
+        
         derivedStateOf {
             val firstItem = listState.layoutInfo.visibleItemsInfo.firstOrNull()
             if (firstItem == null) return@derivedStateOf 4
             
-            // 獲取當前最頂項目滑出咗螢幕幾多 Pixel
             var scrolledDistance = listState.firstVisibleItemScrollOffset.toFloat()
-            
-            // 精準累加「已經完全滑出螢幕」嘅項目高度，獲得真實嘅絕對滑動距離
             for (i in 0 until firstItem.index) {
                 scrolledDistance += when {
-                    hasChart && i == 0 -> chartHeightPx // 圖表大約 108dp
-                    (hasChart && i == 1) || (!hasChart && i == 0) -> 1f // magic_top_anchor 佔 1dp
-                    else -> headerHeightPx // 其他 Header 或 Group 當作 64dp 計算
+                    hasChart && i == 0 -> chartHeightPx
+                    (hasChart && i == 1) || (!hasChart && i == 0) -> 1f
+                    else -> headerHeightPx
                 }
             }
             
-            // 嚴格按照絕對距離去收縮，唔會再因為 Index 改變而突然跳行
-            when {
-                scrolledDistance > collapseStepPx * 3f -> 1
-                scrolledDistance > collapseStepPx * 2f -> 2
-                scrolledDistance > collapseStepPx * 1f -> 3
+            val buffer = 15f // ✅ 加入 15px 嘅防手震緩衝區（Hysteresis）
+            
+            val newRows = when (previousRows) {
+                4 -> if (scrolledDistance > collapseStepPx * 1f + buffer) 3 else 4
+                3 -> when {
+                    scrolledDistance > collapseStepPx * 2f + buffer -> 2
+                    scrolledDistance < collapseStepPx * 1f - buffer -> 4
+                    else -> 3
+                }
+                2 -> when {
+                    scrolledDistance > collapseStepPx * 3f + buffer -> 1
+                    scrolledDistance < collapseStepPx * 2f - buffer -> 3
+                    else -> 2
+                }
+                1 -> if (scrolledDistance < collapseStepPx * 3f - buffer) 2 else 1
                 else -> 4
             }
+            
+            previousRows = newRows // 更新狀態
+            newRows
         }
     }
 
@@ -5327,7 +5339,8 @@ fun QuickInputSection(
 
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeightDp,
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
+                // ✅ 修改：將 dampingRatio 改為 NoBouncy，徹底杜絕高度回彈
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 350f),
                 label = "quickPanelHeight"
             )
 
@@ -5348,9 +5361,10 @@ fun QuickInputSection(
                         .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
                         chips.forEach { chip ->
                             key(chip.name) {
-                                val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = 0.82f, stiffness = 320f), label="x")
-                                val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = 0.82f, stiffness = 320f), label="y")
-                                val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = 0.82f, stiffness = 320f), label="w")
+                                // ✅ 修改：位移動畫全部改為 NoBouncy，確保圖標直線移動唔會反彈
+                                val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="x")
+                                val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="y")
+                                val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="w")
 
                                 // 🟢 冷啟動首次：appear 初始就 true，跳過入場動畫
                                 var appear by remember { mutableStateOf(skipAppearAnimation) }
