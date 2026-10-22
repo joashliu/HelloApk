@@ -36,19 +36,6 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-/**
- * 離線 OCR 前台服務
- *
- * 流程：
- *   1. startForeground（指定 mediaProjection 類型，Android 14+ 強制）
- *   2. getMediaProjection（由 OcrCaptureActivity 傳入授權 token）
- *   3. ImageReader + VirtualDisplay 截圖一次
- *   4. ML Kit 中文 OCR（bundled 離線模型）
- *   5. 正則提取 HKD 金額
- *   6. 開啟 MainActivity，帶 EXTRA_PREFILL_AMOUNT + EXTRA_OPEN_KEYBOARD
- *
- * 所有 OCR 運算喺 Dispatchers.Default 背景線程，唔阻塞主線程。
- */
 class OcrForegroundService : Service() {
 
     companion object {
@@ -77,8 +64,6 @@ class OcrForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
 
-        // ★ Android 14 (API 34) 強制：必須先 startForeground（帶類型），
-        //   才可以呼叫 getMediaProjection()，否則 SecurityException。
         try {
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(
@@ -122,7 +107,6 @@ class OcrForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        // ★ Android 14+ 必須註冊 Callback，否則 getMediaProjection 後立即 stop
         mediaProjection!!.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
                 Log.d(TAG, "MediaProjection stopped by system")
@@ -158,10 +142,6 @@ class OcrForegroundService : Service() {
         }
     }
 
-    /**
-     * 單次截圖：ImageReader + VirtualDisplay
-     * 取第一幀後立即 close，避免後續重複觸發。
-     */
     private suspend fun captureScreenOnce(): Bitmap? = suspendCancellableCoroutine { cont ->
         val dm = getSystemService(DisplayManager::class.java)
         val display = dm.getDisplay(Display.DEFAULT_DISPLAY)
@@ -234,15 +214,6 @@ class OcrForegroundService : Service() {
         }
     }
 
-    /**
-     * ML Kit 中文 OCR + 正則提取 HKD 金額
-     * 支援格式：
-     *   HKD 12.5
-     *   HKD: 1,234.56
-     *   hkd 1234
-     *   HKD $88
-     *   HKD＄99.9
-     */
     private suspend fun recognizeHkdAmount(bitmap: Bitmap): Double? {
         return withContext(Dispatchers.Default) {
             try {
@@ -268,10 +239,6 @@ class OcrForegroundService : Service() {
         }
     }
 
-    /**
-     * 啟動 MainActivity，帶 OCR 金額預填 + 彈鍵盤
-     * 復用現有 EXTRA_PREFILL_AMOUNT / EXTRA_OPEN_KEYBOARD 機制
-     */
     private fun launchMainWithAmount(amount: Double) {
         val launch = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
