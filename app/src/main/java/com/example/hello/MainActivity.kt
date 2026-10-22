@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.BorderStroke
@@ -3980,7 +3981,8 @@ fun SwipeableRecordItem(
                 } else Modifier
             )
             .background(backgroundColor)
-            .onGloballyPositioned { coords -> layoutCoordsHolder[0] = coords }
+            // ✅ 已經改用 onPlaced，終結每幀過千次嘅無謂觸發，大幅減輕滾動時嘅主線程負擔
+            .onPlaced { coords -> layoutCoordsHolder[0] = coords }
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
                     onDragStart = {
