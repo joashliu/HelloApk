@@ -3079,48 +3079,41 @@ fun LedgerContent(
     // ✅ 新增變數：判定圖表係咪存在，以及定義圖表高度
     val hasChart = !filterMode && weeklyExpenses.isNotEmpty()
     val chartHeightPx = remember(density) { with(density) { 108.dp.toPx() } }
-    // ❌ 已經刪除咗重複嘅 val headerHeightPx = ...
-    
-    // ✅ 關鍵：設定每一次縮減行數，需要實打實滑動幾多距離（60dp 係最符合拇指自然推動嘅阻力）
-    val collapseStepPx = remember(density) { with(density) { 60.dp.toPx() } }
 
-    val quickInputMaxRows by remember(listState, hasChart, chartHeightPx, headerHeightPx, collapseStepPx) {
-        var previousRows = 4 // ✅ 記住上一次嘅行數，用嚟做防手震判斷
-        
-        derivedStateOf {
-            val firstItem = listState.layoutInfo.visibleItemsInfo.firstOrNull()
-            if (firstItem == null) return@derivedStateOf 4
-            
-            var scrolledDistance = listState.firstVisibleItemScrollOffset.toFloat()
-            for (i in 0 until firstItem.index) {
-                scrolledDistance += when {
-                    hasChart && i == 0 -> chartHeightPx
-                    (hasChart && i == 1) || (!hasChart && i == 0) -> 1f
-                    else -> headerHeightPx
-                }
-            }
-            
-            val buffer = 15f // ✅ 加入 15px 嘅防手震緩衝區（Hysteresis）
-            
-            val newRows = when (previousRows) {
-                4 -> if (scrolledDistance > collapseStepPx * 1f + buffer) 3 else 4
-                3 -> when {
-                    scrolledDistance > collapseStepPx * 2f + buffer -> 2
-                    scrolledDistance < collapseStepPx * 1f - buffer -> 4
-                    else -> 3
-                }
-                2 -> when {
-                    scrolledDistance > collapseStepPx * 3f + buffer -> 1
-                    scrolledDistance < collapseStepPx * 2f - buffer -> 3
-                    else -> 2
-                }
-                1 -> if (scrolledDistance < collapseStepPx * 3f - buffer) 2 else 1
-                else -> 4
-            }
-            
-            previousRows = newRows // 更新狀態
-            newRows
+    // 🟢 修改：用 mutableIntStateOf 取代 derivedStateOf，避免喺 calculation 入面做副作用；
+    //    亦唔再累加前面 item 高度（day_group 高度係動態嘅，累加會跳變），
+    //    改用 firstVisibleItemIndex + firstVisibleItemScrollOffset 單向分段。
+    val quickInputMaxRows = remember { mutableIntStateOf(4) }
+
+    LaunchedEffect(listState, hasChart, chartHeightPx) {
+        snapshotFlow {
+            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            if (info == null) null
+            else info.index to listState.firstVisibleItemScrollOffset.toFloat()
         }
+            .distinctUntilChanged()
+            .collect { pair ->
+                val (index, offset) = pair ?: return@collect
+                val rows = when {
+                    // 冇圖表：index 0 就係 magic anchor
+                    index == 0 -> if (hasChart) {
+                        when {
+                            offset < chartHeightPx * 0.35f -> 4
+                            offset < chartHeightPx * 0.70f -> 3
+                            else -> 2
+                        }
+                    } else 4
+
+                    // anchor 已貼頂（有圖表時 index 1 = magic anchor）
+                    index == 1 -> 2
+
+                    // 之後一律 1 行
+                    else -> 1
+                }
+                if (quickInputMaxRows.intValue != rows) {
+                    quickInputMaxRows.intValue = rows
+                }
+            }
     }
 
     val fanMenuProgress = animateFloatAsState(
@@ -3436,7 +3429,7 @@ fun LedgerContent(
                                 Spacer(Modifier.height(4.dp))
                                 QuickInputSection(
                                     topNotes = topNotes, noteIconMap = noteIconMap,
-                                    maxRowsPerPage = quickInputMaxRows,
+                                    maxRowsPerPage = quickInputMaxRows.intValue,   // 🟢 修改：加 .intValue
                                     skipAppearAnimation = isFirstShow,
                                     onClick = onQuickInputClick
                                 )
