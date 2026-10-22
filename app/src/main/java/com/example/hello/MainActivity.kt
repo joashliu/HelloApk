@@ -2970,13 +2970,10 @@ fun NotificationAccessGuide(context: Context) {
     }
 }
 
-// =========================================================
-//  ★ LedgerContent
-// =========================================================
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
-    isFirstShow: Boolean = false,   // 🟢 新增
+    isFirstShow: Boolean = false,   // 🟢 傳入
     loading: Boolean,
     filtered: List<Record>,
     groupedByDate: List<Pair<String, List<Record>>>,
@@ -3298,7 +3295,7 @@ fun LedgerContent(
                                 .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
                                 .background(SURFACE_CARD, RoundedCornerShape(20.dp))
                                 .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f))
+                                // ✅ 已經移除 .animateContentSize，避免 Measure Pass 卡頓
                         ) {
                             val currentRecords = dayRecords
                             val activeCount = if (deletingIds.isEmpty()) currentRecords.size
