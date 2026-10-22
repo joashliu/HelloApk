@@ -3076,19 +3076,37 @@ fun LedgerContent(
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
 
-    // ✅ 修正 4：刪除咗 collapseScrollConnection，改用 derivedStateOf 直接讀取 Offset，零效能負擔！
-    val quickInputMaxRows by remember(listState, oneRowPx) {
+    // ✅ 新增變數：判定圖表係咪存在，以及定義各個項目嘅高度
+    val hasChart = !filterMode && weeklyExpenses.isNotEmpty()
+    val chartHeightPx = remember(density) { with(density) { 108.dp.toPx() } }
+    val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
+    
+    // ✅ 關鍵：設定每一次縮減行數，需要實打實滑動幾多距離（60dp 係最符合拇指自然推動嘅阻力）
+    val collapseStepPx = remember(density) { with(density) { 60.dp.toPx() } }
+
+    val quickInputMaxRows by remember(listState, hasChart, chartHeightPx, headerHeightPx, collapseStepPx) {
         derivedStateOf {
-            if (listState.firstVisibleItemIndex > 0) {
-                1
-            } else {
-                val offset = listState.firstVisibleItemScrollOffset
-                when {
-                    offset > oneRowPx * 2.5f -> 1
-                    offset > oneRowPx * 1.5f -> 2
-                    offset > oneRowPx * 0.5f -> 3
-                    else -> 4
+            val firstItem = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            if (firstItem == null) return@derivedStateOf 4
+            
+            // 獲取當前最頂項目滑出咗螢幕幾多 Pixel
+            var scrolledDistance = listState.firstVisibleItemScrollOffset.toFloat()
+            
+            // 精準累加「已經完全滑出螢幕」嘅項目高度，獲得真實嘅絕對滑動距離
+            for (i in 0 until firstItem.index) {
+                scrolledDistance += when {
+                    hasChart && i == 0 -> chartHeightPx // 圖表大約 108dp
+                    (hasChart && i == 1) || (!hasChart && i == 0) -> 1f // magic_top_anchor 佔 1dp
+                    else -> headerHeightPx // 其他 Header 或 Group 當作 64dp 計算
                 }
+            }
+            
+            // 嚴格按照絕對距離去收縮，唔會再因為 Index 改變而突然跳行
+            when {
+                scrolledDistance > collapseStepPx * 3f -> 1
+                scrolledDistance > collapseStepPx * 2f -> 2
+                scrolledDistance > collapseStepPx * 1f -> 3
+                else -> 4
             }
         }
     }
