@@ -1,5 +1,8 @@
 package com.example.hello
 
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.BorderStroke
 import android.app.Application
 import android.app.DatePickerDialog
 import android.app.NotificationChannel
@@ -452,6 +455,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
         nm.notify(notifId, builder.build())
     } catch (_: Exception) {}
 }
+
+private val SWIPE_SPRING = spring<Float>(
+    stiffness = Spring.StiffnessMediumLow,
+    dampingRatio = Spring.DampingRatioNoBouncy
+)
 
 // ===== 配色 =====
 val BRAND_PRIMARY = Color(0xFF6366F1)
@@ -1880,6 +1888,7 @@ fun MainApp(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val db = remember { Firebase.firestore }
 
     // 🟢 從 ViewModel 讀取最後選擇的分類，不讀取 SharedPreferences
     val lastSavedCategory by vm.lastSavedCategory.collectAsState()
