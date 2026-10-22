@@ -438,17 +438,21 @@ private val SWIPE_SPRING = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy
 )
 
-// ===== 配色 =====
+// ===== 配色（iOS 簡約風格）=====
 val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
 val BRAND_PRIMARY_LIGHT = Color(0xFFE0E7FF)
-val SURFACE_BG = Color(0xFFF8FAFC)
+
+// iOS systemGroupedBackground / secondarySystemGroupedBackground
+val SURFACE_BG = Color(0xFFF2F2F7)
 val SURFACE_CARD = Color(0xFFFFFFFF)
-val SURFACE_ELEVATED = Color(0xFFF1F5F9)
-val TEXT_PRIMARY = Color(0xFF0F172A)
-val TEXT_SECONDARY = Color(0xFF64748B)
-val TEXT_TERTIARY = Color(0xFF94A3B8)
-val DIVIDER_COLOR = Color(0xFFE2E8F0)
+val SURFACE_ELEVATED = Color(0xFFE9E9EF)
+
+// iOS label / secondaryLabel / tertiaryLabel
+val TEXT_PRIMARY = Color(0xFF1C1C1E)
+val TEXT_SECONDARY = Color(0xFF8E8E93)
+val TEXT_TERTIARY = Color(0xFFC7C7CC)
+val DIVIDER_COLOR = Color(0xFFE5E5EA)
 
 val COLOR_INCOME = Color(0xFF047857)
 val COLOR_EXPENSE = Color(0xFFB91C1C)
@@ -719,7 +723,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val recordsById = HashMap<String, Record>()
     private val ghostRecordsById = HashMap<String, Record>()
 
-    // 🟢 首次 snapshot 標記
     @Volatile private var hasReceivedFirstSnapshot = false
 
     private val _lastSavedCategory = MutableStateFlow("飲食")
@@ -841,7 +844,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 val changes = snap.documentChanges
                 if (changes.isEmpty()) return@addSnapshotListener
 
-                // 🟢 判斷係咪首次 snapshot
                 val isFirstSnapshot = !hasReceivedFirstSnapshot
                 hasReceivedFirstSnapshot = true
 
@@ -875,7 +877,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                         return@launch
                     }
 
-                    // 🟢 只有「非首次」snapshot 才加入 justAddedIds
                     if (remoteAdded.isNotEmpty() && !isFirstSnapshot) {
                         _justAddedIds.update { it + remoteAdded.toSet() }
                     }
@@ -1538,7 +1539,7 @@ fun FanMenuOverlay(
                         scaleY = btnScale * progress
                         alpha = btnAlpha
                     }
-                    .shadow(if (isHovered) 12.dp else 6.dp, CircleShape)
+                    .shadow(if (isHovered) 4.dp else 0.dp, CircleShape)
                     .clip(CircleShape)
                     .background(action.third)
                     .padding(12.dp),
@@ -1582,7 +1583,6 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 🟢 Splash 等首次數據就緒先消失
         val splash = installSplashScreen()
         splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
@@ -1615,7 +1615,6 @@ class MainActivity : ComponentActivity() {
                 showQuickAddNotification()
             }
 
-            // 🟢 等首幀穩定先請求通知權限
             LaunchedEffect(Unit) {
                 delay(800)
                 askNotificationPermissionIfNeeded()
@@ -1685,7 +1684,6 @@ class MainActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
-    // 🟢 移去 IO
     private fun showQuickAddNotification() {
         val ctx = applicationContext
         lifecycleScope.launch(Dispatchers.IO) {
@@ -1740,7 +1738,6 @@ fun MainApp(
     val weeklyExpenses = remember(rawRecords) { computeWeeklyExpenses(rawRecords) }
     var hasPlayedWeeklyIntro by rememberSaveable { mutableStateOf(false) }
 
-    // 🟢 記錄記賬頁是否已經顯示過；首次顯示才跳過 chips 入場動畫
     var ledgerHasBeenShownOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { ledgerHasBeenShownOnce = true }
 
@@ -2028,7 +2025,7 @@ fun MainApp(
 
         when (currentPage) {
             0 -> LedgerContent(
-                isFirstShow = !ledgerHasBeenShownOnce,   // 🟢 傳入
+                isFirstShow = !ledgerHasBeenShownOnce,
                 loading = ui.loading,
                 filtered = ui.ledgerRecords,
                 groupedByDate = ui.groupedByDate,
@@ -2150,14 +2147,9 @@ fun MainApp(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
-                    .shadow(18.dp, CircleShape, clip = false,
-                        ambientColor = Color(0x26000000), spotColor = Color(0x26000000))
                     .clip(CircleShape)
-                    .background(Brush.verticalGradient(colorStops = arrayOf(
-                        0f to Color(0xF0FFFFFF), 0.5f to Color(0xE0FFFFFF), 1f to Color(0xC0FFFFFF))))
-                    .border(0.8.dp, Brush.verticalGradient(colorStops = arrayOf(
-                        0f to Color(0x80FFFFFF), 0.5f to Color(0x33FFFFFF), 1f to Color(0x14FFFFFF))),
-                        CircleShape)
+                    .background(SURFACE_CARD)
+                    .border(0.5.dp, DIVIDER_COLOR, CircleShape)
             ) {
                 Row(
                     modifier = Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp),
@@ -2166,7 +2158,7 @@ fun MainApp(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White),
+                            modifier = Modifier.size(40.dp).clip(CircleShape).background(SURFACE_ELEVATED),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.Delete, "刪除", tint = Color(0xFFF87171),
@@ -2399,7 +2391,7 @@ fun MainApp(
 
         Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
             Column(Modifier.fillMaxSize()) {
-                Surface(color = SURFACE_CARD, shadowElevation = 4.dp) {
+                Surface(color = SURFACE_CARD, shadowElevation = 0.dp) {
                     Row(
                         Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -2572,10 +2564,10 @@ private fun BoxScope.KeyboardAndFabLayer(
                 ) {
                     Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
                         Surface(
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(26.dp),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = SURFACE_CARD,
-                            shadowElevation = 8.dp
+                            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
                         ) {
                             Row(Modifier.fillMaxSize().padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
@@ -2625,9 +2617,9 @@ private fun BoxScope.KeyboardAndFabLayer(
                             properties = PopupProperties(focusable = false)
                         ) {
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 color = SURFACE_CARD,
-                                shadowElevation = 8.dp,
+                                border = BorderStroke(0.5.dp, DIVIDER_COLOR),
                                 modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
                             ) {
                                 Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -2641,7 +2633,7 @@ private fun BoxScope.KeyboardAndFabLayer(
                                             Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
                                                 maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                        HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                                     }
                                 }
                             }
@@ -2658,8 +2650,9 @@ private fun BoxScope.KeyboardAndFabLayer(
                     detectTapGestures(onTap = { onFilterButtonTap() })
                 },
             shape = CircleShape,
-            color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else Color.White,
-            shadowElevation = 4.dp
+            color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else SURFACE_CARD,
+            border = if (filterModeOn && currentPage == 0) null
+                     else BorderStroke(0.5.dp, DIVIDER_COLOR)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
@@ -2718,7 +2711,6 @@ private fun AnimatedFabLayer(
                 translationX = -fabX
                 translationY = -fabY
                 transformOrigin = TransformOrigin(1f, 1f)
-                shadowElevation = lerp(6.dp, 0.dp, (currentP * 5f).coerceIn(0f, 1f)).toPx()
                 shape = CircleShape
                 clip = true
             }
@@ -2747,7 +2739,6 @@ private fun AnimatedFabLayer(
     }
 }
 
-// 🟢 條件渲染：收起時完全唔建 keyboard panel
 @Composable
 private fun AnimatedKeyboardLayer(
     showKeyboard: Boolean,
@@ -2831,14 +2822,9 @@ fun FloatingNavBar(
         modifier = modifier
             .width(NAV_TAB_WIDTH * items.size)
             .height(NAV_HEIGHT)
-            .shadow(16.dp, RoundedCornerShape(NAV_HEIGHT / 2), clip = false,
-                ambientColor = Color(0x26000000), spotColor = Color(0x26000000))
             .clip(RoundedCornerShape(NAV_HEIGHT / 2))
-            .background(Brush.verticalGradient(colorStops = arrayOf(
-                0f to Color(0xF0FFFFFF), 0.5f to Color(0xE0FFFFFF), 1f to Color(0xC0FFFFFF))))
-            .border(0.8.dp, Brush.verticalGradient(colorStops = arrayOf(
-                0f to Color(0x80FFFFFF), 0.5f to Color(0x33FFFFFF), 1f to Color(0x14FFFFFF))),
-                RoundedCornerShape(NAV_HEIGHT / 2))
+            .background(SURFACE_CARD)
+            .border(0.5.dp, DIVIDER_COLOR, RoundedCornerShape(NAV_HEIGHT / 2))
     ) {
         Box(Modifier.fillMaxSize().pointerInput(Unit) {
             awaitPointerEventScope {
@@ -2902,11 +2888,10 @@ fun FloatingNavBar(
 }
 
 // =========================================================
-//  ★ NotificationAccessGuide（🟢 nullable 避免閃爍）
+//  ★ NotificationAccessGuide
 // =========================================================
 @Composable
 fun NotificationAccessGuide(context: Context) {
-    // 🟢 null = 未知（首幀唔顯示引導卡，避免閃一下）
     var isGranted by remember { mutableStateOf<Boolean?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -2935,7 +2920,6 @@ fun NotificationAccessGuide(context: Context) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 🟢 只有明確「未授權」才顯示
     if (isGranted == false) {
         Surface(
             modifier = Modifier
@@ -2950,7 +2934,8 @@ fun NotificationAccessGuide(context: Context) {
                     } catch (_: Exception) { }
                 },
             shape = RoundedCornerShape(12.dp),
-            color = BRAND_PRIMARY_LIGHT
+            color = SURFACE_CARD,
+            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
         ) {
             Row(
                 Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -2963,9 +2948,9 @@ fun NotificationAccessGuide(context: Context) {
                         fontWeight = FontWeight.Bold, fontSize = 14.sp,
                         color = BRAND_PRIMARY_DARK)
                     Text("點擊前往授權讀取通知，自動捕捉易乘碼消費",
-                        fontSize = 12.sp, color = BRAND_PRIMARY)
+                        fontSize = 12.sp, color = TEXT_SECONDARY)
                 }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = BRAND_PRIMARY)
+                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TEXT_TERTIARY)
             }
         }
     }
@@ -3045,7 +3030,6 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
     val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
 
-    // ✅ 修正 2：改用 snapshotFlow，避免手指點擊屏幕時觸發 LedgerContent 大規模重組
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .collect { inProgress ->
@@ -3076,13 +3060,10 @@ fun LedgerContent(
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
     val oneRowPx = remember(density) { with(density) { 72.dp.toPx() } }
 
-    // ✅ 新增變數：判定圖表係咪存在，以及定義圖表高度
     val hasChart = !filterMode && weeklyExpenses.isNotEmpty()
     val chartHeightPx = remember(density) { with(density) { 108.dp.toPx() } }
 
-    // 🟢 修改：用 mutableIntStateOf 取代 derivedStateOf，避免喺 calculation 入面做副作用；
-    //    亦唔再累加前面 item 高度（day_group 高度係動態嘅，累加會跳變），
-    //    改用 firstVisibleItemIndex + firstVisibleItemScrollOffset 單向分段。
+    // 🟢 修改：用 mutableIntStateOf 取代 derivedStateOf；唔再累加前面 item 高度；改用 index + offset 單向分段
     val quickInputMaxRows = remember { mutableIntStateOf(4) }
 
     LaunchedEffect(listState, hasChart, chartHeightPx) {
@@ -3095,7 +3076,6 @@ fun LedgerContent(
             .collect { pair ->
                 val (index, offset) = pair ?: return@collect
                 val rows = when {
-                    // 冇圖表：index 0 就係 magic anchor
                     index == 0 -> if (hasChart) {
                         when {
                             offset < chartHeightPx * 0.35f -> 4
@@ -3103,11 +3083,7 @@ fun LedgerContent(
                             else -> 2
                         }
                     } else 4
-
-                    // anchor 已貼頂（有圖表時 index 1 = magic anchor）
                     index == 1 -> 2
-
-                    // 之後一律 1 行
                     else -> 1
                 }
                 if (quickInputMaxRows.intValue != rows) {
@@ -3298,10 +3274,8 @@ fun LedgerContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                                .shadow(4.dp, RoundedCornerShape(20.dp), clip = true)
-                                .background(SURFACE_CARD, RoundedCornerShape(20.dp))
-                                .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-                                // ✅ 修正 1：移除 animateContentSize
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SURFACE_CARD)
                         ) {
                             val currentRecords = dayRecords
                             val activeCount = if (deletingIds.isEmpty()) currentRecords.size
@@ -3353,8 +3327,8 @@ fun LedgerContent(
                                         if (showDividerBelow) {
                                             HorizontalDivider(
                                                 modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                                                color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                                                thickness = 0.8.dp
+                                                color = DIVIDER_COLOR,
+                                                thickness = 0.5.dp
                                             )
                                         }
                                     }
@@ -3384,8 +3358,11 @@ fun LedgerContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-                    .padding(top = 4.dp, bottom = 0.dp),
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 8.dp, bottom = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SURFACE_CARD)
+                    .padding(start = 8.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
@@ -3516,7 +3493,7 @@ fun LedgerContent(
                 } else {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize(), // ✅ 修正 4：解除 nestedScroll，釋放原生順滑效能
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 0.dp, end = 0.dp, top = 0.dp,
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
@@ -3983,7 +3960,6 @@ fun SwipeableRecordItem(
                 } else Modifier
             )
             .background(backgroundColor)
-            // ✅ 已經改用 onPlaced，終結每幀過千次嘅無謂觸發，大幅減輕滾動時嘅主線程負擔
             .onPlaced { coords -> layoutCoordsHolder[0] = coords }
             .pointerInput(record.id) {
                 detectHorizontalDragGestures(
@@ -4171,12 +4147,8 @@ fun DayDetailPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(8.dp, RoundedCornerShape(20.dp),
-                ambientColor = Color(0x04000000),
-                spotColor = Color(0x0A000000), clip = false)
-            .background(SURFACE_CARD, RoundedCornerShape(20.dp))
-            .border(0.5.dp, DIVIDER_COLOR.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(SURFACE_CARD)
     ) {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
@@ -4202,7 +4174,7 @@ fun DayDetailPanel(
                 Icon(Icons.Default.Close, "關閉", tint = TEXT_SECONDARY)
             }
         }
-        HorizontalDivider(color = DIVIDER_COLOR)
+        HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
         val isFanActive = activeFanRecord != null
         val activeFanId = activeFanRecord?.id
@@ -4236,8 +4208,8 @@ fun DayDetailPanel(
                     if (idx < sortedRecords.lastIndex && r.id !in deletingIds) {
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 68.dp, end = 16.dp),
-                            color = DIVIDER_COLOR.copy(alpha = 0.8f),
-                            thickness = 0.8.dp
+                            color = DIVIDER_COLOR,
+                            thickness = 0.5.dp
                         )
                     }
                 }
@@ -4274,11 +4246,9 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    val panelShape = RoundedCornerShape(24.dp)
+    val panelShape = RoundedCornerShape(16.dp)
     Box(
         modifier = modifier
-            .shadow(16.dp, panelShape, clip = false,
-                ambientColor = Color(0x33000000), spotColor = Color(0x33000000))
             .clip(panelShape)
             .background(SURFACE_CARD)
             .pointerInput(Unit) { detectTapGestures { } }
@@ -4637,9 +4607,9 @@ fun LedgerKeyboardPanel(
                                 properties = PopupProperties(focusable = false)
                             ) {
                                 Surface(
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     color = SURFACE_CARD,
-                                    shadowElevation = 8.dp,
+                                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
                                     modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
                                 ) {
                                     Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -4657,7 +4627,7 @@ fun LedgerKeyboardPanel(
                                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                             if (s != suggestions.last())
-                                                HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.5f))
+                                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                                         }
                                     }
                                 }
@@ -5024,7 +4994,6 @@ fun AnimatedAmount(
     text: String, color: Color, fontSize: TextUnit,
     fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
 ) {
-    // 🟢 初始槽位由 text 長度 + 2，最少 3
     val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
     LaunchedEffect(text.length) {
         if (text.length > maxSlots.value) maxSlots.value = text.length
@@ -5066,7 +5035,6 @@ fun AnimatedAmount(
     }
 }
 
-// 🟢 簡化為純透傳
 @Composable
 fun SmartElement(
     listState: LazyListState?, dateKey: String,
@@ -5076,7 +5044,6 @@ fun SmartElement(
     Box(modifier) { content() }
 }
 
-// 🟢 簡化版 DayHeader：刪走 next/prev 比對
 @Composable
 fun DayHeader(
     dateKey: String, income: Double, expense: Double,
@@ -5205,7 +5172,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
-        shadowElevation = 1.dp
+        shadowElevation = 0.dp
     ) {
         Row(Modifier.padding(horizontal = 10.dp),
             horizontalArrangement = Arrangement.Center,
@@ -5229,7 +5196,7 @@ fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     maxRowsPerPage: Int = 4,
-    skipAppearAnimation: Boolean = false,   // 🟢 冷啟動跳過入場動畫
+    skipAppearAnimation: Boolean = false,
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -5332,15 +5299,13 @@ fun QuickInputSection(
 
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeightDp,
-                // ✅ 修改：將 dampingRatio 改為 NoBouncy，徹底杜絕高度回彈
                 animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 350f),
                 label = "quickPanelHeight"
             )
 
             Box(
                 Modifier.fillMaxWidth().height(animatedHeight)
-                    .shadow(2.dp, RoundedCornerShape(18.dp), clip = false)
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
             ) {
                 HorizontalPager(
@@ -5354,12 +5319,10 @@ fun QuickInputSection(
                         .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
                         chips.forEach { chip ->
                             key(chip.name) {
-                                // ✅ 修改：位移動畫全部改為 NoBouncy，確保圖標直線移動唔會反彈
                                 val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="x")
                                 val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="y")
                                 val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="w")
 
-                                // 🟢 冷啟動首次：appear 初始就 true，跳過入場動畫
                                 var appear by remember { mutableStateOf(skipAppearAnimation) }
                                 LaunchedEffect(Unit) {
                                     if (!skipAppearAnimation) appear = true
@@ -5807,7 +5770,8 @@ fun CalendarContent(
                     Surface(
                         onClick = { monthDirection = -1; onMonthChange(shiftMonthKey(currentMonthKey, -1)) },
                         modifier = Modifier.size(36.dp),
-                        shape = CircleShape, color = SURFACE_ELEVATED
+                        shape = CircleShape, color = SURFACE_CARD,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ChevronLeft, "上個月",
@@ -5854,7 +5818,8 @@ fun CalendarContent(
                     Surface(
                         onClick = { monthDirection = 1; onMonthChange(shiftMonthKey(currentMonthKey, 1)) },
                         modifier = Modifier.size(36.dp),
-                        shape = CircleShape, color = SURFACE_ELEVATED
+                        shape = CircleShape, color = SURFACE_CARD,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.ChevronRight, "下個月",
@@ -6102,7 +6067,6 @@ fun SegmentedModeControl(
             Box(
                 Modifier.offset(x = indicatorOffset)
                     .width(itemWidth).height(itemHeight)
-                    .shadow(2.dp, RoundedCornerShape(9.dp), clip = false)
                     .clip(RoundedCornerShape(9.dp))
                     .background(SURFACE_CARD)
             )
@@ -6261,11 +6225,11 @@ fun CompareContent(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 shape = RoundedCornerShape(16.dp),
                 color = SURFACE_CARD,
-                border = BorderStroke(0.8.dp, DIVIDER_COLOR.copy(alpha = 0.6f))
+                border = BorderStroke(0.5.dp, DIVIDER_COLOR)
             ) {
                 Column(Modifier.fillMaxSize()) {
                     Row(
-                        Modifier.fillMaxWidth().background(SURFACE_ELEVATED)
+                        Modifier.fillMaxWidth().background(SURFACE_CARD)
                             .padding(horizontal = 10.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -6294,7 +6258,7 @@ fun CompareContent(
                         }
                     }
 
-                    HorizontalDivider(color = DIVIDER_COLOR.copy(alpha = 0.6f), thickness = 0.8.dp)
+                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (displayCategories.isEmpty()) {
@@ -6304,7 +6268,7 @@ fun CompareContent(
                         } else {
                             BoxWithConstraints(Modifier.fillMaxSize()) {
                                 val rowCount = displayCategories.size
-                                val dividerThickness = 0.8.dp
+                                val dividerThickness = 0.5.dp
                                 val totalDividerHeight =
                                     dividerThickness * (rowCount - 1).coerceAtLeast(0)
                                 val calculatedHeight =
@@ -6388,7 +6352,7 @@ fun CompareContent(
                                             if (idx < displayCategories.lastIndex) {
                                                 HorizontalDivider(
                                                     modifier = Modifier.padding(horizontal = 10.dp),
-                                                    color = DIVIDER_COLOR.copy(alpha = 0.7f),
+                                                    color = DIVIDER_COLOR,
                                                     thickness = dividerThickness
                                                 )
                                             }
@@ -6399,10 +6363,10 @@ fun CompareContent(
                         }
                     }
 
-                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 1.dp)
+                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
                     Row(
-                        Modifier.fillMaxWidth().background(SURFACE_ELEVATED)
+                        Modifier.fillMaxWidth().background(SURFACE_CARD)
                             .padding(horizontal = 10.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
