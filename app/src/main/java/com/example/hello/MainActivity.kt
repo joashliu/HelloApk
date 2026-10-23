@@ -5270,8 +5270,10 @@ fun DayHeader(
                     Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                     Spacer(Modifier.height(1.dp))
-                    Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.Medium,
-                        color = if (isToday) BRAND_PRIMARY.copy(alpha = 0.8f) else TEXT_TERTIARY)
+                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，加深「週幾」顏色
+                    // 🟢 如果係今日，移除 0.8 透明度，直接用實色
+                    Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                        color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                 }
             }
         }
@@ -5281,14 +5283,16 @@ fun DayHeader(
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("收入", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
+                    Text("收入", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
                 }
             }
             if (expense > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("支出", fontSize = 10.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Medium)
+                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
+                    Text("支出", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
                 }
