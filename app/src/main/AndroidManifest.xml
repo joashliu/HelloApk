@@ -69,11 +69,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- ★ 新增：註冊 App Shortcuts（長按 App 圖標彈出捷徑選單） -->
-            <meta-data
-                android:name="android.app.shortcuts"
-                android:resource="@xml/shortcuts" />
+            <!-- ★ 已移除 android.app.shortcuts meta-data（改用代碼動態註冊） -->
         </activity>
 
         <!--
