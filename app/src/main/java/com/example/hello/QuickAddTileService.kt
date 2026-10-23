@@ -16,11 +16,6 @@ class QuickAddTileService : TileService() {
         updateTileUi()
     }
 
-    override fun onTileAdded() {
-        super.onTileAdded()
-        updateTileUi()
-    }
-
     private fun updateTileUi() {
         try {
             qsTile?.apply {
@@ -32,7 +27,6 @@ class QuickAddTileService : TileService() {
         }
     }
 
-    // ★ 原有短按邏輯，完全不動
     override fun onClick() {
         super.onClick()
         try {
