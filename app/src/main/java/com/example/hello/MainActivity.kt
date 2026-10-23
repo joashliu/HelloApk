@@ -3067,7 +3067,6 @@ fun LedgerContent(
     val hasChart = !filterMode && weeklyExpenses.isNotEmpty()
     val chartHeightPx = remember(density) { with(density) { 108.dp.toPx() } }
 
-    // 🟢 修改：用 mutableIntStateOf 取代 derivedStateOf；唔再累加前面 item 高度；改用 index + offset 單向分段
     val quickInputMaxRows = remember { mutableIntStateOf(4) }
 
     LaunchedEffect(listState, hasChart, chartHeightPx) {
@@ -3411,7 +3410,8 @@ fun LedgerContent(
                                 QuickInputSection(
                                     topNotes = topNotes, noteIconMap = noteIconMap,
                                     maxRowsPerPage = quickInputMaxRows.intValue,
-                                    skipAppearAnimation = isFirstShow,
+                                    // 🟢 呢度已經改為 !isFirstShow 嚟防止切換時重新播放動畫
+                                    skipAppearAnimation = !isFirstShow, 
                                     onClick = onQuickInputClick
                                 )
                             }
