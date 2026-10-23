@@ -6,6 +6,8 @@ plugins {
     // 如果你用 Kotlin 2.0+ 嘅 Compose Compiler Plugin，加下面呢行：
     // id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")     // Firebase
+    // ★ 新增：由 Git 自動生成 versionCode 同 versionName 嘅插件
+    id("com.gitlab.edyjen.android-versioning") version "1.0.2"
 }
 
 android {
@@ -16,8 +18,14 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 63
-        versionName = "53.2"
+
+        // ❌ 刪除手動寫死嘅版本號
+        // versionCode = 63
+        // versionName = "53.2"
+
+        // ✅ 改為由插件自動生成
+        versionCode = versioning.getVersionCode()
+        versionName = versioning.getVersionName()
 
         vectorDrawables {
             useSupportLibrary = true
