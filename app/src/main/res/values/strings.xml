@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- App 名稱（如果你之前喺 Manifest 用咗 android:label="記帳"，呢度可以保留或刪除） -->
-    <string name="app_name">記帳</string>
-
-    <!-- ★ OCR Shortcut 標籤（shortcuts.xml 引用） -->
-    <string name="shortcut_ocr_short">OCR 掃描</string>
-    <string name="shortcut_ocr_long">OCR 掃描 HKD 金額</string>
-</resources>
