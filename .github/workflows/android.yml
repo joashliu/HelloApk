@@ -11,10 +11,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+        with:
+          # ★ 關鍵修改：拉取完整 Git 歷史同所有 Tag，俾 versioning 插件讀取
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
