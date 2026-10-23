@@ -1587,9 +1587,6 @@ class MainActivity : ComponentActivity() {
         splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
 
-        // 🟢 新增：動態註冊 OCR 捷徑（長按 App 圖標彈出選單）
-        registerOcrShortcut()
-
         val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
         if (fromNotification) {
             keyboardLaunchToken.value += 1
@@ -1655,31 +1652,6 @@ class MainActivity : ComponentActivity() {
             keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY)
             keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
-        }
-    }
-
-    // 🟢 新增：動態註冊 OCR 捷徑（貼喺呢度）
-    private fun registerOcrShortcut() {
-        if (android.os.Build.VERSION.SDK_INT < 25) return
-        try {
-            val shortcut = androidx.core.content.pm.ShortcutInfoCompat.Builder(this, "ocr_scan")
-                .setShortLabel("OCR 掃描")
-                .setLongLabel("OCR 掃描 HKD 金額")
-                .setIcon(
-                    androidx.core.graphics.drawable.IconCompat.createWithResource(
-                        this,
-                        android.R.drawable.ic_menu_camera
-                    )
-                )
-                .setIntent(
-                    Intent(this, OcrCaptureActivity::class.java).apply {
-                        action = Intent.ACTION_VIEW
-                    }
-                )
-                .build()
-            androidx.core.content.pm.ShortcutManagerCompat.pushDynamicShortcut(this, shortcut)
-        } catch (e: Exception) {
-            android.util.Log.w("MainActivity", "registerOcrShortcut failed: ${e.message}")
         }
     }
 
