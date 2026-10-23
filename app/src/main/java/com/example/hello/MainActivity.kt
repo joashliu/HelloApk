@@ -3369,13 +3369,24 @@ fun LedgerContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
+                
+                // 🟢 計算平均每項支出
+                val avgExpense = remember(filtered, filterMode) {
+                    if (!filterMode) 0.0
+                    else {
+                        val exps = filtered.filter { it.category != INCOME_CATEGORY }
+                        if (exps.isNotEmpty()) exps.sumOf { it.amount } / exps.size else 0.0
+                    }
+                }
+
                 Box(modifier = Modifier.weight(1f)) {
                     TopStats(
                         hasIncome = hasIncome, hasExpense = hasExpense,
                         income = totalIncome, expense = totalExpense,
                         isFilterMode = filterMode,
                         filteredCount = if (filterMode) filtered.size else null,
-                        showCategory = showCategoryChip, categoryName = cachedCategory
+                        showCategory = showCategoryChip, categoryName = cachedCategory,
+                        avgExpense = avgExpense // 🟢 傳入 avgExpense 畀新版 TopStats
                     )
                 }
                 IconButton(onClick = { onShowFutureChange(!showFuture) }) {
@@ -3410,8 +3421,7 @@ fun LedgerContent(
                                 QuickInputSection(
                                     topNotes = topNotes, noteIconMap = noteIconMap,
                                     maxRowsPerPage = quickInputMaxRows.intValue,
-                                    // 🟢 呢度已經改為 !isFirstShow 嚟防止切換時重新播放動畫
-                                    skipAppearAnimation = !isFirstShow, 
+                                    skipAppearAnimation = !isFirstShow, // 🟢 跳過二次載入時嘅動畫
                                     onClick = onQuickInputClick
                                 )
                             }
@@ -4885,153 +4895,237 @@ fun TopStats(
     hasIncome: Boolean, hasExpense: Boolean,
     income: Double, expense: Double,
     isFilterMode: Boolean = false, filteredCount: Int? = null,
-    showCategory: Boolean = false, categoryName: String = ""
+    showCategory: Boolean = false, categoryName: String = "",
+    avgExpense: Double? = null
 ) {
     val balance = income - expense
     val showIncome = hasIncome || (!hasIncome && !hasExpense)
     val showExpense = hasExpense
-
+    
+    val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
+    
+    // 動畫權重，用嚟控制各個板塊平滑出現/消失
     val spec = tween<Float>(durationMillis = 420, easing = FastOutSlowInEasing)
     val incomeW by animateFloatAsState(if (showIncome) 1f else 0f, spec, label = "iW")
     val expenseW by animateFloatAsState(if (showExpense) 1f else 0f, spec, label = "eW")
     val catW by animateFloatAsState(if (showCategory) 1f else 0f, spec, label = "cW")
-
-    val thirdBlockText = if (isFilterMode) "${filteredCount ?: 0}"
-                         else formatAmountNoDecimal(balance)
-    val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-    val thirdBlockColor by animateColorAsState(
-        targetValue = if (isFilterMode) BRAND_PRIMARY else targetBalColor,
-        animationSpec = tween(400, easing = FastOutSlowInEasing),
-        label = "3rdColor"
-    )
+    val avgW by animateFloatAsState(if (isFilterMode && avgExpense != null && avgExpense > 0) 1f else 0f, spec, label = "aW")
 
     Row(
         modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // 1. 類別 (Category)
         if (showCategory || catW > 0.001f) {
             Box(modifier = Modifier.weight(catW.coerceAtLeast(0.001f)).clipToBounds(),
                 contentAlignment = Alignment.Center) {
                 val alphaScale = catW.coerceIn(0f, 1f)
-                Box(Modifier.wrapContentWidth(unbounded = true).graphicsLayer {
-                    alpha = alphaScale
-                    scaleX = 0.85f + 0.15f * alphaScale
-                    scaleY = 0.85f + 0.15f * alphaScale
-                }) { CategoryStatChip(category = categoryName) }
+                val catStyle = CATEGORY_STYLES[categoryName]
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = catStyle?.icon ?: Icons.Default.Category,
+                    iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
+                    labelNormal = "類別", labelFilter = "類別",
+                    valueNormal = categoryName, valueFilter = categoryName,
+                    valueColorNormal = TEXT_PRIMARY,
+                    showDollarNormal = false, showDollarFilter = false,
+                    modifier = Modifier.graphicsLayer {
+                        alpha = alphaScale
+                        scaleX = 0.85f + 0.15f * alphaScale
+                        scaleY = 0.85f + 0.15f * alphaScale
+                    }
+                )
             }
         }
 
+        // 2. 收入 (Income)
         if (showIncome || incomeW > 0.001f) {
             Box(modifier = Modifier.weight(incomeW.coerceAtLeast(0.001f)).clipToBounds(),
                 contentAlignment = Alignment.Center) {
                 val alphaScale = incomeW.coerceIn(0f, 1f)
-                Column(
-                    Modifier.padding(horizontal = 4.dp).graphicsLayer {
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.TrendingUp,
+                    iconColorNormal = COLOR_INCOME,
+                    labelNormal = "收入", labelFilter = "收入",
+                    valueNormal = formatAmountNoDecimal(income),
+                    valueFilter = formatAmountNoDecimal(income),
+                    valueColorNormal = COLOR_INCOME,
+                    modifier = Modifier.graphicsLayer {
                         alpha = alphaScale
                         scaleX = 0.85f + 0.15f * alphaScale
                         scaleY = 0.85f + 0.15f * alphaScale
-                    },
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.height(22.dp)) {
-                        Icon(Icons.Default.TrendingUp, null, tint = COLOR_INCOME,
-                            modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("收入", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
-                        contentAlignment = Alignment.Center) {
-                        DollarAmount(
-                            text = formatAmountNoDecimal(income),
-                            color = COLOR_INCOME,
-                            fontSize = STAT_AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                )
             }
         }
 
+        // 3. 支出 (Expense)
         if (showExpense || expenseW > 0.001f) {
             Box(modifier = Modifier.weight(expenseW.coerceAtLeast(0.001f)).clipToBounds(),
                 contentAlignment = Alignment.Center) {
                 val alphaScale = expenseW.coerceIn(0f, 1f)
-                Column(
-                    Modifier.padding(horizontal = 4.dp).graphicsLayer {
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.TrendingDown,
+                    iconColorNormal = COLOR_EXPENSE,
+                    labelNormal = "支出", labelFilter = "支出",
+                    valueNormal = formatAmountNoDecimal(expense),
+                    valueFilter = formatAmountNoDecimal(expense),
+                    valueColorNormal = COLOR_EXPENSE,
+                    modifier = Modifier.graphicsLayer {
                         alpha = alphaScale
                         scaleX = 0.85f + 0.15f * alphaScale
                         scaleY = 0.85f + 0.15f * alphaScale
-                    },
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.height(22.dp)) {
-                        Icon(Icons.Default.TrendingDown, null, tint = COLOR_EXPENSE,
-                            modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("支出", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
-                        contentAlignment = Alignment.Center) {
-                        DollarAmount(
-                            text = formatAmountNoDecimal(expense),
-                            color = COLOR_EXPENSE,
-                            fontSize = STAT_AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                )
             }
         }
 
+        // 4. 平均支出 (Average Expense) - 只喺篩選模式出現
+        if ((isFilterMode && avgExpense != null && avgExpense > 0) || avgW > 0.001f) {
+            Box(modifier = Modifier.weight(avgW.coerceAtLeast(0.001f)).clipToBounds(),
+                contentAlignment = Alignment.Center) {
+                val alphaScale = avgW.coerceIn(0f, 1f)
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.Receipt, // 均支 Icon
+                    iconColorNormal = Color(0xFFF59E0B), // 琥珀色
+                    labelNormal = "均支", labelFilter = "均支",
+                    valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0),
+                    valueFilter = formatAmountNoDecimal(avgExpense ?: 0.0),
+                    valueColorNormal = Color(0xFFF59E0B),
+                    modifier = Modifier.graphicsLayer {
+                        alpha = alphaScale
+                        scaleX = 0.85f + 0.15f * alphaScale
+                        scaleY = 0.85f + 0.15f * alphaScale
+                    }
+                )
+            }
+        }
+
+        // 5. 餘額 / 筆數 (Balance / Count)
         Box(modifier = Modifier.weight(1f).clipToBounds(),
             contentAlignment = Alignment.Center) {
-            Column(Modifier.padding(horizontal = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.Center) {
-                    Crossfade(
-                        targetState = isFilterMode,
-                        animationSpec = tween(200, easing = FastOutSlowInEasing),
-                        label = "labelCrossfade"
-                    ) { isFilter ->
-                        if (!isFilter) {
-                            Row(verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.height(22.dp)) {
-                                Icon(Icons.Default.AccountBalanceWallet, null, tint = targetBalColor,
-                                    modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("餘額", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
-                                    fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
-                            }
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.height(22.dp)) {
-                                Icon(Icons.Default.FilterList, null, tint = BRAND_PRIMARY,
-                                    modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("筆數", fontSize = STAT_LABEL_FONT_SIZE, color = TEXT_SECONDARY,
-                                    fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
-                    contentAlignment = Alignment.Center) {
-                    DollarAmount(
-                        text = thirdBlockText,
-                        color = thirdBlockColor,
-                        fontSize = STAT_AMOUNT_FONT_SIZE,
-                        fontWeight = FontWeight.Bold,
-                        showDollar = !isFilterMode
-                    )
-                }
+            AnimatedStatBlock(
+                isFilterMode = isFilterMode,
+                iconNormal = Icons.Default.AccountBalanceWallet,
+                iconFilter = Icons.Default.FilterList,
+                iconColorNormal = targetBalColor,
+                iconColorFilter = BRAND_PRIMARY,
+                labelNormal = "餘額",
+                labelFilter = "", // 🟢 篩選模式時標籤變空，完美配合 "X 筆"
+                valueNormal = formatAmountNoDecimal(balance),
+                valueFilter = "${filteredCount ?: 0} 筆",
+                valueColorNormal = targetBalColor,
+                valueColorFilter = BRAND_PRIMARY,
+                showDollarNormal = true, showDollarFilter = false, // "X 筆" 唔需要金錢符號
+                modifier = Modifier.fillMaxHeight()
+            )
+        }
+    }
+}
+
+// 🟢 專為完美平滑過渡（上下排版 -> 左右排版）度身訂造嘅 Layout 引擎
+@Composable
+fun AnimatedStatBlock(
+    isFilterMode: Boolean,
+    iconNormal: ImageVector,
+    iconFilter: ImageVector = iconNormal,
+    iconColorNormal: Color,
+    iconColorFilter: Color = iconColorNormal,
+    labelNormal: String,
+    labelFilter: String,
+    valueNormal: String,
+    valueFilter: String,
+    valueColorNormal: Color,
+    valueColorFilter: Color = valueColorNormal,
+    showDollarNormal: Boolean = true,
+    showDollarFilter: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val progress by animateFloatAsState(
+        targetValue = if (isFilterMode) 1f else 0f,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "statBlockAnim"
+    )
+    
+    val currentIconColor = androidx.compose.ui.graphics.lerp(iconColorNormal, iconColorFilter, progress)
+    val currentValueColor = androidx.compose.ui.graphics.lerp(valueColorNormal, valueColorFilter, progress)
+    
+    // 文字交畀 DollarAmount 內部自帶嘅 AnimatedAmount 自動做字元滑動動畫
+    val targetValueText = if (isFilterMode) valueFilter else valueNormal
+    val targetShowDollar = if (isFilterMode) showDollarFilter else showDollarNormal
+    val targetIcon = if (isFilterMode) iconFilter else iconNormal
+    
+    androidx.compose.ui.layout.Layout(
+        content = {
+            // [0] 圖標 (Icon)
+            Crossfade(targetState = targetIcon, label = "icon") { ico ->
+                Icon(ico, null, tint = currentIconColor, modifier = Modifier.size((16f - 2f * progress).dp))
             }
+            
+            // [1] 標籤文字 (Label)
+            val currentLabel = if (isFilterMode && labelFilter.isEmpty()) labelNormal else if (isFilterMode) labelFilter else labelNormal
+            val labelAlpha = if (labelFilter.isEmpty()) (1f - progress).coerceIn(0f, 1f) else 1f
+            Text(
+                text = currentLabel,
+                fontSize = (11f - 1f * progress).sp,
+                color = TEXT_SECONDARY.copy(alpha = labelAlpha),
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
+            )
+            
+            // [2] 數值 (Value)
+            DollarAmount(
+                text = targetValueText,
+                color = currentValueColor,
+                fontSize = (22f - 8f * progress).sp, // 由 22sp 平滑縮細到 14sp
+                fontWeight = FontWeight.Bold,
+                showDollar = targetShowDollar
+            )
+        },
+        modifier = modifier.fillMaxHeight()
+    ) { measurables, constraints ->
+        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
+            
+            val titleGapNormal = 4.dp.roundToPx()
+            val gap1 = 4.dp.roundToPx()
+            val gap2 = 6.dp.roundToPx()
+            
+            // 📍 正常模式 (Normal): 上下排列
+            val topRowWNormal = iconP.width + titleGapNormal + labelP.width
+            val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
+            val titleYNormal = (constraints.maxHeight / 2) - maxOf(iconP.height, labelP.height) + 2.dp.roundToPx()
+            
+            val iconXNormal = topRowXNormal
+            val labelXNormal = iconXNormal + iconP.width + titleGapNormal
+            
+            val valueXNormal = (constraints.maxWidth - valueP.width) / 2
+            val valueYNormal = (constraints.maxHeight / 2) + 2.dp.roundToPx()
+            
+            // 📍 篩選模式 (Filter): 左右平排
+            val effectiveLabelW = if (labelFilter.isEmpty()) 0 else labelP.width
+            val totalWFilter = iconP.width + (if(effectiveLabelW > 0) gap1 + effectiveLabelW else 0) + gap2 + valueP.width
+            val startXFilter = (constraints.maxWidth - totalWFilter) / 2
+            
+            val iconXFilter = startXFilter
+            val labelXFilter = iconXFilter + iconP.width + gap1
+            val valueXFilter = startXFilter + totalWFilter - valueP.width
+            
+            val titleYFilter = (constraints.maxHeight - maxOf(iconP.height, labelP.height)) / 2
+            val valueYFilter = (constraints.maxHeight - valueP.height) / 2
+            
+            // ✨ 平滑插值 (Lerp) 物理佈局
+            iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(titleYNormal, titleYFilter, progress))
+            labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(titleYNormal, titleYFilter, progress))
+            valueP.placeRelative(lerpI(valueXNormal, valueXFilter, progress), lerpI(valueYNormal, valueYFilter, progress))
         }
     }
 }
