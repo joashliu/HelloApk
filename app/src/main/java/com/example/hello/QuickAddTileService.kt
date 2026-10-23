@@ -1,41 +1,40 @@
 package com.example.hello
 
+import android.app.PendingIntent
 import android.content.Intent
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import android.util.Log
 
 class QuickAddTileService : TileService() {
 
-    companion object {
-        private const val TAG = "QuickAddTile"
-    }
-
     override fun onStartListening() {
         super.onStartListening()
-        updateTileUi()
-    }
-
-    private fun updateTileUi() {
-        try {
-            qsTile?.apply {
-                state = Tile.STATE_INACTIVE
-                updateTile()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "updateTileUi failed: ${e.message}")
-        }
+        qsTile?.state = Tile.STATE_ACTIVE
+        qsTile?.updateTile()
     }
 
     override fun onClick() {
         super.onClick()
-        try {
-            val intent = buildLaunchIntentForMain(this, prefillNote = null).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+        
+        // 1. 建立 Intent，並加入 FLAG_ACTIVITY_NEW_TASK (從 Service 啟動 Activity 必須加)
+        val intent = buildLaunchIntentForMain(this, prefillNote = null).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        // 2. 判斷 Android 版本，Android 14 (API 34) 或以上必須用 PendingIntent
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            startActivityAndCollapse(pendingIntent)
+        } else {
+            // Android 13 或以下維持舊寫法
+            @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
-        } catch (e: Exception) {
-            Log.e(TAG, "onClick failed: ${e.message}", e)
         }
     }
 }
