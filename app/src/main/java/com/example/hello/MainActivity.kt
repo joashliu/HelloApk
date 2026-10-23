@@ -4843,6 +4843,42 @@ fun CalendarFilterChip(
 }
 
 @Composable
+private fun DollarAmount(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.Bold,
+    showDollar: Boolean = true,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        when {
+            !showDollar -> {
+                AnimatedAmount(
+                    text = text, color = color,
+                    fontSize = fontSize, fontWeight = fontWeight
+                )
+            }
+            text.startsWith("-") -> {
+                Text("-$", color = color, fontSize = fontSize,
+                    fontWeight = fontWeight, maxLines = 1, softWrap = false)
+                AnimatedAmount(
+                    text = text.substring(1), color = color,
+                    fontSize = fontSize, fontWeight = fontWeight
+                )
+            }
+            else -> {
+                Text("$", color = color, fontSize = fontSize,
+                    fontWeight = fontWeight, maxLines = 1, softWrap = false)
+                AnimatedAmount(
+                    text = text, color = color,
+                    fontSize = fontSize, fontWeight = fontWeight
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun TopStats(
     hasIncome: Boolean, hasExpense: Boolean,
     income: Double, expense: Double,
@@ -4906,9 +4942,12 @@ fun TopStats(
                     Spacer(Modifier.height(4.dp))
                     Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
                         contentAlignment = Alignment.Center) {
-                        AnimatedAmount(text = formatAmountNoDecimal(income),
-                            color = COLOR_INCOME, fontSize = STAT_AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold)
+                        DollarAmount(
+                            text = formatAmountNoDecimal(income),
+                            color = COLOR_INCOME,
+                            fontSize = STAT_AMOUNT_FONT_SIZE,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -4937,9 +4976,12 @@ fun TopStats(
                     Spacer(Modifier.height(4.dp))
                     Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
                         contentAlignment = Alignment.Center) {
-                        AnimatedAmount(text = formatAmountNoDecimal(expense),
-                            color = COLOR_EXPENSE, fontSize = STAT_AMOUNT_FONT_SIZE,
-                            fontWeight = FontWeight.Bold)
+                        DollarAmount(
+                            text = formatAmountNoDecimal(expense),
+                            color = COLOR_EXPENSE,
+                            fontSize = STAT_AMOUNT_FONT_SIZE,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -4979,8 +5021,13 @@ fun TopStats(
                 Spacer(Modifier.height(4.dp))
                 Box(Modifier.fillMaxWidth().height(32.dp).clipToBounds(),
                     contentAlignment = Alignment.Center) {
-                    AnimatedAmount(text = thirdBlockText, color = thirdBlockColor,
-                        fontSize = STAT_AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold)
+                    DollarAmount(
+                        text = thirdBlockText,
+                        color = thirdBlockColor,
+                        fontSize = STAT_AMOUNT_FONT_SIZE,
+                        fontWeight = FontWeight.Bold,
+                        showDollar = !isFilterMode
+                    )
                 }
             }
         }
