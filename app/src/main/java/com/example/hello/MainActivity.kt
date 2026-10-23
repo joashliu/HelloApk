@@ -4088,11 +4088,13 @@ fun SwipeableRecordItem(
                     fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
-                Text(metaText, fontSize = META_FONT_SIZE, color = TEXT_TERTIARY,
+                // 🟢 詳情文字顏色改深：由 TEXT_TERTIARY 改為 TEXT_SECONDARY
+                Text(metaText, fontSize = META_FONT_SIZE, color = TEXT_SECONDARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
-            Text(amtText, color = amtColor, fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.Bold)
+            // 🟢 金額粗度加強：由 FontWeight.Bold 改為 FontWeight.ExtraBold
+            Text(amtText, color = amtColor, fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
