@@ -3534,7 +3534,7 @@ fun LedgerContent(
 private enum class StatBlockType { CAT, INC, EXP, AVG, BAL }
 private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp)
 
-// 🟢 核心：全局統一嘅物理彈簧，保證高度、位置、大小、內部排版「完美同步」，杜絕兩步變形
+// 🟢 核心：全局統一嘅物理彈簧，保證高度、位置、大小、內部排版「完美同步」
 private val MASTER_SPRING_DP = spring<Dp>(dampingRatio = 0.9f, stiffness = 400f)
 private val MASTER_SPRING_FLOAT = spring<Float>(dampingRatio = 0.9f, stiffness = 400f)
 
@@ -3553,27 +3553,36 @@ fun TopStats(
     val showBal = true
     val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
 
-    // 1. 決定目前有哪些板塊需要顯示
-    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, showBal) {
+    // 1. 決定目前有哪些板塊需要顯示，並根據模式智能排序！
+    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, showBal, isFilterMode) {
         val list = mutableListOf<StatBlockType>()
-        if (showCategory) list.add(StatBlockType.CAT)
-        if (showIncome) list.add(StatBlockType.INC)
-        if (showExpense) list.add(StatBlockType.EXP)
-        if (showAvg) list.add(StatBlockType.AVG)
-        if (showBal) list.add(StatBlockType.BAL)
+        if (isFilterMode) {
+            // 🟢 篩選模式：將「筆數」同「類別」放埋一齊；「支出」同「均支」放埋一齊
+            if (showCategory) list.add(StatBlockType.CAT)
+            if (showBal) list.add(StatBlockType.BAL) // 筆數提早上嚟
+            if (showIncome) list.add(StatBlockType.INC)
+            if (showExpense) list.add(StatBlockType.EXP)
+            if (showAvg) list.add(StatBlockType.AVG)
+        } else {
+            // 🟢 正常模式：傳統排序
+            if (showCategory) list.add(StatBlockType.CAT)
+            if (showIncome) list.add(StatBlockType.INC)
+            if (showExpense) list.add(StatBlockType.EXP)
+            if (showAvg) list.add(StatBlockType.AVG)
+            if (showBal) list.add(StatBlockType.BAL) // 餘額喺最後
+        }
         list
     }
 
     BoxWithConstraints(
-        // 🟢 徹底移除 animateContentSize，交由內部 animHeight 統一控制，確保一步到位
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
     ) {
         val totalW = maxWidth
         val gapX = 6.dp
-        val gapY = 2.dp // 🟢 極致壓縮垂直行距
-        val rowH = 46.dp // 🟢 大幅縮減單行高度，更緊湊精緻
+        val gapY = 2.dp
+        val rowH = 46.dp
 
-        // 2. 佈局大腦：精確計算每個板塊嘅 X, Y, Width，保證「絕對平均分佈」及「用盡空間」
+        // 2. 佈局大腦：精確計算每個板塊嘅 X, Y, Width
         val geoMap = remember(activeBlocks, totalW) {
             val map = mutableMapOf<StatBlockType, BlockGeometry>()
             val rows = when (activeBlocks.size) {
@@ -3587,7 +3596,6 @@ fun TopStats(
             
             rows.forEachIndexed { rIdx, row ->
                 val itemsInRow = row.size
-                // 智能平分寬度
                 val w = (totalW - gapX * (itemsInRow - 1).coerceAtLeast(0)) / itemsInRow
                 val y = (rowH + gapY) * rIdx
                 row.forEachIndexed { cIdx, block ->
@@ -3598,7 +3606,7 @@ fun TopStats(
             map
         }
 
-        // 3. 高度動畫 (使用 MASTER_SPRING 確保同內部元素移動神同步)
+        // 3. 高度動畫
         val targetHeight = if (activeBlocks.size > 3) (rowH * 2 + gapY) else rowH
         val animHeight by animateDpAsState(targetValue = targetHeight, animationSpec = MASTER_SPRING_DP, label = "containerHeight")
 
@@ -3615,7 +3623,7 @@ fun TopStats(
                     isFilterMode = isFilterMode,
                     iconNormal = catStyle?.icon ?: Icons.Default.Category,
                     iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
-                    labelNormal = "類別", labelFilter = "", // 🟢 篩選時隱藏「類別」文字
+                    labelNormal = "類別", labelFilter = "",
                     valueNormal = categoryName, valueFilter = categoryName,
                     valueColorNormal = TEXT_PRIMARY,
                     showDollarNormal = false, showDollarFilter = false,
@@ -3674,10 +3682,10 @@ fun TopStats(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.AccountBalanceWallet, iconFilter = Icons.Default.FilterList,
                     iconColorNormal = targetBalColor, iconColorFilter = BRAND_PRIMARY,
-                    labelNormal = "餘額", labelFilter = "", // 🟢 篩選時隱藏「餘額」，只顯示筆數
+                    labelNormal = "餘額", labelFilter = "", 
                     valueNormal = formatAmountNoDecimal(balance), valueFilter = "${filteredCount ?: 0} 筆",
                     valueColorNormal = targetBalColor, valueColorFilter = BRAND_PRIMARY,
-                    showDollarNormal = true, showDollarFilter = false, // X 筆無需 $
+                    showDollarNormal = true, showDollarFilter = false,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -3685,7 +3693,6 @@ fun TopStats(
     }
 }
 
-// 🟢 獨立控制每塊板塊嘅「平滑位移」及「原地淡出淡入」
 @Composable
 private fun StatBlockItem(
     type: StatBlockType,
@@ -3695,8 +3702,6 @@ private fun StatBlockItem(
     content: @Composable () -> Unit
 ) {
     val targetGeo = geoMap[type]
-    
-    // 記憶最後位置，確保板塊消失時係原地縮小淡出，而唔係飛走
     var memoryGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp)) }
     var isInitialized by remember { mutableStateOf(false) }
 
@@ -3705,7 +3710,7 @@ private fun StatBlockItem(
         isInitialized = true
     }
 
-    if (!isInitialized) return // 未曾出現過就唔好渲染，防止由 0,0 飛出嚟
+    if (!isInitialized) return
 
     val animX by animateDpAsState(memoryGeo.x, MASTER_SPRING_DP, label = "x_$type")
     val animY by animateDpAsState(memoryGeo.y, MASTER_SPRING_DP, label = "y_$type")
@@ -3732,7 +3737,7 @@ private fun StatBlockItem(
     }
 }
 
-// 🟢 負責內部文字同 Icon 嘅平滑過渡佈局
+// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局 
 @Composable
 private fun AnimatedStatBlock(
     isFilterMode: Boolean,
@@ -3750,7 +3755,6 @@ private fun AnimatedStatBlock(
     showDollarFilter: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    // 🟢 同樣使用 MASTER_SPRING_FLOAT，確保文字滑動同外框變形 100% 同步
     val progress by animateFloatAsState(
         targetValue = if (isFilterMode) 1f else 0f,
         animationSpec = MASTER_SPRING_FLOAT,
@@ -3759,6 +3763,8 @@ private fun AnimatedStatBlock(
     
     val currentIconColor = androidx.compose.ui.graphics.lerp(iconColorNormal, iconColorFilter, progress)
     val currentValueColor = androidx.compose.ui.graphics.lerp(valueColorNormal, valueColorFilter, progress)
+    // 🟢 標籤顏色由淺灰(Normal) 過渡到深黑(FilterMode)
+    val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, progress)
     
     val targetValueText = if (isFilterMode) valueFilter else valueNormal
     val targetShowDollar = if (isFilterMode) showDollarFilter else showDollarNormal
@@ -3780,9 +3786,11 @@ private fun AnimatedStatBlock(
             val labelAlpha = if (isFilterMode && labelFilter.isEmpty()) (1f - progress * 2.5f).coerceIn(0f, 1f) else 1f
             Text(
                 text = currentLabel,
-                fontSize = (11f - 1f * progress).sp,
-                color = TEXT_SECONDARY.copy(alpha = labelAlpha),
-                fontWeight = FontWeight.Medium,
+                // 🟢 字體大小同步！由 11sp 放大至 15sp，同數值字體一樣大
+                fontSize = (11f + 4f * progress).sp, 
+                color = currentLabelColor.copy(alpha = labelAlpha),
+                // 🟢 粗度加強，更清晰醒目
+                fontWeight = if (progress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false
             )
@@ -3791,7 +3799,7 @@ private fun AnimatedStatBlock(
             Text(
                 text = finalValueString,
                 color = currentValueColor,
-                fontSize = (19f - 4f * progress).sp, // 🟢 壓縮字體大細適應 46dp 行高
+                fontSize = (19f - 4f * progress).sp, // 🟢 字體流暢縮小 (19sp -> 15sp)
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
                 softWrap = false
@@ -3813,10 +3821,17 @@ private fun AnimatedStatBlock(
             // 📍 正常模式 (上下排列)
             val topRowWNormal = iconP.width + titleGapNormal + labelP.width
             val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
-            val titleYNormal = (constraints.maxHeight / 2) - maxOf(iconP.height, labelP.height) + 1.dp.roundToPx()
+            
+            // 🟢 修正：計算 Icon 同 Label 嘅最高點，做絕對垂直居中，保證平排！
+            val topRowHNormal = maxOf(iconP.height, labelP.height)
+            val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
             
             val iconXNormal = topRowXNormal
             val labelXNormal = iconXNormal + iconP.width + titleGapNormal
+            
+            // 確保 Icon 同文字喺同一條基準線上
+            val iconYNormal = topRowYNormal + (topRowHNormal - iconP.height) / 2
+            val labelYNormal = topRowYNormal + (topRowHNormal - labelP.height) / 2
             
             val valueXNormal = (constraints.maxWidth - valueP.width) / 2
             val valueYNormal = (constraints.maxHeight / 2) + 1.dp.roundToPx()
@@ -3836,8 +3851,8 @@ private fun AnimatedStatBlock(
             val valueYFilter = (constraints.maxHeight - valueP.height) / 2
             
             // ✨ 平滑過渡坐標
-            iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(titleYNormal, iconYFilter, progress))
-            labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(titleYNormal, labelYFilter, progress))
+            iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(iconYNormal, iconYFilter, progress))
+            labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(labelYNormal, labelYFilter, progress))
             valueP.placeRelative(lerpI(valueXNormal, valueXFilter, progress), lerpI(valueYNormal, valueYFilter, progress))
         }
     }
