@@ -6,8 +6,6 @@ plugins {
     // 如果你用 Kotlin 2.0+ 嘅 Compose Compiler Plugin，加下面呢行：
     // id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")     // Firebase
-    // ★ 自動版本號插件（Git 驅動）
-    id("de.nanogiants.android-versioning") version "2.4.0"
 }
 
 android {
@@ -18,10 +16,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-
-        // ✅ 由插件自動生成 versionCode 同 versionName
-        versionCode = versioning.getVersionCode()
-        versionName = versioning.getVersionName()
+        versionCode = 64
+        versionName = "53.3"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -57,7 +53,7 @@ android {
             isMinifyEnabled = true
             // 🟢 優化：縮減 APK 大小
             isShrinkResources = true
-
+            
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -97,7 +93,7 @@ dependencies {
     // ============ Core ============
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
-
+    
     // 🟢 新增：官方 Splash Screen API，負責極速渲染開屏畫面
     implementation("androidx.core:core-splashscreen:1.0.1")
 
