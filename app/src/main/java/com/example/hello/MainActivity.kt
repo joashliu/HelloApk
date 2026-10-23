@@ -1582,19 +1582,12 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
-        override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
 
-        val fromNotification = intent?.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false) ?: false
-        if (fromNotification) {
-            keyboardLaunchToken.value += 1
-            keyboardPrefillNote.value = intent?.getStringExtra(EXTRA_PREFILL_NOTE)
-            keyboardPrefillCategory.value = intent?.getStringExtra(EXTRA_PREFILL_CATEGORY)
-            keyboardPrefillAmount.value = if (intent?.hasExtra(EXTRA_PREFILL_AMOUNT) == true)
-                intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
-        }
+        handleLaunchIntent(intent)
 
         lifecycleScope.launch(Dispatchers.IO) {
             NotificationCaptureBridge.init(applicationContext)
@@ -1641,17 +1634,28 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         showQuickAddNotification()
+        
+        // 兜底：如果 Activity 從背景返回（例如從磁貼點擊），確保檢查 Intent
+        handleLaunchIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent == null) return
         if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
             keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY)
             keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
+            
+            // 🟢 關鍵：處理完必須清空，防止在 onResume 或其他生命週期重複觸發
+            intent.removeExtra(EXTRA_OPEN_KEYBOARD)
         }
     }
 
@@ -3406,7 +3410,7 @@ fun LedgerContent(
                                 Spacer(Modifier.height(4.dp))
                                 QuickInputSection(
                                     topNotes = topNotes, noteIconMap = noteIconMap,
-                                    maxRowsPerPage = quickInputMaxRows.intValue,   // 🟢 修改：加 .intValue
+                                    maxRowsPerPage = quickInputMaxRows.intValue,
                                     skipAppearAnimation = isFirstShow,
                                     onClick = onQuickInputClick
                                 )
