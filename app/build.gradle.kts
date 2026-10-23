@@ -86,6 +86,11 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // 🟢 新增：防止 shrinkResources 誤刪 ML Kit 模型檔（bundled OCR 模型）
+    androidResources {
+        noCompress += listOf("tflite", "pb", "lite", "bin", "dat")
+    }
 }
 
 dependencies {
@@ -132,6 +137,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+
+    // 🟢 新增：ML Kit 中文文字識別（bundled 離線模型，用於 OCR 掃描 HKD 金額）
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 
     // ============ 測試 ============
     testImplementation("junit:junit:4.13.2")
