@@ -5232,9 +5232,16 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
             verticalAlignment = Alignment.CenterVertically) {
             IconView(iconUrl, name, size = 18.dp)
             Spacer(Modifier.width(6.dp))
-            Text(name, fontSize = 13.sp, color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Medium, maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
+            Text(
+                text = name, 
+                fontSize = 13.sp, 
+                color = TEXT_PRIMARY,
+                fontWeight = FontWeight.Medium, 
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                // 🟢 關鍵修改：加入彈性權重，文字超長時會縮短並顯示「...」，同時保證左邊 Icon 及文字開頭可見
+                modifier = Modifier.weight(1f, fill = false)
+            )
         }
     }
 }
@@ -5286,7 +5293,10 @@ fun QuickInputSection(
                     val textW = noteTextWidthCache.getOrPut(name) {
                         textMeasurer.measure(name, textStyle).size.width.toFloat()
                     }
-                    val itemPx = baseItemPx + textW
+                    
+                    // 🟢 關鍵修改：限制 Chip 最大寬度為可用範圍嘅寬度 (contentWidthPx)
+                    val itemPx = (baseItemPx + textW).coerceAtMost(contentWidthPx)
+                    
                     val needed = if (currentRow.isEmpty()) itemPx else currentRowWidth + gapPx + itemPx
                     if (currentRow.isNotEmpty() && needed > contentWidthPx) {
                         intrinsicRows.add(currentRow)
