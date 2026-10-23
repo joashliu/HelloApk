@@ -1363,16 +1363,26 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     val y = p[0].toIntOrNull() ?: return null
     val mo = p[1].toIntOrNull() ?: return null
     val d = p[2].toIntOrNull() ?: return null
+
+    // 🟢 修復關鍵：必須【先】獲取 todayStart！
+    // 確保 getTodayStartMillis() 就算觸發咗 30 秒快取刷新並修改咗 threadLocalCal，
+    // 都唔會影響到下面設定好嘅目標日期。
+    val todayStart = getTodayStartMillis()
+
+    // 設定目標 header 嘅時間
     val cal = threadLocalCal.get()!!.apply {
         set(y, mo - 1, d)
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
+    
+    val targetMillis = cal.timeInMillis // 獲取並鎖定目標時間
     val dow = cal.get(Calendar.DAY_OF_WEEK)
     val weekdayChar = WEEKDAY_CHARS[dow - 1]
     val isWeekend = dow == Calendar.SUNDAY || dow == Calendar.SATURDAY
-    val todayStart = getTodayStartMillis()
-    val diff = ((todayStart - cal.timeInMillis) / 86_400_000L).toInt()
+
+    // 使用穩定嘅 targetMillis 計算差距
+    val diff = ((todayStart - targetMillis) / 86_400_000L).toInt()
     val tag = when {
         diff == -1 -> "明日"
         diff == -2 -> "後日"
