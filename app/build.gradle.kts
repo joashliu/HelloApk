@@ -24,6 +24,7 @@ android {
         }
     }
 
+    // ★★★ 由舊版加返：release keystore 設定 ★★★
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("KEYSTORE_PATH")
@@ -43,12 +44,16 @@ android {
     }
 
     buildTypes {
+        // ★★★ 由舊版加返：debug 都用 release keystore ★★★
         debug {
             signingConfig = signingConfigs.getByName("release")
         }
         release {
+            // 🟢 優化：啟用 R8 壓縮與混淆，消除 JIT 編譯熱身帶來嘅卡頓
             isMinifyEnabled = true
+            // 🟢 優化：縮減 APK 大小
             isShrinkResources = true
+            
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -71,6 +76,8 @@ android {
     }
 
     composeOptions {
+        // ★ 如果你用 Kotlin 1.9.x → 保持下面呢行
+        // ★ 如果你升到 Kotlin 2.0+ → 刪咗下面呢行，改用 compose plugin
         kotlinCompilerExtensionVersion = "1.5.14"
     }
 
@@ -79,11 +86,6 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
-
-    // 🟢 新增：防止 shrinkResources 誤刪 ML Kit 模型檔（bundled OCR 模型）
-    androidResources {
-        noCompress += listOf("tflite", "pb", "lite", "bin", "dat")
-    }
 }
 
 dependencies {
@@ -91,6 +93,8 @@ dependencies {
     // ============ Core ============
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    
+    // 🟢 新增：官方 Splash Screen API，負責極速渲染開屏畫面
     implementation("androidx.core:core-splashscreen:1.0.1")
 
     // ============ Lifecycle (ViewModel + Compose 整合) ============
@@ -103,6 +107,7 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
+    // Compose UI
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -127,11 +132,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
-
-    // 🟢 新增：ML Kit 中文文字識別（bundled 模型，離線可用）
-    //    包含中文 + 拉丁字符，支援正則提取 HKD 金額
-    //    APK 會大咗約 20MB，但唔使首次聯網下載
-    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
 
     // ============ 測試 ============
     testImplementation("junit:junit:4.13.2")
