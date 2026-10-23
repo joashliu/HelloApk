@@ -21,6 +21,10 @@
         android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- ★ OCR Shortcut 功能所需權限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -59,6 +63,20 @@
             </intent-filter>
         </activity>
 
+        <!-- ★ OCR 授權中介 Activity (供 Shortcut 啟動) -->
+        <activity
+            android:name=".OcrCaptureActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- ★ OCR 截圖與辨識前台服務 -->
+        <service
+            android:name=".OcrForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <!-- 監控易乘碼 / 八達通 / 銀行通知 -->
         <service
             android:name=".PaymentNotificationListener"
@@ -75,7 +93,7 @@
             android:name=".NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- 快速記帳快捷磁貼 -->
+        <!-- 快速記帳快捷磁貼 (短按邏輯不變) -->
         <service
             android:name=".QuickAddTileService"
             android:label="快速記帳"
