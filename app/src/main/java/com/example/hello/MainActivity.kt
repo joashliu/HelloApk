@@ -4866,7 +4866,9 @@ private fun DollarAmount(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+private enum class StatBlockType { CAT, INC, EXP, AVG, BAL }
+private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp)
+
 @Composable
 fun TopStats(
     hasIncome: Boolean, hasExpense: Boolean,
@@ -4880,138 +4882,192 @@ fun TopStats(
     val showExpense = hasExpense
     val showAvg = isFilterMode && avgExpense != null && avgExpense > 0
     val showBal = true
-    
     val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
 
-    // 計算總共有幾多個活躍板塊
-    val visibleCount = (if (showCategory) 1 else 0) +
-                       (if (showIncome) 1 else 0) +
-                       (if (showExpense) 1 else 0) +
-                       (if (showAvg) 1 else 0) + 1
-
-    // 🟢 智能排版：如果剛好 4 個資訊就 2個一行 (2x2)，否則 3個一行
-    val maxPerRow = if (visibleCount == 4) 2 else 3
+    // 1. 決定目前有哪些板塊需要顯示
+    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, showBal) {
+        val list = mutableListOf<StatBlockType>()
+        if (showCategory) list.add(StatBlockType.CAT)
+        if (showIncome) list.add(StatBlockType.INC)
+        if (showExpense) list.add(StatBlockType.EXP)
+        if (showAvg) list.add(StatBlockType.AVG)
+        if (showBal) list.add(StatBlockType.BAL)
+        list
+    }
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(tween(420, easing = FastOutSlowInEasing))
             .padding(vertical = 4.dp)
     ) {
-        val totalWidth = maxWidth
-        val gap = 4.dp
-        // 減去 0.1dp 係為咗防止浮點數誤差導致意外提早換行
-        val itemWidth2 = (totalWidth - gap - 0.1.dp) / 2
-        val itemWidth3 = (totalWidth - gap * 2 - 0.1.dp) / 3
+        val totalW = maxWidth
+        val gapX = 6.dp
+        val gapY = 6.dp // 🟢 縮短咗垂直間隔，令兩行唔會太散
+        val rowH = 60.dp // 🟢 輕微調低高度，視覺更集中
 
-        fun getTargetW(visible: Boolean) = if (!visible) 0.dp else if (maxPerRow == 2) itemWidth2 else itemWidth3
-
-        // 寬度動畫，令板塊出現/消失及換行時保持平滑
-        val animSpec = spring<Dp>(dampingRatio = 0.8f, stiffness = 300f)
-        val catW by animateDpAsState(getTargetW(showCategory), animSpec, label = "catW")
-        val incW by animateDpAsState(getTargetW(showIncome), animSpec, label = "incW")
-        val expW by animateDpAsState(getTargetW(showExpense), animSpec, label = "expW")
-        val avgW by animateDpAsState(getTargetW(showAvg), animSpec, label = "avgW")
-        val balW by animateDpAsState(getTargetW(showBal), animSpec, label = "balW")
-
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(gap),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // 1. 類別 (Category)
-            if (catW > 0.dp) {
-                Box(modifier = Modifier.width(catW).height(64.dp).clipToBounds()) {
-                    val catStyle = CATEGORY_STYLES[categoryName]
-                    AnimatedStatBlock(
-                        isFilterMode = isFilterMode,
-                        iconNormal = catStyle?.icon ?: Icons.Default.Category,
-                        iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
-                        labelNormal = "類別", 
-                        labelFilter = "", // 🟢 縮細後不顯示「類別」文字
-                        valueNormal = categoryName, valueFilter = categoryName,
-                        valueColorNormal = TEXT_PRIMARY,
-                        showDollarNormal = false, showDollarFilter = false,
-                        modifier = Modifier.fillMaxSize()
-                    )
+        // 2. 核心大腦：精確計算每個板塊嘅 X, Y, Width，保證永遠「平均分佈」及「用盡空間」
+        val geoMap = remember(activeBlocks, totalW) {
+            val map = mutableMapOf<StatBlockType, BlockGeometry>()
+            val rows = when (activeBlocks.size) {
+                1 -> listOf(activeBlocks)
+                2 -> listOf(activeBlocks)
+                3 -> listOf(activeBlocks)
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2)) // 🟢 4個時：完美 2x2 排列
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3)) // 🟢 5個時：上3 下2
+                else -> emptyList()
+            }
+            
+            rows.forEachIndexed { rIdx, row ->
+                val itemsInRow = row.size
+                // 自動將寬度平分 (扣除 gap)
+                val w = (totalW - gapX * (itemsInRow - 1).coerceAtLeast(0)) / itemsInRow
+                val y = (rowH + gapY) * rIdx
+                row.forEachIndexed { cIdx, block ->
+                    val x = (w + gapX) * cIdx
+                    map[block] = BlockGeometry(x, y, w)
                 }
             }
+            map
+        }
 
-            // 2. 收入 (Income)
-            if (incW > 0.dp) {
-                Box(modifier = Modifier.width(incW).height(64.dp).clipToBounds()) {
-                    AnimatedStatBlock(
-                        isFilterMode = isFilterMode,
-                        iconNormal = Icons.Default.TrendingUp,
-                        iconColorNormal = COLOR_INCOME,
-                        labelNormal = "收入", labelFilter = "收入",
-                        valueNormal = formatAmountNoDecimal(income),
-                        valueFilter = formatAmountNoDecimal(income),
-                        valueColorNormal = COLOR_INCOME,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+        // 動態高度：根據行數自動撐高容器
+        val targetHeight = if (activeBlocks.size > 3) (rowH * 2 + gapY) else rowH
+        val animHeight by animateDpAsState(
+            targetValue = targetHeight,
+            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
+            label = "containerHeight"
+        )
+
+        // 3. 畫布區域：交由 StatBlockItem 獨立控制每塊嘅「平滑位移」及「淡入淡出」
+        Box(Modifier.fillMaxWidth().height(animHeight)) {
+            // 類別 (Category)
+            StatBlockItem(
+                type = StatBlockType.CAT, isActive = activeBlocks.contains(StatBlockType.CAT),
+                geoMap = geoMap, fallbackGeo = BlockGeometry(totalW / 2, 0.dp, 0.dp), rowH = rowH
+            ) {
+                val catStyle = CATEGORY_STYLES[categoryName]
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = catStyle?.icon ?: Icons.Default.Category,
+                    iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
+                    labelNormal = "類別", labelFilter = "", // 🟢 篩選時隱藏「類別」文字
+                    valueNormal = categoryName, valueFilter = categoryName,
+                    valueColorNormal = TEXT_PRIMARY,
+                    showDollarNormal = false, showDollarFilter = false,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
 
-            // 3. 支出 (Expense)
-            if (expW > 0.dp) {
-                Box(modifier = Modifier.width(expW).height(64.dp).clipToBounds()) {
-                    AnimatedStatBlock(
-                        isFilterMode = isFilterMode,
-                        iconNormal = Icons.Default.TrendingDown,
-                        iconColorNormal = COLOR_EXPENSE,
-                        labelNormal = "支出", labelFilter = "支出",
-                        valueNormal = formatAmountNoDecimal(expense),
-                        valueFilter = formatAmountNoDecimal(expense),
-                        valueColorNormal = COLOR_EXPENSE,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+            // 收入 (Income)
+            StatBlockItem(
+                type = StatBlockType.INC, isActive = activeBlocks.contains(StatBlockType.INC),
+                geoMap = geoMap, fallbackGeo = BlockGeometry(totalW / 2, 0.dp, 0.dp), rowH = rowH
+            ) {
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.TrendingUp,
+                    iconColorNormal = COLOR_INCOME,
+                    labelNormal = "收入", labelFilter = "收入",
+                    valueNormal = formatAmountNoDecimal(income), valueFilter = formatAmountNoDecimal(income),
+                    valueColorNormal = COLOR_INCOME, modifier = Modifier.fillMaxSize()
+                )
             }
 
-            // 4. 平均支出 (Average Expense) - 只喺篩選模式出現
-            if (avgW > 0.dp) {
-                Box(modifier = Modifier.width(avgW).height(64.dp).clipToBounds()) {
-                    AnimatedStatBlock(
-                        isFilterMode = isFilterMode,
-                        iconNormal = Icons.Default.Receipt, // 均支 Icon
-                        iconColorNormal = Color(0xFFF59E0B), // 琥珀色
-                        labelNormal = "均支", labelFilter = "均支",
-                        valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0),
-                        valueFilter = formatAmountNoDecimal(avgExpense ?: 0.0),
-                        valueColorNormal = Color(0xFFF59E0B),
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+            // 支出 (Expense)
+            StatBlockItem(
+                type = StatBlockType.EXP, isActive = activeBlocks.contains(StatBlockType.EXP),
+                geoMap = geoMap, fallbackGeo = BlockGeometry(totalW / 2, 0.dp, 0.dp), rowH = rowH
+            ) {
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.TrendingDown,
+                    iconColorNormal = COLOR_EXPENSE,
+                    labelNormal = "支出", labelFilter = "支出",
+                    valueNormal = formatAmountNoDecimal(expense), valueFilter = formatAmountNoDecimal(expense),
+                    valueColorNormal = COLOR_EXPENSE, modifier = Modifier.fillMaxSize()
+                )
             }
 
-            // 5. 餘額 / 筆數 (Balance / Count)
-            if (balW > 0.dp) {
-                Box(modifier = Modifier.width(balW).height(64.dp).clipToBounds()) {
-                    AnimatedStatBlock(
-                        isFilterMode = isFilterMode,
-                        iconNormal = Icons.Default.AccountBalanceWallet,
-                        iconFilter = Icons.Default.FilterList,
-                        iconColorNormal = targetBalColor,
-                        iconColorFilter = BRAND_PRIMARY,
-                        labelNormal = "餘額",
-                        labelFilter = "", // 🟢 篩選模式時標籤變空
-                        valueNormal = formatAmountNoDecimal(balance),
-                        valueFilter = "${filteredCount ?: 0} 筆", // 🟢 直接顯示 "X 筆"
-                        valueColorNormal = targetBalColor,
-                        valueColorFilter = BRAND_PRIMARY,
-                        showDollarNormal = true, showDollarFilter = false, // "X 筆" 唔需要金錢符號
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+            // 均支 (Average)
+            StatBlockItem(
+                type = StatBlockType.AVG, isActive = activeBlocks.contains(StatBlockType.AVG),
+                geoMap = geoMap, fallbackGeo = BlockGeometry(totalW / 2, rowH + gapY, 0.dp), rowH = rowH
+            ) {
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B),
+                    labelNormal = "均支", labelFilter = "均支",
+                    valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueFilter = formatAmountNoDecimal(avgExpense ?: 0.0),
+                    valueColorNormal = Color(0xFFF59E0B), modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // 餘額 / 筆數 (Balance)
+            StatBlockItem(
+                type = StatBlockType.BAL, isActive = activeBlocks.contains(StatBlockType.BAL),
+                geoMap = geoMap, fallbackGeo = BlockGeometry(totalW / 2, 0.dp, 0.dp), rowH = rowH
+            ) {
+                AnimatedStatBlock(
+                    isFilterMode = isFilterMode,
+                    iconNormal = Icons.Default.AccountBalanceWallet, iconFilter = Icons.Default.FilterList,
+                    iconColorNormal = targetBalColor, iconColorFilter = BRAND_PRIMARY,
+                    labelNormal = "餘額", labelFilter = "", // 🟢 篩選時標籤留白，只顯示筆數
+                    valueNormal = formatAmountNoDecimal(balance), valueFilter = "${filteredCount ?: 0} 筆", // 🟢 X 筆
+                    valueColorNormal = targetBalColor, valueColorFilter = BRAND_PRIMARY,
+                    showDollarNormal = true, showDollarFilter = false, // X 筆無需 $
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }
 }
 
-// 🟢 專為完美平滑過渡（上下排版 -> 左右排版）度身訂造嘅 Layout 引擎
+// 🟢 自動追蹤及執行「平滑位移」同「淡入彈出」嘅容器
 @Composable
-fun AnimatedStatBlock(
+private fun StatBlockItem(
+    type: StatBlockType,
+    isActive: Boolean,
+    geoMap: Map<StatBlockType, BlockGeometry>,
+    fallbackGeo: BlockGeometry,
+    rowH: Dp,
+    content: @Composable () -> Unit
+) {
+    val targetGeo = geoMap[type] ?: fallbackGeo
+    var lastGeo by remember { mutableStateOf(targetGeo) }
+    
+    // 一旦啟動，即刻將起點 set 做目標位置，防止由 0,0 飛出嚟；之後嘅移動就靠動畫
+    if (isActive) lastGeo = targetGeo
+
+    val animSpec = spring<Dp>(dampingRatio = 0.8f, stiffness = 300f)
+    val animX by animateDpAsState(lastGeo.x, animSpec, label = "x_$type")
+    val animY by animateDpAsState(lastGeo.y, animSpec, label = "y_$type")
+    val animW by animateDpAsState(lastGeo.w, animSpec, label = "w_$type")
+
+    // 🟢 出現動畫改為：原地淡入及放大 (Fade In + Scale Up)，極致自然
+    val alpha by animateFloatAsState(if (isActive) 1f else 0f, tween(250), label = "alpha_$type")
+    val scale by animateFloatAsState(if (isActive) 1f else 0.7f, spring(0.75f, 300f), label = "scale_$type")
+
+    if (alpha > 0.01f) {
+        Box(
+            Modifier
+                .offset(x = animX, y = animY)
+                .width(animW)
+                .height(rowH)
+                .graphicsLayer {
+                    this.alpha = alpha
+                    this.scaleX = scale
+                    this.scaleY = scale
+                }
+                .clipToBounds()
+        ) {
+            content()
+        }
+    }
+}
+
+// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局 (完全拋棄數字跳動)
+@Composable
+private fun AnimatedStatBlock(
     isFilterMode: Boolean,
     iconNormal: ImageVector,
     iconFilter: ImageVector = iconNormal,
@@ -5040,19 +5096,19 @@ fun AnimatedStatBlock(
     val targetShowDollar = if (isFilterMode) showDollarFilter else showDollarNormal
     val targetIcon = if (isFilterMode) iconFilter else iconNormal
     
-    // 🟢 放棄數字滾動，直接使用標準文字處理，保證位移時絕對穩定
+    // 🟢 使用標準純文字顯示，確保過渡期間數字絕對穩定，唔會滾動或跳行
     val finalValueString = if (targetShowDollar) {
         if (targetValueText.startsWith("-")) "-$" + targetValueText.substring(1) else "$" + targetValueText
     } else targetValueText
 
     androidx.compose.ui.layout.Layout(
         content = {
-            // [0] 圖標 (Icon)
+            // [0] 圖標
             Crossfade(targetState = targetIcon, label = "icon", animationSpec = tween(300)) { ico ->
                 Icon(ico, null, tint = currentIconColor, modifier = Modifier.size((16f - 1f * progress).dp))
             }
             
-            // [1] 標籤文字 (Label)
+            // [1] 標籤
             val currentLabel = if (isFilterMode && labelFilter.isEmpty()) labelNormal else if (isFilterMode) labelFilter else labelNormal
             val labelAlpha = if (isFilterMode && labelFilter.isEmpty()) (1f - progress * 2f).coerceIn(0f, 1f) else 1f
             Text(
@@ -5064,11 +5120,11 @@ fun AnimatedStatBlock(
                 softWrap = false
             )
             
-            // [2] 數值 (Value)
+            // [2] 數值
             Text(
                 text = finalValueString,
                 color = currentValueColor,
-                fontSize = (22f - 7f * progress).sp, // 🟢 由 22sp 平滑縮細到 15sp
+                fontSize = (20f - 5f * progress).sp, // 🟢 字體流暢縮放 (20sp -> 15sp)
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
                 softWrap = false
@@ -5087,7 +5143,7 @@ fun AnimatedStatBlock(
             val gap1 = 4.dp.roundToPx()
             val gap2 = 6.dp.roundToPx()
             
-            // 📍 正常模式 (Normal): 上下排列
+            // 📍 正常模式 (上下排列)
             val topRowWNormal = iconP.width + titleGapNormal + labelP.width
             val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
             val titleYNormal = (constraints.maxHeight / 2) - maxOf(iconP.height, labelP.height) + 2.dp.roundToPx()
@@ -5098,7 +5154,7 @@ fun AnimatedStatBlock(
             val valueXNormal = (constraints.maxWidth - valueP.width) / 2
             val valueYNormal = (constraints.maxHeight / 2) + 2.dp.roundToPx()
             
-            // 📍 篩選模式 (Filter): 左右平排
+            // 📍 篩選模式 (左右平排)
             val effectiveLabelW = if (labelFilter.isEmpty()) 0 else labelP.width
             val effectiveGap1 = if (effectiveLabelW > 0) gap1 else 0
             val totalWFilter = iconP.width + effectiveGap1 + effectiveLabelW + gap2 + valueP.width
@@ -5112,7 +5168,7 @@ fun AnimatedStatBlock(
             val labelYFilter = (constraints.maxHeight - labelP.height) / 2
             val valueYFilter = (constraints.maxHeight - valueP.height) / 2
             
-            // ✨ 平滑插值 (Lerp) 物理佈局
+            // ✨ 平滑過渡坐標
             iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(titleYNormal, iconYFilter, progress))
             labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(titleYNormal, labelYFilter, progress))
             valueP.placeRelative(lerpI(valueXNormal, valueXFilter, progress), lerpI(valueYNormal, valueYFilter, progress))
