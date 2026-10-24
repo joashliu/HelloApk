@@ -3041,6 +3041,48 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
     val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
 
+    // 🟢 1. 建立 NestedScroll 狀態，用於攔截手勢控制快速輸入面板的無縫裁剪
+    var fullHeaderHeightPx by remember { mutableFloatStateOf(0f) }
+    val minHeaderHeightPx = remember(density) { with(density) { 68.dp.toPx() } } // 預留約一行的空間
+    var headerCollapseOffsetPx by remember { mutableFloatStateOf(0f) }
+
+    // 確保切換模式時重置高度狀態
+    LaunchedEffect(filterMode) {
+        headerCollapseOffsetPx = 0f
+        try { listState.scrollToItem(0) } catch (_: Exception) {}
+    }
+
+    // 🟢 2. 完美跟手的核心：攔截滑動手勢
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                val maxCollapse = -(fullHeaderHeightPx - minHeaderHeightPx).coerceAtLeast(0f)
+                
+                // 向上滑動時 (delta < 0)：優先收縮頂部容器，唔滾動列表
+                if (delta < 0 && headerCollapseOffsetPx > maxCollapse) {
+                    val newOffset = (headerCollapseOffsetPx + delta).coerceAtLeast(maxCollapse)
+                    val consumed = newOffset - headerCollapseOffsetPx
+                    headerCollapseOffsetPx = newOffset
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                // 向下滑動 (delta > 0) 且列表已經到頂時：平滑展開頂部容器
+                if (delta > 0 && headerCollapseOffsetPx < 0f) {
+                    val newOffset = (headerCollapseOffsetPx + delta).coerceAtMost(0f)
+                    val consumedDelta = newOffset - headerCollapseOffsetPx
+                    headerCollapseOffsetPx = newOffset
+                    return Offset(0f, consumedDelta)
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .collect { inProgress ->
@@ -3069,37 +3111,7 @@ fun LedgerContent(
     val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
-
     val hasChart = !filterMode && weeklyExpenses.isNotEmpty()
-    val chartHeightPx = remember(density) { with(density) { 108.dp.toPx() } }
-
-    val quickInputMaxRows = remember { mutableIntStateOf(4) }
-
-    LaunchedEffect(listState, hasChart, chartHeightPx) {
-        snapshotFlow {
-            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull()
-            if (info == null) null
-            else info.index to listState.firstVisibleItemScrollOffset.toFloat()
-        }
-            .distinctUntilChanged()
-            .collect { pair ->
-                val (index, offset) = pair ?: return@collect
-                val rows = when {
-                    index == 0 -> if (hasChart) {
-                        when {
-                            offset < chartHeightPx * 0.35f -> 4
-                            offset < chartHeightPx * 0.70f -> 3
-                            else -> 2
-                        }
-                    } else 4
-                    index == 1 -> 2
-                    else -> 1
-                }
-                if (quickInputMaxRows.intValue != rows) {
-                    quickInputMaxRows.intValue = rows
-                }
-            }
-    }
 
     val fanMenuProgress = animateFloatAsState(
         targetValue = if (activeFanRecord != null) 1f else 0f,
@@ -3189,16 +3201,10 @@ fun LedgerContent(
             if (showFuture) {
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
-            } else {
+            } catch (_: Exception) {}
+            else {
                 if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
             }
-        } catch (_: Exception) {}
-    }
-
-    // 🟢 強制回頂：切換模式時瞬間將滾動重置為 0，確保整個面版完整顯示
-    LaunchedEffect(filterMode) {
-        try { 
-            listState.scrollToItem(0) 
         } catch (_: Exception) {}
     }
 
@@ -3377,17 +3383,15 @@ fun LedgerContent(
                 modifier = Modifier
                     .zIndex(1f)
                     .fillMaxWidth()
+                    .nestedScroll(nestedScrollConnection) // 🟢 3. 綁定手勢攔截器，監控列表拉動
             ) {
                 AnimatedContent(
                     targetState = filterMode,
                     transitionSpec = {
-                        // 🟢 全新卡片左右滑動動畫：完美平移兼淡入淡出
                         if (targetState) {
-                            // 進入篩選：快速輸入向左走，篩選卡片從右滑入
                             (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
                             (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(250)))
                         } else {
-                            // 離開篩選：篩選卡片向右走，快速輸入從左滑入
                             (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
                             (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
                         }.using(SizeTransform(clip = false) { _, _ -> tween(350, easing = FastOutSlowInEasing) })
@@ -3398,12 +3402,40 @@ fun LedgerContent(
                         Column(Modifier.fillMaxWidth()) {
                             if (topNotes.isNotEmpty()) {
                                 Spacer(Modifier.height(4.dp))
-                                QuickInputSection(
-                                    topNotes = topNotes, noteIconMap = noteIconMap,
-                                    maxRowsPerPage = quickInputMaxRows.intValue,
-                                    skipAppearAnimation = !isFirstShow,
-                                    onClick = onQuickInputClick
-                                )
+                                
+                                // 🟢 4. 無縫裁剪高度，取代原本嘅動畫消失
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(
+                                            with(density) {
+                                                if (fullHeaderHeightPx > 0) {
+                                                    // 原本完整高度 + (因滑動而產生的負 offset) = 實際顯示高度
+                                                    (fullHeaderHeightPx + headerCollapseOffsetPx).toDp()
+                                                } else {
+                                                    Dp.Unspecified
+                                                }
+                                            }
+                                        )
+                                        .clipToBounds() // 絕對關鍵：將超出的內部內容硬裁剪
+                                ) {
+                                    Box(
+                                        modifier = Modifier.onSizeChanged { size ->
+                                            val newH = size.height.toFloat()
+                                            if (newH > 0f && fullHeaderHeightPx != newH) {
+                                                fullHeaderHeightPx = newH
+                                            }
+                                        }
+                                    ) {
+                                        QuickInputSection(
+                                            topNotes = topNotes,
+                                            noteIconMap = noteIconMap,
+                                            maxRowsPerPage = 4, // 固定完整渲染，交由外層裁剪
+                                            skipAppearAnimation = !isFirstShow,
+                                            onClick = onQuickInputClick
+                                        )
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(4.dp))
                         }
@@ -3458,61 +3490,61 @@ fun LedgerContent(
                         }
                     }
                 }
-            }
 
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clipToBounds()
-                    .graphicsLayer {
-                        val p = keyboardProgressProvider()
-                        alpha = 1f - (p * 0.4f)
-                        if (p > 0.02f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            val quantized = ((p * 24f).roundToInt() * 2).coerceIn(2, 48)
-                            renderEffect = getCachedBlurEffect(quantized)
-                        } else {
-                            renderEffect = null
-                        }
-                    }
-            ) {
-                if (loading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = BRAND_PRIMARY)
-                    }
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(
-                            start = 0.dp, end = 0.dp, top = 0.dp,
-                            bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
-                        )
-                    ) {
-                        if (!filterMode && weeklyExpenses.isNotEmpty()) {
-                            item(key = "weekly_chart", contentType = "weekly_chart") {
-                                WeeklyExpenseChart(
-                                    data = weeklyExpenses,
-                                    listState = listState,
-                                    introProgress = weeklyIntroProgress.value,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .clipToBounds()
+                        .graphicsLayer {
+                            val p = keyboardProgressProvider()
+                            alpha = 1f - (p * 0.4f)
+                            if (p > 0.02f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                val quantized = ((p * 24f).roundToInt() * 2).coerceIn(2, 48)
+                                renderEffect = getCachedBlurEffect(quantized)
+                            } else {
+                                renderEffect = null
                             }
                         }
-
-                        item(key = "magic_top_anchor", contentType = "anchor") {
-                            Spacer(Modifier.height(1.dp))
+                ) {
+                    if (loading) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = BRAND_PRIMARY)
                         }
-                        if (displayGroups.isEmpty() && !showKeyboard) {
-                            item(key = "__empty__", contentType = "empty") {
-                                Box(Modifier.fillParentMaxWidth().padding(top = 80.dp),
-                                    contentAlignment = Alignment.Center) {
-                                    Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
-                                        color = TEXT_SECONDARY)
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(
+                                start = 0.dp, end = 0.dp, top = 0.dp,
+                                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
+                            )
+                        ) {
+                            if (!filterMode && weeklyExpenses.isNotEmpty()) {
+                                item(key = "weekly_chart", contentType = "weekly_chart") {
+                                    WeeklyExpenseChart(
+                                        data = weeklyExpenses,
+                                        listState = listState,
+                                        introProgress = weeklyIntroProgress.value,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
                             }
-                        } else {
-                            listContent()
+
+                            item(key = "magic_top_anchor", contentType = "anchor") {
+                                Spacer(Modifier.height(1.dp))
+                            }
+                            if (displayGroups.isEmpty() && !showKeyboard) {
+                                item(key = "__empty__", contentType = "empty") {
+                                    Box(Modifier.fillParentMaxWidth().padding(top = 80.dp),
+                                        contentAlignment = Alignment.Center) {
+                                        Text(if (filterMode) "冇符合篩選條件嘅記錄" else "仲未有記錄,撳右下角 + 新增",
+                                            color = TEXT_SECONDARY)
+                                    }
+                                }
+                            } else {
+                                listContent()
+                            }
                         }
                     }
                 }
@@ -5430,7 +5462,6 @@ fun QuickInputSection(
                         textMeasurer.measure(name, textStyle).size.width.toFloat()
                     }
                     
-                    // 🟢 關鍵修改：限制 Chip 最大寬度為可用範圍嘅寬度 (contentWidthPx)
                     val itemPx = (baseItemPx + textW).coerceAtMost(contentWidthPx)
                     
                     val needed = if (currentRow.isEmpty()) itemPx else currentRowWidth + gapPx + itemPx
@@ -5496,14 +5527,9 @@ fun QuickInputSection(
                 (if (hasIndicator) indicatorSpaceDp else 0.dp)
             }
 
-            val animatedHeight by animateDpAsState(
-                targetValue = targetHeightDp,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 350f),
-                label = "quickPanelHeight"
-            )
-
+            // 🟢 取消高度動畫，完全固定，將裁剪和縮小效果交畀外層的 Box 控制
             Box(
-                Modifier.fillMaxWidth().height(animatedHeight)
+                Modifier.fillMaxWidth().height(targetHeightDp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
             ) {
