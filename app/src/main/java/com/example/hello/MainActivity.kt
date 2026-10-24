@@ -3127,44 +3127,40 @@ fun LedgerContent(
     LaunchedEffect(scrollToTopTrigger) {
         if (scrollToTopTrigger > 0) {
             try {
-                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
+                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
-            } catch (_: Exception) {
-                try { listState.scrollToItem(0) } catch (_: Exception) {}
-            }
+            } catch (_: Exception) {}
         }
     }
 
+    // 🟢 1. 解決雙重彈跳：將瞬間 scrollToItem 改為 animateScrollToItem 平滑過渡
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             try {
-                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
+                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
-            } catch (_: Exception) {
-            } finally {
-                try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-                        listState.scrollToItem(0)
-                    }
-                } catch (_: Exception) {}
-            }
+            } catch (_: Exception) {}
         }
     }
 
     LaunchedEffect(showFuture) {
         try {
             if (showFuture) {
-                if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
+                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
-            } else {
+            }
+            else {
                 if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
             }
         } catch (_: Exception) {}
     }
     
-    // 確保切換模式時重置位置，等大家睇得見新面板
+    // 🟢 2. 切換模式時平滑回頂，與 AnimatedContent 嘅高度變更完美融合
     LaunchedEffect(filterMode) {
-        try { listState.scrollToItem(0) } catch (_: Exception) {}
+        try { 
+            if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
+            listState.animateScrollToItem(0) 
+        } catch (_: Exception) {}
     }
 
     val singleCategory by remember(filterMode, filtered) {
@@ -3216,10 +3212,12 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
+                    // 🟢 3. 徹底拔除 placementSpec = spring(...) 位移動畫！
+                    // 保留 fadeIn/fadeOut 等項目被刪除時可以柔和消失，但禁用佈局位移動畫，徹底解決彈跳感。
                     Box(modifier = Modifier.animateItem(
                         fadeInSpec = tween(250, easing = FastOutSlowInEasing),
                         fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
-                        placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
+                        placementSpec = null 
                     )) {
                         Column(
                             modifier = Modifier
@@ -3287,7 +3285,7 @@ fun LedgerContent(
                         .height(10.dp)
                         .animateItem(
                             fadeInSpec = tween(250), fadeOutSpec = tween(200),
-                            placementSpec = spring(dampingRatio = 0.85f, stiffness = 450f)
+                            placementSpec = null // 🟢 同上，禁用位移動畫
                         )
                     )
                 }
@@ -3299,7 +3297,6 @@ fun LedgerContent(
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
             NotificationAccessGuide(context = LocalContext.current)
 
-            // 🟢 TopStats 保留置頂，方便任何時候都見到總覽
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3368,7 +3365,6 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // 🟢 將快速輸入/篩選面板化身為列表嘅第一項，完美滑走！
                         item(key = "top_dynamic_panel") {
                             AnimatedContent(
                                 targetState = filterMode,
@@ -3379,7 +3375,9 @@ fun LedgerContent(
                                     } else {
                                         (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
                                         (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
-                                    }.using(SizeTransform(clip = false) { _, _ -> tween(350, easing = FastOutSlowInEasing) })
+                                    }
+                                    // 🟢 4. 將 SizeTransform 同步為 spring(0.9f, 400f)，同上方嘅 TopStats 完全咬合！
+                                    .using(SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.9f, stiffness = 400f) })
                                 },
                                 label = "filterContent"
                             ) { isFilter ->
@@ -3390,7 +3388,7 @@ fun LedgerContent(
                                             QuickInputSection(
                                                 topNotes = topNotes,
                                                 noteIconMap = noteIconMap,
-                                                maxRowsPerPage = 4, // 依然保留你最愛嘅 4 行設計
+                                                maxRowsPerPage = 4,
                                                 skipAppearAnimation = !isFirstShow,
                                                 onClick = onQuickInputClick
                                             )
@@ -3461,6 +3459,10 @@ fun LedgerContent(
                             }
                         }
 
+                        item(key = "magic_top_anchor", contentType = "anchor") {
+                            Spacer(Modifier.height(1.dp))
+                        }
+                        
                         if (displayGroups.isEmpty() && !showKeyboard) {
                             item(key = "__empty__", contentType = "empty") {
                                 Box(Modifier.fillParentMaxWidth().padding(top = 80.dp),
