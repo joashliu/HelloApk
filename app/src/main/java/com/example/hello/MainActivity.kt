@@ -3156,8 +3156,7 @@ fun LedgerContent(
             if (showFuture) {
                 if (listState.firstVisibleItemIndex > 3) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
-            } catch (_: Exception) {}
-            else {
+            } else {
                 if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
             }
         } catch (_: Exception) {}
