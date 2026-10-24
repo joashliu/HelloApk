@@ -11,16 +11,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4   # 修正：目前最新穩定版係 v4，v6 唔存在
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4 # 修正：目前最新穩定版係 v4，v5 唔存在
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3 # 修正：目前最新穩定版係 v3
 
       - name: Decode google-services.json
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -di > app/google-services.json
@@ -38,13 +38,16 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew     # 建議加入：確保 Linux 環境下 gradlew 有執行權限
+
       - name: Build debug APK
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release.keystore
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle assembleDebug
+        run: ./gradlew assembleDebug # 修正：改用 ./gradlew 確保使用項目專屬嘅 Gradle 版本
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
