@@ -3133,9 +3133,14 @@ fun LedgerContent(
         } catch (_: Exception) {}
     }
     
-    // 🟢 2. 切換模式時瞬間回頂，防止同 AnimatedContent 嘅高度動畫打交
+    // 🟢 2. 等 panel 高度動畫完成後，才平滑滾返頂，避免「瞬移 + 高度動畫」兩次移動
     LaunchedEffect(filterMode) {
-        try { listState.scrollToItem(0) } catch (_: Exception) {}
+        try {
+            if (listState.firstVisibleItemIndex > 0) {
+                delay(420)
+                listState.animateScrollToItem(0)
+            }
+        } catch (_: Exception) {}
     }
 
     val singleCategory by remember(filterMode, filtered) {
@@ -3350,7 +3355,7 @@ fun LedgerContent(
                                         (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
                                         (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
                                     }
-                                    .using(SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.9f, stiffness = 400f) })
+                                    .using(SizeTransform(clip = true) { _, _ -> tween(durationMillis = 400, easing = FastOutSlowInEasing) })
                                 },
                                 label = "filterContent"
                             ) { isFilter ->
@@ -5324,7 +5329,7 @@ private data class PlacedChip(
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    maxRowsPerPage: Int = 4, // 🟢 按照你要求，改返做 4 行！
+    maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
     onClick: (String) -> Unit
 ) {
@@ -5429,9 +5434,11 @@ fun QuickInputSection(
                 (if (hasIndicator) indicatorSpaceDp else 0.dp)
             }
 
+            // 🟢 改動 3：改 tween(400, FastOutSlowIn) 對齊 AnimatedContent 曲線，
+            // 令 panel 高度動畫同外層高度動畫完全同步，唔會再「二次跳動」
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeightDp,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 350f),
+                animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
                 label = "quickPanelHeight"
             )
 
