@@ -3040,30 +3040,9 @@ fun LedgerContent(
 
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val headerHeightPx = remember(density) { with(density) { 64.dp.toPx() } }
 
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }
-            .collect { inProgress ->
-                if (!inProgress) {
-                    val transitioningHeader = listState.layoutInfo.visibleItemsInfo.find {
-                        it.contentType == "day_header" && it.offset < -2 && it.offset > -(headerHeightPx - 2)
-                    }
-                    if (transitioningHeader != null) {
-                        val offset = transitioningHeader.offset.toFloat()
-                        val distanceToScroll = if (offset < -headerHeightPx / 2) {
-                            headerHeightPx + offset
-                        } else offset
-                        try {
-                            listState.animateScrollBy(
-                                value = distanceToScroll,
-                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f)
-                            )
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-    }
+    // 🟢 1. 徹底刪除咗會同 stickyHeader 打交、導致「彈兩下」嘅 snapshotFlow 監聽邏輯！
+    // 交返畀 Compose 原生嘅 LazyColumn 處理滾動，絕對唔會再有二次彈跳。
 
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
@@ -3133,7 +3112,6 @@ fun LedgerContent(
         }
     }
 
-    // 🟢 1. 解決雙重彈跳：將瞬間 scrollToItem 改為 animateScrollToItem 平滑過渡
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             try {
@@ -3155,12 +3133,9 @@ fun LedgerContent(
         } catch (_: Exception) {}
     }
     
-    // 🟢 2. 切換模式時平滑回頂，與 AnimatedContent 嘅高度變更完美融合
+    // 🟢 2. 切換模式時瞬間回頂，防止同 AnimatedContent 嘅高度動畫打交
     LaunchedEffect(filterMode) {
-        try { 
-            if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
-            listState.animateScrollToItem(0) 
-        } catch (_: Exception) {}
+        try { listState.scrollToItem(0) } catch (_: Exception) {}
     }
 
     val singleCategory by remember(filterMode, filtered) {
@@ -3212,12 +3187,11 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
-                    // 🟢 3. 徹底拔除 placementSpec = spring(...) 位移動畫！
-                    // 保留 fadeIn/fadeOut 等項目被刪除時可以柔和消失，但禁用佈局位移動畫，徹底解決彈跳感。
+                    // 🟢 3. 恢復 placementSpec！畀返個順滑嘅位移動畫佢，解決「冇動畫」嘅問題。
                     Box(modifier = Modifier.animateItem(
                         fadeInSpec = tween(250, easing = FastOutSlowInEasing),
                         fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
-                        placementSpec = null 
+                        placementSpec = spring(dampingRatio = 0.9f, stiffness = 350f) 
                     )) {
                         Column(
                             modifier = Modifier
@@ -3285,7 +3259,7 @@ fun LedgerContent(
                         .height(10.dp)
                         .animateItem(
                             fadeInSpec = tween(250), fadeOutSpec = tween(200),
-                            placementSpec = null // 🟢 同上，禁用位移動畫
+                            placementSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
                         )
                     )
                 }
@@ -3376,7 +3350,6 @@ fun LedgerContent(
                                         (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
                                         (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
                                     }
-                                    // 🟢 4. 將 SizeTransform 同步為 spring(0.9f, 400f)，同上方嘅 TopStats 完全咬合！
                                     .using(SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.9f, stiffness = 400f) })
                                 },
                                 label = "filterContent"
