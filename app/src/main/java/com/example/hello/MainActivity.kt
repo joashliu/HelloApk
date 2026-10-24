@@ -3060,27 +3060,23 @@ fun LedgerContent(
                 val delta = available.y
                 val maxCollapse = -(fullHeaderHeightPx - minHeaderHeightPx).coerceAtLeast(0f)
                 
-                // 向上滑動時 (delta < 0)：優先收縮頂部容器，唔滾動列表
                 if (delta < 0 && headerCollapseOffsetPx > maxCollapse) {
+                    // 向上滑 (縮細)：優先收縮頂部容器
                     val newOffset = (headerCollapseOffsetPx + delta).coerceAtLeast(maxCollapse)
+                    val consumed = newOffset - headerCollapseOffsetPx
+                    headerCollapseOffsetPx = newOffset
+                    return Offset(0f, consumed)
+                } else if (delta > 0 && headerCollapseOffsetPx < 0f) {
+                    // 向下滑 (放大)：即時響應手勢 (Quick Return 模式)
+                    val newOffset = (headerCollapseOffsetPx + delta).coerceAtMost(0f)
                     val consumed = newOffset - headerCollapseOffsetPx
                     headerCollapseOffsetPx = newOffset
                     return Offset(0f, consumed)
                 }
                 return Offset.Zero
             }
-
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                val delta = available.y
-                // 向下滑動 (delta > 0) 且列表已經到頂時：平滑展開頂部容器
-                if (delta > 0 && headerCollapseOffsetPx < 0f) {
-                    val newOffset = (headerCollapseOffsetPx + delta).coerceAtMost(0f)
-                    val consumedDelta = newOffset - headerCollapseOffsetPx
-                    headerCollapseOffsetPx = newOffset
-                    return Offset(0f, consumedDelta)
-                }
-                return Offset.Zero
-            }
+            
+            // onPostScroll 可以留空，因為我哋已經喺 onPreScroll 完美接管咗上下滑動
         }
     }
 
@@ -3420,12 +3416,17 @@ fun LedgerContent(
                                         .clipToBounds() // 絕對關鍵：將超出的內部內容硬裁剪
                                 ) {
                                     Box(
-                                        modifier = Modifier.onSizeChanged { size ->
-                                            val newH = size.height.toFloat()
-                                            if (newH > 0f && fullHeaderHeightPx != newH) {
-                                                fullHeaderHeightPx = newH
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            // 🟢 防夾殺神器：允許內部組件無視外層嘅高度限制，永遠保持測量真實全高！
+                                            .wrapContentHeight(unbounded = true, align = Alignment.Top)
+                                            .onGloballyPositioned { coords ->
+                                                val newH = coords.size.height.toFloat()
+                                                // 加入容錯值 (>1f)，防止小數點精度導致無限刷新
+                                                if (newH > 0f && kotlin.math.abs(fullHeaderHeightPx - newH) > 1f) {
+                                                    fullHeaderHeightPx = newH
+                                                }
                                             }
-                                        }
                                     ) {
                                         QuickInputSection(
                                             topNotes = topNotes,
