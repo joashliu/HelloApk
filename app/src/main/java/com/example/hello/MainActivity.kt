@@ -3015,6 +3015,20 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
+    // 🟢 初次顯示 stagger 狀態：等 filtered 由空變非空時觸發一次，4 秒後清空
+    val staggerIdsState = remember { mutableStateOf<Set<String>>(emptySet()) }
+    val staggerIds = staggerIdsState.value
+    var staggerConsumed by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(filtered.isNotEmpty()) {
+        if (!staggerConsumed && filtered.isNotEmpty()) {
+            staggerIdsState.value = filtered.map { it.id }.toSet()
+            staggerConsumed = true
+            delay(4000)
+            staggerIdsState.value = emptySet()
+        }
+    }
+
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
 
@@ -3177,6 +3191,16 @@ fun LedgerContent(
         }
     }
 
+    // 🟢 按列表順序為每條 record 編號；跨日期 group 連續編號，視覺上連貫啲
+    val staggerIndexMap = remember(displayGroups) {
+        val map = HashMap<String, Int>()
+        var i = 0
+        for ((_, records) in displayGroups) {
+            for (r in records) map[r.id] = i++
+        }
+        map
+    }
+
     val listContent: LazyListScope.() -> Unit = {
         displayGroups.forEachIndexed { index, (dateKey, dayRecords) ->
             val stat = dayStats[dateKey] ?: DayStat(0.0, 0.0, false)
@@ -3216,9 +3240,11 @@ fun LedgerContent(
 
                                 key(r.id) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
+                                        // 🟢 傳入 staggerIds 同 staggerIndex，令初出場有 stagger 效果
                                         AnimatedRecordItem(
-                                            animateOnMount = r.id in justAddedIds,
-                                            isDeleting = isRecDeleting
+                                            animateOnMount = r.id in justAddedIds || r.id in staggerIds,
+                                            isDeleting = isRecDeleting,
+                                            staggerIndex = staggerIndexMap[r.id] ?: 0
                                         ) {
                                             SwipeableRecordItem(
                                                 backgroundColor = SURFACE_CARD,
@@ -3937,6 +3963,7 @@ private val PARTICLE_COLORS = listOf(
 fun AnimatedRecordItem(
     animateOnMount: Boolean,
     isDeleting: Boolean = false,
+    staggerIndex: Int = 0,                 // 🟢 新增：stagger 延遲索引
     content: @Composable () -> Unit
 ) {
     var everDeleting by remember { mutableStateOf(isDeleting) }
@@ -3959,7 +3986,8 @@ fun AnimatedRecordItem(
     val alphaAnim = remember { Animatable(if (animateOnMount) 0f else 1f) }
     val translateYAnim = remember { Animatable(if (animateOnMount) 40f else 0f) }
 
-    LaunchedEffect(animateOnMount, isDeleting) {
+    // 🟢 key 加入 staggerIndex；延遲按索引遞增，上限 25 個 (~780ms) 避免極長列表拖太耐
+    LaunchedEffect(animateOnMount, isDeleting, staggerIndex) {
         if (isDeleting) {
             launch {
                 translateYAnim.animateTo(16f,
@@ -3975,7 +4003,8 @@ fun AnimatedRecordItem(
                     spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow))
             }
         } else if (animateOnMount) {
-            delay(30)
+            // 🟢 原本 delay(30)，改成按 staggerIndex 遞增
+            delay(30L + staggerIndex.coerceAtMost(25) * 30L)
             launch {
                 heightAnim.animateTo(maxHeightPx,
                     spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow))
@@ -4414,9 +4443,11 @@ fun DayDetailPanel(
         sortedRecords.forEachIndexed { idx, r ->
             key(r.id) {
                 Column(modifier = Modifier.fillMaxWidth()) {
+                    // 🟢 傳入 staggerIndex，展開當日詳情時有 stagger 效果
                     AnimatedRecordItem(
                         animateOnMount = r.id in justAddedIds,
-                        isDeleting = r.id in deletingIds
+                        isDeleting = r.id in deletingIds,
+                        staggerIndex = idx
                     ) {
                         SwipeableRecordItem(
                             backgroundColor = SURFACE_CARD,
@@ -5434,7 +5465,7 @@ fun QuickInputSection(
                 (if (hasIndicator) indicatorSpaceDp else 0.dp)
             }
 
-            // 🟢 改動 3：改 tween(400, FastOutSlowIn) 對齊 AnimatedContent 曲線，
+            // 🟢 改 tween(400, FastOutSlowIn) 對齊 AnimatedContent 曲線，
             // 令 panel 高度動畫同外層高度動畫完全同步，唔會再「二次跳動」
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeightDp,
