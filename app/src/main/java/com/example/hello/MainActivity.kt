@@ -3528,7 +3528,7 @@ fun TopStats(
         val totalW = maxWidth
         val gapX = 6.dp
         val gapY = 2.dp
-        val rowH = 46.dp
+        val rowH = 52.dp
 
         // 2. 佈局大腦：精確計算每個板塊嘅 X, Y, Width
         val geoMap = remember(activeBlocks, totalW) {
