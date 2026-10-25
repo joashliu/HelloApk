@@ -5261,130 +5261,54 @@ private fun DollarAmount(
     }
 }
 
-private val DIGIT_ENTER_SPRING = spring<Float>(
-    dampingRatio = 0.65f,
-    stiffness = 450f
-)
-private val DIGIT_EXIT_TWEEN = tween<Float>(
-    durationMillis = 70,
-    easing = FastOutLinearInEasing
-)
+private val DIGIT_SLIDE_ENTER = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
+private val DIGIT_SLIDE_EXIT = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
+private val DIGIT_FLOAT_ENTER = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
+private val DIGIT_FLOAT_EXIT = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
+private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
 @Composable
 fun AnimatedAmount(
     text: String, color: Color, fontSize: TextUnit,
     fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
 ) {
-    // 固定槽位数：空槽位宽度为 0，不影响布局；
-    // 保证每个数字从 null 变字符时都能触发进入动画，不会因槽位新建而跳过。
-    val maxSlots = 14
+    val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
+    LaunchedEffect(text.length) {
+        if (text.length > maxSlots.value) maxSlots.value = text.length
+    }
+
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        for (i in 0 until maxSlots) {
+        for (i in 0 until maxSlots.value) {
             val char = text.getOrNull(i)
             key(i) {
-                AnimatedDigitSlot(
-                    char = char,
-                    color = color,
-                    fontSize = fontSize,
-                    fontWeight = fontWeight
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AnimatedDigitSlot(
-    char: Char?,
-    color: Color,
-    fontSize: TextUnit,
-    fontWeight: FontWeight,
-) {
-    // 当前显示的字符（进入动画中）
-    var current by remember { mutableStateOf<Char?>(char) }
-    // 正在退出的字符
-    var outgoing by remember { mutableStateOf<Char?>(null) }
-
-    // 进入进度 0..1
-    val enter = remember { Animatable(if (char != null) 1f else 0f) }
-    // 退出进度 1..0
-    val exit = remember { Animatable(1f) }
-
-    // 动画队列：同一槽位的字符变化按顺序排队
-    val pending = remember { mutableStateListOf<Char?>() }
-    var lastSeen by remember { mutableStateOf<Char?>(char) }
-
-    // 收集变化（首次组合 char == lastSeen，不会入队，避免初始播放动画）
-    LaunchedEffect(char) {
-        if (char != lastSeen) {
-            lastSeen = char
-            pending.add(char)
-        }
-    }
-
-    // 消费者：严格按输入顺序逐个播放，不覆盖、不中断
-    LaunchedEffect(Unit) {
-        while (true) {
-            if (pending.isEmpty()) {
-                delay(8)
-                continue
-            }
-            val next = pending.removeAt(0)
-
-            // 先让旧字符完整退出
-            if (current != null) {
-                outgoing = current
-                current = null
-                exit.snapTo(1f)
-                exit.animateTo(0f, DIGIT_EXIT_TWEEN)
-                outgoing = null
-            }
-
-            // 再让新字符进入
-            if (next != null) {
-                current = next
-                enter.snapTo(0f)
-                enter.animateTo(1f, DIGIT_ENTER_SPRING)
-            }
-        }
-    }
-
-    Box(contentAlignment = Alignment.Center) {
-        outgoing?.let { oc ->
-            val p = exit.value
-            Text(
-                text = oc.toString(),
-                color = color,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.graphicsLayer {
-                    alpha = p
-                    val s = 1f - 0.4f * (1f - p)
-                    scaleX = s
-                    scaleY = s
-                    translationY = (1f - p) * -18f
+                AnimatedContent(
+                    targetState = char,
+                    transitionSpec = {
+                        if (targetState != null && initialState == null) {
+                            (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
+                             fadeIn(tween(200)) +
+                             scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith
+                            fadeOut(tween(0))
+                        } else if (targetState == null && initialState != null) {
+                            fadeIn(tween(0)) togetherWith
+                            (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
+                             fadeOut(tween(180)) +
+                             scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
+                        } else {
+                            (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
+                            (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
+                        }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
+                    },
+                    label = "digit_$i"
+                ) { c ->
+                    if (c != null) {
+                        Text(text = c.toString(), color = color, fontSize = fontSize,
+                            fontWeight = fontWeight, maxLines = 1, softWrap = false)
+                    } else {
+                        Spacer(Modifier.width(0.dp))
+                    }
                 }
-            )
-        }
-        current?.let { cc ->
-            val p = enter.value
-            Text(
-                text = cc.toString(),
-                color = color,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.graphicsLayer {
-                    alpha = p
-                    val s = 0.4f + 0.6f * p
-                    scaleX = s
-                    scaleY = s
-                    translationY = (1f - p) * 18f
-                }
-            )
+            }
         }
     }
 }
