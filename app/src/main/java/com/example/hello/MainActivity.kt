@@ -5277,9 +5277,28 @@ fun AnimatedAmount(
         if (text.length > maxSlots.value) maxSlots.value = text.length
     }
 
+    // 🟢 核心修復：使用本地狀態追蹤「視覺上」顯示嘅文字
+    var displayedText by remember { mutableStateOf(text) }
+    
+    LaunchedEffect(text) {
+        // 如果係刪除操作，或者係完全唔同嘅字串（例如重置、或由其他介面傳入）
+        if (text.length < displayedText.length || !text.startsWith(displayedText)) {
+            displayedText = text // 立即更新，保留原有嘅退出/清除動畫邏輯
+        } else {
+            // 如果係新增字元（快速連續輸入），計算出差異並逐位排隊播放
+            val diff = text.substring(displayedText.length)
+            for (c in diff) {
+                displayedText += c
+                // 微細嘅延遲強制 Compose 為每一個新字元獨立觸發 AnimatedContent
+                // 65ms 剛好能營造出流暢不重疊嘅波浪彈出感，且不會造成視覺過長嘅延遲
+                kotlinx.coroutines.delay(65) 
+            }
+        }
+    }
+
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         for (i in 0 until maxSlots.value) {
-            val char = text.getOrNull(i)
+            val char = displayedText.getOrNull(i)
             key(i) {
                 AnimatedContent(
                     targetState = char,
@@ -5312,7 +5331,6 @@ fun AnimatedAmount(
         }
     }
 }
-
 @Composable
 fun SmartElement(
     listState: LazyListState?, dateKey: String,
