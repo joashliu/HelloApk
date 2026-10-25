@@ -4986,7 +4986,8 @@ fun LedgerKeyboardPanel(
                             onDismissRequest = { menuVisibleState.targetState = false },
                             properties = PopupProperties(focusable = true)
                         ) {
-                            AnimatedVisibility(
+                            // 🟢 修复：用全限定名调用顶层 AnimatedVisibility，避免 RowScope 隐式接收者冲突
+                            androidx.compose.animation.AnimatedVisibility(
                                 visibleState = menuVisibleState,
                                 enter = fadeIn(tween(200, easing = FastOutSlowInEasing)) +
                                     scaleIn(
