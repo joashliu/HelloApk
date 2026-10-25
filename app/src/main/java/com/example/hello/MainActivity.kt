@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.window.Popup
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1273,6 +1274,34 @@ fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
         )
     }
     return result
+}
+
+object CategoryMenuPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize
+    ): IntOffset {
+        val margin = 8
+        // 水平居中于 anchor
+        val targetX = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
+        val x = targetX.coerceIn(
+            margin,
+            (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
+        )
+        // 优先显示在 anchor 上方
+        val yAbove = anchorBounds.top - popupContentSize.height - margin
+        if (yAbove >= margin) return IntOffset(x, yAbove)
+        // 上方不够就显示在下方
+        val yBelow = anchorBounds.bottom + margin
+        if (yBelow + popupContentSize.height <= windowSize.height - margin) {
+            return IntOffset(x, yBelow)
+        }
+        // 都不够就贴边挤压
+        val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
+        return IntOffset(x, yAbove.coerceIn(margin, maxY))
+    }
 }
 
 object AboveAnchorPositionProvider : PopupPositionProvider {
@@ -4932,11 +4961,12 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
-                var showCategoryMenu by remember { mutableStateOf(false) }
+                // ================= 类别按钮 + 新菜单 =================
                 val currentStyle = CATEGORY_STYLES[state.category]
+                val menuVisibleState = remember { MutableTransitionState(false) }
                 Box {
                     Button(
-                        onClick = { showCategoryMenu = true },
+                        onClick = { menuVisibleState.targetState = true },
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.width(110.dp).fillMaxHeight(),
                         colors = ButtonDefaults.buttonColors(
@@ -4949,58 +4979,134 @@ fun LedgerKeyboardPanel(
                         }
                         Text(state.category, maxLines = 1, fontSize = 14.sp)
                     }
-                    DropdownMenu(
-                        expanded = showCategoryMenu,
-                        onDismissRequest = { showCategoryMenu = false },
-                        modifier = Modifier.width(288.dp),
-                        shape = RoundedCornerShape(18.dp),
-                        containerColor = SURFACE_CARD
-                    ) {
-                        Column(Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CHUNKED_CATEGORIES.forEach { pair ->
-                                Row(Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    pair.forEach { cat ->
-                                        val s = CATEGORY_STYLES[cat]
-                                        val sel = cat == state.category
-                                        val chipShape = RoundedCornerShape(12.dp)
+
+                    if (menuVisibleState.currentState || menuVisibleState.targetState) {
+                        androidx.compose.ui.window.Popup(
+                            popupPositionProvider = CategoryMenuPositionProvider,
+                            onDismissRequest = { menuVisibleState.targetState = false },
+                            properties = PopupProperties(focusable = true)
+                        ) {
+                            AnimatedVisibility(
+                                visibleState = menuVisibleState,
+                                enter = fadeIn(tween(200, easing = FastOutSlowInEasing)) +
+                                    scaleIn(
+                                        initialScale = 0.85f,
+                                        animationSpec = spring(
+                                            dampingRatio = 0.72f,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        ),
+                                        transformOrigin = TransformOrigin(0.5f, 1f)
+                                    ),
+                                exit = fadeOut(tween(140, easing = FastOutLinearInEasing)) +
+                                    scaleOut(
+                                        targetScale = 0.9f,
+                                        animationSpec = tween(160, easing = FastOutSlowInEasing),
+                                        transformOrigin = TransformOrigin(0.5f, 1f)
+                                    )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .width(288.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(SURFACE_CARD)
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CHUNKED_CATEGORIES.forEachIndexed { rowIdx, pair ->
                                         Row(
-                                            Modifier.weight(1f).height(44.dp)
-                                                .clip(chipShape)
-                                                .background(
-                                                    if (sel) (s?.fgColor ?: BRAND_PRIMARY)
-                                                    else (s?.bgColor ?: SURFACE_ELEVATED))
-                                                .clickable(
-                                                    interactionSource = remember { MutableInteractionSource() },
-                                                    indication = null
-                                                ) {
-                                                    onStateChange(state.copy(
-                                                        category = cat, currency = "HKD",
-                                                        focusedField = "amount"))
-                                                    showCategoryMenu = false
-                                                },
-                                            horizontalArrangement = Arrangement.Center,
-                                            verticalAlignment = Alignment.CenterVertically
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            if (s != null) {
-                                                Icon(s.icon, null,
-                                                    tint = if (sel) Color.White else s.fgColor,
-                                                    modifier = Modifier.size(16.dp))
-                                                Spacer(Modifier.width(5.dp))
+                                            pair.forEachIndexed { colIdx, cat ->
+                                                key(cat) {
+                                                    val s = CATEGORY_STYLES[cat]
+                                                    val sel = cat == state.category
+                                                    val chipIndex = rowIdx * 2 + colIdx
+                                                    val chipVisible = remember { mutableStateOf(false) }
+
+                                                    LaunchedEffect(menuVisibleState.targetState) {
+                                                        if (menuVisibleState.targetState) {
+                                                            delay(60L + chipIndex * 35L)
+                                                            chipVisible.value = true
+                                                        } else {
+                                                            chipVisible.value = false
+                                                        }
+                                                    }
+
+                                                    AnimatedVisibility(
+                                                        visible = chipVisible.value,
+                                                        modifier = Modifier.weight(1f),
+                                                        enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
+                                                            slideInVertically(
+                                                                animationSpec = spring(
+                                                                    dampingRatio = 0.7f,
+                                                                    stiffness = 400f
+                                                                ),
+                                                                initialOffsetY = { -it / 3 }
+                                                            ) +
+                                                            scaleIn(
+                                                                initialScale = 0.88f,
+                                                                animationSpec = spring(
+                                                                    dampingRatio = 0.7f,
+                                                                    stiffness = 400f
+                                                                )
+                                                            ),
+                                                        exit = fadeOut(tween(100, easing = FastOutLinearInEasing)) +
+                                                            scaleOut(
+                                                                targetScale = 0.92f,
+                                                                animationSpec = tween(100, easing = FastOutSlowInEasing)
+                                                            )
+                                                    ) {
+                                                        val chipShape = RoundedCornerShape(12.dp)
+                                                        Row(
+                                                            Modifier
+                                                                .fillMaxWidth()
+                                                                .height(44.dp)
+                                                                .clip(chipShape)
+                                                                .background(
+                                                                    if (sel) (s?.fgColor ?: BRAND_PRIMARY)
+                                                                    else (s?.bgColor ?: SURFACE_ELEVATED))
+                                                                .clickable(
+                                                                    interactionSource = remember { MutableInteractionSource() },
+                                                                    indication = null
+                                                                ) {
+                                                                    onStateChange(
+                                                                        state.copy(
+                                                                            category = cat,
+                                                                            currency = "HKD",
+                                                                            focusedField = "amount"
+                                                                        )
+                                                                    )
+                                                                    menuVisibleState.targetState = false
+                                                                },
+                                                            horizontalArrangement = Arrangement.Center,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            if (s != null) {
+                                                                Icon(s.icon, null,
+                                                                    tint = if (sel) Color.White else s.fgColor,
+                                                                    modifier = Modifier.size(16.dp))
+                                                                Spacer(Modifier.width(5.dp))
+                                                            }
+                                                            Text(cat, fontSize = 13.sp,
+                                                                color = if (sel) Color.White
+                                                                        else (s?.fgColor ?: TEXT_PRIMARY),
+                                                                fontWeight = if (sel) FontWeight.SemiBold
+                                                                             else FontWeight.Normal,
+                                                                maxLines = 1)
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            Text(cat, fontSize = 13.sp,
-                                                color = if (sel) Color.White else (s?.fgColor ?: TEXT_PRIMARY),
-                                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                                                maxLines = 1)
+                                            if (pair.size == 1) Spacer(Modifier.weight(1f))
                                         }
                                     }
-                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                                 }
                             }
                         }
                     }
                 }
+                // =================================================
             }
 
             Spacer(Modifier.height(10.dp))
