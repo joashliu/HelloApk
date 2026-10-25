@@ -3072,9 +3072,6 @@ fun LedgerContent(
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
-    // 🟢 1. 徹底刪除咗會同 stickyHeader 打交、導致「彈兩下」嘅 snapshotFlow 監聽邏輯！
-    // 交返畀 Compose 原生嘅 LazyColumn 處理滾動，絕對唔會再有二次彈跳。
-
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
@@ -3163,8 +3160,7 @@ fun LedgerContent(
             }
         } catch (_: Exception) {}
     }
-    
-    // 🟢 2. 等 panel 高度動畫完成後，才平滑滾返頂，避免「瞬移 + 高度動畫」兩次移動
+
     LaunchedEffect(filterMode) {
         try {
             if (listState.firstVisibleItemIndex > 0) {
@@ -3223,11 +3219,10 @@ fun LedgerContent(
                 }
 
                 item(key = "group_$dateKey", contentType = "day_group") {
-                    // 🟢 3. 恢復 placementSpec！畀返個順滑嘅位移動畫佢，解決「冇動畫」嘅問題。
                     Box(modifier = Modifier.animateItem(
                         fadeInSpec = tween(250, easing = FastOutSlowInEasing),
                         fadeOutSpec = tween(200, easing = FastOutSlowInEasing),
-                        placementSpec = spring(dampingRatio = 0.9f, stiffness = 350f) 
+                        placementSpec = spring(dampingRatio = 0.9f, stiffness = 350f)
                     )) {
                         Column(
                             modifier = Modifier
@@ -3318,7 +3313,7 @@ fun LedgerContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
-                
+
                 val avgExpense = remember(filtered, filterMode) {
                     if (!filterMode) 0.0
                     else {
@@ -3346,6 +3341,89 @@ fun LedgerContent(
                 }
             }
 
+            // 🟢 固定顶部：快速输入 / 筛选面板，不参与模糊，键盘打开时仍可点击
+            AnimatedContent(
+                targetState = filterMode,
+                modifier = Modifier.fillMaxWidth(),
+                transitionSpec = {
+                    if (targetState) {
+                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
+                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(250)))
+                    } else {
+                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
+                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
+                    }
+                    .using(SizeTransform(clip = true) { _, _ -> tween(durationMillis = 400, easing = FastOutSlowInEasing) })
+                },
+                label = "filterContent"
+            ) { isFilter ->
+                if (!isFilter) {
+                    Column(Modifier.fillMaxWidth()) {
+                        if (topNotes.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            QuickInputSection(
+                                topNotes = topNotes,
+                                noteIconMap = noteIconMap,
+                                maxRowsPerPage = 4,
+                                skipAppearAnimation = !isFirstShow,
+                                onClick = onQuickInputClick
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                } else {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
+                        Spacer(Modifier.height(4.dp))
+                        val allCategories: List<String?> = remember(visibleCategories) {
+                            listOf(null) + visibleCategories
+                        }
+                        val rows = remember(allCategories) { allCategories.chunked(4) }
+                        rows.forEach { row ->
+                            Row(Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                row.forEach { cat ->
+                                    AnimatedFilterChip(
+                                        modifier = Modifier.weight(1f),
+                                        selected = filterCategory == cat,
+                                        label = cat ?: "全部",
+                                        fillWidth = true,
+                                        onClick = {
+                                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                                        }
+                                    )
+                                }
+                                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+                        if (availableMonths.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AnimatedFilterChip(
+                                    selected = filterMonth == null, label = "全年",
+                                    fillWidth = false,
+                                    onClick = { onFilterMonthChange(null) }
+                                )
+                                availableMonths.forEach { m ->
+                                    AnimatedFilterChip(
+                                        selected = filterMonth == m,
+                                        label = formatMonthLabel(m), fillWidth = false,
+                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+
+            // 🟢 滚动区：只有记账项目列表参与模糊
             Box(
                 Modifier
                     .weight(1f)
@@ -3375,88 +3453,6 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        item(key = "top_dynamic_panel") {
-                            AnimatedContent(
-                                targetState = filterMode,
-                                transitionSpec = {
-                                    if (targetState) {
-                                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
-                                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(250)))
-                                    } else {
-                                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
-                                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
-                                    }
-                                    .using(SizeTransform(clip = true) { _, _ -> tween(durationMillis = 400, easing = FastOutSlowInEasing) })
-                                },
-                                label = "filterContent"
-                            ) { isFilter ->
-                                if (!isFilter) {
-                                    Column(Modifier.fillMaxWidth()) {
-                                        if (topNotes.isNotEmpty()) {
-                                            Spacer(Modifier.height(4.dp))
-                                            QuickInputSection(
-                                                topNotes = topNotes,
-                                                noteIconMap = noteIconMap,
-                                                maxRowsPerPage = 4,
-                                                skipAppearAnimation = !isFirstShow,
-                                                onClick = onQuickInputClick
-                                            )
-                                        }
-                                        Spacer(Modifier.height(4.dp))
-                                    }
-                                } else {
-                                    Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
-                                        Spacer(Modifier.height(4.dp))
-                                        val allCategories: List<String?> = remember(visibleCategories) {
-                                            listOf(null) + visibleCategories
-                                        }
-                                        val rows = remember(allCategories) { allCategories.chunked(4) }
-                                        rows.forEach { row ->
-                                            Row(Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                row.forEach { cat ->
-                                                    AnimatedFilterChip(
-                                                        modifier = Modifier.weight(1f),
-                                                        selected = filterCategory == cat,
-                                                        label = cat ?: "全部",
-                                                        fillWidth = true,
-                                                        onClick = {
-                                                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                                                        }
-                                                    )
-                                                }
-                                                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
-                                            }
-                                            Spacer(Modifier.height(4.dp))
-                                        }
-
-                                        Spacer(Modifier.height(4.dp))
-                                        if (availableMonths.isNotEmpty()) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                AnimatedFilterChip(
-                                                    selected = filterMonth == null, label = "全年",
-                                                    fillWidth = false,
-                                                    onClick = { onFilterMonthChange(null) }
-                                                )
-                                                availableMonths.forEach { m ->
-                                                    AnimatedFilterChip(
-                                                        selected = filterMonth == m,
-                                                        label = formatMonthLabel(m), fillWidth = false,
-                                                        onClick = { onFilterMonthChange(if (filterMonth == m) null else m) }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Spacer(Modifier.height(6.dp))
-                                    }
-                                }
-                            }
-                        }
-
                         if (!filterMode && weeklyExpenses.isNotEmpty()) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
                                 WeeklyExpenseChart(
@@ -3471,7 +3467,7 @@ fun LedgerContent(
                         item(key = "magic_top_anchor", contentType = "anchor") {
                             Spacer(Modifier.height(1.dp))
                         }
-                        
+
                         if (displayGroups.isEmpty() && !showKeyboard) {
                             item(key = "__empty__", contentType = "empty") {
                                 Box(Modifier.fillParentMaxWidth().padding(top = 80.dp),
