@@ -482,7 +482,7 @@ const val FILTER_ANIM_MS = 250
 @Immutable
 data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
 
-val CATEGORIES = listOf("收入", "娛樂", "家用", "飲食", "交通", "個人", "購物", "月費", "旅遊")
+val CATEGORIES = listOf("收入", "娛樂", "家用", "飲食", "交通", "個人", "購物", "月費", "旅遊", "還錢")
 val EXPENSE_CATEGORIES = CATEGORIES.filter { it != "收入" }
 const val INCOME_CATEGORY = "收入"
 
@@ -495,7 +495,8 @@ val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
     "個人" to CategoryStyle(Icons.Default.Person, Color(0xFFFCE7F3), Color(0xFF9D174D)),
     "購物" to CategoryStyle(Icons.Default.ShoppingCart, Color(0xFFFEF3C7), Color(0xFF854D0E)),
     "月費" to CategoryStyle(Icons.Default.Autorenew, Color(0xFFE2E8F0), Color(0xFF334155)),
-    "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59))
+    "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59)),
+    "還錢" to CategoryStyle(Icons.Default.Payments, Color(0xFFFFE4E6), Color(0xFFBE123C))
 )
 
 @Immutable
@@ -5014,96 +5015,85 @@ fun LedgerKeyboardPanel(
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     CHUNKED_CATEGORIES.forEachIndexed { rowIdx, pair ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            pair.forEachIndexed { colIdx, cat ->
-                                                key(cat) {
-                                                    val s = CATEGORY_STYLES[cat]
-                                                    val sel = cat == state.category
-                                                    val chipIndex = rowIdx * 2 + colIdx
-                                                    val chipVisible = remember { mutableStateOf(false) }
+    key(rowIdx) {
+        val rowVisible = remember { mutableStateOf(false) }
+        LaunchedEffect(menuVisibleState.targetState) {
+            if (menuVisibleState.targetState) {
+                delay(30L + rowIdx * 25L)
+                rowVisible.value = true
+            } else {
+                rowVisible.value = false
+            }
+        }
 
-                                                    LaunchedEffect(menuVisibleState.targetState) {
-                                                        if (menuVisibleState.targetState) {
-                                                            delay(60L + chipIndex * 35L)
-                                                            chipVisible.value = true
-                                                        } else {
-                                                            chipVisible.value = false
-                                                        }
-                                                    }
-
-                                                    AnimatedVisibility(
-                                                        visible = chipVisible.value,
-                                                        modifier = Modifier.weight(1f),
-                                                        enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
-                                                            slideInVertically(
-                                                                animationSpec = spring(
-                                                                    dampingRatio = 0.7f,
-                                                                    stiffness = 400f
-                                                                ),
-                                                                initialOffsetY = { -it / 3 }
-                                                            ) +
-                                                            scaleIn(
-                                                                initialScale = 0.88f,
-                                                                animationSpec = spring(
-                                                                    dampingRatio = 0.7f,
-                                                                    stiffness = 400f
-                                                                )
-                                                            ),
-                                                        exit = fadeOut(tween(100, easing = FastOutLinearInEasing)) +
-                                                            scaleOut(
-                                                                targetScale = 0.92f,
-                                                                animationSpec = tween(100, easing = FastOutSlowInEasing)
-                                                            )
-                                                    ) {
-                                                        val chipShape = RoundedCornerShape(12.dp)
-                                                        Row(
-                                                            Modifier
-                                                                .fillMaxWidth()
-                                                                .height(44.dp)
-                                                                .clip(chipShape)
-                                                                .background(
-                                                                    if (sel) (s?.fgColor ?: BRAND_PRIMARY)
-                                                                    else (s?.bgColor ?: SURFACE_ELEVATED))
-                                                                .clickable(
-                                                                    interactionSource = remember { MutableInteractionSource() },
-                                                                    indication = null
-                                                                ) {
-                                                                    onStateChange(
-                                                                        state.copy(
-                                                                            category = cat,
-                                                                            currency = "HKD",
-                                                                            focusedField = "amount"
-                                                                        )
-                                                                    )
-                                                                    menuVisibleState.targetState = false
-                                                                },
-                                                            horizontalArrangement = Arrangement.Center,
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            if (s != null) {
-                                                                Icon(s.icon, null,
-                                                                    tint = if (sel) Color.White else s.fgColor,
-                                                                    modifier = Modifier.size(16.dp))
-                                                                Spacer(Modifier.width(5.dp))
-                                                            }
-                                                            Text(cat, fontSize = 13.sp,
-                                                                color = if (sel) Color.White
-                                                                        else (s?.fgColor ?: TEXT_PRIMARY),
-                                                                fontWeight = if (sel) FontWeight.SemiBold
-                                                                             else FontWeight.Normal,
-                                                                maxLines = 1)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            if (pair.size == 1) Spacer(Modifier.weight(1f))
-                                        }
-                                    }
-                                }
-                            }
+        AnimatedVisibility(
+            visible = rowVisible.value,
+            enter = fadeIn(tween(140, easing = FastOutSlowInEasing)) +
+                scaleIn(
+                    initialScale = 0.5f,
+                    animationSpec = spring(
+                        dampingRatio = 0.5f,
+                        stiffness = 550f
+                    )
+                ),
+            exit = fadeOut(tween(90, easing = FastOutLinearInEasing)) +
+                scaleOut(
+                    targetScale = 0.85f,
+                    animationSpec = tween(90, easing = FastOutSlowInEasing)
+                )
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pair.forEach { cat ->
+                    val s = CATEGORY_STYLES[cat]
+                    val sel = cat == state.category
+                    val chipShape = RoundedCornerShape(12.dp)
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(chipShape)
+                            .background(
+                                if (sel) (s?.fgColor ?: BRAND_PRIMARY)
+                                else (s?.bgColor ?: SURFACE_ELEVATED)
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                onStateChange(
+                                    state.copy(
+                                        category = cat,
+                                        currency = "HKD",
+                                        focusedField = "amount"
+                                    )
+                                )
+                                menuVisibleState.targetState = false
+                            },
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (s != null) {
+                            Icon(s.icon, null,
+                                tint = if (sel) Color.White else s.fgColor,
+                                modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Text(cat, fontSize = 13.sp,
+                            color = if (sel) Color.White
+                                    else (s?.fgColor ?: TEXT_PRIMARY),
+                            fontWeight = if (sel) FontWeight.SemiBold
+                                         else FontWeight.Normal,
+                            maxLines = 1)
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
                         }
                     }
                 }
