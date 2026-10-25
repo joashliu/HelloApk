@@ -5015,96 +5015,96 @@ fun LedgerKeyboardPanel(
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     CHUNKED_CATEGORIES.forEachIndexed { rowIdx, pair ->
-                                        key(rowIdx) {
-                                            val rowVisible = remember { mutableStateOf(false) }
-                                            LaunchedEffect(menuVisibleState.targetState) {
-                                                if (menuVisibleState.targetState) {
-                                                    delay(30L + rowIdx * 25L)
-                                                    rowVisible.value = true
-                                                } else {
-                                                    rowVisible.value = false
-                                                }
-                                            }
+    key(rowIdx) {
+        val rowVisible = remember { mutableStateOf(false) }
+        LaunchedEffect(menuVisibleState.targetState) {
+            if (menuVisibleState.targetState) {
+                delay(320L + rowIdx * 40L)
+                rowVisible.value = true
+            } else {
+                rowVisible.value = false
+            }
+        }
 
-                                            AnimatedVisibility(
-                                                visible = rowVisible.value,
-                                                enter = fadeIn(tween(140, easing = FastOutSlowInEasing)) +
-                                                    scaleIn(
-                                                        initialScale = 0.5f,
-                                                        animationSpec = spring(
-                                                            dampingRatio = 0.5f,
-                                                            stiffness = 550f
-                                                        )
-                                                    ) +
-                                                    expandVertically(
-                                                        expandFrom = Alignment.Top,
-                                                        animationSpec = spring(
-                                                            dampingRatio = 0.7f,
-                                                            stiffness = 500f
-                                                        )
-                                                    ),
-                                                exit = fadeOut(tween(90, easing = FastOutLinearInEasing)) +
-                                                    scaleOut(
-                                                        targetScale = 0.85f,
-                                                        animationSpec = tween(90, easing = FastOutSlowInEasing)
-                                                    ) +
-                                                    shrinkVertically(
-                                                        shrinkTowards = Alignment.Top,
-                                                        animationSpec = tween(90, easing = FastOutSlowInEasing)
-                                                    )
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                                ) {
-                                                    pair.forEach { cat ->
-                                                        val s = CATEGORY_STYLES[cat]
-                                                        val sel = cat == state.category
-                                                        val chipShape = RoundedCornerShape(12.dp)
-                                                        Row(
-                                                            Modifier
-                                                                .weight(1f)
-                                                                .height(44.dp)
-                                                                .clip(chipShape)
-                                                                .background(
-                                                                    if (sel) (s?.fgColor ?: BRAND_PRIMARY)
-                                                                    else (s?.bgColor ?: SURFACE_ELEVATED)
-                                                                )
-                                                                .clickable(
-                                                                    interactionSource = remember { MutableInteractionSource() },
-                                                                    indication = null
-                                                                ) {
-                                                                    onStateChange(
-                                                                        state.copy(
-                                                                            category = cat,
-                                                                            currency = "HKD",
-                                                                            focusedField = "amount"
-                                                                        )
-                                                                    )
-                                                                    menuVisibleState.targetState = false
-                                                                },
-                                                            horizontalArrangement = Arrangement.Center,
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            if (s != null) {
-                                                                Icon(s.icon, null,
-                                                                    tint = if (sel) Color.White else s.fgColor,
-                                                                    modifier = Modifier.size(16.dp))
-                                                                Spacer(Modifier.width(5.dp))
-                                                            }
-                                                            Text(cat, fontSize = 13.sp,
-                                                                color = if (sel) Color.White
-                                                                        else (s?.fgColor ?: TEXT_PRIMARY),
-                                                                fontWeight = if (sel) FontWeight.SemiBold
-                                                                             else FontWeight.Normal,
-                                                                maxLines = 1)
-                                                        }
-                                                    }
-                                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
-                                                }
-                                            }
-                                        }
-                                    }
+        AnimatedVisibility(
+            visible = rowVisible.value,
+            enter = fadeIn(tween(140, easing = FastOutSlowInEasing)) +
+                scaleIn(
+                    initialScale = 0.5f,
+                    animationSpec = spring(
+                        dampingRatio = 0.5f,
+                        stiffness = 550f
+                    )
+                ) +
+                expandVertically(
+                    expandFrom = Alignment.Top,
+                    animationSpec = spring(
+                        dampingRatio = 0.7f,
+                        stiffness = 500f
+                    )
+                ),
+            exit = fadeOut(tween(90, easing = FastOutLinearInEasing)) +
+                scaleOut(
+                    targetScale = 0.85f,
+                    animationSpec = tween(90, easing = FastOutSlowInEasing)
+                ) +
+                shrinkVertically(
+                    shrinkTowards = Alignment.Top,
+                    animationSpec = tween(90, easing = FastOutSlowInEasing)
+                )
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pair.forEach { cat ->
+                    val s = CATEGORY_STYLES[cat]
+                    val sel = cat == state.category
+                    val chipShape = RoundedCornerShape(12.dp)
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(chipShape)
+                            .background(
+                                if (sel) (s?.fgColor ?: BRAND_PRIMARY)
+                                else (s?.bgColor ?: SURFACE_ELEVATED)
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                onStateChange(
+                                    state.copy(
+                                        category = cat,
+                                        currency = "HKD",
+                                        focusedField = "amount"
+                                    )
+                                )
+                                menuVisibleState.targetState = false
+                            },
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (s != null) {
+                            Icon(s.icon, null,
+                                tint = if (sel) Color.White else s.fgColor,
+                                modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Text(cat, fontSize = 13.sp,
+                            color = if (sel) Color.White
+                                    else (s?.fgColor ?: TEXT_PRIMARY),
+                            fontWeight = if (sel) FontWeight.SemiBold
+                                         else FontWeight.Normal,
+                            maxLines = 1)
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
                                 }
                             }
                         }
