@@ -3812,11 +3812,9 @@ fun WeeklyExpenseChart(
     introProgress: Float,
     modifier: Modifier = Modifier,
 ) {
-    val density = LocalDensity.current
-    val chartHeight = 108.dp
-    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
-    val maxBarHeight = 62.dp
+    val chartHeight = 178.dp
 
+    // 用实际 item size 计算淡出，避免固定 chartHeightPx 与新的高度对不上
     val scrollProgress by remember(listState) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -3826,7 +3824,7 @@ fun WeeklyExpenseChart(
             } else {
                 val offset = info.offset
                 if (offset >= 0) 0f
-                else (-offset / chartHeightPx).coerceIn(0f, 1f)
+                else (-offset / info.size.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
             }
         }
     }
@@ -3834,30 +3832,61 @@ fun WeeklyExpenseChart(
     val maxAmount = remember(data) {
         data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
     }
+    val totalAmount = remember(data) { data.sumOf { it.amount } }
 
     Box(modifier = modifier.fillMaxWidth().height(chartHeight).clipToBounds()) {
         Box(
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                val p = scrollProgress
-                alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
-                scaleY = 1f - p * 0.35f
-                scaleX = 1f - p * 0.08f
-                translationY = -p * 14.dp.toPx()
-                transformOrigin = TransformOrigin(0.5f, 0f)
-            }
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .graphicsLayer {
+                    val p = scrollProgress
+                    alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
+                    scaleY = 1f - p * 0.35f
+                    scaleX = 1f - p * 0.08f
+                    translationY = -p * 14.dp.toPx()
+                    transformOrigin = TransformOrigin(0.5f, 0f)
+                }
         ) {
-            Row(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.Bottom
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SURFACE_CARD)
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
             ) {
-                data.forEach { day ->
-                    WeeklyExpenseBar(
-                        day = day, maxAmount = maxAmount,
-                        introProgress = introProgress,
-                        maxBarHeight = maxBarHeight,
-                        modifier = Modifier.weight(1f).fillMaxHeight()
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "近 7 日支出",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY
                     )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "合計 $${formatAmountNoDecimal(totalAmount)}",
+                        fontSize = 12.sp,
+                        color = TEXT_SECONDARY,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    data.forEach { day ->
+                        WeeklyExpenseBar(
+                            day = day,
+                            maxAmount = maxAmount,
+                            introProgress = introProgress,
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        )
+                    }
                 }
             }
         }
