@@ -3895,8 +3895,10 @@ fun WeeklyExpenseChart(
 
 @Composable
 fun WeeklyExpenseBar(
-    day: WeeklyExpenseDay, maxAmount: Double, introProgress: Float,
-    maxBarHeight: Dp, modifier: Modifier = Modifier,
+    day: WeeklyExpenseDay,
+    maxAmount: Double,
+    introProgress: Float,
+    modifier: Modifier = Modifier,
 ) {
     val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
     val animatedRatio by animateFloatAsState(
@@ -3904,53 +3906,72 @@ fun WeeklyExpenseBar(
         animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
         label = "weeklyBarRatio_${day.dayOfMonth}"
     )
+    val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
+    val hasAmount = day.amount > 0.0
 
-    val minBarHeight = 4.dp
-    val minRatio = if (maxBarHeight.value > 0f) (minBarHeight.value / maxBarHeight.value) else 0f
-    val displayRatio: Float = if (day.amount > 0.0) {
-        (animatedRatio * introProgress).coerceAtLeast(minRatio * introProgress)
-    } else {
-        animatedRatio * introProgress
-    }.coerceIn(0f, 1f)
-
-    val barHeight = maxBarHeight * displayRatio
+    // 顶部圆角大、底部圆角小，视觉上像从底部“长出来”
+    val barShape = RoundedCornerShape(
+        topStart = 6.dp, topEnd = 6.dp,
+        bottomStart = 2.dp, bottomEnd = 2.dp
+    )
 
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Bottom
     ) {
-        Box(
-            modifier = Modifier.fillMaxWidth().height(maxBarHeight),
+        BoxWithConstraints(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             contentAlignment = Alignment.BottomCenter
         ) {
+            val maxBarHeight = maxHeight
+            val minBarHeight = 3.dp
+            val barHeight = if (hasAmount) {
+                (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
+            } else 0.dp
+
+            // 浅色轨道底，统一颜色
             Box(
-                modifier = Modifier.width(16.dp).fillMaxHeight()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f))
+                modifier = Modifier
+                    .width(22.dp)
+                    .fillMaxHeight()
+                    .clip(barShape)
+                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
             )
-            if (displayRatio > 0.0005f) {
+
+            // 前景柱子
+            if (barHeight > 0.dp) {
                 Box(
-                    modifier = Modifier.width(16.dp).height(barHeight)
-                        .clip(RoundedCornerShape(8.dp))
+                    modifier = Modifier
+                        .width(22.dp)
+                        .height(barHeight)
+                        .clip(barShape)
                         .background(
-                            Brush.verticalGradient(
-                                colors = if (day.isToday) {
-                                    listOf(BRAND_PRIMARY_DARK, BRAND_PRIMARY)
-                                } else {
+                            if (day.isToday) {
+                                Brush.verticalGradient(
                                     listOf(
-                                        BRAND_PRIMARY.copy(alpha = 0.88f),
-                                        BRAND_PRIMARY.copy(alpha = 0.58f)
+                                        BRAND_PRIMARY_DARK,
+                                        BRAND_PRIMARY.copy(alpha = 0.85f)
                                     )
-                                }
-                            )
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    listOf(
+                                        BRAND_PRIMARY.copy(alpha = 0.85f),
+                                        BRAND_PRIMARY.copy(alpha = 0.55f)
+                                    )
+                                )
+                            }
                         )
                 )
             }
         }
-        Spacer(Modifier.height(4.dp))
+
+        Spacer(Modifier.height(5.dp))
+
         Text(
-            text = day.weekdayChar, fontSize = 11.sp,
+            text = day.weekdayChar,
+            fontSize = 11.sp,
             color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
             fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
             maxLines = 1
