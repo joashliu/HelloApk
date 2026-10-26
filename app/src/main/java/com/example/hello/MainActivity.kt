@@ -5277,32 +5277,27 @@ fun AnimatedAmount(
         if (text.length > maxSlots.value) maxSlots.value = text.length
     }
 
+    // 🟢 終極防彈版：使用無限迴圈 + 狀態快照，確保打字機列隊絕對精準
+    val currentText by rememberUpdatedState(text)
     var displayedText by remember { mutableStateOf(text) }
-    
-    // 建立一個無限容量嘅緩衝通道，用嚟接收要新增嘅字元
-    val charQueue = remember { kotlinx.coroutines.channels.Channel<Char>(kotlinx.coroutines.channels.Channel.UNLIMITED) }
-    
-    // 獨立嘅消費者協程：專職負責將佇列中嘅字元逐個拎出嚟顯示，並確保每次更新之間有足夠嘅動畫間隔
-    LaunchedEffect(Unit) {
-        for (char in charQueue) {
-            displayedText += char
-            // 保證每個字元之間至少有 70ms 間隔，確保 Compose 有足夠時間繪製每一個獨立嘅動畫
-            kotlinx.coroutines.delay(70)
-        }
-    }
 
-    // 生產者：觀察文字狀態變化
-    LaunchedEffect(text) {
-        // 如果係刪除操作，或者輸入被重置 / 截斷，就清空現有嘅佇列，並直接同步顯示狀態
-        if (text.length < displayedText.length || !text.startsWith(displayedText)) {
-            // 取消目前通道入面排緊隊嘅字
-            while (charQueue.tryReceive().isSuccess) { /* 清空 Queue */ }
-            displayedText = text
-        } else {
-            // 如果係新增操作，將新多出嚟嘅字元掉入 Queue 排隊
-            val diff = text.substring(displayedText.length)
-            for (c in diff) {
-                charQueue.trySend(c)
+    LaunchedEffect(Unit) {
+        // 呢個 Worker 由頭到尾只會啟動一次，永遠唔會被你嘅極速打字中斷
+        while (kotlinx.coroutines.isActive) {
+            val target = currentText
+            if (displayedText == target) {
+                // 當前顯示已同步，掛起等待下一次輸入 (每幀約 16ms 檢查一次，極致輕量)
+                kotlinx.coroutines.delay(16)
+            } else {
+                if (target.length < displayedText.length || !target.startsWith(displayedText)) {
+                    // 遇到刪除或重置字串，立即同步，無縫觸發退格退出動畫
+                    displayedText = target
+                } else {
+                    // 遇到新增字元，嚴格逐一添加
+                    displayedText += target[displayedText.length]
+                    // ⚡ 強制鎖定每個字元彈出嘅時間間隔 (60ms)，保證「波浪感」絕不重疊或被跳過
+                    kotlinx.coroutines.delay(60)
+                }
             }
         }
     }
