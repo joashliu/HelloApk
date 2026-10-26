@@ -4,99 +4,57 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import java.util.concurrent.ConcurrentHashMap
 
 class PaymentNotificationListener : NotificationListenerService() {
 
-    companion object {
-        private const val TAG = "PaymentNotif"
-
-        // 🟢 通知級去重：10 秒內相同內容只處理一次
-        private val recentKeys = ConcurrentHashMap<String, Long>(32)
-        private const val DEDUP_WINDOW_MS = 10_000L
-
-        private val AMOUNT_PATTERN = Regex(
-            """(?:HKD|HK\$|\$)\s*(\d+(?:\.\d{1,2})?)""",
-            RegexOption.IGNORE_CASE
-        )
-
-        private val DEDUCT_KEYWORDS = listOf(
-            "扣款", "已付款", "付款", "消費", "交易",
-            "易乘碼", "地鐵", "港鐵", "入閘", "出閘",
-            "繳費", "轉賬", "支付"
-        )
-    }
+    // 簡單去重機制：記錄最近 30 秒內處理過嘅文字內容
+    private val recentProcessed = mutableMapOf<String, Long>()
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
 
-        val pkg = sbn.packageName ?: "unknown"
-        val extras = sbn.notification?.extras ?: return
+        val extras = sbn.notification.extras
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+        val tickerText = sbn.notification.tickerText?.toString() ?: ""
 
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
-        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+        val fullText = "$title$text $bigText$tickerText"
+        
+        // 1. 等待原始通知完整載入：如果無任何文字，直接忽略等下一次更新
+        if (fullText.isBlank()) return
 
-        val combined = "$title $text $bigText $subText".trim()
-        Log.d(TAG, "收到通知 | pkg=$pkg | 內容=$combined")
+        // 2. 關鍵字匹配 (唔干擾其他無關通知)
+        if (fullText.contains("乘車碼") || fullText.contains("易乘碼")) {
+            Log.d("LedgerNotif", "👀 偵測到乘車碼通知：$fullText")
+            
+            // 3. 去重機制 (避免相同通知喺幾毫秒內重複發送更新)
+            val now = System.currentTimeMillis()
+            val hashKey = fullText.trim()
+            val lastProcessedTime = recentProcessed[hashKey] ?: 0L
+            if (now - lastProcessedTime < 30_000L) {
+                Log.d("LedgerNotif", "⏳ 30秒內已處理過相同通知，忽略去重")
+                return
+            }
 
-        if (combined.isBlank()) return
-
-        if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) {
-            Log.d(TAG, "跳過：無消費關鍵字")
-            return
+            // 4. 提取金額 (支援 HKD 4.9, HK$ 4.90, $ 4.9 等格式)
+            val amountRegex = Regex("(?:HKD|HK\\$\vert{}\\$)\\s*([0-9]+\\.?[0-9]*)")
+            val match = amountRegex.find(fullText)
+            val amount = match?.groupValues?.get(1)?.toDoubleOrNull()
+            
+            if (amount != null && amount > 0) {
+                Log.d("LedgerNotif", "✅ 匹配成功！準備推送金額: $amount")
+                recentProcessed[hashKey] = now
+                
+                // 觸發自定義 APP 彈出通知 (分類強制設定為"交通")
+                NotificationCaptureBridge.pushCaptured("乘車扣費", amount, "交通")
+            } else {
+                Log.d("LedgerNotif", "⚠️ 搵到關鍵字，但提取唔到金額: $fullText")
+            }
         }
-
-        val match = AMOUNT_PATTERN.find(combined)
-        if (match == null) {
-            Log.d(TAG, "跳過：搵唔到金額")
-            return
-        }
-
-        val amount = match.groupValues.getOrNull(1)?.toDoubleOrNull()
-        if (amount == null || amount <= 0.0 || amount > 100000.0) {
-            Log.d(TAG, "跳過：金額無效 ($amount)")
-            return
-        }
-
-        // 🟢 通知級去重：用 pkg + 金額 + 文本 hash 做 key
-        val contentKey = "$pkg|$amount|${combined.take(150)}"
-        val now = System.currentTimeMillis()
-
-        // 清理過期記錄，防止 map 無限增長
-        if (recentKeys.size > 100) {
-            recentKeys.entries.removeAll { it.value < now - DEDUP_WINDOW_MS * 2 }
-        }
-
-        val lastTime = recentKeys[contentKey]
-        if (lastTime != null && (now - lastTime) < DEDUP_WINDOW_MS) {
-            Log.d(TAG, "跳過重複通知 (${now - lastTime}ms 內): $contentKey")
-            return
-        }
-        recentKeys[contentKey] = now
-
-        val note = when {
-            combined.contains("地鐵", true) || combined.contains("港鐵", true)
-                || combined.contains("易乘碼", true) -> "地鐵"
-            title.isNotBlank() && title.length <= 20 -> title
-            else -> "消費"
-        }
-
-        val category = when {
-            combined.contains("地鐵", true) || combined.contains("港鐵", true)
-                || combined.contains("易乘碼", true) -> "交通"
-            combined.contains("餐", true) || combined.contains("食", true)
-                || combined.contains("飲", true) -> "飲食"
-            combined.contains("超市", true) || combined.contains("店", true)
-                || combined.contains("購物", true) -> "購物"
-            combined.contains("繳費", true) || combined.contains("月費", true) -> "月費"
-            else -> "個人"
-        }
-
-        Log.d(TAG, "✅ 捕獲成功：$note · $amount · $category（來自 $pkg）")
-        NotificationCaptureBridge.pushCaptured(note, amount, category)
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification?) {}
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        // 唔干擾原始通知被滑走嘅行為，保留喺系統欄
+    }
 }
