@@ -331,9 +331,63 @@ fun buildLaunchIntentForMain(
         if (!prefillNote.isNullOrBlank()) putExtra(MainActivity.EXTRA_PREFILL_NOTE, prefillNote)
         if (!prefillCategory.isNullOrBlank()) putExtra(MainActivity.EXTRA_PREFILL_CATEGORY, prefillCategory)
         if (prefillAmount != null && prefillAmount > 0.0) putExtra(MainActivity.EXTRA_PREFILL_AMOUNT, prefillAmount)
-        // 🟢 將系統通知 ID 傳入 Intent
         if (cancelNotifId != null) putExtra(MainActivity.EXTRA_CANCEL_NOTIF_ID, cancelNotifId)
     }
+}
+
+fun refreshQuickAddNotification(context: Context) {
+    try {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val granted = context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
+                PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        ensureNotificationChannels(context)
+
+        val normalIntent = buildLaunchIntentForMain(context, prefillNote = null)
+        val normalPi = PendingIntent.getActivity(
+            context, 0, normalIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val infos = topQuickNotesInfo.value
+        val first = infos.firstOrNull()
+
+        val builder = NotificationCompat.Builder(context, QUICK_ADD_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_input_add)
+            .setContentTitle("快速記帳")
+            .setContentText("撳一下即開鍵盤記一筆")
+            .setContentIntent(normalPi)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+
+        if (first != null && first.note.isNotBlank()) {
+            val noteIntent = buildLaunchIntentForMain(context, first.note, first.amount, first.category)
+            val notePi = PendingIntent.getActivity(
+                context, 1, noteIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(android.R.drawable.ic_menu_edit, first.note, notePi)
+        }
+
+        val captured = topLatestCapturedNotification.value
+        if (captured != null && captured.note.isNotBlank()) {
+            val todayStart = getTimestampMeta(System.currentTimeMillis()).startOfDayMillis
+            val capturedStart = getTimestampMeta(captured.timestamp).startOfDayMillis
+            if (capturedStart == todayStart) {
+                val label = "${captured.note} · ${NotificationCaptureBridge.formatAmountForLabel(captured.amount)}"
+                val capturedIntent = buildLaunchIntentForMain(context, captured.note, captured.amount, captured.category)
+                val capturedPi = PendingIntent.getActivity(
+                    context, 2, capturedIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(android.R.drawable.ic_menu_recent_history, label, capturedPi)
+            }
+        }
+
+        nm.notify(QUICK_ADD_NOTIFICATION_ID, builder.build())
+    } catch (_: Exception) {}
 }
 
 fun showCaptureConfirmNotification(context: Context, captured: CapturedNotification) {
@@ -346,14 +400,12 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         ensureNotificationChannels(context)
 
-        // 🟢 使用時間戳生成獨立 ID，避免多筆消費重疊覆蓋
         val notifId = CONFIRM_NOTIFICATION_BASE_ID + (captured.timestamp % 10000).toInt()
         val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
 
         val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         
-        // 🟢 傳入 notifId，等用戶點擊入賬時，App知道要清邊條
         val addIntent = buildLaunchIntentForMain(
             context, captured.note, captured.amount, captured.category, notifId
         )
@@ -376,64 +428,13 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
             )
             .setContentIntent(addPi)
             .setFullScreenIntent(fullScreenPi, true)
-            .setAutoCancel(true) // 點擊主體自動清除
-            .setPriority(NotificationCompat.PRIORITY_MAX) // 確保 Heads-up 彈出
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
-            .setVibrate(longArrayOf(0, 300, 200, 300))
-            .setTimeoutAfter(10 * 60 * 1000L) // 10分鐘無人理自動消失
-            .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
-
-        nm.notify(notifId, builder.build())
-    } catch (_: Exception) {}
-}
-
-fun showCaptureConfirmNotification(context: Context, captured: CapturedNotification) {
-    try {
-        if (Build.VERSION.SDK_INT >= 33) {
-            val granted = context.checkSelfPermission("android.permission.POST_NOTIFICATIONS") ==
-                PackageManager.PERMISSION_GRANTED
-            if (!granted) return
-        }
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-        ensureNotificationChannels(context)
-
-        val notifId = CONFIRM_NOTIFICATION_BASE_ID
-        val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
-        val title = "檢測到消費：${captured.note} · HKD $amountStr"
-
-        val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val addIntent = buildLaunchIntentForMain(
-            context, captured.note, captured.amount, captured.category
-        )
-        val addPi = PendingIntent.getActivity(context, notifId + 1, addIntent, piFlags)
-        val fullScreenPi = PendingIntent.getActivity(context, notifId + 1, addIntent, piFlags)
-
-        val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
-            action = "com.example.hello.ACTION_IGNORE_CAPTURE"
-            putExtra("notif_id", notifId)
-        }
-        val ignorePi = PendingIntent.getBroadcast(context, notifId + 2, ignoreIntent, piFlags)
-
-        val builder = NotificationCompat.Builder(context, CONFIRM_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(title)
-            .setContentText("是否新增這筆記錄？（分類：${captured.category}）")
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
-            )
-            .setContentIntent(addPi)
-            .setFullScreenIntent(fullScreenPi, true)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
-            .setTimeoutAfter(5 * 60 * 1000L)
+            .setTimeoutAfter(10 * 60 * 1000L)
             .addAction(android.R.drawable.ic_menu_save, "✅ 記賬", addPi)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "❌ 忽略", ignorePi)
 
