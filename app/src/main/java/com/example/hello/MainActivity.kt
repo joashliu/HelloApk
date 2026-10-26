@@ -4985,17 +4985,15 @@ fun LedgerKeyboardPanel(
                             onDismissRequest = { menuVisibleState.targetState = false },
                             properties = PopupProperties(focusable = true)
                         ) {
-                            val totalRows = CHUNKED_CATEGORIES.size
-                            val staggerMs = 40
-                            val rowEnterDur = 350
-                            val rowExitDur = 200
-                            val initialDelay = 50
-                            val maxExitDelay = (totalRows - 1) * staggerMs + rowExitDur
+                            val staggerMs = 25
+                            val rowEnterDur = 200
 
                             androidx.compose.animation.AnimatedVisibility(
                                 visibleState = menuVisibleState,
-                                enter = fadeIn(tween(initialDelay, easing = LinearEasing)),
-                                exit = fadeOut(tween(150, delayMillis = maxExitDelay, easing = FastOutLinearInEasing))
+                                enter = fadeIn(tween(100, easing = LinearEasing)) +
+                                        scaleIn(initialScale = 0.92f, animationSpec = tween(220, easing = LinearOutSlowInEasing)),
+                                exit = fadeOut(tween(150, easing = FastOutLinearInEasing)) +
+                                       scaleOut(targetScale = 0.9f, animationSpec = tween(150, easing = FastOutLinearInEasing))
                             ) {
                                 var isReady by remember { mutableStateOf(false) }
                                 LaunchedEffect(menuVisibleState.targetState) {
@@ -5012,15 +5010,14 @@ fun LedgerKeyboardPanel(
                                 ) {
                                     CHUNKED_CATEGORIES.forEachIndexed { rowIdx, pair ->
                                         key(rowIdx) {
-                                            val enterDelay = initialDelay + rowIdx * staggerMs
-                                            val exitDelay = (totalRows - 1 - rowIdx) * staggerMs
+                                            val enterDelay = rowIdx * staggerMs
 
                                             val rowAlpha by animateFloatAsState(
                                                 targetValue = if (isReady) 1f else 0f,
                                                 animationSpec = if (isReady) {
                                                     tween(rowEnterDur, enterDelay, LinearOutSlowInEasing)
                                                 } else {
-                                                    tween(rowExitDur, exitDelay, FastOutLinearInEasing)
+                                                    tween(150, 0, FastOutLinearInEasing)
                                                 },
                                                 label = "rowAlpha_$rowIdx"
                                             )
@@ -5030,7 +5027,7 @@ fun LedgerKeyboardPanel(
                                                 animationSpec = if (isReady) {
                                                     tween(rowEnterDur, enterDelay, LinearOutSlowInEasing)
                                                 } else {
-                                                    tween(rowExitDur, exitDelay, FastOutLinearInEasing)
+                                                    tween(150, 0, FastOutLinearInEasing)
                                                 },
                                                 label = "rowScale_$rowIdx"
                                             )
