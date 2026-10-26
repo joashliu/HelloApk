@@ -3943,7 +3943,6 @@ fun WeeklyExpenseChart(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                // 🟢 核心修正：將所有滾動計算搬入 graphicsLayer，效能極高且唔會觸發多餘重組
                 .graphicsLayer {
                     var offsetPx = 0f
                     var p = 0f
@@ -3954,25 +3953,18 @@ fun WeeklyExpenseChart(
                     } else {
                         val offset = info.offset
                         if (offset < 0) {
-                            // 取得卡片超出頂部視窗嘅像素 (負數)
                             offsetPx = offset.toFloat()
                             p = (-offset / info.size.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                         }
                     }
 
-                    // 🟢 1. 簡單平滑嘅淡出 (滾動到 40% 就完全隱藏)
+                    // 🟢 1. 純粹平滑淡出，移除所有 scaleX / scaleY 縮放邏輯
+                    // 唔會再有向內擠壓或者變形消失嘅感覺
                     alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
                     
-                    // 🟢 2. 統一比例縮小 (類似快速輸入區)
-                    val s = 1f - (p * 0.15f) 
-                    scaleX = s
-                    scaleY = s
-                    
-                    // 🟢 3. 完美視覺停留 (Sticky 效果)：
-                    // 將卡片反向推落嚟，抵消向上滾動嘅位移。
-                    // 咁樣卡片視覺上就會一直黏住視窗最頂，絕對唔會被 LazyColumn 裁切，四隻圓角完美保留！
+                    // 🟢 2. 完美視覺停留 (Sticky 效果)
+                    // 卡片會原尺寸定格喺頂部，下面嘅 LazyColumn 內容會自然向上滑過並覆蓋佢
                     translationY = -offsetPx 
-                    transformOrigin = TransformOrigin(0.5f, 0f) // 確保從頂部邊緣正中縮放
                 }
         ) {
             Column(
