@@ -3050,7 +3050,7 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
-    // 🟢 新增：快速輸入區滾動收縮狀態
+    // 🟢 快速輸入區滾動收縮狀態
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
@@ -3062,7 +3062,6 @@ fun LedgerContent(
     val quickInputScrollConnection = remember(filterMode, topNotes) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // 如果開啟咗篩選模式或者冇常用項目，就唔攔截滾動
                 if (filterMode || topNotes.isEmpty()) return Offset.Zero
                 
                 val delta = available.y
@@ -3077,7 +3076,7 @@ fun LedgerContent(
     val isListScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
     val scope = rememberCoroutineScope()
     
-    // 🟢 新增：當滑動停止時，自動吸附 (Snap) 到完全展開或完全收縮
+    // 🟢 當滑動停止時，自動吸附 (Snap) 到完全展開或完全收縮
     LaunchedEffect(isListScrolling) {
         if (!isListScrolling && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
             val target = if (quickInputCollapseOffset > maxCollapsePx * 0.5f) maxCollapsePx else 0f
@@ -3181,8 +3180,17 @@ fun LedgerContent(
         }
     }
 
+    // 🟢 打開鍵盤時，自動平滑展開快速輸入區
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
+            if (quickInputCollapseOffset > 0f) {
+                launch {
+                    val a = Animatable(quickInputCollapseOffset)
+                    a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                        quickInputCollapseOffset = this.value
+                    }
+                }
+            }
             try {
                 if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
                 listState.animateScrollToItem(0)
@@ -3401,7 +3409,6 @@ fun LedgerContent(
                     Column(Modifier.fillMaxWidth()) {
                         if (topNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
-                            // 🟢 傳入 collapseProgress 及點擊還原邏輯
                             QuickInputSection(
                                 topNotes = topNotes,
                                 noteIconMap = noteIconMap,
@@ -3473,7 +3480,6 @@ fun LedgerContent(
                 }
             }
 
-            // 🟢 將 quickInputScrollConnection 綁定到 List 嘅容器
             Box(
                 Modifier
                     .weight(1f)
