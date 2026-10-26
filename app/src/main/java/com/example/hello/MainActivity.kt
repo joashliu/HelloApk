@@ -4985,24 +4985,23 @@ fun LedgerKeyboardPanel(
                             onDismissRequest = { menuVisibleState.targetState = false },
                             properties = PopupProperties(focusable = true)
                         ) {
+                            val totalRows = CHUNKED_CATEGORIES.size
+                            val staggerMs = 40
+                            val rowEnterDur = 350
+                            val rowExitDur = 200
+                            val initialDelay = 50
+                            val maxExitDelay = (totalRows - 1) * staggerMs + rowExitDur
+
                             androidx.compose.animation.AnimatedVisibility(
                                 visibleState = menuVisibleState,
-                                enter = fadeIn(tween(200, easing = FastOutSlowInEasing)) +
-                                    scaleIn(
-                                        initialScale = 0.85f,
-                                        animationSpec = spring(
-                                            dampingRatio = 0.72f,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        ),
-                                        transformOrigin = TransformOrigin(0.5f, 1f)
-                                    ),
-                                exit = fadeOut(tween(140, easing = FastOutLinearInEasing)) +
-                                    scaleOut(
-                                        targetScale = 0.9f,
-                                        animationSpec = tween(160, easing = FastOutSlowInEasing),
-                                        transformOrigin = TransformOrigin(0.5f, 1f)
-                                    )
+                                enter = fadeIn(tween(initialDelay, easing = LinearEasing)),
+                                exit = fadeOut(tween(150, delayMillis = maxExitDelay, easing = FastOutLinearInEasing))
                             ) {
+                                var isReady by remember { mutableStateOf(false) }
+                                LaunchedEffect(menuVisibleState.targetState) {
+                                    isReady = menuVisibleState.targetState
+                                }
+
                                 Column(
                                     modifier = Modifier
                                         .width(288.dp)
@@ -5012,96 +5011,88 @@ fun LedgerKeyboardPanel(
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     CHUNKED_CATEGORIES.forEachIndexed { rowIdx, pair ->
-    key(rowIdx) {
-        val rowVisible = remember { mutableStateOf(false) }
-        LaunchedEffect(menuVisibleState.targetState) {
-            if (menuVisibleState.targetState) {
-                delay(320L + rowIdx * 40L)
-                rowVisible.value = true
-            } else {
-                rowVisible.value = false
-            }
-        }
+                                        key(rowIdx) {
+                                            val enterDelay = initialDelay + rowIdx * staggerMs
+                                            val exitDelay = (totalRows - 1 - rowIdx) * staggerMs
 
-        AnimatedVisibility(
-            visible = rowVisible.value,
-            enter = fadeIn(tween(140, easing = FastOutSlowInEasing)) +
-                scaleIn(
-                    initialScale = 0.5f,
-                    animationSpec = spring(
-                        dampingRatio = 0.5f,
-                        stiffness = 550f
-                    )
-                ) +
-                expandVertically(
-                    expandFrom = Alignment.Top,
-                    animationSpec = spring(
-                        dampingRatio = 0.7f,
-                        stiffness = 500f
-                    )
-                ),
-            exit = fadeOut(tween(90, easing = FastOutLinearInEasing)) +
-                scaleOut(
-                    targetScale = 0.85f,
-                    animationSpec = tween(90, easing = FastOutSlowInEasing)
-                ) +
-                shrinkVertically(
-                    shrinkTowards = Alignment.Top,
-                    animationSpec = tween(90, easing = FastOutSlowInEasing)
-                )
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                pair.forEach { cat ->
-                    val s = CATEGORY_STYLES[cat]
-                    val sel = cat == state.category
-                    val chipShape = RoundedCornerShape(12.dp)
-                    Row(
-                        Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                            .clip(chipShape)
-                            .background(
-                                if (sel) (s?.fgColor ?: BRAND_PRIMARY)
-                                else (s?.bgColor ?: SURFACE_ELEVATED)
-                            )
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                onStateChange(
-                                    state.copy(
-                                        category = cat,
-                                        currency = "HKD",
-                                        focusedField = "amount"
-                                    )
-                                )
-                                menuVisibleState.targetState = false
-                            },
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (s != null) {
-                            Icon(s.icon, null,
-                                tint = if (sel) Color.White else s.fgColor,
-                                modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(5.dp))
-                        }
-                        Text(cat, fontSize = 13.sp,
-                            color = if (sel) Color.White
-                                    else (s?.fgColor ?: TEXT_PRIMARY),
-                            fontWeight = if (sel) FontWeight.SemiBold
-                                         else FontWeight.Normal,
-                            maxLines = 1)
-                    }
-                }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
+                                            val rowAlpha by animateFloatAsState(
+                                                targetValue = if (isReady) 1f else 0f,
+                                                animationSpec = if (isReady) {
+                                                    tween(rowEnterDur, enterDelay, LinearOutSlowInEasing)
+                                                } else {
+                                                    tween(rowExitDur, exitDelay, FastOutLinearInEasing)
+                                                },
+                                                label = "rowAlpha_$rowIdx"
+                                            )
+
+                                            val rowScale by animateFloatAsState(
+                                                targetValue = if (isReady) 1f else 0.85f,
+                                                animationSpec = if (isReady) {
+                                                    tween(rowEnterDur, enterDelay, LinearOutSlowInEasing)
+                                                } else {
+                                                    tween(rowExitDur, exitDelay, FastOutLinearInEasing)
+                                                },
+                                                label = "rowScale_$rowIdx"
+                                            )
+
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .graphicsLayer {
+                                                        alpha = rowAlpha
+                                                        scaleX = rowScale
+                                                        scaleY = rowScale
+                                                    },
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                pair.forEach { cat ->
+                                                    val s = CATEGORY_STYLES[cat]
+                                                    val sel = cat == state.category
+                                                    val chipShape = RoundedCornerShape(12.dp)
+                                                    
+                                                    Row(
+                                                        Modifier
+                                                            .weight(1f)
+                                                            .height(44.dp)
+                                                            .clip(chipShape)
+                                                            .background(
+                                                                if (sel) (s?.fgColor ?: BRAND_PRIMARY)
+                                                                else (s?.bgColor ?: SURFACE_ELEVATED)
+                                                            )
+                                                            .clickable(
+                                                                interactionSource = remember { MutableInteractionSource() },
+                                                                indication = null
+                                                            ) {
+                                                                onStateChange(
+                                                                    state.copy(
+                                                                        category = cat,
+                                                                        currency = "HKD",
+                                                                        focusedField = "amount"
+                                                                    )
+                                                                )
+                                                                menuVisibleState.targetState = false
+                                                            },
+                                                        horizontalArrangement = Arrangement.Center,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        if (s != null) {
+                                                            Icon(s.icon, null,
+                                                                tint = if (sel) Color.White else s.fgColor,
+                                                                modifier = Modifier.size(16.dp))
+                                                            Spacer(Modifier.width(5.dp))
+                                                        }
+                                                        Text(cat, fontSize = 13.sp,
+                                                            color = if (sel) Color.White
+                                                                    else (s?.fgColor ?: TEXT_PRIMARY),
+                                                            fontWeight = if (sel) FontWeight.SemiBold
+                                                                         else FontWeight.Normal,
+                                                            maxLines = 1)
+                                                    }
+                                                }
+                                                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
