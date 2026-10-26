@@ -5277,25 +5277,20 @@ fun AnimatedAmount(
         if (text.length > maxSlots.value) maxSlots.value = text.length
     }
 
-    // 🟢 終極防彈版：使用無限迴圈 + 狀態快照，確保打字機列隊絕對精準
     val currentText by rememberUpdatedState(text)
     var displayedText by remember { mutableStateOf(text) }
 
     LaunchedEffect(Unit) {
-        // 呢個 Worker 由頭到尾只會啟動一次，永遠唔會被你嘅極速打字中斷
-        while (kotlinx.coroutines.isActive) {
+        // 🟢 修正這裡：直接使用 isActive，因為 LaunchedEffect 已經提供了 CoroutineScope
+        while (isActive) {
             val target = currentText
             if (displayedText == target) {
-                // 當前顯示已同步，掛起等待下一次輸入 (每幀約 16ms 檢查一次，極致輕量)
                 kotlinx.coroutines.delay(16)
             } else {
                 if (target.length < displayedText.length || !target.startsWith(displayedText)) {
-                    // 遇到刪除或重置字串，立即同步，無縫觸發退格退出動畫
                     displayedText = target
                 } else {
-                    // 遇到新增字元，嚴格逐一添加
                     displayedText += target[displayedText.length]
-                    // ⚡ 強制鎖定每個字元彈出嘅時間間隔 (60ms)，保證「波浪感」絕不重疊或被跳過
                     kotlinx.coroutines.delay(60)
                 }
             }
