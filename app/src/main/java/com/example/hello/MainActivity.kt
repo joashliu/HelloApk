@@ -3953,17 +3953,21 @@ fun WeeklyExpenseChart(
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    Box(modifier = modifier.fillMaxWidth().height(chartHeight).clipToBounds()) {
+    // 🟢 移除咗 clipToBounds()，防止滾動收縮時卡片被裁切導致頂部圓角變直角
+    Box(modifier = modifier.fillMaxWidth().height(chartHeight)) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 4.dp)
                 .graphicsLayer {
                     val p = scrollProgress
-                    alpha = (1f - p * 1.05f).coerceIn(0f, 1f)
-                    scaleY = 1f - p * 0.35f
-                    scaleX = 1f - p * 0.08f
-                    translationY = -p * 14.dp.toPx()
+                    
+                    // 🟢 統一縮放比例及淡出速度，移除 3D 傾斜同負數 Y 軸位移
+                    // 效果同快速輸入區保持一致：單純縮小 + 淡出
+                    alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                    val s = 1f - (p * 0.15f) 
+                    scaleX = s
+                    scaleY = s
                     transformOrigin = TransformOrigin(0.5f, 0f)
                 }
         ) {
