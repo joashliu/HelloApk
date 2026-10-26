@@ -3933,42 +3933,46 @@ fun WeeklyExpenseChart(
 ) {
     val chartHeight = 178.dp
 
-    // 用实际 item size 计算淡出，避免固定 chartHeightPx 与新的高度对不上
-    val scrollProgress by remember(listState) {
-        derivedStateOf {
-            val info = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.key == "weekly_chart" }
-            if (info == null) {
-                if (listState.firstVisibleItemIndex > 0) 1f else 0f
-            } else {
-                val offset = info.offset
-                if (offset >= 0) 0f
-                else (-offset / info.size.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
-            }
-        }
-    }
-
     val maxAmount = remember(data) {
         data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    // 🟢 移除咗 clipToBounds()，防止滾動收縮時卡片被裁切導致頂部圓角變直角
     Box(modifier = modifier.fillMaxWidth().height(chartHeight)) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 4.dp)
+                // 🟢 核心修正：將所有滾動計算搬入 graphicsLayer，效能極高且唔會觸發多餘重組
                 .graphicsLayer {
-                    val p = scrollProgress
+                    var offsetPx = 0f
+                    var p = 0f
                     
-                    // 🟢 統一縮放比例及淡出速度，移除 3D 傾斜同負數 Y 軸位移
-                    // 效果同快速輸入區保持一致：單純縮小 + 淡出
+                    val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "weekly_chart" }
+                    if (info == null) {
+                        p = if (listState.firstVisibleItemIndex > 0) 1f else 0f
+                    } else {
+                        val offset = info.offset
+                        if (offset < 0) {
+                            // 取得卡片超出頂部視窗嘅像素 (負數)
+                            offsetPx = offset.toFloat()
+                            p = (-offset / info.size.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
+                        }
+                    }
+
+                    // 🟢 1. 簡單平滑嘅淡出 (滾動到 40% 就完全隱藏)
                     alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                    
+                    // 🟢 2. 統一比例縮小 (類似快速輸入區)
                     val s = 1f - (p * 0.15f) 
                     scaleX = s
                     scaleY = s
-                    transformOrigin = TransformOrigin(0.5f, 0f)
+                    
+                    // 🟢 3. 完美視覺停留 (Sticky 效果)：
+                    // 將卡片反向推落嚟，抵消向上滾動嘅位移。
+                    // 咁樣卡片視覺上就會一直黏住視窗最頂，絕對唔會被 LazyColumn 裁切，四隻圓角完美保留！
+                    translationY = -offsetPx 
+                    transformOrigin = TransformOrigin(0.5f, 0f) // 確保從頂部邊緣正中縮放
                 }
         ) {
             Column(
