@@ -6083,7 +6083,6 @@ fun CalendarContent(
                     if (calendarExpansion.value > 0.35f || available.y > 400f) {
                         scope.launch {
                             calendarExpansion.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 300f))
-                            // 🟢 核心修復：等收縮動畫跑完先清空 selectedDay，完美無縫收合
                             selectedDay = null
                             selectedRowIdx = null
                             selectedColIdx = null
@@ -6180,64 +6179,76 @@ fun CalendarContent(
 
                 Spacer(Modifier.height(10.dp))
 
-                AnimatedVisibility(
-                    visible = selectedDay == null,
-                    enter = fadeIn(tween(250)) + expandVertically(tween(300, easing = FastOutSlowInEasing)),
-                    exit = fadeOut(tween(200)) + shrinkVertically(tween(250, easing = FastOutSlowInEasing))
-                ) {
-                    Column {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 72.dp),
-                            modifier = Modifier.fillMaxWidth().animateContentSize(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            userScrollEnabled = false
-                        ) {
-                            item(key = "__all__") {
-                                CalendarFilterChip(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selected = filterCategory == null,
-                                    label = "全部",
-                                    onClick = { onFilterCategoryChange(null) }
-                                )
-                            }
-                            items(items = visibleCategories, key = { it }) { cat ->
-                                CalendarFilterChip(
-                                    modifier = Modifier.animateItem().fillMaxWidth(),
-                                    selected = filterCategory == cat,
-                                    label = cat,
-                                    onClick = {
-                                        onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                                    }
-                                )
+                // 🟢 將原本嘅 AnimatedVisibility 轉用 layout 攔截
+                // 令佢嘅高度、透明度完全跟隨 calendarExpansion.value，同月曆格仔完美同步，解決空間留空問題
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            val h = (placeable.height * calendarExpansion.value).roundToInt()
+                            layout(placeable.width, h) {
+                                // 收縮時內容往上推，製造自然摺疊感
+                                placeable.placeRelative(0, h - placeable.height)
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AnimatedInfoChip(
-                                label = "總計",
-                                valueText = "$${formatAmountNoDecimal(totalNet)}",
-                                modifier = Modifier.weight(1f),
-                                valueFontSize = 16.sp,
-                                valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                        .clipToBounds()
+                        .graphicsLayer {
+                            // 稍微加速淡入效果，令手感更利落
+                            alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
+                        }
+                ) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 72.dp),
+                        modifier = Modifier.fillMaxWidth().animateContentSize(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        userScrollEnabled = false
+                    ) {
+                        item(key = "__all__") {
+                            CalendarFilterChip(
+                                modifier = Modifier.fillMaxWidth(),
+                                selected = filterCategory == null,
+                                label = "全部",
+                                onClick = { onFilterCategoryChange(null) }
                             )
-                            AnimatedInfoChip(
-                                label = "平均每項",
-                                valueText = "$${formatAmountNoDecimal(avgPerItem)}",
-                                modifier = Modifier.weight(1f),
-                                valueFontSize = 16.sp
-                            )
-                            AnimatedInfoChip(
-                                label = "日均支出",
-                                valueText = "$${formatAmountNoDecimal(avgPerDay)}",
-                                modifier = Modifier.weight(1f),
-                                valueFontSize = 16.sp
+                        }
+                        items(items = visibleCategories, key = { it }) { cat ->
+                            CalendarFilterChip(
+                                modifier = Modifier.animateItem().fillMaxWidth(),
+                                selected = filterCategory == cat,
+                                label = cat,
+                                onClick = {
+                                    onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                                }
                             )
                         }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AnimatedInfoChip(
+                            label = "總計",
+                            valueText = "$${formatAmountNoDecimal(totalNet)}",
+                            modifier = Modifier.weight(1f),
+                            valueFontSize = 16.sp,
+                            valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                        )
+                        AnimatedInfoChip(
+                            label = "平均每項",
+                            valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                            modifier = Modifier.weight(1f),
+                            valueFontSize = 16.sp
+                        )
+                        AnimatedInfoChip(
+                            label = "日均支出",
+                            valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                            modifier = Modifier.weight(1f),
+                            valueFontSize = 16.sp
+                        )
+                    }
+                    // 🟢 原本喺外面嘅 Spacer，收入嚟等佢可以一齊平滑縮細
+                    Spacer(Modifier.height(10.dp))
                 }
-
-                Spacer(Modifier.height(10.dp))
 
                 Row(Modifier.fillMaxWidth()) {
                     CALENDAR_WEEKDAY_HEADERS.forEach { w ->
@@ -6313,12 +6324,10 @@ fun CalendarContent(
                             ) {
                                 val dragAlpha = (1f - calendarExpansion.value * 2.5f).coerceIn(0f, 1f)
                                 val dragScale = (1f - calendarExpansion.value * 0.05f).coerceAtLeast(0.8f)
-                                // 🟢 核心佈局收縮：進度接近 1f 時，高度慢慢壓縮到 0
                                 val dragHeightFactor = (1f - calendarExpansion.value).coerceIn(0f, 1f)
 
                                 Column(
                                     Modifier.fillMaxWidth()
-                                        // 🟢 動態修改佔用嘅實體高度，扯起下方行數
                                         .layout { measurable, constraints ->
                                             val placeable = measurable.measure(constraints)
                                             val h = (placeable.height * dragHeightFactor).roundToInt()
@@ -6371,12 +6380,10 @@ fun CalendarContent(
                                         onFanMenuEnd = handleFanEnd,
                                         activeFanRecord = activeFanRecord
                                     )
-                                    // 🟢 將原有嘅 12.dp 減至 6.dp，配合出便一齊確保無縫銜接
                                     Spacer(Modifier.height(6.dp))
                                 }
                             }
 
-                            // 🟢 確保每行之間永遠有 6.dp 間距（展開時會拉長），防閃爍
                             if (rowExpansion > 0.05f) {
                                 Spacer(Modifier.height(6.dp * rowExpansion))
                             }
