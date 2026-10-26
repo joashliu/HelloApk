@@ -3054,15 +3054,19 @@ fun LedgerContent(
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
+    
+    // 🟢 新增防護鎖：防止程式自動動畫與 NestedScroll / Snap 打交
+    var isAutoAnimating by remember { mutableStateOf(false) }
 
     LaunchedEffect(filterMode) {
         if (filterMode) quickInputCollapseOffset = 0f
     }
 
-    val quickInputScrollConnection = remember(filterMode, topNotes) {
+    val quickInputScrollConnection = remember(filterMode, topNotes, isAutoAnimating) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (filterMode || topNotes.isEmpty()) return Offset.Zero
+                // 如果開啟篩選、冇項目、或者進行緊自動展開動畫，就唔攔截滾動
+                if (filterMode || topNotes.isEmpty() || isAutoAnimating) return Offset.Zero
                 
                 val delta = available.y
                 val next = (quickInputCollapseOffset - delta).coerceIn(0f, maxCollapsePx)
@@ -3076,13 +3080,18 @@ fun LedgerContent(
     val isListScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
     val scope = rememberCoroutineScope()
     
-    // 🟢 當滑動停止時，自動吸附 (Snap) 到完全展開或完全收縮
+    // 🟢 當滑動停止時，自動吸附 (加入 !isAutoAnimating 條件防止誤判)
     LaunchedEffect(isListScrolling) {
-        if (!isListScrolling && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
-            val target = if (quickInputCollapseOffset > maxCollapsePx * 0.5f) maxCollapsePx else 0f
-            val a = Animatable(quickInputCollapseOffset)
-            a.animateTo(target, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                quickInputCollapseOffset = this.value
+        if (!isListScrolling && !isAutoAnimating && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
+            try {
+                isAutoAnimating = true
+                val target = if (quickInputCollapseOffset > maxCollapsePx * 0.5f) maxCollapsePx else 0f
+                val a = Animatable(quickInputCollapseOffset)
+                a.animateTo(target, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                    quickInputCollapseOffset = this.value
+                }
+            } finally {
+                isAutoAnimating = false
             }
         }
     }
@@ -3180,14 +3189,19 @@ fun LedgerContent(
         }
     }
 
-    // 🟢 打開鍵盤時，自動平滑展開快速輸入區
+    // 🟢 打開鍵盤時，鎖定並自動平滑展開快速輸入區
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             if (quickInputCollapseOffset > 0f) {
                 launch {
-                    val a = Animatable(quickInputCollapseOffset)
-                    a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                        quickInputCollapseOffset = this.value
+                    try {
+                        isAutoAnimating = true
+                        val a = Animatable(quickInputCollapseOffset)
+                        a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                            quickInputCollapseOffset = this.value
+                        }
+                    } finally {
+                        isAutoAnimating = false
                     }
                 }
             }
@@ -3417,9 +3431,14 @@ fun LedgerContent(
                                 collapseProgress = collapseProgress,
                                 onExpandClick = {
                                     scope.launch {
-                                        val a = Animatable(quickInputCollapseOffset)
-                                        a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                                            quickInputCollapseOffset = this.value
+                                        try {
+                                            isAutoAnimating = true
+                                            val a = Animatable(quickInputCollapseOffset)
+                                            a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                                                quickInputCollapseOffset = this.value
+                                            }
+                                        } finally {
+                                            isAutoAnimating = false
                                         }
                                     }
                                 },
