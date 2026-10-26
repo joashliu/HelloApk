@@ -3050,6 +3050,46 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
+    // 🟢 新增：快速輸入區滾動收縮狀態
+    val density = LocalDensity.current
+    val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
+    var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(filterMode) {
+        if (filterMode) quickInputCollapseOffset = 0f
+    }
+
+    val quickInputScrollConnection = remember(filterMode, topNotes) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // 如果開啟咗篩選模式或者冇常用項目，就唔攔截滾動
+                if (filterMode || topNotes.isEmpty()) return Offset.Zero
+                
+                val delta = available.y
+                val next = (quickInputCollapseOffset - delta).coerceIn(0f, maxCollapsePx)
+                val consumed = quickInputCollapseOffset - next
+                quickInputCollapseOffset = next
+                return Offset(0f, consumed)
+            }
+        }
+    }
+
+    val isListScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
+    val scope = rememberCoroutineScope()
+    
+    // 🟢 新增：當滑動停止時，自動吸附 (Snap) 到完全展開或完全收縮
+    LaunchedEffect(isListScrolling) {
+        if (!isListScrolling && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
+            val target = if (quickInputCollapseOffset > maxCollapsePx * 0.5f) maxCollapsePx else 0f
+            val a = Animatable(quickInputCollapseOffset)
+            a.animateTo(target, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                quickInputCollapseOffset = this.value
+            }
+        }
+    }
+
+    val collapseProgress = if (maxCollapsePx > 0f) (quickInputCollapseOffset / maxCollapsePx).coerceIn(0f, 1f) else 0f
+
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
 
@@ -3072,9 +3112,6 @@ fun LedgerContent(
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
     val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
-
-    val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
 
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
@@ -3345,7 +3382,6 @@ fun LedgerContent(
                 }
             }
 
-            // 🟢 固定顶部：快速输入 / 筛选面板，不参与模糊，键盘打开时仍可点击
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
@@ -3365,11 +3401,21 @@ fun LedgerContent(
                     Column(Modifier.fillMaxWidth()) {
                         if (topNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
+                            // 🟢 傳入 collapseProgress 及點擊還原邏輯
                             QuickInputSection(
                                 topNotes = topNotes,
                                 noteIconMap = noteIconMap,
                                 maxRowsPerPage = 4,
                                 skipAppearAnimation = !isFirstShow,
+                                collapseProgress = collapseProgress,
+                                onExpandClick = {
+                                    scope.launch {
+                                        val a = Animatable(quickInputCollapseOffset)
+                                        a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                                            quickInputCollapseOffset = this.value
+                                        }
+                                    }
+                                },
                                 onClick = onQuickInputClick
                             )
                         }
@@ -3427,12 +3473,13 @@ fun LedgerContent(
                 }
             }
 
-            // 🟢 滚动区：只有记账项目列表参与模糊
+            // 🟢 將 quickInputScrollConnection 綁定到 List 嘅容器
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .clipToBounds()
+                    .nestedScroll(quickInputScrollConnection) 
                     .graphicsLayer {
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
@@ -5497,6 +5544,8 @@ fun QuickInputSection(
     noteIconMap: Map<String, String>,
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
+    collapseProgress: Float = 0f, // 🟢 接收滾動收縮進度 (0f: 展開, 1f: 隱藏)
+    onExpandClick: () -> Unit = {}, // 🟢 收縮後嘅點擊事件
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -5586,7 +5635,6 @@ fun QuickInputSection(
             val hasIndicator = pagesWithChips.size > 1
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
 
-            // 🟢 恢復動態高度：根據當前頁面的實際行數調整高度，切換分頁時會有平滑過渡
             val targetHeightDp = remember(pagesWithChips, safeCurrentPage, hasIndicator) {
                 val currentRowCount = pagesWithChips[safeCurrentPage].let { chips ->
                     if (chips.isEmpty()) 1 else {
@@ -5600,74 +5648,114 @@ fun QuickInputSection(
                 (if (hasIndicator) indicatorSpaceDp else 0.dp)
             }
 
-            // 🟢 改動 3：改 tween(400, FastOutSlowIn) 對齊 AnimatedContent 曲線，
-            // 令 panel 高度動畫同外層高度動畫完全同步，唔會再「二次跳動」
             val animatedHeight by animateDpAsState(
                 targetValue = targetHeightDp,
                 animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
                 label = "quickPanelHeight"
             )
 
+            // 🟢 最終高度會根據滾動進度在 原始高度 同 收縮形態（44dp） 之間平滑轉換
+            val collapsedHeight = 44.dp
+            val finalHeight = androidx.compose.ui.unit.lerp(animatedHeight, collapsedHeight, collapseProgress)
+
             Box(
-                Modifier.fillMaxWidth().height(animatedHeight)
+                Modifier.fillMaxWidth().height(finalHeight)
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
             ) {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                    verticalAlignment = Alignment.Top
-                ) { page ->
-                    val chips = pagesWithChips.getOrNull(page) ?: emptyList()
+                // 原有常用項目的淡出同縮放
+                val mainAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
+                val mainScale = 1f - (collapseProgress * 0.08f)
 
-                    Box(Modifier.fillMaxWidth()
-                        .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
-                        chips.forEach { chip ->
-                            key(chip.name) {
-                                val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="x")
-                                val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="y")
-                                val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="w")
+                if (mainAlpha > 0.01f) {
+                    Box(Modifier.fillMaxSize().graphicsLayer {
+                        alpha = mainAlpha
+                        scaleX = mainScale
+                        scaleY = mainScale
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                    }) {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.Top
+                        ) { page ->
+                            val chips = pagesWithChips.getOrNull(page) ?: emptyList()
 
-                                var appear by remember { mutableStateOf(skipAppearAnimation) }
-                                LaunchedEffect(Unit) {
-                                    if (!skipAppearAnimation) appear = true
-                                }
-                                val scale by animateFloatAsState(if (appear) 1f else 0.6f, spring(0.65f, 400f), label="s")
-                                val alpha by animateFloatAsState(if (appear) 1f else 0f, tween(250), label="a")
+                            Box(Modifier.fillMaxWidth()
+                                .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
+                                chips.forEach { chip ->
+                                    key(chip.name) {
+                                        val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="x")
+                                        val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="y")
+                                        val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="w")
 
-                                Box(
-                                    Modifier
-                                        .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
-                                        .layout { measurable, constraints ->
-                                            val w = animW.value.roundToInt()
-                                            val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
-                                            layout(w, placeable.height) { placeable.placeRelative(0, 0) }
+                                        var appear by remember { mutableStateOf(skipAppearAnimation) }
+                                        LaunchedEffect(Unit) {
+                                            if (!skipAppearAnimation) appear = true
                                         }
-                                        .height(chipHeightDp)
-                                        .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
-                                ) {
-                                    QuickInputChip(
-                                        name = chip.name,
-                                        iconUrl = noteIconMap[chip.name] ?: "",
-                                        modifier = Modifier.fillMaxSize(),
-                                        onClick = { onClick(chip.name) }
-                                    )
+                                        val scale by animateFloatAsState(if (appear) 1f else 0.6f, spring(0.65f, 400f), label="s")
+                                        val alpha by animateFloatAsState(if (appear) 1f else 0f, tween(250), label="a")
+
+                                        Box(
+                                            Modifier
+                                                .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
+                                                .layout { measurable, constraints ->
+                                                    val w = animW.value.roundToInt()
+                                                    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+                                                    layout(w, placeable.height) { placeable.placeRelative(0, 0) }
+                                                }
+                                                .height(chipHeightDp)
+                                                .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
+                                        ) {
+                                            QuickInputChip(
+                                                name = chip.name,
+                                                iconUrl = noteIconMap[chip.name] ?: "",
+                                                modifier = Modifier.fillMaxSize(),
+                                                onClick = { onClick(chip.name) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (hasIndicator) {
+                            Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val safeCurrent = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
+                                repeat(pagesWithChips.size) { i ->
+                                    val isSelected = safeCurrent == i
+                                    Box(Modifier
+                                        .size(if (isSelected) 6.dp else 4.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR))
                                 }
                             }
                         }
                     }
                 }
 
-                if (hasIndicator) {
-                    Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val safeCurrent = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
-                        repeat(pagesWithChips.size) { i ->
-                            val isSelected = safeCurrent == i
-                            Box(Modifier
-                                .size(if (isSelected) 6.dp else 4.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR))
+                // 🟢 收縮形態：當滾動過半，淡入一個長形按鈕，提示可展開
+                val pillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
+                if (pillAlpha > 0.01f) {
+                    Box(
+                        Modifier.fillMaxSize().graphicsLayer { alpha = pillAlpha },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            onClick = onExpandClick,
+                            shape = CircleShape,
+                            color = SURFACE_ELEVATED,
+                            modifier = Modifier.height(34.dp).wrapContentWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, "展開", tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("展開快速輸入", fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
+                            }
                         }
                     }
                 }
