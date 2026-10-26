@@ -5277,21 +5277,32 @@ fun AnimatedAmount(
         if (text.length > maxSlots.value) maxSlots.value = text.length
     }
 
-    // 🟢 核心修復：使用本地狀態追蹤「視覺上」顯示嘅文字
     var displayedText by remember { mutableStateOf(text) }
     
+    // 建立一個無限容量嘅緩衝通道，用嚟接收要新增嘅字元
+    val charQueue = remember { kotlinx.coroutines.channels.Channel<Char>(kotlinx.coroutines.channels.Channel.UNLIMITED) }
+    
+    // 獨立嘅消費者協程：專職負責將佇列中嘅字元逐個拎出嚟顯示，並確保每次更新之間有足夠嘅動畫間隔
+    LaunchedEffect(Unit) {
+        for (char in charQueue) {
+            displayedText += char
+            // 保證每個字元之間至少有 70ms 間隔，確保 Compose 有足夠時間繪製每一個獨立嘅動畫
+            kotlinx.coroutines.delay(70)
+        }
+    }
+
+    // 生產者：觀察文字狀態變化
     LaunchedEffect(text) {
-        // 如果係刪除操作，或者係完全唔同嘅字串（例如重置、或由其他介面傳入）
+        // 如果係刪除操作，或者輸入被重置 / 截斷，就清空現有嘅佇列，並直接同步顯示狀態
         if (text.length < displayedText.length || !text.startsWith(displayedText)) {
-            displayedText = text // 立即更新，保留原有嘅退出/清除動畫邏輯
+            // 取消目前通道入面排緊隊嘅字
+            while (charQueue.tryReceive().isSuccess) { /* 清空 Queue */ }
+            displayedText = text
         } else {
-            // 如果係新增字元（快速連續輸入），計算出差異並逐位排隊播放
+            // 如果係新增操作，將新多出嚟嘅字元掉入 Queue 排隊
             val diff = text.substring(displayedText.length)
             for (c in diff) {
-                displayedText += c
-                // 微細嘅延遲強制 Compose 為每一個新字元獨立觸發 AnimatedContent
-                // 65ms 剛好能營造出流暢不重疊嘅波浪彈出感，且不會造成視覺過長嘅延遲
-                kotlinx.coroutines.delay(65) 
+                charQueue.trySend(c)
             }
         }
     }
