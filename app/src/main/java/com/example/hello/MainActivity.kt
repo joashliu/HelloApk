@@ -5940,7 +5940,7 @@ fun CalendarContent(
 
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
-    var cachedSelectedRowIdx by remember { mutableIntStateOf(0) } // 🟢 記住收縮前係邊行，確保動畫過渡完美
+    var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
 
     val scrollState = rememberScrollState()
 
@@ -6037,7 +6037,6 @@ fun CalendarContent(
     val totalCells = firstDayOffset + daysInMonth
     val totalRows = (totalCells + 6) / 7
 
-    // 🟢 核心展開狀態：0f = 收縮, 1f = 完整展開
     val calendarExpansion = remember { Animatable(1f) }
     val maxDragPx = remember(density) { with(density) { 250.dp.toPx() } }
 
@@ -6048,7 +6047,6 @@ fun CalendarContent(
         detailExpandedId = null
     }
 
-    // 🟢 點擊收縮/程式碼恢復展開嘅觸發器
     LaunchedEffect(selectedDay) {
         if (selectedDay != null) {
             calendarExpansion.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
@@ -6058,11 +6056,9 @@ fun CalendarContent(
         }
     }
 
-    // 🟢 下拉手勢攔截核心：只喺列表頂部生效
     val nestedScrollConnection = remember(selectedDay) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // 如果已經半展開緊，而且手指向上推 (available.y < 0)，食咗個滑動來收縮月曆
                 if (selectedDay != null && available.y < 0 && calendarExpansion.value > 0f) {
                     val currentPx = calendarExpansion.value * maxDragPx
                     val newPx = (currentPx + available.y).coerceIn(0f, maxDragPx)
@@ -6073,7 +6069,6 @@ fun CalendarContent(
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                // 如果列表置頂 (scrollState.value == 0)，而且手指向下拉 (available.y > 0)，食咗個滑動來展開月曆
                 if (selectedDay != null && available.y > 0 && scrollState.value == 0) {
                     val currentPx = calendarExpansion.value * maxDragPx
                     val newPx = (currentPx + available.y).coerceIn(0f, maxDragPx)
@@ -6086,21 +6081,20 @@ fun CalendarContent(
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (selectedDay != null && calendarExpansion.value > 0f) {
                     if (calendarExpansion.value > 0.35f || available.y > 400f) {
-                        // 展開超過 35% 或大力向下拉，自動補完展開，並取消選擇
                         scope.launch {
                             calendarExpansion.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 300f))
+                            // 🟢 核心修復：等收縮動畫跑完先清空 selectedDay，完美無縫收合
+                            selectedDay = null
+                            selectedRowIdx = null
+                            selectedColIdx = null
+                            detailExpandedId = null
                         }
-                        selectedDay = null
-                        selectedRowIdx = null
-                        selectedColIdx = null
-                        detailExpandedId = null
                     } else {
-                        // 回彈還原收縮狀態
                         scope.launch {
                             calendarExpansion.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f))
                         }
                     }
-                    return available // 攔截 Fling，避免列表亂飛
+                    return available
                 }
                 return Velocity.Zero
             }
@@ -6262,7 +6256,7 @@ fun CalendarContent(
 
                 Column(
                     Modifier.fillMaxSize()
-                        .nestedScroll(nestedScrollConnection) // 🟢 綁定手勢連接器
+                        .nestedScroll(nestedScrollConnection)
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
                         .padding(top = 10.dp)
@@ -6275,7 +6269,6 @@ fun CalendarContent(
                         val isThisRowSelected = selectedRowIdx == rowIdx
                         val isCachedSelectedRow = cachedSelectedRowIdx == rowIdx
                         
-                        // 🟢 智能分配每一行嘅進度：所選行永遠係 1f；其他行就跟隨全局手勢進度
                         val rowExpansion = when {
                             selectedDay == null -> if (isCachedSelectedRow) 1f else calendarExpansion.value
                             isThisRowSelected -> 1f
@@ -6294,7 +6287,7 @@ fun CalendarContent(
                                 maxAbsNet = maxAbsNet,
                                 selectedDay = if (isThisRowSelected) selectedDay else null,
                                 selectedCol = if (isThisRowSelected) selectedColIdx else null,
-                                expansionFraction = rowExpansion, // 🟢 傳入手勢進度
+                                expansionFraction = rowExpansion,
                                 onCellClick = { day, col ->
                                     if (selectedDay == day) {
                                         selectedDay = null
@@ -6313,7 +6306,6 @@ fun CalendarContent(
                                 }
                             )
 
-                            // 🟢 面板會喺手勢拖動期間流暢縮細淡出
                             AnimatedVisibility(
                                 visible = isThisRowSelected && selectedDay != null,
                                 enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
@@ -6321,14 +6313,25 @@ fun CalendarContent(
                             ) {
                                 val dragAlpha = (1f - calendarExpansion.value * 2.5f).coerceIn(0f, 1f)
                                 val dragScale = (1f - calendarExpansion.value * 0.05f).coerceAtLeast(0.8f)
+                                // 🟢 核心佈局收縮：進度接近 1f 時，高度慢慢壓縮到 0
+                                val dragHeightFactor = (1f - calendarExpansion.value).coerceIn(0f, 1f)
 
                                 Column(
-                                    Modifier.fillMaxWidth().graphicsLayer {
-                                        alpha = dragAlpha
-                                        scaleX = dragScale
-                                        scaleY = dragScale
-                                        transformOrigin = TransformOrigin(0.5f, 0f)
-                                    }
+                                    Modifier.fillMaxWidth()
+                                        // 🟢 動態修改佔用嘅實體高度，扯起下方行數
+                                        .layout { measurable, constraints ->
+                                            val placeable = measurable.measure(constraints)
+                                            val h = (placeable.height * dragHeightFactor).roundToInt()
+                                            layout(placeable.width, h) {
+                                                placeable.placeRelative(0, 0)
+                                            }
+                                        }
+                                        .graphicsLayer {
+                                            alpha = dragAlpha
+                                            scaleX = dragScale
+                                            scaleY = dragScale
+                                            transformOrigin = TransformOrigin(0.5f, 0f)
+                                        }
                                 ) {
                                     Spacer(Modifier.height(8.dp))
 
@@ -6368,12 +6371,13 @@ fun CalendarContent(
                                         onFanMenuEnd = handleFanEnd,
                                         activeFanRecord = activeFanRecord
                                     )
-                                    Spacer(Modifier.height(12.dp))
+                                    // 🟢 將原有嘅 12.dp 減至 6.dp，配合出便一齊確保無縫銜接
+                                    Spacer(Modifier.height(6.dp))
                                 }
                             }
 
-                            // 當無選中，又或者過渡到非 1f 時，強制保留行距
-                            if (rowExpansion > 0.05f && !(isThisRowSelected && selectedDay != null)) {
+                            // 🟢 確保每行之間永遠有 6.dp 間距（展開時會拉長），防閃爍
+                            if (rowExpansion > 0.05f) {
                                 Spacer(Modifier.height(6.dp * rowExpansion))
                             }
                         }
