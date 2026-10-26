@@ -2918,14 +2918,16 @@ fun FloatingNavBar(
             Row(Modifier.fillMaxSize()) {
                 items.forEachIndexed { idx, item ->
                     val sel = idx == selectedIndex
-                    val tint = if (sel) BRAND_PRIMARY_DARK else TEXT_SECONDARY
+                    // 🟢 未選中顏色改用 Color(0xFF636366)，比之前嘅 TEXT_SECONDARY 深色
+                    val tint = if (sel) BRAND_PRIMARY_DARK else Color(0xFF636366)
                     Box(Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(),
                         contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(6.dp))
+                            // 🟢 將未選中嘅字體粗度由 Normal 改為 Medium，令文字更加清晰實淨
                             Text(item.label, fontSize = 14.sp,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
                                 color = tint)
                         }
                     }
@@ -6583,7 +6585,8 @@ fun CompareValueCell(
         Spacer(Modifier.width(4.dp))
         Box(Modifier.width(38.dp), contentAlignment = Alignment.CenterEnd) {
             if (pctText != null) {
-                Text(pctText, fontSize = 11.sp, color = TEXT_TERTIARY,
+                // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，令百分比顏色深色啲
+                Text(pctText, fontSize = 11.sp, color = TEXT_SECONDARY,
                     fontWeight = FontWeight.Medium, textAlign = TextAlign.End, maxLines = 1)
             }
         }
