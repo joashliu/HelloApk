@@ -6179,22 +6179,22 @@ fun CalendarContent(
 
                 Spacer(Modifier.height(10.dp))
 
-                // 🟢 將原本嘅 AnimatedVisibility 轉用 layout 攔截
-                // 令佢嘅高度、透明度完全跟隨 calendarExpansion.value，同月曆格仔完美同步，解決空間留空問題
+                // 🟢 加入 coerceIn 安全限制，防止尺寸低於佈局要求導致閃退
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .layout { measurable, constraints ->
                             val placeable = measurable.measure(constraints)
-                            val h = (placeable.height * calendarExpansion.value).roundToInt()
-                            layout(placeable.width, h) {
-                                // 收縮時內容往上推，製造自然摺疊感
-                                placeable.placeRelative(0, h - placeable.height)
+                            val targetH = (placeable.height * calendarExpansion.value).roundToInt()
+                            // 絕對安全防護：強迫高度喺合理範圍內
+                            val safeH = targetH.coerceIn(constraints.minHeight, constraints.maxHeight)
+                            val safeW = placeable.width.coerceIn(constraints.minWidth, constraints.maxWidth)
+                            layout(safeW, safeH) {
+                                placeable.placeRelative(0, safeH - placeable.height)
                             }
                         }
                         .clipToBounds()
                         .graphicsLayer {
-                            // 稍微加速淡入效果，令手感更利落
                             alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                         }
                 ) {
@@ -6246,7 +6246,6 @@ fun CalendarContent(
                             valueFontSize = 16.sp
                         )
                     }
-                    // 🟢 原本喺外面嘅 Spacer，收入嚟等佢可以一齊平滑縮細
                     Spacer(Modifier.height(10.dp))
                 }
 
@@ -6326,12 +6325,15 @@ fun CalendarContent(
                                 val dragScale = (1f - calendarExpansion.value * 0.05f).coerceAtLeast(0.8f)
                                 val dragHeightFactor = (1f - calendarExpansion.value).coerceIn(0f, 1f)
 
+                                // 🟢 佈局收縮時加入安全檢查
                                 Column(
                                     Modifier.fillMaxWidth()
                                         .layout { measurable, constraints ->
                                             val placeable = measurable.measure(constraints)
-                                            val h = (placeable.height * dragHeightFactor).roundToInt()
-                                            layout(placeable.width, h) {
+                                            val targetH = (placeable.height * dragHeightFactor).roundToInt()
+                                            val safeH = targetH.coerceIn(constraints.minHeight, constraints.maxHeight)
+                                            val safeW = placeable.width.coerceIn(constraints.minWidth, constraints.maxWidth)
+                                            layout(safeW, safeH) {
                                                 placeable.placeRelative(0, 0)
                                             }
                                         }
