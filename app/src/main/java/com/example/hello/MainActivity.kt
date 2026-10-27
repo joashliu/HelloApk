@@ -4236,88 +4236,72 @@ fun WeeklyExpenseChart(
     val titleGap = 10.dp
     val labelRowHeight = 16.dp
 
-    val density = LocalDensity.current
-    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
-    val labelReservedPx = remember(density) { with(density) { (labelRowHeight + innerPadding).toPx() } }
-    val titleReservedPx = remember(density) { with(density) { (titleRowHeight + titleGap + innerPadding).toPx() } }
-    val barAreaOriginalPx = (chartHeightPx - labelReservedPx - titleReservedPx).coerceAtLeast(1f)
-    val labelReservedDp = with(density) { labelReservedPx.toDp() }
-
-    val maxAmount = remember(data) { data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001 }
+    val maxAmount = remember(data) {
+        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
+    }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    val collapseOffsetPx by remember(listState, chartHeightPx) {
-        derivedStateOf {
-            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "weekly_chart" }
-            if (info == null) chartHeightPx
-            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
-        }
-    }
-
-    val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
-    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
-
-    // 柱體層 scaleY：只作用於柱子，文字層不縮放
-    val barAreaCurrentPx = (visibleHeightPx - labelReservedPx - titleReservedPx).coerceAtLeast(0f)
-    val barScaleY = (barAreaCurrentPx / barAreaOriginalPx).coerceIn(0f, 1f)
-
-    // 日期行頂部位置：低於 titleReservedPx 時表示已入侵標題區
-    val dateRowTopPx = visibleHeightPx - labelReservedPx
-    val hasOverlap = dateRowTopPx < titleReservedPx && visibleHeightPx > 0.5f
-
+    // ★ 卡片始终完整 178dp，白色背景 + 四角圆角全程不变。
+    //   LazyColumn 天然裁切 → 卡片顶部随滚动被裁，裁切边界从顶部往下移。
+    //   卡片底部圆角全程可见；卡片下半截不会被任何遮罩覆盖变浅灰。
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(chartHeight)
-            .padding(horizontal = horizontalPadding)   // 左右固定 16dp，全程不變
+            .padding(horizontal = horizontalPadding)   // 左右 16dp 全程固定
     ) {
-        if (visibleHeightPx > 0.5f) {
-            Box(
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(12.dp))       // 四角圆角：卡片整体形状
+                .background(SURFACE_CARD)              // 白色背景：全程覆盖完整 178dp
+        ) {
+            Column(
                 Modifier
-                    .fillMaxWidth()
-                    .height(visibleHeightDp)
-                    .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))   // 圓角全程生效
-                    .background(SURFACE_CARD)
+                    .fillMaxSize()
+                    .padding(innerPadding)
             ) {
-                // ── 層1：柱體層（graphicsLayer scaleY，僅柱子縮放）
-                if (barScaleY > 0.001f) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { barAreaOriginalPx.toDp() })
-                            .align(Alignment.BottomCenter)
-                            .offset(y = with(density) { -labelReservedPx.toDp() })
-                            .padding(horizontal = innerPadding)
-                            .graphicsLayer {
-                                scaleY = barScaleY
-                                transformOrigin = TransformOrigin(0.5f, 1f)
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            data.forEach { day ->
-                                WeeklyExpenseBarBody(
-                                    day = day,
-                                    maxAmount = maxAmount,
-                                    introProgress = introProgress,
-                                    modifier = Modifier.weight(1f).fillMaxHeight()
-                                )
-                            }
-                        }
+                // ── 标题行（顶部固定，卡片被裁到此处时一起消失）
+                Row(
+                    Modifier.fillMaxWidth().height(titleRowHeight),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "近 7 日支出",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "合計 $${formatAmountNoDecimal(totalAmount)}",
+                        fontSize = 12.sp,
+                        color = TEXT_SECONDARY,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(Modifier.height(titleGap))
+
+                // ── 柱体区域（中间占满，文字不缩放，柱高靠 LazyColumn 裁切呈现「变矮」）
+                Row(
+                    Modifier.fillMaxWidth().weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    data.forEach { day ->
+                        WeeklyExpenseBarBody(
+                            day = day,
+                            maxAmount = maxAmount,
+                            introProgress = introProgress,
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        )
                     }
                 }
 
-                // ── 層2：日期行（不縮放、原字體大小、底部對齊）
+                // ── 日期行（底部固定，卡片被裁到此处时一起消失）
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                        .padding(start = innerPadding, end = innerPadding, bottom = innerPadding)
-                        .height(labelRowHeight),
+                    Modifier.fillMaxWidth().height(labelRowHeight),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     data.forEach { day ->
@@ -4331,34 +4315,6 @@ fun WeeklyExpenseChart(
                             )
                         }
                     }
-                }
-
-                // ── 層3：蒙布遮罩（SURFACE_BG 實色，蓋住日期行）
-                //   僅在日期行入侵標題區時出現；此時柱體已 scaleY = 0 不可見，遮罩不會誤傷柱體
-                if (hasOverlap) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(labelReservedDp)
-                            .align(Alignment.BottomCenter)
-                            .background(SURFACE_BG)
-                            .zIndex(2f)
-                    )
-                }
-
-                // ── 層4：標題行（zIndex 最高，永遠清晰可見）
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter)
-                        .padding(start = innerPadding, end = innerPadding, top = innerPadding)
-                        .height(titleRowHeight)
-                        .zIndex(3f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("近 7 日支出", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                    Spacer(Modifier.weight(1f))
-                    Text("合計 $${formatAmountNoDecimal(totalAmount)}", fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
                 }
             }
         }
