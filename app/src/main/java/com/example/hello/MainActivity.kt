@@ -1004,9 +1004,23 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
     val noteCategoryMap = HashMap<String, String>()
     val allNoteNames = ArrayList<String>()
 
+    // 🟢 新增：統計每筆名稱嘅總出現次數 及 最新記錄時間
+    val noteCountMap = HashMap<String, Int>()
+    val latestTimestampByNote = HashMap<String, Long>()
+
     for (r in records) {
         val note = r.note
         if (note.isBlank()) continue
+
+        // 統計筆數
+        noteCountMap[note] = (noteCountMap[note] ?: 0) + 1
+        
+        // 更新該項目的最新記錄時間（作排序穩定性 tie-breaker）
+        val currentLatest = latestTimestampByNote[note] ?: 0L
+        if (r.timestamp > currentLatest) {
+            latestTimestampByNote[note] = r.timestamp
+        }
+
         val sec = getTimestampMeta(r.timestamp).secOfDay
         val d = abs(secNow - sec)
         val dist = if (d < 86400 - d) d else 86400 - d
@@ -1025,7 +1039,25 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
         }
     }
 
-    val topNotes = minDistByNote.entries.sortedBy { it.value }.take(42).map { it.key to 0 }
+    // 🟢 核心排序修改：抽出原有按「時間距離」最接近嘅名單
+    val timeSorted = minDistByNote.entries.sortedBy { it.value }.map { it.key }
+
+    val topNotes = if (timeSorted.isEmpty()) {
+        emptyList()
+    } else {
+        // 1. 第一個位置：保留按每日時間最接近嘅項目
+        val firstNote = timeSorted.first()
+        
+        // 2. 其餘位置：按總筆數降序排列；如果筆數相同，就按最新記錄時間降序，保持列表穩定
+        val restNotes = timeSorted.drop(1).sortedWith(
+            compareByDescending<String> { noteCountMap[it] ?: 0 }
+                .thenByDescending { latestTimestampByNote[it] ?: 0L }
+        )
+        
+        // 3. 組合兩個列表並限制 42 個
+        (listOf(firstNote) + restNotes).take(42).map { it to (noteCountMap[it] ?: 0) }
+    }
+
     val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
         if (note.isBlank()) null
         else QuickNoteInfo(
