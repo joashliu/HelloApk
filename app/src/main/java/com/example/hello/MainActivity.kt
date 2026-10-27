@@ -4233,8 +4233,8 @@ fun WeeklyExpenseChart(
     val horizontalPadding = 16.dp
     val innerPadding = 12.dp
     val titleRowHeight = 20.dp
-    val titleGap = 10.dp
-    val labelRowHeight = 16.dp
+    val titleGap = 8.dp              // ★ 從 10 減到 8，省回 2dp
+    val labelRowHeight = 20.dp       // ★ 從 16 增加到 20，保證文字完整
 
     val density = LocalDensity.current
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
@@ -4255,36 +4255,33 @@ fun WeeklyExpenseChart(
     val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
-    // 外層佔位：固定 178dp（LazyColumn 項高度不變，避免 layout 反饋循環）
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(chartHeight)
-            .padding(horizontal = horizontalPadding)   // 左右 16dp 全程固定
+            .padding(horizontal = horizontalPadding)
     ) {
         if (visibleHeightPx > 0.5f) {
-            // ★ 卡片主動變矮，底部對齊
-            //   卡片 height = visibleHeightDp，四角圓角由 .clip() 全程繪製
-            //   頂部圓角 = 卡片自己的圓角（不被 LazyColumn 裁成直角）
+            // ★ 卡片主動變矮，底部對齊；頂部/底部圓角由 .clip() 全程繪製
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(visibleHeightDp)
                     .align(Alignment.BottomCenter)
                     .clip(RoundedCornerShape(12.dp))   // 四角圓角：全程生效
-                    .background(SURFACE_CARD)          // 白色背景：覆蓋完整可見區域
+                    .background(SURFACE_CARD)          // 白色背景：全程覆蓋可見區域
             ) {
                 // ★ 內容固定 178dp，底部對齊卡片底部
                 //   卡片變矮時，內容超出卡片頂部的部分被 .clip() 裁掉
-                //   裁切的是卡片自己的圓角邊界 → 頂部兩個角永遠是圓角
+                //   裁切邊界是卡片自己的圓角矩形 → 頂部兩角永遠是圓角
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .height(chartHeight)
                         .align(Alignment.BottomCenter)
-                        .padding(innerPadding)
+                        .padding(horizontal = innerPadding, vertical = innerPadding)
                 ) {
-                    // 標題行（卡片變矮時最先被裁掉）
+                    // ── 標題行（卡片變矮時最先被裁掉，屬於卡片內部內容）
                     Row(
                         Modifier.fillMaxWidth().height(titleRowHeight),
                         verticalAlignment = Alignment.CenterVertically
@@ -4303,8 +4300,10 @@ fun WeeklyExpenseChart(
                             fontWeight = FontWeight.Medium
                         )
                     }
+
                     Spacer(Modifier.height(titleGap))
-                    // 柱體（中間佔滿，文字不縮放，柱高靠卡片裁切呈現「變矮」）
+
+                    // ── 柱體（中間佔滿，文字不縮放，柱高靠卡片裁切呈現「變矮」）
                     Row(
                         Modifier.fillMaxWidth().weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -4319,9 +4318,12 @@ fun WeeklyExpenseChart(
                             )
                         }
                     }
-                    // 日期行（卡片底部，全程可見；卡片變矮時最後被裁掉）
+
+                    // ── 日期行（★ 修復：min 20dp + 文字 lineHeight 14sp + 無 font padding）
                     Row(
-                        Modifier.fillMaxWidth().height(labelRowHeight),
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = labelRowHeight),   // 內容可撐開，不會被裁
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         data.forEach { day ->
@@ -4329,6 +4331,10 @@ fun WeeklyExpenseChart(
                                 Text(
                                     text = day.weekdayChar,
                                     fontSize = 11.sp,
+                                    lineHeight = 14.sp,             // ★ 行高固定 14dp
+                                    style = TextStyle(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)  // ★ 無 font padding
+                                    ),
                                     color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
                                     fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
                                     maxLines = 1
