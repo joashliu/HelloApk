@@ -1,5 +1,7 @@
 package com.example.hello 
 
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.isActive
 import androidx.compose.animation.core.MutableTransitionState
@@ -2025,6 +2027,7 @@ fun MainApp(
     LaunchedEffect(Unit) { ledgerHasBeenShownOnce = true }
 
     var expandedId by remember { mutableStateOf<String?>(null) }
+    var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSearchHasFocus by remember { mutableStateOf(false) }
@@ -2119,9 +2122,13 @@ fun MainApp(
         if (uri != null && target != null) {
             scope.launch {
                 uploading = true
-                val db = withContext(Dispatchers.IO) { Firebase.firestore }
-                uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
+                val bitmaps = loadAndProcessBitmaps(context, uri)
                 uploading = false
+                if (bitmaps != null) {
+                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
+                } else {
+                    Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_SHORT).show()
+                }
             }
         }
         iconTargetRecord = null
@@ -2133,9 +2140,13 @@ fun MainApp(
         if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
-                val db = withContext(Dispatchers.IO) { Firebase.firestore }
-                uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
+                val bitmaps = loadAndProcessBitmaps(context, uri)
                 uploading = false
+                if (bitmaps != null) {
+                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
+                } else {
+                    Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_SHORT).show()
+                }
                 try {
                     uri.path?.let { p ->
                         val f = java.io.File(p)
@@ -2585,6 +2596,50 @@ fun MainApp(
         }
     }
 
+    if (pendingImageUpload != null) {
+            Box(Modifier.fillMaxSize().zIndex(200f)) {
+                // 透明黑色蒙版，阻截點擊防止意外關閉，強制用戶互動或等待 10s
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { detectTapGestures { } })
+                
+                Box(Modifier.align(Alignment.BottomCenter)) {
+                    ImageEffectSelectionPanel(
+                        state = pendingImageUpload!!,
+                        onSelect = { bitmap, forceCrop, isEnhanced ->
+                            val targetRecord = pendingImageUpload!!.record
+                            val origBmp = pendingImageUpload!!.originalBitmap
+                            val procBmp = pendingImageUpload!!.processedBitmap
+                            pendingImageUpload = null
+                            
+                            scope.launch {
+                                uploading = true
+                                try {
+                                    val finalBmp = if (isEnhanced) applyEnhancedFilter(bitmap) else bitmap
+                                    val finalBytes = compressBitmapToPngForUpload(finalBmp, forceCrop)
+                                    
+                                    // 確保無內存洩漏
+                                    if (finalBmp !== origBmp && finalBmp !== procBmp) finalBmp.recycle()
+                                    origBmp.recycle()
+                                    procBmp.recycle()
+                                    
+                                    val url = uploadBytesToCloudinary(finalBytes)
+                                    if (url != null) {
+                                        val db = Firebase.firestore
+                                        applyUrlToSameName(context, db, targetRecord.note, url)
+                                    } else {
+                                        Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "處理失敗: ${e.message}", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    uploading = false
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
     if (showIconSourceDialog) {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
@@ -2711,6 +2766,43 @@ fun MainApp(
         var selectedImageUrl by remember { mutableStateOf<String?>(null) }
         BackHandler { webSearchTarget = null }
 
+        LaunchedEffect(selectedImageUrl) {
+            val url = selectedImageUrl
+            if (url != null) {
+                selectedImageUrl = null
+                webSearchTarget = null
+                uploading = true
+                try {
+                    val bitmaps = withContext(Dispatchers.IO) {
+                        val rawBytes = if (url.startsWith("data:image")) {
+                            val base64 = url.substringAfter(",")
+                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                        } else {
+                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                            conn.connectTimeout = 10000
+                            conn.readTimeout = 10000
+                            conn.inputStream.readBytes()
+                        }
+                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                        val original = if (srcBitmap.width > 800 || srcBitmap.height > 800) {
+                            val scaled = scaleKeepAspectWidth(srcBitmap, 800)
+                            if (scaled !== srcBitmap) srcBitmap.recycle()
+                            scaled
+                        } else srcBitmap
+                        
+                        val processed = removeBackground(original)
+                        Pair(original, processed)
+                    }
+                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "下載失敗或圖片受保護", Toast.LENGTH_SHORT).show()
+                } finally {
+                    uploading = false
+                }
+            }
+        }
+
         Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
             Column(Modifier.fillMaxSize()) {
                 Surface(color = SURFACE_CARD, shadowElevation = 0.dp) {
@@ -2758,6 +2850,8 @@ fun MainApp(
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 )
             }
+        }
+    }
 
             if (selectedImageUrl != null) {
                 AlertDialog(
@@ -7337,6 +7431,225 @@ private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.Subj
     .enableForegroundBitmap()
     .build()
 private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(segmenterOptions)
+
+data class PendingImageUpload(
+    val record: Record,
+    val originalBitmap: Bitmap,
+    val processedBitmap: Bitmap
+)
+
+suspend fun loadAndProcessBitmaps(context: Context, uri: Uri): Pair<Bitmap, Bitmap>? = withContext(Dispatchers.IO) {
+    try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val w = bounds.outWidth; val h = bounds.outHeight
+        if (w <= 0 || h <= 0) return@withContext null
+
+        var s = 1; val md = maxOf(w, h)
+        while (md / (s * 2) >= 800) s *= 2
+
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = s
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val src = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, opts)
+        } ?: return@withContext null
+
+        // 避免處理過大圖片導致 OOM
+        val original = if (src.width > 800 || src.height > 800) {
+            val scaled = scaleKeepAspectWidth(src, 800)
+            if (scaled !== src) src.recycle()
+            scaled
+        } else src
+
+        val processed = removeBackground(original)
+        Pair(original, processed)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
+suspend fun applyEnhancedFilter(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+    val bmp = Bitmap.createBitmap(src.width, src.height, src.config ?: Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    val paint = android.graphics.Paint()
+    val cm = android.graphics.ColorMatrix().apply {
+        // 增強對比度及略微降低亮度，令去背邊緣更清晰實色
+        set(floatArrayOf(
+            1.15f, 0f, 0f, 0f, -5f,
+            0f, 1.15f, 0f, 0f, -5f,
+            0f, 0f, 1.15f, 0f, -5f,
+            0f, 0f, 0f, 1f, 0f
+        ))
+    }
+    paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+    canvas.drawBitmap(src, 0f, 0f, paint)
+    bmp
+}
+
+suspend fun compressBitmapToPngForUpload(bitmap: Bitmap, forceCrop: Boolean, targetSize: Int = ICON_SIZE): ByteArray = withContext(Dispatchers.Default) {
+    val finalBitmap = if (forceCrop) {
+        scaleCropCenter(bitmap, targetSize)
+    } else {
+        if (bitmap.width > bitmap.height) scaleKeepAspectWidth(bitmap, targetSize)
+        else scaleCropCenter(bitmap, targetSize)
+    }
+    val baos = ByteArrayOutputStream()
+    finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+    if (finalBitmap !== bitmap) finalBitmap.recycle()
+    baos.toByteArray()
+}
+
+@Composable
+fun ImageEffectSelectionPanel(
+    state: PendingImageUpload,
+    onSelect: (Bitmap, Boolean, Boolean) -> Unit
+) {
+    var timeLeft by remember { mutableIntStateOf(10) }
+    
+    LaunchedEffect(Unit) {
+        while (timeLeft > 0) {
+            delay(1000)
+            timeLeft--
+        }
+        // 時限到，預設使用自動去背
+        onSelect(state.processedBitmap, false, false)
+    }
+
+    var isVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { isVisible = true }
+    
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 300f)) { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut(),
+        modifier = Modifier.align(Alignment.BottomCenter)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(SURFACE_CARD)
+                .padding(bottom = 32.dp, top = 20.dp)
+        ) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("選擇圖片效果", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                Spacer(Modifier.weight(1f))
+                Text("${timeLeft}s", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TEXT_SECONDARY)
+            }
+            Spacer(Modifier.height(16.dp))
+            
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp)
+            ) {
+                item {
+                    EffectOptionCard(
+                        title = "自動去背圖", bitmap = state.processedBitmap,
+                        buttonText = "使用去背圖", isPrimary = true, timeHint = "($timeLeft)",
+                        onClick = { onSelect(state.processedBitmap, false, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "原始圖片", bitmap = state.originalBitmap,
+                        buttonText = "使用原圖", isPrimary = false,
+                        onClick = { onSelect(state.originalBitmap, false, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "手動裁剪後重處理", bitmap = state.originalBitmap,
+                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
+                        onClick = { onSelect(state.originalBitmap, true, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
+                        buttonText = "強化去背", isPrimary = false, isEnhanced = true,
+                        onClick = { onSelect(state.processedBitmap, false, true) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EffectOptionCard(
+    title: String, bitmap: Bitmap, buttonText: String, isPrimary: Boolean,
+    timeHint: String = "", showCropGrid: Boolean = false, isEnhanced: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.width(140.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
+                .background(SURFACE_ELEVATED)
+                .border(2.dp, if(isPrimary) BRAND_PRIMARY else Color.Transparent, RoundedCornerShape(16.dp))
+                .clickable { onClick() }
+        ) {
+            val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+            val colorFilter = remember(isEnhanced) {
+                if (isEnhanced) {
+                    androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+                        androidx.compose.ui.graphics.ColorMatrix().apply {
+                            setToScale(1.15f, 1.15f, 1.15f, 1f)
+                        }
+                    )
+                } else null
+            }
+            
+            Image(
+                bitmap = imageBitmap, contentDescription = null,
+                contentScale = ContentScale.Fit, colorFilter = colorFilter,
+                modifier = Modifier.fillMaxSize().drawWithContent {
+                    drawContent()
+                    if (showCropGrid) {
+                        val strokeW = 1.dp.toPx()
+                        val w = size.width; val h = size.height
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(w/3, 0f), Offset(w/3, h), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(w*2/3, 0f), Offset(w*2/3, h), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h/3), Offset(w, h/3), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h*2/3), Offset(w, h*2/3), strokeWidth = strokeW)
+                        
+                        drawRect(Color.Black.copy(alpha = 0.35f), size = size)
+                        
+                        val md = minOf(w, h) * 0.8f; val cx = w/2; val cy = h/2; val half = md/2
+                        drawRect(Color.White, topLeft = Offset(cx - half, cy - half),
+                            size = androidx.compose.ui.geometry.Size(md, md), style = Stroke(2.dp.toPx()))
+                    }
+                }
+            )
+            
+            if (isPrimary && timeHint.isNotEmpty()) {
+                Box(Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(BRAND_PRIMARY).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text("推薦", color=Color.White, fontSize=10.sp, fontWeight=FontWeight.Bold)
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(8.dp))
+        Text(title, fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1)
+        Spacer(Modifier.height(6.dp))
+        
+        Button(
+            onClick = onClick, shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().height(36.dp),
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isPrimary) BRAND_PRIMARY else SURFACE_ELEVATED,
+                contentColor = if (isPrimary) Color.White else TEXT_PRIMARY
+            )
+        ) {
+            Text(if (isPrimary && timeHint.isNotEmpty()) "$buttonText $timeHint" else buttonText, 
+                 fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
 
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     var argbBitmap: Bitmap? = null
