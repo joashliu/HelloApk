@@ -6171,6 +6171,9 @@ fun CalendarContent(
     val calendarExpansion = remember { Animatable(1f) }
     val maxDragPx = remember(density) { with(density) { 250.dp.toPx() } }
 
+    // 🟢 動態記錄頂部實色標題嘅真實高度
+    var topBarHeight by remember { mutableStateOf(56.dp) }
+
     LaunchedEffect(currentMonthKey) {
         selectedDay = null
         selectedRowIdx = null
@@ -6246,9 +6249,10 @@ fun CalendarContent(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(top = 56.dp) // 預留頂部永久固定標題嘅高度 (10+36+10)
+                // 🟢 避開頂部真實高度，保證唔會被遮
+                .padding(top = topBarHeight) 
         ) {
-            // 🟢 展開收縮區 (Chips + Stats)
+            // 展開收縮區 (Chips + Stats)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6266,7 +6270,7 @@ fun CalendarContent(
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
-                Spacer(Modifier.height(14.dp)) // 保留適當間距
+                Spacer(Modifier.height(12.dp))
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
@@ -6470,7 +6474,7 @@ fun CalendarContent(
         }
 
         // ==========================================
-        // 2. 頂部永久固定標題區 (實色 + 極幼細版毛玻璃遮罩)
+        // 2. 頂部永久固定標題區 (實色 + 智能漸變遮罩)
         // ==========================================
         Column(
             modifier = Modifier
@@ -6478,13 +6482,20 @@ fun CalendarContent(
                 .fillMaxWidth()
                 .zIndex(10f)
         ) {
-            // 實色背景區 (完全不透明，高度 10+36+10 = 56dp)
+            // 實色背景區 (自動適應字體高度)
             Box(
                 Modifier
                     .fillMaxWidth()
                     .background(SURFACE_BG)
                     .padding(horizontal = 10.dp)
                     .padding(top = 10.dp, bottom = 10.dp)
+                    .onSizeChanged { size ->
+                        // 🟢 自動量度頂部高度，確保下方內容完美貼齊
+                        val h = with(density) { size.height.toDp() }
+                        if (h != topBarHeight) {
+                            topBarHeight = h
+                        }
+                    }
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Surface(
@@ -6552,17 +6563,25 @@ fun CalendarContent(
                 }
             }
 
-            // 🟢 極幼細向下漸變毛玻璃遮罩 (高度改為 6.dp，超級邊緣淡出)
+            // 🟢 智能遮罩：冇拉起日曆嘅時候 100% 隱形，拉起時先平滑淡出 16.dp 高嘅靚靚遮罩
+            val showMask = calendarExpansion.value < 0.99f
+            val maskAlpha by animateFloatAsState(
+                targetValue = if (showMask) 1f else 0f,
+                animationSpec = tween(150),
+                label = "maskAlpha"
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(6.dp) // 📉 縮減至極細微嘅邊界過渡
+                    .height(16.dp) 
+                    .graphicsLayer { alpha = maskAlpha }
                     .background(
                         Brush.verticalGradient(
                             colorStops = arrayOf(
                                 0.0f to SURFACE_BG,
-                                0.4f to SURFACE_BG.copy(alpha = 0.8f),
-                                0.8f to SURFACE_BG.copy(alpha = 0.3f),
+                                0.35f to SURFACE_BG.copy(alpha = 0.85f),
+                                0.70f to SURFACE_BG.copy(alpha = 0.35f),
                                 1.0f to SURFACE_BG.copy(alpha = 0f)
                             )
                         )
@@ -6592,7 +6611,6 @@ fun CalendarContent(
         )
     }
 }
-
 private val SEGMENTED_MODES = listOf(
     Triple("金額", Icons.Default.AttachMoney, 0),
     Triple("項目", Icons.Default.List, 1),
