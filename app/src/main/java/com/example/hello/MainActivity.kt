@@ -185,6 +185,7 @@ private val keyboardPrefillNote = mutableStateOf<String?>(null)
 private val keyboardPrefillAmount = mutableStateOf<Double?>(null)
 private val keyboardPrefillCategory = mutableStateOf<String?>(null)
 private val keyboardPrefillNotifId = mutableStateOf<Int?>(null)
+private val keyboardPrefillFluidCardId = mutableStateOf<String?>(null)
 
 // 🟢 啟動狀態：等 Firestore 第一次回傳先收 Splash
 object AppStartupState {
@@ -1648,7 +1649,6 @@ class MainActivity : ComponentActivity() {
         val isColdStart = !isProcessAlive
         isProcessAlive = true
         val isFromTile = intent?.getBooleanExtra(EXTRA_FROM_TILE, false) == true
-        
         val startLightweight = isColdStart && isFromTile
 
         handleLaunchIntent(intent)
@@ -1688,20 +1688,16 @@ class MainActivity : ComponentActivity() {
                             vm = viewModel(),
                             onTransitionToMain = { stateToTransfer ->
                                 if (stateToTransfer != null) {
-                                    // 用戶點擊「完整模式」，保留打到一半嘅資料並觸發鍵盤打開
                                     keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
                                     keyboardPrefillNote.value = stateToTransfer.noteText
                                     keyboardPrefillCategory.value = stateToTransfer.category
                                     keyboardLaunchToken.value += 1
                                 } else {
-                                    // 🟢 核心修復：成功入帳後切換主程式，必須清空啟動標記！
-                                    // 咁樣 MainApp 載入時就唔會以為仲要自動彈出鍵盤
                                     keyboardLaunchToken.value = 0
                                     keyboardPrefillAmount.value = null
                                     keyboardPrefillNote.value = null
                                     keyboardPrefillCategory.value = null
                                 }
-                                // 切換至主介面
                                 currentAppMode = AppUiMode.FULL
                             }
                         )
@@ -1736,7 +1732,19 @@ class MainActivity : ComponentActivity() {
 
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
-        if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
+        
+        // 🟢 處理來自 UPK 流体云嘅 DeepLink 指令
+        val uri = intent.data
+        if (uri != null && uri.scheme == "ledgerapp" && uri.host == "quickadd") {
+            keyboardLaunchToken.value += 1
+            keyboardPrefillNote.value = uri.getQueryParameter("note")
+            keyboardPrefillCategory.value = uri.getQueryParameter("category")
+            keyboardPrefillAmount.value = uri.getQueryParameter("amount")?.toDoubleOrNull()
+            keyboardPrefillFluidCardId.value = uri.getQueryParameter("card_id")
+            intent.data = null // 清除 Data 防止重覆處理
+        } 
+        // 處理原生通知 / 磁貼啟動
+        else if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
             keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY)
@@ -2251,16 +2259,22 @@ fun MainApp(
             ) { newId -> afterSaveHint = AfterSaveHint(newId, category, totalThisMonth) }
         }
         
-        // 🟢 成功後調用徹底清除焦點嘅函數
         dismissKeyboard()
         scrollToTopTrigger++
 
+        // 清除原生系統通知
         keyboardPrefillNotifId.value?.let { notifId ->
             if (notifId != -1) {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 nm?.cancel(notifId)
                 keyboardPrefillNotifId.value = null
             }
+        }
+        
+        // 🟢 清除並銷毀 OPPO 流体云卡片
+        keyboardPrefillFluidCardId.value?.let { cardId ->
+            OppoFluidCloudBridge.dismissCard(context, cardId)
+            keyboardPrefillFluidCardId.value = null
         }
     }
 
@@ -3173,6 +3187,7 @@ fun FloatingNavBar(
 fun NotificationAccessGuide(context: Context) {
     var isGranted by remember { mutableStateOf<Boolean?>(null) }
     val scope = rememberCoroutineScope()
+    var showPantanalHint by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         isGranted = withContext(Dispatchers.IO) {
@@ -3199,6 +3214,14 @@ fun NotificationAccessGuide(context: Context) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // 🟢 檢查流体云/泛在服務權限是否正常
+    LaunchedEffect(showPantanalHint) {
+        if (showPantanalHint) {
+            Toast.makeText(context, "提示：如需使用流体云體驗，請確保在系統設定開啟「泛在服務」", Toast.LENGTH_LONG).show()
+            showPantanalHint = false
+        }
+    }
+
     if (isGranted == false) {
         Surface(
             modifier = Modifier
@@ -3210,6 +3233,11 @@ fun NotificationAccessGuide(context: Context) {
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                         )
+                        // 🟢 開啟權限時，順便檢查潘塔納爾服務
+                        if (OppoFluidCloudBridge.isPantanalSupported(context) && 
+                            !OppoFluidCloudBridge.hasPantanalPermission(context)) {
+                            showPantanalHint = true
+                        }
                     } catch (_: Exception) { }
                 },
             shape = RoundedCornerShape(12.dp),
