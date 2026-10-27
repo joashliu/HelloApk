@@ -9,6 +9,12 @@ class PaymentNotificationListener : NotificationListenerService() {
 
     private val recentProcessed = mutableMapOf<String, Long>()
 
+    // 當監聽器成功連接系統時，順便喚醒常駐嘅快速記帳通知
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        try { refreshQuickAddNotification(this) } catch (_: Exception) {}
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
 
@@ -20,10 +26,8 @@ class PaymentNotificationListener : NotificationListenerService() {
 
         val fullText = "$title $text $bigText $tickerText"
         
-        // 1. 等待文字載入完整，否則跳過
         if (fullText.isBlank()) return
 
-        // 2. 嚴格匹配交通扣費關鍵字，不干擾其他通知
         if (fullText.contains("乘車碼") || fullText.contains("易乘碼")) {
             Log.d("LedgerNotif", "👀 偵測到乘車碼通知：$fullText")
             
@@ -31,9 +35,9 @@ class PaymentNotificationListener : NotificationListenerService() {
             val hashKey = fullText.trim()
             val lastProcessedTime = recentProcessed[hashKey] ?: 0L
             
-            // 3. 去重機制 (30秒內唔重複觸發，無論係流体云定普通通知)
-            if (now - lastProcessedTime < 30000L) {
-                Log.d("LedgerNotif", "⏳ 30秒內已處理過相同通知，忽略去重")
+            // 🟢 縮短冷卻時間至 3 秒 (3000ms)，確保連續消費都能觸發
+            if (now - lastProcessedTime < 3000L) {
+                Log.d("LedgerNotif", "⏳ 3秒內已處理過相同通知，忽略去重")
                 return
             }
 
@@ -45,7 +49,6 @@ class PaymentNotificationListener : NotificationListenerService() {
                 Log.d("LedgerNotif", "✅ 匹配成功！準備推送金額: $amount")
                 recentProcessed[hashKey] = now
                 
-                // 🟢 4. 優先嘗試喚起 OPPO 流体云 (將名稱改為地鐵)
                 val triggeredCloud = OppoFluidCloudBridge.triggerFluidCloud(
                     context = this,
                     note = "地鐵",
@@ -54,7 +57,6 @@ class PaymentNotificationListener : NotificationListenerService() {
                     timestamp = now
                 )
                 
-                // 🟢 5. 降級備用：如果流体云不支援/發送失敗，彈出原生抬頭通知 (將名稱改為地鐵)
                 if (!triggeredCloud) {
                     NotificationCaptureBridge.pushCaptured("地鐵", amount, "交通")
                 }
@@ -65,6 +67,5 @@ class PaymentNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // 唔刪除原始支付平台嘅通知
     }
 }
