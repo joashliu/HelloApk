@@ -4230,6 +4230,9 @@ fun WeeklyExpenseChart(
     modifier: Modifier = Modifier,
 ) {
     val chartHeight = 178.dp
+    val horizontalPadding = 16.dp   // ★ 跟 App 其他卡片一致
+    val innerPadding = 12.dp        // 内容到卡片边缘的内边距
+
     val density = LocalDensity.current
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
@@ -4239,46 +4242,49 @@ fun WeeklyExpenseChart(
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
     // 讀取 chart item 的滾動偏移量（0 = 完全展開，chartHeightPx = 完全收起）
-    val collapseOffsetPx by remember(listState) {
+    val collapseOffsetPx by remember(listState, chartHeightPx) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
                 .firstOrNull { it.key == "weekly_chart" }
-            if (info == null) {
-                // chart 不在可見列表（已完全滾出）→ 保守返回全高，卡片高度 0
-                chartHeightPx
-            } else {
-                (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
-            }
+            if (info == null) chartHeightPx
+            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
         }
     }
 
     val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
+    // ★ 內容縮放比例（0..1）：只改 scaleY，不改文字/柱子的橫向佈局
+    val contentScaleY = if (chartHeightPx > 0f) {
+        (visibleHeightPx / chartHeightPx).coerceIn(0f, 1f)
+    } else 0f
 
-    // ★ 外層 Box 高度固定 178dp：LazyColumn 視角的 item 高度不變，
-    //   避免 layout 反饋循環。內部卡片主動變矮，圓角全程保留。
-    Box(modifier = modifier.fillMaxWidth().height(chartHeight)) {
-
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(chartHeight)
+            .padding(horizontal = horizontalPadding)   // ★ 固定左右 Padding（全程不變）
+    ) {
         if (visibleHeightPx > 0.5f) {
-            // ★ 卡片：bottom 對齊 Box，高度隨滾動收縮
-            //   clip 在外層，卡片自身圓角全程生效、不被裁
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(visibleHeightDp)
                     .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(12.dp))   // ★ 圓角全程生效
                     .background(SURFACE_CARD)
             ) {
-                // ★ 內容：固定 178dp 高，bottom 對齊卡片 bottom
-                //   不變比例、不扭曲；超出卡片頂部的部分由卡片 clip 裁掉
+                // ★ 內容：固定 178dp 高，只做 scaleY，從底部縮放
+                //   縮放比例 = 卡片可見高度 / 178，視覺上正好貼合卡片
                 Column(
-                    modifier = Modifier
+                    Modifier
                         .fillMaxWidth()
                         .height(chartHeight)
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                        .graphicsLayer {
+                            scaleY = contentScaleY
+                            transformOrigin = TransformOrigin(0.5f, 1f)  // 從底部（柱根）縮放
+                        }
+                        .padding(horizontal = innerPadding, vertical = innerPadding)
                 ) {
                     Row(
                         Modifier.fillMaxWidth(),
