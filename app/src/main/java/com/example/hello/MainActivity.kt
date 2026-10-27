@@ -177,6 +177,10 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.ui.graphics.ColorFilter
@@ -7647,34 +7651,34 @@ suspend fun compressBitmapToPngForUpload(bitmap: Bitmap, forceCrop: Boolean, tar
 
 /**
  * 圖片效果選擇面板
- * - Toast 風格置底、卡片式
- * - 4 個選項，每個都有真實預覽：自動去背 / 原始圖 / 手動裁剪(疊裁剪框) / 強化去背(高對比)
- * - 10 秒倒數，逾時自動選「自動去背圖」
- * - 點背景不會關閉（MainApp 那邊已用 pointerInput 吞點擊）
+ * - Toast 風格置底、卡片式、無時間限制
+ * - 4 個選項：
+ *   1. 自動去背圖 (ML Kit 主體分割)
+ *   2. 簡單去白底 (像素級別，R/G/B 都接近白色 → 透明)
+ *   3. 手動裁剪 (彈出 CropDialog，可拖動 + 雙指縮放)
+ *   4. 強化去背 (ML Kit 去背 + ColorMatrix 提高飽和對比)
+ * - 點背景不關閉（MainApp 那邊用 pointerInput 吞掉）
  */
 @Composable
 fun ImageEffectSelectionPanel(
     state: PendingImageUpload,
     onSelect: (Bitmap, Boolean, Boolean) -> Unit
 ) {
-    var timeLeft by remember { mutableIntStateOf(10) }
+    val scope = rememberCoroutineScope()
+    var showCropDialog by remember { mutableStateOf(false) }
     var dismissed by remember { mutableStateOf(false) }
 
-    fun select(bitmap: Bitmap, forceCrop: Boolean, isEnhanced: Boolean) {
+    // 預先計算「簡單去白底」（背景執行，唔會阻塞 UI）
+    val whiteRemovedBitmap by produceState<Bitmap?>(initialValue = null, key1 = state.originalBitmap) {
+        value = withContext(Dispatchers.Default) {
+            removeWhiteBackgroundSimple(state.originalBitmap)
+        }
+    }
+
+    fun safeSelect(bitmap: Bitmap, forceCrop: Boolean, isEnhanced: Boolean) {
         if (dismissed) return
         dismissed = true
         onSelect(bitmap, forceCrop, isEnhanced)
-    }
-
-    LaunchedEffect(Unit) {
-        while (timeLeft > 0 && !dismissed) {
-            delay(1000)
-            timeLeft--
-        }
-        if (!dismissed) {
-            // 逾時 → 自動選「自動去背圖」（保持原有默認行為）
-            select(state.processedBitmap, false, false)
-        }
     }
 
     var isVisible by remember { mutableStateOf(false) }
@@ -7698,7 +7702,7 @@ fun ImageEffectSelectionPanel(
             ) {
                 Text("選擇圖片效果", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
                 Spacer(Modifier.weight(1f))
-                Text("${timeLeft}s", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TEXT_SECONDARY)
+                Text("點選使用 / 手動裁剪", fontSize = 12.sp, color = TEXT_SECONDARY)
             }
             Spacer(Modifier.height(16.dp))
 
@@ -7706,36 +7710,61 @@ fun ImageEffectSelectionPanel(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp)
             ) {
+                // ① 自動去背（ML Kit 主體分割）
                 item {
                     EffectOptionCard(
                         title = "自動去背圖", bitmap = state.processedBitmap,
-                        buttonText = "使用去背圖", isPrimary = true, timeHint = "($timeLeft)",
-                        onClick = { select(state.processedBitmap, false, false) }
+                        buttonText = "使用去背圖", isPrimary = true,
+                        onClick = { safeSelect(state.processedBitmap, false, false) }
                     )
                 }
+                // ② 簡單去白底（像素級別）
                 item {
+                    val preview = whiteRemovedBitmap ?: state.originalBitmap
                     EffectOptionCard(
-                        title = "原始圖片", bitmap = state.originalBitmap,
-                        buttonText = "使用原圖", isPrimary = false,
-                        onClick = { select(state.originalBitmap, false, false) }
+                        title = if (whiteRemovedBitmap == null) "去白底（計算中）" else "簡單去白底",
+                        bitmap = preview,
+                        buttonText = "使用去白底",
+                        isPrimary = false,
+                        onClick = {
+                            scope.launch {
+                                val target = whiteRemovedBitmap ?: withContext(Dispatchers.Default) {
+                                    removeWhiteBackgroundSimple(state.originalBitmap)
+                                }
+                                safeSelect(target, false, false)
+                            }
+                        }
                     )
                 }
+                // ③ 手動裁剪（彈出 CropDialog）
                 item {
                     EffectOptionCard(
-                        title = "手動裁剪後重處理", bitmap = state.originalBitmap,
+                        title = "手動裁剪", bitmap = state.originalBitmap,
                         buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
-                        onClick = { select(state.originalBitmap, true, false) }
+                        onClick = { showCropDialog = true }
                     )
                 }
+                // ④ 更乾淨去背 / 強化
                 item {
                     EffectOptionCard(
                         title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
                         buttonText = "強化去背", isPrimary = false, isEnhanced = true,
-                        onClick = { select(state.processedBitmap, false, true) }
+                        onClick = { safeSelect(state.processedBitmap, false, true) }
                     )
                 }
             }
         }
+    }
+
+    if (showCropDialog) {
+        CropDialog(
+            sourceBitmap = state.originalBitmap,
+            onDismiss = { showCropDialog = false },
+            onCropped = { cropped ->
+                showCropDialog = false
+                safeSelect(cropped, false, false)
+            }
+        )
     }
 }
 
@@ -7820,6 +7849,211 @@ fun EffectOptionCard(
                 if (isPrimary && timeHint.isNotEmpty()) "$buttonText $timeHint" else buttonText,
                 fontSize = 13.sp, fontWeight = FontWeight.Bold
             )
+        }
+    }
+}
+
+// =========================================================
+//  ★ 簡單去除白色背景（像素級別，跟 ML Kit 主體分割完全不同的算法）
+//  R/G/B 三通道都接近白色（>= 255 - tolerance）的像素 → 完全透明
+//  默認 tolerance = 30，可調 10~60
+// =========================================================
+suspend fun removeWhiteBackgroundSimple(
+    src: Bitmap,
+    tolerance: Int = 30
+): Bitmap = withContext(Dispatchers.Default) {
+    val w = src.width
+    val h = src.height
+    if (w <= 0 || h <= 0) return@withContext src
+
+    val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val pixels = IntArray(w * h)
+    src.getPixels(pixels, 0, w, 0, 0, w, h)
+    val out = IntArray(w * h)
+    val threshold = 255 - tolerance
+
+    for (i in pixels.indices) {
+        val p = pixels[i]
+        val r = (p shr 16) and 0xFF
+        val g = (p shr 8) and 0xFF
+        val b = p and 0xFF
+        out[i] = if (r >= threshold && g >= threshold && b >= threshold) {
+            0x00000000  // 完全透明
+        } else {
+            p           // 保持原像素
+        }
+    }
+    result.setPixels(out, 0, w, 0, 0, w, h)
+    result
+}
+
+// =========================================================
+//  ★ 手動裁剪彈窗
+//  - 圖片可拖動、雙指縮放
+//  - 中間固定正方形裁剪框（= 圖標 1:1 比例）
+//  - 所見即所得：裁剪框內的就是最終裁剪結果
+// =========================================================
+@Composable
+fun CropDialog(
+    sourceBitmap: Bitmap,
+    onDismiss: () -> Unit,
+    onCropped: (Bitmap) -> Unit
+) {
+    val density = LocalDensity.current
+    var userScale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    val imageBitmap = remember(sourceBitmap) { sourceBitmap.asImageBitmap() }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+            val screenW = with(density) { maxWidth.toPx() }
+            val screenH = with(density) { maxHeight.toPx() }
+            // 裁剪框：屏幕短邊的 85%，正方形
+            val boxSize = minOf(screenW, screenH) * 0.85f
+            val boxLeft = (screenW - boxSize) / 2f
+            val boxTop = (screenH - boxSize) / 2f
+
+            val bitmapW = sourceBitmap.width.toFloat()
+            val bitmapH = sourceBitmap.height.toFloat()
+            // 基礎 cover 縮放：讓圖片至少填滿裁剪框
+            val baseScale = boxSize / minOf(bitmapW, bitmapH)
+            val finalScale = baseScale * userScale
+            val displayW = bitmapW * finalScale
+            val displayH = bitmapH * finalScale
+
+            // 拖動 + 縮放手勢
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            val newUserScale = (userScale * zoom).coerceIn(1f, 5f)
+                            val newFinalScale = baseScale * newUserScale
+                            val newW = bitmapW * newFinalScale
+                            val newH = bitmapH * newFinalScale
+                            val newMaxOffX = maxOf(0f, (newW - boxSize) / 2f)
+                            val newMaxOffY = maxOf(0f, (newH - boxSize) / 2f)
+                            userScale = newUserScale
+                            offsetX = (offsetX + pan.x).coerceIn(-newMaxOffX, newMaxOffX)
+                            offsetY = (offsetY + pan.y).coerceIn(-newMaxOffY, newMaxOffY)
+                        }
+                    }
+            ) {
+                Image(
+                    bitmap = imageBitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.FillBounds,
+                    modifier = Modifier
+                        .requiredSize(
+                            with(density) { displayW.toDp() },
+                            with(density) { displayH.toDp() }
+                        )
+                        .align(Alignment.Center)
+                        .graphicsLayer {
+                            translationX = offsetX
+                            translationY = offsetY
+                        }
+                )
+            }
+
+            // 遮罩 + 邊框 + 三分線
+            Canvas(Modifier.fillMaxSize()) {
+                val maskColor = Color.Black.copy(alpha = 0.6f)
+                // 上
+                drawRect(maskColor, topLeft = Offset(0f, 0f), size = Size(size.width, boxTop))
+                // 下
+                drawRect(maskColor, topLeft = Offset(0f, boxTop + boxSize),
+                    size = Size(size.width, size.height - boxTop - boxSize))
+                // 左
+                drawRect(maskColor, topLeft = Offset(0f, boxTop), size = Size(boxLeft, boxSize))
+                // 右
+                drawRect(maskColor, topLeft = Offset(boxLeft + boxSize, boxTop),
+                    size = Size(size.width - boxLeft - boxSize, boxSize))
+
+                // 白色邊框
+                drawRect(
+                    Color.White,
+                    topLeft = Offset(boxLeft, boxTop),
+                    size = Size(boxSize, boxSize),
+                    style = Stroke(2.dp.toPx())
+                )
+
+                // 三分線（幫助構圖）
+                val gridColor = Color.White.copy(alpha = 0.45f)
+                val gridW = 1.dp.toPx()
+                drawLine(gridColor, Offset(boxLeft + boxSize / 3f, boxTop),
+                    Offset(boxLeft + boxSize / 3f, boxTop + boxSize), gridW)
+                drawLine(gridColor, Offset(boxLeft + boxSize * 2f / 3f, boxTop),
+                    Offset(boxLeft + boxSize * 2f / 3f, boxTop + boxSize), gridW)
+                drawLine(gridColor, Offset(boxLeft, boxTop + boxSize / 3f),
+                    Offset(boxLeft + boxSize, boxTop + boxSize / 3f), gridW)
+                drawLine(gridColor, Offset(boxLeft, boxTop + boxSize * 2f / 3f),
+                    Offset(boxLeft + boxSize, boxTop + boxSize * 2f / 3f), gridW)
+            }
+
+            // 頂部標題
+            Row(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(top = 24.dp, start = 12.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, "取消", tint = Color.White)
+                }
+                Text("裁剪圖片", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text("拖動 / 雙指縮放", color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 12.sp)
+            }
+
+            // 底部按鈕
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp, start = 20.dp, end = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SURFACE_ELEVATED,
+                        contentColor = TEXT_PRIMARY
+                    )
+                ) { Text("取消", fontSize = 15.sp, fontWeight = FontWeight.Medium) }
+
+                Button(
+                    onClick = {
+                        // ★ 所見即所得：按當前縮放/偏移計算裁剪框對應原圖的區域
+                        val cropSizePx = (boxSize / finalScale).roundToInt().coerceAtLeast(1)
+                        val actualSize = minOf(
+                            cropSizePx,
+                            sourceBitmap.width,
+                            sourceBitmap.height
+                        ).coerceAtLeast(1)
+                        val leftF = ((displayW - boxSize) / 2f - offsetX) / finalScale
+                        val topF = ((displayH - boxSize) / 2f - offsetY) / finalScale
+                        val left = leftF.roundToInt().coerceIn(0, sourceBitmap.width - actualSize)
+                        val top = topF.roundToInt().coerceIn(0, sourceBitmap.height - actualSize)
+                        val cropped = Bitmap.createBitmap(sourceBitmap, left, top, actualSize, actualSize)
+                        onCropped(cropped)
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BRAND_PRIMARY,
+                        contentColor = Color.White
+                    )
+                ) { Text("裁剪", fontSize = 15.sp, fontWeight = FontWeight.Bold) }
+            }
         }
     }
 }
