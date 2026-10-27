@@ -16,12 +16,16 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 118
-        versionName = "58.7"
+        versionCode = 117
+        versionName = "58.6"
 
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // 🔥 終極絕招：直接由 Gradle 喺編譯時注入 string 資源！
+        // 咁樣就算 GitHub 搵唔到 strings.xml，系統都會自動生成呢串字，永不報錯！
+        resValue("string", "accessibility_description", "此服務僅用於偵測支付 App 的通知，作為畫面擷取及記帳功能的觸發信號。絕不會主動讀取您的私人畫面或對話內容，並且不設任何後台持續擷取。")
     }
 
     // ★★★ 由舊版加返：release keystore 設定 ★★★
