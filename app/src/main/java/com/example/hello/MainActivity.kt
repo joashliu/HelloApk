@@ -3532,11 +3532,13 @@ fun LedgerContent(
         } catch (_: Exception) {}
     }
 
-        LaunchedEffect(filterMode) {
+            LaunchedEffect(filterMode) {
         try {
-            // ★ 移除 delay(420)，立即滾到頂，避免第二次位移
-            if (listState.firstVisibleItemIndex > 0) {
-                listState.scrollToItem(0)
+            // ★ 移除強制 scrollToItem(0)：不再打斷 SizeTransform 的平滑過渡
+            //   僅當用戶滾得很深（> 20 items）時才平滑回頂，避免篩選欄被遮住
+            //   animateScrollToItem 用動畫，不瞬間跳轉
+            if (listState.firstVisibleItemIndex > 20) {
+                listState.animateScrollToItem(0)
             }
         } catch (_: Exception) {}
     }
@@ -3717,12 +3719,12 @@ fun LedgerContent(
                 }
             }
 
-                        AnimatedContent(
+                                    AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
-                    // ★ 移除 SizeTransform：高度切換瞬間完成，LazyColumn 只重新佈局一次
-                    //   動畫只做淡入 + 輕微滑入，兩個卡片一次性出現，無兩次位移
+                    // ★ 恢復 SizeTransform：柔和 spring 驅動高度平滑過渡
+                    //   LazyColumn 平滑重排，stickyHeader 跟隨內容平滑移動，不閃動
                     if (targetState) {
                         (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeIn(tween(300))) togetherWith
                         (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeOut(tween(250)))
@@ -3730,6 +3732,9 @@ fun LedgerContent(
                         (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeIn(tween(300))) togetherWith
                         (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeOut(tween(250)))
                     }
+                    .using(SizeTransform(clip = true) { _, _ ->
+                        spring(dampingRatio = 0.85f, stiffness = 300f)
+                    })
                 },
                 label = "filterContent"
             ) { isFilter ->
