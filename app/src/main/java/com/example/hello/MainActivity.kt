@@ -6239,158 +6239,104 @@ fun CalendarContent(
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        Column(Modifier.fillMaxSize()) {
-            Column(Modifier.padding(horizontal = 10.dp)) {
-                Spacer(Modifier.height(8.dp))
-
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        onClick = { monthDirection = -1; onMonthChange(shiftMonthKey(currentMonthKey, -1)) },
-                        modifier = Modifier.size(36.dp),
-                        shape = CircleShape, color = SURFACE_CARD,
-                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ChevronLeft, "上個月",
-                                tint = Color.Black, modifier = Modifier.size(22.dp))
+        
+        // ==========================================
+        // 1. 底層滾動區 (包含 Chips、Stats 同月曆網格)
+        // ==========================================
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(top = 56.dp) // 預留頂部永久固定標題嘅高度 (10+36+10)
+        ) {
+            // 🟢 展開收縮區 (Chips + Stats)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        val targetH = (placeable.height * calendarExpansion.value).roundToInt()
+                        val safeH = targetH.coerceIn(constraints.minHeight, constraints.maxHeight)
+                        val safeW = placeable.width.coerceIn(constraints.minWidth, constraints.maxWidth)
+                        layout(safeW, safeH) {
+                            // 向上推移，內容會超出 bounds 滑入頂部遮罩下方
+                            placeable.placeRelative(0, safeH - placeable.height)
                         }
                     }
-                    Spacer(Modifier.width(10.dp))
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            if (currentMonthKey != todayKey) {
-                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
-                                onMonthChange(todayKey)
-                            }
-                        }
-                    ) {
-                        Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp,
-                            color = Color.Black, fontWeight = FontWeight.Medium)
-                        AnimatedContent(
-                            targetState = currentMonthKey,
-                            transitionSpec = {
-                                val forward = monthDirection > 0
-                                if (forward) {
-                                    (slideInHorizontally(animationSpec = tween(280)) { it } + fadeIn(tween(200)))
-                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { -it } + fadeOut(tween(180)))
-                                } else {
-                                    (slideInHorizontally(animationSpec = tween(280)) { -it } + fadeIn(tween(200)))
-                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { it } + fadeOut(tween(180)))
-                                }
-                            },
-                            label = "monthAnim"
-                        ) { key ->
-                            val m = key.split("-").getOrNull(1)?.toIntOrNull() ?: month
-                            Text("${m}月", fontSize = 28.sp, lineHeight = 30.sp,
-                                fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                        }
+                    // ⚠️ 核心修改：移除 clipToBounds()，允許內容向外退入 Header 遮罩後方
+                    .graphicsLayer {
+                        alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
+            ) {
+                Spacer(Modifier.height(14.dp)) // 加大 Spacer 確保完全展開時避開遮罩
 
-                    Spacer(Modifier.width(10.dp))
-                    Surface(
-                        onClick = { monthDirection = 1; onMonthChange(shiftMonthKey(currentMonthKey, 1)) },
-                        modifier = Modifier.size(36.dp),
-                        shape = CircleShape, color = SURFACE_CARD,
-                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ChevronRight, "下個月",
-                                tint = Color.Black, modifier = Modifier.size(22.dp))
-                        }
-                    }
-
-                    Spacer(Modifier.weight(1f))
-                    SegmentedModeControl(displayMode = displayMode, onModeChange = { displayMode = it })
+                val allCategories: List<String?> = remember(visibleCategories) {
+                    listOf(null) + visibleCategories
                 }
-
-                Spacer(Modifier.height(10.dp))
-
-                // 🟢 加入 coerceIn 安全限制，防止尺寸低於佈局要求導致閃退
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .layout { measurable, constraints ->
-                            val placeable = measurable.measure(constraints)
-                            val targetH = (placeable.height * calendarExpansion.value).roundToInt()
-                            // 絕對安全防護：強迫高度喺合理範圍內
-                            val safeH = targetH.coerceIn(constraints.minHeight, constraints.maxHeight)
-                            val safeW = placeable.width.coerceIn(constraints.minWidth, constraints.maxWidth)
-                            layout(safeW, safeH) {
-                                placeable.placeRelative(0, safeH - placeable.height)
-                            }
-                        }
-                        .clipToBounds()
-                        .graphicsLayer {
-                            alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
-                        }
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 72.dp),
+                    modifier = Modifier.fillMaxWidth().animateContentSize(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    userScrollEnabled = false
                 ) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 72.dp),
-                        modifier = Modifier.fillMaxWidth().animateContentSize(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        userScrollEnabled = false
-                    ) {
-                        item(key = "__all__") {
-                            CalendarFilterChip(
-                                modifier = Modifier.fillMaxWidth(),
-                                selected = filterCategory == null,
-                                label = "全部",
-                                onClick = { onFilterCategoryChange(null) }
-                            )
-                        }
-                        items(items = visibleCategories, key = { it }) { cat ->
-                            CalendarFilterChip(
-                                modifier = Modifier.animateItem().fillMaxWidth(),
-                                selected = filterCategory == cat,
-                                label = cat,
-                                onClick = {
-                                    onFilterCategoryChange(if (filterCategory == cat) null else cat)
-                                }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(
-                            label = "總計",
-                            valueText = "$${formatAmountNoDecimal(totalNet)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp,
-                            valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
-                        )
-                        AnimatedInfoChip(
-                            label = "平均每項",
-                            valueText = "$${formatAmountNoDecimal(avgPerItem)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp
-                        )
-                        AnimatedInfoChip(
-                            label = "日均支出",
-                            valueText = "$${formatAmountNoDecimal(avgPerDay)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp
+                    item(key = "__all__") {
+                        CalendarFilterChip(
+                            modifier = Modifier.fillMaxWidth(),
+                            selected = filterCategory == null,
+                            label = "全部",
+                            onClick = { onFilterCategoryChange(null) }
                         )
                     }
-                    Spacer(Modifier.height(10.dp))
+                    items(items = visibleCategories, key = { it }) { cat ->
+                        CalendarFilterChip(
+                            modifier = Modifier.animateItem().fillMaxWidth(),
+                            selected = filterCategory == cat,
+                            label = cat,
+                            onClick = {
+                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                            }
+                        )
+                    }
                 }
 
-                Row(Modifier.fillMaxWidth()) {
-                    CALENDAR_WEEKDAY_HEADERS.forEach { w ->
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Text(w, fontSize = 12.sp, color = Color.Black,
-                                fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AnimatedInfoChip(
+                        label = "總計",
+                        valueText = "$${formatAmountNoDecimal(totalNet)}",
+                        modifier = Modifier.weight(1f),
+                        valueFontSize = 16.sp,
+                        valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                    )
+                    AnimatedInfoChip(
+                        label = "平均每項",
+                        valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                        modifier = Modifier.weight(1f),
+                        valueFontSize = 16.sp
+                    )
+                    AnimatedInfoChip(
+                        label = "日均支出",
+                        valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                        modifier = Modifier.weight(1f),
+                        valueFontSize = 16.sp
+                    )
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(12.dp))
             }
 
+            // 星期標題
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
+                CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                        Text(w, fontSize = 12.sp, color = Color.Black,
+                            fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+
+            // 滾動月曆網格
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
                 val cellWidth = (screenWidthDp - 20.dp) / 7
@@ -6400,7 +6346,7 @@ fun CalendarContent(
                         .nestedScroll(nestedScrollConnection)
                         .verticalScroll(scrollState)
                         .padding(horizontal = 10.dp)
-                        .padding(top = 10.dp)
+                        .padding(top = 2.dp)
                         .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
                 ) {
                     val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
@@ -6456,7 +6402,6 @@ fun CalendarContent(
                                 val dragScale = (1f - calendarExpansion.value * 0.05f).coerceAtLeast(0.8f)
                                 val dragHeightFactor = (1f - calendarExpansion.value).coerceIn(0f, 1f)
 
-                                // 🟢 佈局收縮時加入安全檢查
                                 Column(
                                     Modifier.fillMaxWidth()
                                         .layout { measurable, constraints ->
@@ -6526,6 +6471,110 @@ fun CalendarContent(
             }
         }
 
+        // ==========================================
+        // 2. 頂部永久固定標題區 (實色 + 毛玻璃遮罩)
+        // ==========================================
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .zIndex(10f)
+        ) {
+            // 實色背景區 (完全不透明，高度 10+36+10 = 56dp)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(SURFACE_BG)
+                    .padding(horizontal = 10.dp)
+                    .padding(top = 10.dp, bottom = 10.dp)
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        onClick = { monthDirection = -1; onMonthChange(shiftMonthKey(currentMonthKey, -1)) },
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape, color = SURFACE_CARD,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ChevronLeft, "上個月",
+                                tint = Color.Black, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            if (currentMonthKey != todayKey) {
+                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
+                                onMonthChange(todayKey)
+                            }
+                        }
+                    ) {
+                        Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp,
+                            color = Color.Black, fontWeight = FontWeight.Medium)
+                        AnimatedContent(
+                            targetState = currentMonthKey,
+                            transitionSpec = {
+                                val forward = monthDirection > 0
+                                if (forward) {
+                                    (slideInHorizontally(animationSpec = tween(280)) { it } + fadeIn(tween(200)))
+                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { -it } + fadeOut(tween(180)))
+                                } else {
+                                    (slideInHorizontally(animationSpec = tween(280)) { -it } + fadeIn(tween(200)))
+                                        .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { it } + fadeOut(tween(180)))
+                                }
+                            },
+                            label = "monthAnim"
+                        ) { key ->
+                            val m = key.split("-").getOrNull(1)?.toIntOrNull() ?: month
+                            Text("${m}月", fontSize = 28.sp, lineHeight = 30.sp,
+                                fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                        }
+                    }
+
+                    Spacer(Modifier.width(10.dp))
+                    Surface(
+                        onClick = { monthDirection = 1; onMonthChange(shiftMonthKey(currentMonthKey, 1)) },
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape, color = SURFACE_CARD,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.ChevronRight, "下個月",
+                                tint = Color.Black, modifier = Modifier.size(22.dp))
+                        }
+                    }
+
+                    Spacer(Modifier.weight(1f))
+                    SegmentedModeControl(displayMode = displayMode, onModeChange = { displayMode = it })
+                }
+            }
+
+            // 向下漸變毛玻璃遮罩 (高度 18.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to SURFACE_BG,
+                                0.35f to SURFACE_BG.copy(alpha = 0.85f),
+                                0.65f to SURFACE_BG.copy(alpha = 0.45f),
+                                1.0f to SURFACE_BG.copy(alpha = 0f)
+                            )
+                        )
+                    )
+            )
+        }
+
+        // ==========================================
+        // 3. FAB 同埋 FanMenu
+        // ==========================================
         FloatingActionButton(
             onClick = onAddClick,
             shape = CircleShape,
