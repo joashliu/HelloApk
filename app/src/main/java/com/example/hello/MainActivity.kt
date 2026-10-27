@@ -4325,7 +4325,7 @@ fun WeeklyExpenseChart(
                     Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = innerPadding, bottom = innerPadding)
+                        .padding(start = innerPadding, end = innerPadding, bottom = innerPadding)
                         .height(labelRowHeight),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
