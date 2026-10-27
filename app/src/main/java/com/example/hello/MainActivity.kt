@@ -1797,7 +1797,7 @@ fun LightweightEntryApp(
     val haptic = LocalHapticFeedback.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     
-    // 獲取快取數據以供鍵盤聯想使用，就算未 load 完都唔會阻塞畫面渲染
+    // 獲取快取數據以供鍵盤聯想及 Chips 渲染使用
     val ui by vm.ledgerUiState.collectAsState()
     val lastSavedCategory by vm.lastSavedCategory.collectAsState()
     
@@ -1833,7 +1833,6 @@ fun LightweightEntryApp(
                    timestamp = ts, iconUrl = inherited)
         )
         Toast.makeText(context, "✅ 記帳成功", Toast.LENGTH_SHORT).show()
-        // 極速模式下，記完帳自動退出，返去桌面，唔拖泥帶水
         onDismiss() 
     }
 
@@ -1871,15 +1870,46 @@ fun LightweightEntryApp(
             }
         }
         
-        // 底部獨立嘅輸入鍵盤（重用現有組件）
-        Box(
+        // 🟢 將 Chips 區同鍵盤綁定喺底部一齊升起
+        Column(
             Modifier.align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp, start = 16.dp, end = 16.dp)
+                .padding(bottom = 20.dp)
                 .graphicsLayer {
                     alpha = appearProgress.value
                     translationY = (1f - appearProgress.value) * 150f
                 }
         ) {
+            
+            // 🟢 載入快速輸入 Chips (極速模式專用設定)
+            if (ui.topNotes.isNotEmpty()) {
+                QuickInputSection(
+                    topNotes = ui.topNotes,
+                    noteIconMap = ui.noteIconMap,
+                    maxRowsPerPage = 3, // 設定最多 3 行，為頂部保留充足空間
+                    skipAppearAnimation = false,
+                    collapseProgress = 0f, // 輕量模式下永遠完全展開，唔會出現收縮按鈕
+                    onExpandClick = {},
+                    onClick = { name ->
+                        val amt = ui.recentAmountByNote[name]
+                        val cat = ui.noteCategoryMap[name] ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+                        val cur = if (cat == "旅遊") "JPY" else "HKD"
+                        val amtText = amt?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: ""
+                        
+                        // 點擊 Chips 自動更新鍵盤狀態 (類似主介面 openKeyboardForNew)
+                        keyboardState = keyboardState.copy(
+                            noteText = name,
+                            amountText = amtText,
+                            category = cat,
+                            currency = cur,
+                            selectAmountOnInput = amt != null && amt > 0.0,
+                            focusedField = "amount" // 自動聚焦金額
+                        )
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // 底部獨立嘅輸入鍵盤
             LedgerKeyboardPanel(
                 state = keyboardState,
                 onStateChange = { keyboardState = it },
@@ -1891,7 +1921,7 @@ fun LightweightEntryApp(
                 noteCategoryMap = ui.noteCategoryMap,
                 nameFlashTrigger = 0,
                 showKeyboard = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             )
         }
     }
