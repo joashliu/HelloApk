@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 24
         targetSdk = 34
-        versionCode = 105
-        versionName = "57.4"
+        versionCode = 106
+        versionName = "57.5"
 
         vectorDrawables {
             useSupportLibrary = true
