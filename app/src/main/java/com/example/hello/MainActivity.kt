@@ -1615,6 +1615,12 @@ fun FanMenuOverlay(
     }
 }
 
+// 🟢 定義 APP 當前渲染模式
+enum class AppUiMode { LIGHTWEIGHT, FULL }
+
+// 🟢 判斷進程係咪啱啱啟動 (冷啟動)
+private var isProcessAlive = false
+
 // =========================================================
 //  ★ MainActivity
 // =========================================================
@@ -1626,6 +1632,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PREFILL_AMOUNT = "extra_prefill_amount"
         const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category"
         const val EXTRA_CANCEL_NOTIF_ID = "extra_cancel_notif_id"
+        const val EXTRA_FROM_TILE = "extra_from_tile" // 🟢 磁鐵專用標記
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
@@ -1637,6 +1644,14 @@ class MainActivity : ComponentActivity() {
         val splash = installSplashScreen()
         splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
+
+        // 🟢 判斷是否冷啟動及是否來自磁鐵
+        val isColdStart = !isProcessAlive
+        isProcessAlive = true
+        val isFromTile = intent?.getBooleanExtra(EXTRA_FROM_TILE, false) == true
+        
+        // 只有【冷啟動】+【來自磁鐵】先會進入極速輕量模式
+        val startLightweight = isColdStart && isFromTile
 
         handleLaunchIntent(intent)
 
@@ -1654,6 +1669,11 @@ class MainActivity : ComponentActivity() {
             val prefillCategory = keyboardPrefillCategory.value
             val notesInfo = topQuickNotesInfo.value
 
+            // 🟢 控制當前 UI 模式
+            var currentAppMode by rememberSaveable {
+                mutableStateOf(if (startLightweight) AppUiMode.LIGHTWEIGHT else AppUiMode.FULL)
+            }
+
             LaunchedEffect(notesInfo) {
                 persistTopQuickNotes(notesInfo)
                 showQuickAddNotification()
@@ -1666,17 +1686,34 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
-                    MainApp(
-                        keyboardLaunchToken = token,
-                        prefillNoteOnLaunch = prefillNote,
-                        prefillAmountOnLaunch = prefillAmount,
-                        prefillCategoryOnLaunch = prefillCategory,
-                        onKeyboardLaunchConsumed = {
-                            keyboardPrefillNote.value = null
-                            keyboardPrefillAmount.value = null
-                            keyboardPrefillCategory.value = null
-                        }
-                    )
+                    if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
+                        // 🟢 獨立極速渲染分支：唔載入 List、動畫同圖表，達到 0 延遲
+                        LightweightEntryApp(
+                            vm = viewModel(), // 共享同一個 ViewModel，資料庫底層同步
+                            onDismiss = { finish() },
+                            onTransitionToMain = { stateToTransfer ->
+                                // 將輕量模式打到一半嘅字，帶入主程式
+                                keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
+                                keyboardPrefillNote.value = stateToTransfer.noteText
+                                keyboardPrefillCategory.value = stateToTransfer.category
+                                keyboardLaunchToken.value += 1
+                                currentAppMode = AppUiMode.FULL
+                            }
+                        )
+                    } else {
+                        // 🟢 正常主介面分支
+                        MainApp(
+                            keyboardLaunchToken = token,
+                            prefillNoteOnLaunch = prefillNote,
+                            prefillAmountOnLaunch = prefillAmount,
+                            prefillCategoryOnLaunch = prefillCategory,
+                            onKeyboardLaunchConsumed = {
+                                keyboardPrefillNote.value = null
+                                keyboardPrefillAmount.value = null
+                                keyboardPrefillCategory.value = null
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1685,8 +1722,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         showQuickAddNotification()
-        // 🟢 徹底刪除 handleLaunchIntent(intent)
-        // 確保只有 onCreate 或 onNewIntent (真正嘅新點擊) 先會處理，防止由後台喚醒時重複彈出
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -1745,6 +1780,119 @@ class MainActivity : ComponentActivity() {
         val ctx = applicationContext
         lifecycleScope.launch(Dispatchers.IO) {
             try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
+        }
+    }
+}
+
+// =========================================================
+//  ★ LightweightEntryApp (極簡冷啟動介面)
+// =========================================================
+@Composable
+fun LightweightEntryApp(
+    vm: LedgerViewModel,
+    onDismiss: () -> Unit,
+    onTransitionToMain: (KeyboardState) -> Unit
+) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    
+    // 獲取快取數據以供鍵盤聯想使用，就算未 load 完都唔會阻塞畫面渲染
+    val ui by vm.ledgerUiState.collectAsState()
+    val lastSavedCategory by vm.lastSavedCategory.collectAsState()
+    
+    var keyboardState by remember {
+        val cat = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        val cur = if (cat == "旅遊") "JPY" else "HKD"
+        mutableStateOf(KeyboardState(category = cat, currency = cur, selectAmountOnInput = false))
+    }
+    
+    val appearProgress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appearProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 300f))
+    }
+
+    fun performSave() {
+        val inputAmt = keyboardState.amountText.toDoubleOrNull() ?: return
+        if (inputAmt <= 0.0) {
+            Toast.makeText(context, "請輸入金額", Toast.LENGTH_SHORT).show()
+            return
+        }
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        val amt = if (keyboardState.category == "旅遊" && keyboardState.currency == "JPY") {
+            val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
+            inputAmt * rate
+        } else inputAmt
+        
+        val ts = keyboardState.timestamp
+        val inherited = vm.latestIconForNote(keyboardState.noteText)
+        
+        vm.updateLastSavedCategory(keyboardState.category)
+        vm.addRecord(
+            Record(amount = amt, note = keyboardState.noteText, category = keyboardState.category,
+                   timestamp = ts, iconUrl = inherited)
+        )
+        Toast.makeText(context, "✅ 記帳成功", Toast.LENGTH_SHORT).show()
+        // 極速模式下，記完帳自動退出，返去桌面，唔拖泥帶水
+        onDismiss() 
+    }
+
+    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        // 頂部大字標題與切換按鈕
+        Row(
+            Modifier.fillMaxWidth().padding(top = 64.dp, start = 24.dp, end = 20.dp)
+                .graphicsLayer {
+                    alpha = appearProgress.value
+                    translationY = (1f - appearProgress.value) * -50f
+                },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("快速記帳", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = TEXT_PRIMARY)
+                Spacer(Modifier.height(4.dp))
+                Text("極速啟動模式", fontSize = 14.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+            }
+            
+            Surface(
+                onClick = {
+                    focusManager.clearFocus()
+                    // 🟢 切換去完整版時，將目前打到一半嘅資料傳送過去
+                    onTransitionToMain(keyboardState) 
+                },
+                shape = CircleShape,
+                color = BRAND_PRIMARY_LIGHT
+            ) {
+                Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.OpenInFull, null, modifier = Modifier.size(16.dp), tint = BRAND_PRIMARY_DARK)
+                    Spacer(Modifier.width(6.dp))
+                    Text("完整模式", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BRAND_PRIMARY_DARK)
+                }
+            }
+        }
+        
+        // 底部獨立嘅輸入鍵盤（重用現有組件）
+        Box(
+            Modifier.align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp, start = 16.dp, end = 16.dp)
+                .graphicsLayer {
+                    alpha = appearProgress.value
+                    translationY = (1f - appearProgress.value) * 150f
+                }
+        ) {
+            LedgerKeyboardPanel(
+                state = keyboardState,
+                onStateChange = { keyboardState = it },
+                onDismiss = onDismiss, // 收起 = 關閉 App
+                onConfirm = { performSave() }, // 點擊入帳
+                onNext = { keyboardState = keyboardState.copy(editingNote = true) },
+                onPickCategory = { },
+                allNoteNames = ui.allNoteNames,
+                noteCategoryMap = ui.noteCategoryMap,
+                nameFlashTrigger = 0,
+                showKeyboard = true,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
