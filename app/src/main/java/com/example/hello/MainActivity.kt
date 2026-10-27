@@ -1,8 +1,5 @@
 package com.example.hello 
 
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.isActive
 import androidx.compose.animation.core.MutableTransitionState
@@ -37,6 +34,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,6 +49,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -89,8 +88,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -269,7 +268,6 @@ object NotificationCaptureBridge {
             .trimEnd('0').trimEnd('.').ifEmpty { "0" }
 }
 
-// 🟢 升級 Channel ID，強制系統重置橫幅權限
 private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add_v2"
 private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v5"
 private const val QUICK_ADD_NOTIFICATION_ID = 1001
@@ -279,7 +277,6 @@ fun ensureNotificationChannels(context: Context) {
     if (Build.VERSION.SDK_INT < 26) return
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
     try {
-        // 清理所有舊版殘留嘅頻道
         val staleIds = listOf(
             "ledger_capture_confirm", "ledger_capture_confirm_v2",
             "ledger_capture_confirm_v3", "ledger_capture_confirm_v3_old",
@@ -297,12 +294,12 @@ fun ensureNotificationChannels(context: Context) {
         setShowBadge(false)
     }
     val confirm = NotificationChannel(
-        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH // 🟢 確保高優先級
+        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH
     ).apply {
         description = "檢測到消費通知時，強制橫幅彈出詢問"
         enableVibration(true)
         enableLights(true)
-        setBypassDnd(true) // 嘗試繞過勿擾模式
+        setBypassDnd(true)
     }
     nm.createNotificationChannel(quick)
     nm.createNotificationChannel(confirm)
@@ -412,7 +409,6 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
         )
         val addPi = PendingIntent.getActivity(context, notifId, addIntent, piFlags)
         
-        // 🟢 加入 FullScreenIntent，強烈要求系統彈出橫幅/喚醒螢幕
         val fullScreenPi = PendingIntent.getActivity(context, notifId + 100, addIntent, piFlags)
 
         val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
@@ -430,11 +426,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
                     .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
             )
             .setContentIntent(addPi)
-            .setFullScreenIntent(fullScreenPi, true) // 🟢 霸道喚醒橫幅
+            .setFullScreenIntent(fullScreenPi, true) 
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX) // 🟢 MAX 等級
+            .setPriority(NotificationCompat.PRIORITY_MAX) 
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_CALL) // 🟢 偽裝成來電級別中斷
+            .setCategory(NotificationCompat.CATEGORY_CALL) 
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
             .setTimeoutAfter(10 * 60 * 1000L)
@@ -455,12 +451,10 @@ val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
 val BRAND_PRIMARY_LIGHT = Color(0xFFE0E7FF)
 
-// iOS systemGroupedBackground / secondarySystemGroupedBackground
 val SURFACE_BG = Color(0xFFF2F2F7)
 val SURFACE_CARD = Color(0xFFFFFFFF)
 val SURFACE_ELEVATED = Color(0xFFE9E9EF)
 
-// iOS label / secondaryLabel / tertiaryLabel
 val TEXT_PRIMARY = Color(0xFF1C1C1E)
 val TEXT_SECONDARY = Color(0xFF8E8E93)
 val TEXT_TERTIARY = Color(0xFFC7C7CC)
@@ -1007,7 +1001,6 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
     val noteCategoryMap = HashMap<String, String>()
     val allNoteNames = ArrayList<String>()
 
-    // 🟢 新增：統計每筆名稱嘅總出現次數 及 最新記錄時間
     val noteCountMap = HashMap<String, Int>()
     val latestTimestampByNote = HashMap<String, Long>()
 
@@ -1015,10 +1008,7 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
         val note = r.note
         if (note.isBlank()) continue
 
-        // 統計筆數
         noteCountMap[note] = (noteCountMap[note] ?: 0) + 1
-        
-        // 更新該項目的最新記錄時間（作排序穩定性 tie-breaker）
         val currentLatest = latestTimestampByNote[note] ?: 0L
         if (r.timestamp > currentLatest) {
             latestTimestampByNote[note] = r.timestamp
@@ -1042,22 +1032,16 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
         }
     }
 
-    // 🟢 核心排序修改：抽出原有按「時間距離」最接近嘅名單
     val timeSorted = minDistByNote.entries.sortedBy { it.value }.map { it.key }
 
     val topNotes = if (timeSorted.isEmpty()) {
         emptyList()
     } else {
-        // 1. 第一個位置：保留按每日時間最接近嘅項目
         val firstNote = timeSorted.first()
-        
-        // 2. 其餘位置：按總筆數降序排列；如果筆數相同，就按最新記錄時間降序，保持列表穩定
         val restNotes = timeSorted.drop(1).sortedWith(
             compareByDescending<String> { noteCountMap[it] ?: 0 }
                 .thenByDescending { latestTimestampByNote[it] ?: 0L }
         )
-        
-        // 3. 組合兩個列表並限制 42 個
         (listOf(firstNote) + restNotes).take(42).map { it to (noteCountMap[it] ?: 0) }
     }
 
@@ -1297,7 +1281,6 @@ fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
     val startDay = todayStart - 6 * dayMs
     val amountByDay = HashMap<Long, Double>(7)
     for (r in records) {
-        // 🟢 修改：計算棒形圖時，直接跳過「收入」同「還錢」類別
         if (r.category == INCOME_CATEGORY || r.category == "還錢") continue
         
         val dayStart = getTimestampMeta(r.timestamp).startOfDayMillis
@@ -1329,21 +1312,17 @@ object CategoryMenuPositionProvider : PopupPositionProvider {
         popupContentSize: IntSize
     ): IntOffset {
         val margin = 8
-        // 水平居中于 anchor
         val targetX = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
         val x = targetX.coerceIn(
             margin,
             (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
         )
-        // 优先显示在 anchor 上方
         val yAbove = anchorBounds.top - popupContentSize.height - margin
         if (yAbove >= margin) return IntOffset(x, yAbove)
-        // 上方不够就显示在下方
         val yBelow = anchorBounds.bottom + margin
         if (yBelow + popupContentSize.height <= windowSize.height - margin) {
             return IntOffset(x, yBelow)
         }
-        // 都不够就贴边挤压
         val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
         return IntOffset(x, yAbove.coerceIn(margin, maxY))
     }
@@ -1439,24 +1418,19 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     val mo = p[1].toIntOrNull() ?: return null
     val d = p[2].toIntOrNull() ?: return null
 
-    // 🟢 修復關鍵：必須【先】獲取 todayStart！
-    // 確保 getTodayStartMillis() 就算觸發咗 30 秒快取刷新並修改咗 threadLocalCal，
-    // 都唔會影響到下面設定好嘅目標日期。
     val todayStart = getTodayStartMillis()
 
-    // 設定目標 header 嘅時間
     val cal = threadLocalCal.get()!!.apply {
         set(y, mo - 1, d)
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
     
-    val targetMillis = cal.timeInMillis // 獲取並鎖定目標時間
+    val targetMillis = cal.timeInMillis
     val dow = cal.get(Calendar.DAY_OF_WEEK)
     val weekdayChar = WEEKDAY_CHARS[dow - 1]
     val isWeekend = dow == Calendar.SUNDAY || dow == Calendar.SATURDAY
 
-    // 使用穩定嘅 targetMillis 計算差距
     val diff = ((todayStart - targetMillis) / 86_400_000L).toInt()
     val tag = when {
         diff == -1 -> "明日"
@@ -1650,10 +1624,8 @@ fun FanMenuOverlay(
     }
 }
 
-// 🟢 定義 APP 當前渲染模式
 enum class AppUiMode { LIGHTWEIGHT, FULL }
 
-// 🟢 判斷進程係咪啱啱啟動 (冷啟動)
 private var isProcessAlive = false
 
 // =========================================================
@@ -1767,7 +1739,6 @@ class MainActivity : ComponentActivity() {
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
         
-        // 🟢 處理來自 UPK 流体云嘅 DeepLink 指令
         val uri = intent.data
         if (uri != null && uri.scheme == "ledgerapp" && uri.host == "quickadd") {
             keyboardLaunchToken.value += 1
@@ -1775,9 +1746,8 @@ class MainActivity : ComponentActivity() {
             keyboardPrefillCategory.value = uri.getQueryParameter("category")
             keyboardPrefillAmount.value = uri.getQueryParameter("amount")?.toDoubleOrNull()
             keyboardPrefillFluidCardId.value = uri.getQueryParameter("card_id")
-            intent.data = null // 清除 Data 防止重覆處理
+            intent.data = null 
         } 
-        // 處理原生通知 / 磁貼啟動
         else if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
@@ -1836,7 +1806,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LightweightEntryApp(
     vm: LedgerViewModel,
-    // 🟢 移除 onDismiss，改為統一使用 onTransitionToMain 處理所有離場邏輯
     onTransitionToMain: (KeyboardState?) -> Unit
 ) {
     val context = LocalContext.current
@@ -1879,7 +1848,6 @@ fun LightweightEntryApp(
         )
         Toast.makeText(context, "✅ 記帳成功", Toast.LENGTH_SHORT).show()
         
-        // 🟢 成功記帳後，清空焦點並平滑過渡去正常 App 介面
         focusManager.clearFocus()
         onTransitionToMain(null)
     }
@@ -1903,7 +1871,6 @@ fun LightweightEntryApp(
             Surface(
                 onClick = {
                     focusManager.clearFocus()
-                    // 點擊完整模式時，將未打完嘅資料帶過去
                     onTransitionToMain(keyboardState) 
                 },
                 shape = CircleShape,
@@ -1956,7 +1923,6 @@ fun LightweightEntryApp(
             LedgerKeyboardPanel(
                 state = keyboardState,
                 onStateChange = { keyboardState = it },
-                // 🟢 收起鍵盤時，直接變返正常 App，唔會退出桌面
                 onDismiss = {
                     focusManager.clearFocus()
                     onTransitionToMain(null)
@@ -2011,7 +1977,6 @@ fun MainApp(
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
-    // 🟢 焦點管理 (確保輸入框唔會自己偷偷獲取焦點)
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -2028,7 +1993,6 @@ fun MainApp(
     LaunchedEffect(Unit) { ledgerHasBeenShownOnce = true }
 
     var expandedId by remember { mutableStateOf<String?>(null) }
-    var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSearchHasFocus by remember { mutableStateOf(false) }
@@ -2045,6 +2009,7 @@ fun MainApp(
     var showKeyboard by remember { mutableStateOf(false) }
 
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
+    var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
 
     val keyboardAnimProgress = remember { Animatable(0f) }
     LaunchedEffect(showKeyboard) {
@@ -2063,7 +2028,6 @@ fun MainApp(
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
 
-    // 🟢 徹底關閉鍵盤及清除所有焦點
     fun dismissKeyboard() {
         showKeyboard = false
         keyboardState = KeyboardState()
@@ -2071,14 +2035,12 @@ fun MainApp(
         focusManager.clearFocus()
     }
 
-    // 🟢 規則：切換頁面時，若鍵盤開啟，自動隱藏並移除焦點
     LaunchedEffect(currentPage) {
         if (currentPage != 0 && showKeyboard) {
             dismissKeyboard()
         }
     }
 
-    // 🟢 規則：App 進入後台 (如切換至其他 App 或鎖屏) 時，自動隱藏鍵盤
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -2305,7 +2267,6 @@ fun MainApp(
         dismissKeyboard()
         scrollToTopTrigger++
 
-        // 清除原生系統通知
         keyboardPrefillNotifId.value?.let { notifId ->
             if (notifId != -1) {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -2314,11 +2275,10 @@ fun MainApp(
             }
         }
         
-        // 🟢 清除並銷毀 OPPO 流体云卡片
-        keyboardPrefillFluidCardId.value?.let { cardId ->
+        /* keyboardPrefillFluidCardId.value?.let { cardId ->
             OppoFluidCloudBridge.dismissCard(context, cardId)
             keyboardPrefillFluidCardId.value = null
-        }
+        } */
     }
 
     LaunchedEffect(keyboardLaunchToken) {
@@ -2597,50 +2557,6 @@ fun MainApp(
         }
     }
 
-    if (pendingImageUpload != null) {
-            Box(Modifier.fillMaxSize().zIndex(200f)) {
-                // 透明黑色蒙版，阻截點擊防止意外關閉，強制用戶互動或等待 10s
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { detectTapGestures { } })
-                
-                Box(Modifier.align(Alignment.BottomCenter)) {
-                    ImageEffectSelectionPanel(
-                        state = pendingImageUpload!!,
-                        onSelect = { bitmap, forceCrop, isEnhanced ->
-                            val targetRecord = pendingImageUpload!!.record
-                            val origBmp = pendingImageUpload!!.originalBitmap
-                            val procBmp = pendingImageUpload!!.processedBitmap
-                            pendingImageUpload = null
-                            
-                            scope.launch {
-                                uploading = true
-                                try {
-                                    val finalBmp = if (isEnhanced) applyEnhancedFilter(bitmap) else bitmap
-                                    val finalBytes = compressBitmapToPngForUpload(finalBmp, forceCrop)
-                                    
-                                    // 確保無內存洩漏
-                                    if (finalBmp !== origBmp && finalBmp !== procBmp) finalBmp.recycle()
-                                    origBmp.recycle()
-                                    procBmp.recycle()
-                                    
-                                    val url = uploadBytesToCloudinary(finalBytes)
-                                    if (url != null) {
-                                        val db = Firebase.firestore
-                                        applyUrlToSameName(context, db, targetRecord.note, url)
-                                    } else {
-                                        Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_SHORT).show()
-                                    }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "處理失敗: ${e.message}", Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    uploading = false
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-        }
-
     if (showIconSourceDialog) {
         val target = iconTargetRecord
         val hasIcon = target?.iconUrl?.isNotBlank() == true
@@ -2894,7 +2810,7 @@ fun MainApp(
             }
         }
     }
-} // 🟢 這個括號就是 MainApp 函數的「最後一個」閉合括號！
+}
 
 @Composable
 private fun AnimatedFabLayer(
@@ -3079,14 +2995,12 @@ fun FloatingNavBar(
             Row(Modifier.fillMaxSize()) {
                 items.forEachIndexed { idx, item ->
                     val sel = idx == selectedIndex
-                    // 🟢 未選中顏色改用 Color(0xFF636366)，比之前嘅 TEXT_SECONDARY 深色
                     val tint = if (sel) BRAND_PRIMARY_DARK else Color(0xFF636366)
                     Box(Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(),
                         contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(6.dp))
-                            // 🟢 將未選中嘅字體粗度由 Normal 改為 Medium，令文字更加清晰實淨
                             Text(item.label, fontSize = 14.sp,
                                 fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
                                 color = tint)
@@ -3098,9 +3012,6 @@ fun FloatingNavBar(
     }
 }
 
-// =========================================================
-//  ★ NotificationAccessGuide
-// =========================================================
 @Composable
 fun NotificationAccessGuide(context: Context) {
     var isGranted by remember { mutableStateOf<Boolean?>(null) }
@@ -3132,7 +3043,6 @@ fun NotificationAccessGuide(context: Context) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 🟢 檢查流体云/泛在服務權限是否正常
     LaunchedEffect(showPantanalHint) {
         if (showPantanalHint) {
             Toast.makeText(context, "提示：如需使用流体云體驗，請確保在系統設定開啟「泛在服務」", Toast.LENGTH_LONG).show()
@@ -3151,11 +3061,6 @@ fun NotificationAccessGuide(context: Context) {
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                         )
-                        // 🟢 開啟權限時，順便檢查潘塔納爾服務
-                        if (OppoFluidCloudBridge.isPantanalSupported(context) && 
-                            !OppoFluidCloudBridge.hasPantanalPermission(context)) {
-                            showPantanalHint = true
-                        }
                     } catch (_: Exception) { }
                 },
             shape = RoundedCornerShape(12.dp),
@@ -3432,7 +3337,6 @@ fun LedgerContent(
                     if (r.category == INCOME_CATEGORY) {
                         inc += r.amount
                     } else if (r.category != "還錢") {
-                        // 🟢 修改：當計算每日卡片 Header 時，排除「還錢」類別，唔計入支出
                         exp += r.amount 
                     }
                 }
@@ -3760,7 +3664,6 @@ fun LedgerContent(
 private enum class StatBlockType { CAT, INC, EXP, AVG, BAL }
 private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp)
 
-// 🟢 核心：全局統一嘅物理彈簧，保證高度、位置、大小、內部排版「完美同步」
 private val MASTER_SPRING_DP = spring<Dp>(dampingRatio = 0.9f, stiffness = 400f)
 private val MASTER_SPRING_FLOAT = spring<Float>(dampingRatio = 0.9f, stiffness = 400f)
 
@@ -3779,23 +3682,20 @@ fun TopStats(
     val showBal = true
     val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
 
-    // 1. 決定目前有哪些板塊需要顯示，並根據模式智能排序！
     val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, showBal, isFilterMode) {
         val list = mutableListOf<StatBlockType>()
         if (isFilterMode) {
-            // 🟢 篩選模式：將「筆數」同「類別」放埋一齊；「支出」同「均支」放埋一齊
             if (showCategory) list.add(StatBlockType.CAT)
-            if (showBal) list.add(StatBlockType.BAL) // 筆數提早上嚟
+            if (showBal) list.add(StatBlockType.BAL)
             if (showIncome) list.add(StatBlockType.INC)
             if (showExpense) list.add(StatBlockType.EXP)
             if (showAvg) list.add(StatBlockType.AVG)
         } else {
-            // 🟢 正常模式：傳統排序
             if (showCategory) list.add(StatBlockType.CAT)
             if (showIncome) list.add(StatBlockType.INC)
             if (showExpense) list.add(StatBlockType.EXP)
             if (showAvg) list.add(StatBlockType.AVG)
-            if (showBal) list.add(StatBlockType.BAL) // 餘額喺最後
+            if (showBal) list.add(StatBlockType.BAL)
         }
         list
     }
@@ -3808,15 +3708,14 @@ fun TopStats(
         val gapY = 2.dp
         val rowH = 52.dp
 
-        // 2. 佈局大腦：精確計算每個板塊嘅 X, Y, Width
         val geoMap = remember(activeBlocks, totalW) {
             val map = mutableMapOf<StatBlockType, BlockGeometry>()
             val rows = when (activeBlocks.size) {
                 1 -> listOf(activeBlocks)
                 2 -> listOf(activeBlocks)
                 3 -> listOf(activeBlocks)
-                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2)) // 4個時：完美 2x2
-                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3)) // 5個時：上3 下2
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
                 else -> emptyList()
             }
             
@@ -3832,14 +3731,11 @@ fun TopStats(
             map
         }
 
-        // 3. 高度動畫
         val targetHeight = if (activeBlocks.size > 3) (rowH * 2 + gapY) else rowH
         val animHeight by animateDpAsState(targetValue = targetHeight, animationSpec = MASTER_SPRING_DP, label = "containerHeight")
 
-        // 畫布區域
         Box(Modifier.fillMaxWidth().height(animHeight)) {
             
-            // 類別 (Category)
             StatBlockItem(
                 type = StatBlockType.CAT, isActive = activeBlocks.contains(StatBlockType.CAT),
                 geoMap = geoMap, rowH = rowH
@@ -3857,7 +3753,6 @@ fun TopStats(
                 )
             }
 
-            // 收入 (Income)
             StatBlockItem(
                 type = StatBlockType.INC, isActive = activeBlocks.contains(StatBlockType.INC),
                 geoMap = geoMap, rowH = rowH
@@ -3871,7 +3766,6 @@ fun TopStats(
                 )
             }
 
-            // 支出 (Expense)
             StatBlockItem(
                 type = StatBlockType.EXP, isActive = activeBlocks.contains(StatBlockType.EXP),
                 geoMap = geoMap, rowH = rowH
@@ -3885,7 +3779,6 @@ fun TopStats(
                 )
             }
 
-            // 均支 (Average)
             StatBlockItem(
                 type = StatBlockType.AVG, isActive = activeBlocks.contains(StatBlockType.AVG),
                 geoMap = geoMap, rowH = rowH
@@ -3899,7 +3792,6 @@ fun TopStats(
                 )
             }
 
-            // 餘額 / 筆數 (Balance)
             StatBlockItem(
                 type = StatBlockType.BAL, isActive = activeBlocks.contains(StatBlockType.BAL),
                 geoMap = geoMap, rowH = rowH
@@ -3963,7 +3855,6 @@ private fun StatBlockItem(
     }
 }
 
-// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局 
 @Composable
 private fun AnimatedStatBlock(
     isFilterMode: Boolean,
@@ -3989,7 +3880,6 @@ private fun AnimatedStatBlock(
     
     val currentIconColor = androidx.compose.ui.graphics.lerp(iconColorNormal, iconColorFilter, progress)
     val currentValueColor = androidx.compose.ui.graphics.lerp(valueColorNormal, valueColorFilter, progress)
-    // 🟢 標籤顏色由淺灰(Normal) 過渡到深黑(FilterMode)
     val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, progress)
     
     val targetValueText = if (isFilterMode) valueFilter else valueNormal
@@ -4002,30 +3892,25 @@ private fun AnimatedStatBlock(
 
     androidx.compose.ui.layout.Layout(
         content = {
-            // [0] 圖標
             Crossfade(targetState = targetIcon, label = "icon", animationSpec = tween(200)) { ico ->
                 Icon(ico, null, tint = currentIconColor, modifier = Modifier.size((16f - 1f * progress).dp))
             }
             
-            // [1] 標籤
             val currentLabel = if (isFilterMode && labelFilter.isEmpty()) labelNormal else if (isFilterMode) labelFilter else labelNormal
             val labelAlpha = if (isFilterMode && labelFilter.isEmpty()) (1f - progress * 2.5f).coerceIn(0f, 1f) else 1f
             Text(
                 text = currentLabel,
-                // 🟢 字體大小同步！由 11sp 放大至 15sp，同數值字體一樣大
                 fontSize = (11f + 4f * progress).sp, 
                 color = currentLabelColor.copy(alpha = labelAlpha),
-                // 🟢 粗度加強，更清晰醒目
                 fontWeight = if (progress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false
             )
             
-            // [2] 數值
             Text(
                 text = finalValueString,
                 color = currentValueColor,
-                fontSize = (19f - 4f * progress).sp, // 🟢 字體流暢縮小 (19sp -> 15sp)
+                fontSize = (19f - 4f * progress).sp,
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
                 softWrap = false
@@ -4044,25 +3929,21 @@ private fun AnimatedStatBlock(
             val gap1 = 4.dp.roundToPx()
             val gap2 = 5.dp.roundToPx()
             
-            // 📍 正常模式 (上下排列)
             val topRowWNormal = iconP.width + titleGapNormal + labelP.width
             val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
             
-            // 🟢 修正：計算 Icon 同 Label 嘅最高點，做絕對垂直居中，保證平排！
             val topRowHNormal = maxOf(iconP.height, labelP.height)
             val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
             
             val iconXNormal = topRowXNormal
             val labelXNormal = iconXNormal + iconP.width + titleGapNormal
             
-            // 確保 Icon 同文字喺同一條基準線上
             val iconYNormal = topRowYNormal + (topRowHNormal - iconP.height) / 2
             val labelYNormal = topRowYNormal + (topRowHNormal - labelP.height) / 2
             
             val valueXNormal = (constraints.maxWidth - valueP.width) / 2
             val valueYNormal = (constraints.maxHeight / 2) + 1.dp.roundToPx()
             
-            // 📍 篩選模式 (左右平排)
             val effectiveLabelW = if (labelFilter.isEmpty()) 0 else labelP.width
             val effectiveGap1 = if (effectiveLabelW > 0) gap1 else 0
             val totalWFilter = iconP.width + effectiveGap1 + effectiveLabelW + gap2 + valueP.width
@@ -4076,7 +3957,6 @@ private fun AnimatedStatBlock(
             val labelYFilter = (constraints.maxHeight - labelP.height) / 2
             val valueYFilter = (constraints.maxHeight - valueP.height) / 2
             
-            // ✨ 平滑過渡坐標
             iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(iconYNormal, iconYFilter, progress))
             labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(labelYNormal, labelYFilter, progress))
             valueP.placeRelative(lerpI(valueXNormal, valueXFilter, progress), lerpI(valueYNormal, valueYFilter, progress))
@@ -4117,12 +3997,7 @@ fun WeeklyExpenseChart(
                         }
                     }
 
-                    // 🟢 1. 純粹平滑淡出，移除所有 scaleX / scaleY 縮放邏輯
-                    // 唔會再有向內擠壓或者變形消失嘅感覺
                     alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
-                    
-                    // 🟢 2. 完美視覺停留 (Sticky 效果)
-                    // 卡片會原尺寸定格喺頂部，下面嘅 LazyColumn 內容會自然向上滑過並覆蓋佢
                     translationY = -offsetPx 
                 }
         ) {
@@ -4187,7 +4062,6 @@ fun WeeklyExpenseBar(
     val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
     val hasAmount = day.amount > 0.0
 
-    // 顶部圆角大、底部圆角小，视觉上像从底部“长出来”
     val barShape = RoundedCornerShape(
         topStart = 6.dp, topEnd = 6.dp,
         bottomStart = 2.dp, bottomEnd = 2.dp
@@ -4208,7 +4082,6 @@ fun WeeklyExpenseBar(
                 (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
             } else 0.dp
 
-            // 浅色轨道底，统一颜色
             Box(
                 modifier = Modifier
                     .width(22.dp)
@@ -4217,7 +4090,6 @@ fun WeeklyExpenseBar(
                     .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
             )
 
-            // 前景柱子
             if (barHeight > 0.dp) {
                 Box(
                     modifier = Modifier
@@ -4642,12 +4514,10 @@ fun SwipeableRecordItem(
                     fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
-                // 🟢 詳情文字顏色改深：由 TEXT_TERTIARY 改為 TEXT_SECONDARY
                 Text(metaText, fontSize = META_FONT_SIZE, color = TEXT_SECONDARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
-            // 🟢 金額粗度加強：由 FontWeight.Bold 改為 FontWeight.ExtraBold
             Text(amtText, color = amtColor, fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.ExtraBold)
         }
     }
@@ -5210,7 +5080,6 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
-                // ================= 类别按钮 + 菜单 =================
                 val currentStyle = CATEGORY_STYLES[state.category]
                 val menuVisibleState = remember { MutableTransitionState(false) }
                 Box {
@@ -5345,7 +5214,6 @@ fun LedgerKeyboardPanel(
                         }
                     }
                 }
-                // =================================================
             }
 
             Spacer(Modifier.height(10.dp))
@@ -5520,7 +5388,6 @@ fun AnimatedAmount(
     var displayedText by remember { mutableStateOf(text) }
 
     LaunchedEffect(Unit) {
-        // 🟢 修正這裡：直接使用 isActive，因為 LaunchedEffect 已經提供了 CoroutineScope
         while (isActive) {
             val target = currentText
             if (displayedText == target) {
@@ -5621,8 +5488,6 @@ fun DayHeader(
                     Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                     Spacer(Modifier.height(1.dp))
-                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，加深「週幾」顏色
-                    // 🟢 如果係今日，移除 0.8 透明度，直接用實色
                     Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                 }
@@ -5634,7 +5499,6 @@ fun DayHeader(
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
                     Text("收入", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
@@ -5642,7 +5506,6 @@ fun DayHeader(
             }
             if (expense > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
                     Text("支出", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
@@ -5726,7 +5589,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                 fontWeight = FontWeight.Medium, 
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                // 🟢 關鍵修改：加入彈性權重，文字超長時會縮短並顯示「...」，同時保證左邊 Icon 及文字開頭可見
                 modifier = Modifier.weight(1f, fill = false)
             )
         }
@@ -5744,8 +5606,8 @@ fun QuickInputSection(
     noteIconMap: Map<String, String>,
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
-    collapseProgress: Float = 0f, // 🟢 接收滾動收縮進度 (0f: 展開, 1f: 隱藏)
-    onExpandClick: () -> Unit = {}, // 🟢 收縮後嘅點擊事件
+    collapseProgress: Float = 0f,
+    onExpandClick: () -> Unit = {},
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -5854,7 +5716,6 @@ fun QuickInputSection(
                 label = "quickPanelHeight"
             )
 
-            // 🟢 最終高度會根據滾動進度在 原始高度 同 收縮形態（44dp） 之間平滑轉換
             val collapsedHeight = 44.dp
             val finalHeight = androidx.compose.ui.unit.lerp(animatedHeight, collapsedHeight, collapseProgress)
 
@@ -5863,7 +5724,6 @@ fun QuickInputSection(
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
             ) {
-                // 原有常用項目的淡出同縮放
                 val mainAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
                 val mainScale = 1f - (collapseProgress * 0.08f)
 
@@ -5935,7 +5795,6 @@ fun QuickInputSection(
                     }
                 }
 
-                // 🟢 收縮形態：當滾動過半，淡入一個長形按鈕，提示可展開
                 val pillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
                 if (pillAlpha > 0.01f) {
                     Box(
@@ -5990,7 +5849,7 @@ fun CalendarRow(
     isCurrentMonth: Boolean, recordsByDay: Map<Int, List<Record>>,
     displayMode: Int, maxAbsNet: Double,
     selectedDay: Int?, selectedCol: Int?,
-    expansionFraction: Float, // 🟢 新增：由 0f 到 1f 嘅展開比例
+    expansionFraction: Float,
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -6020,7 +5879,6 @@ fun CalendarRow(
     val verticalPad = (contentHeight * (cellMaxScale - 1f) / 2f + 2.dp).coerceAtLeast(4.dp)
     val horizontalPad = 3.dp
 
-    // 🟢 移除 animateDpAsState，直接根據手勢進度即時計算高度，做到完美跟手
     val targetHeight = contentHeight + verticalPad * 2
     val rowHeight = targetHeight * expansionFraction
 
@@ -6041,7 +5899,7 @@ fun CalendarRow(
                         day = dayOfMonth,
                         isToday = isCurrentMonth && dayOfMonth == todayDayOfMonth,
                         isSelected = selectedDay == dayOfMonth,
-                        visibilityScale = expansionFraction, // 🟢 傳入縮放比例
+                        visibilityScale = expansionFraction,
                         records = dayRecords,
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
@@ -6061,7 +5919,7 @@ private data class DayCellSummary(
 
 @Composable
 fun CalendarDayCell(
-    day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f, // 🟢 修改參數
+    day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f,
     records: List<Record>, displayMode: Int, maxAbsNet: Double, onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -6122,8 +5980,8 @@ fun CalendarDayCell(
     Box(
         Modifier.fillMaxSize()
             .graphicsLayer {
-                val s = selectionScale * visibilityScale // 🟢 疊加手勢嘅縮放
-                scaleX = s; scaleY = s; alpha = visibilityScale // 🟢 透明度跟隨手勢
+                val s = selectionScale * visibilityScale
+                scaleX = s; scaleY = s; alpha = visibilityScale
             }
             .shadow(elevation, shape, clip = false,
                 ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000))
@@ -6401,15 +6259,11 @@ fun CalendarContent(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         
-        // ==========================================
-        // 1. 底層滾動區
-        // ==========================================
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(top = topBarHeight) 
         ) {
-            // 🟢 展開收縮區 (Chips + Stats)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6427,13 +6281,11 @@ fun CalendarContent(
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
-                // 🟢 增加預設間距，等 Chips 乖乖留喺月份下方，絕對睇得哂
                 Spacer(Modifier.height(24.dp))
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
                 }
-                // 🟢 替換為穩定嘅 Chunked Row 排版，確保測量高度 100% 準確
                 val rows = remember(allCategories) { allCategories.chunked(4) }
                 
                 Column(Modifier.fillMaxWidth().animateContentSize()) {
@@ -6483,7 +6335,6 @@ fun CalendarContent(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // 星期標題
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
                 CALENDAR_WEEKDAY_HEADERS.forEach { w ->
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -6494,7 +6345,6 @@ fun CalendarContent(
             }
             Spacer(Modifier.height(6.dp))
 
-            // 滾動月曆網格
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
                 val cellWidth = (screenWidthDp - 20.dp) / 7
@@ -6629,16 +6479,12 @@ fun CalendarContent(
             }
         }
 
-        // ==========================================
-        // 2. 頂部永久固定標題區 (實色 + 智能漸變遮罩)
-        // ==========================================
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .zIndex(10f)
         ) {
-            // 實色背景區
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -6718,7 +6564,6 @@ fun CalendarContent(
                 }
             }
 
-            // 智能遮罩：冇拉起日曆嘅時候 100% 隱形，拉起時先平滑淡出 6.dp 高嘅靚靚遮罩
             val showMask = calendarExpansion.value < 0.99f
             val maskAlpha by animateFloatAsState(
                 targetValue = if (showMask) 1f else 0f,
@@ -6744,9 +6589,6 @@ fun CalendarContent(
             )
         }
 
-        // ==========================================
-        // 3. FAB 同埋 FanMenu
-        // ==========================================
         FloatingActionButton(
             onClick = onAddClick,
             shape = CircleShape,
@@ -6934,7 +6776,6 @@ fun CompareValueCell(
         Spacer(Modifier.width(4.dp))
         Box(Modifier.width(38.dp), contentAlignment = Alignment.CenterEnd) {
             if (pctText != null) {
-                // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，令百分比顏色深色啲
                 Text(pctText, fontSize = 11.sp, color = TEXT_SECONDARY,
                     fontWeight = FontWeight.Medium, textAlign = TextAlign.End, maxLines = 1)
             }
@@ -7187,7 +7028,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
 }
 
 // =========================================================
-//  圖片處理函數
+//  圖片處理函數 (包含新增的去背預覽相關邏輯)
 // =========================================================
 fun createTempImageUri(context: Context): Uri? {
     return try {
@@ -7220,11 +7061,6 @@ fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
 }
 
-private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
-    .enableForegroundBitmap()
-    .build()
-private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(segmenterOptions)
-
 data class PendingImageUpload(
     val record: Record,
     val originalBitmap: Bitmap,
@@ -7249,7 +7085,6 @@ suspend fun loadAndProcessBitmaps(context: Context, uri: Uri): Pair<Bitmap, Bitm
             BitmapFactory.decodeStream(it, null, opts)
         } ?: return@withContext null
 
-        // 避免處理過大圖片導致 OOM
         val original = if (src.width > 800 || src.height > 800) {
             val scaled = scaleKeepAspectWidth(src, 800)
             if (scaled !== src) src.recycle()
@@ -7269,7 +7104,6 @@ suspend fun applyEnhancedFilter(src: Bitmap): Bitmap = withContext(Dispatchers.D
     val canvas = android.graphics.Canvas(bmp)
     val paint = android.graphics.Paint()
     val cm = android.graphics.ColorMatrix().apply {
-        // 增強對比度及略微降低亮度，令去背邊緣更清晰實色
         set(floatArrayOf(
             1.15f, 0f, 0f, 0f, -5f,
             0f, 1.15f, 0f, 0f, -5f,
@@ -7295,154 +7129,10 @@ suspend fun compressBitmapToPngForUpload(bitmap: Bitmap, forceCrop: Boolean, tar
     baos.toByteArray()
 }
 
-@Composable
-fun ImageEffectSelectionPanel(
-    state: PendingImageUpload,
-    onSelect: (Bitmap, Boolean, Boolean) -> Unit
-) {
-    var timeLeft by remember { mutableIntStateOf(10) }
-    
-    LaunchedEffect(Unit) {
-        while (timeLeft > 0) {
-            delay(1000)
-            timeLeft--
-        }
-        // 時限到，預設使用自動去背
-        onSelect(state.processedBitmap, false, false)
-    }
-
-    var isVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { isVisible = true }
-    
-    AnimatedVisibility(
-        visible = isVisible,
-        enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 300f)) { it } + fadeIn(),
-        exit = slideOutVertically { it } + fadeOut()
-        // 🟢 修復：移除了 Modifier.align，交由外層調用時嘅 Box 處理
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .background(SURFACE_CARD)
-                .padding(bottom = 32.dp, top = 20.dp)
-        ) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("選擇圖片效果", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                Spacer(Modifier.weight(1f))
-                Text("${timeLeft}s", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TEXT_SECONDARY)
-            }
-            Spacer(Modifier.height(16.dp))
-            
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp)
-            ) {
-                item {
-                    EffectOptionCard(
-                        title = "自動去背圖", bitmap = state.processedBitmap,
-                        buttonText = "使用去背圖", isPrimary = true, timeHint = "($timeLeft)",
-                        onClick = { onSelect(state.processedBitmap, false, false) }
-                    )
-                }
-                item {
-                    EffectOptionCard(
-                        title = "原始圖片", bitmap = state.originalBitmap,
-                        buttonText = "使用原圖", isPrimary = false,
-                        onClick = { onSelect(state.originalBitmap, false, false) }
-                    )
-                }
-                item {
-                    EffectOptionCard(
-                        title = "手動裁剪後重處理", bitmap = state.originalBitmap,
-                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
-                        onClick = { onSelect(state.originalBitmap, true, false) }
-                    )
-                }
-                item {
-                    EffectOptionCard(
-                        title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
-                        buttonText = "強化去背", isPrimary = false, isEnhanced = true,
-                        onClick = { onSelect(state.processedBitmap, false, true) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun EffectOptionCard(
-    title: String, bitmap: Bitmap, buttonText: String, isPrimary: Boolean,
-    timeHint: String = "", showCropGrid: Boolean = false, isEnhanced: Boolean = false,
-    onClick: () -> Unit
-) {
-    Column(modifier = Modifier.width(140.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
-                .background(SURFACE_ELEVATED)
-                .border(2.dp, if(isPrimary) BRAND_PRIMARY else Color.Transparent, RoundedCornerShape(16.dp))
-                .clickable { onClick() }
-        ) {
-            val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
-            val colorFilter = remember(isEnhanced) {
-                if (isEnhanced) {
-                    androidx.compose.ui.graphics.ColorFilter.colorMatrix(
-                        androidx.compose.ui.graphics.ColorMatrix().apply {
-                            setToScale(1.15f, 1.15f, 1.15f, 1f)
-                        }
-                    )
-                } else null
-            }
-            
-            Image(
-                bitmap = imageBitmap, contentDescription = null,
-                contentScale = ContentScale.Fit, colorFilter = colorFilter,
-                modifier = Modifier.fillMaxSize().drawWithContent {
-                    drawContent()
-                    if (showCropGrid) {
-                        val strokeW = 1.dp.toPx()
-                        val w = size.width; val h = size.height
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(w/3, 0f), Offset(w/3, h), strokeWidth = strokeW)
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(w*2/3, 0f), Offset(w*2/3, h), strokeWidth = strokeW)
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h/3), Offset(w, h/3), strokeWidth = strokeW)
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h*2/3), Offset(w, h*2/3), strokeWidth = strokeW)
-                        
-                        drawRect(Color.Black.copy(alpha = 0.35f), size = size)
-                        
-                        val md = minOf(w, h) * 0.8f; val cx = w/2; val cy = h/2; val half = md/2
-                        drawRect(Color.White, topLeft = Offset(cx - half, cy - half),
-                            size = androidx.compose.ui.geometry.Size(md, md), style = Stroke(2.dp.toPx()))
-                    }
-                }
-            )
-            
-            if (isPrimary && timeHint.isNotEmpty()) {
-                Box(Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(BRAND_PRIMARY).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    Text("推薦", color=Color.White, fontSize=10.sp, fontWeight=FontWeight.Bold)
-                }
-            }
-        }
-        
-        Spacer(Modifier.height(8.dp))
-        Text(title, fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1)
-        Spacer(Modifier.height(6.dp))
-        
-        Button(
-            onClick = onClick, shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().height(36.dp),
-            contentPadding = PaddingValues(0.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isPrimary) BRAND_PRIMARY else SURFACE_ELEVATED,
-                contentColor = if (isPrimary) Color.White else TEXT_PRIMARY
-            )
-        ) {
-            Text(if (isPrimary && timeHint.isNotEmpty()) "$buttonText $timeHint" else buttonText, 
-                 fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
+private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
+    .enableForegroundBitmap()
+    .build()
+private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(segmenterOptions)
 
 suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     var argbBitmap: Bitmap? = null
@@ -7576,6 +7266,156 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
 }
 
 // =========================================================
+//  新 UI 面板組件
+// =========================================================
+@Composable
+fun ImageEffectSelectionPanel(
+    state: PendingImageUpload,
+    onSelect: (Bitmap, Boolean, Boolean) -> Unit
+) {
+    var timeLeft by remember { mutableIntStateOf(10) }
+    
+    LaunchedEffect(Unit) {
+        while (timeLeft > 0) {
+            delay(1000)
+            timeLeft--
+        }
+        onSelect(state.processedBitmap, false, false)
+    }
+
+    var isVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { isVisible = true }
+    
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 300f)) { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut()
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(SURFACE_CARD)
+                .padding(bottom = 32.dp, top = 20.dp)
+        ) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("選擇圖片效果", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                Spacer(Modifier.weight(1f))
+                Text("${timeLeft}s", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TEXT_SECONDARY)
+            }
+            Spacer(Modifier.height(16.dp))
+            
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp)
+            ) {
+                item {
+                    EffectOptionCard(
+                        title = "自動去背圖", bitmap = state.processedBitmap,
+                        buttonText = "使用去背圖", isPrimary = true, timeHint = "($timeLeft)",
+                        onClick = { onSelect(state.processedBitmap, false, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "原始圖片", bitmap = state.originalBitmap,
+                        buttonText = "使用原圖", isPrimary = false,
+                        onClick = { onSelect(state.originalBitmap, false, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "手動裁剪後重處理", bitmap = state.originalBitmap,
+                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
+                        onClick = { onSelect(state.originalBitmap, true, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
+                        buttonText = "強化去背", isPrimary = false, isEnhanced = true,
+                        onClick = { onSelect(state.processedBitmap, false, true) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EffectOptionCard(
+    title: String, bitmap: Bitmap, buttonText: String, isPrimary: Boolean,
+    timeHint: String = "", showCropGrid: Boolean = false, isEnhanced: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.width(140.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
+                .background(SURFACE_ELEVATED)
+                .border(2.dp, if(isPrimary) BRAND_PRIMARY else Color.Transparent, RoundedCornerShape(16.dp))
+                .clickable { onClick() }
+        ) {
+            val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+            val colorFilter = remember(isEnhanced) {
+                if (isEnhanced) {
+                    androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+                        androidx.compose.ui.graphics.ColorMatrix().apply {
+                            setToScale(1.15f, 1.15f, 1.15f, 1f)
+                        }
+                    )
+                } else null
+            }
+            
+            Image(
+                bitmap = imageBitmap, contentDescription = null,
+                contentScale = ContentScale.Fit, colorFilter = colorFilter,
+                modifier = Modifier.fillMaxSize().drawWithContent {
+                    drawContent()
+                    if (showCropGrid) {
+                        val strokeW = 1.dp.toPx()
+                        val w = size.width; val h = size.height
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(w/3, 0f), Offset(w/3, h), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(w*2/3, 0f), Offset(w*2/3, h), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h/3), Offset(w, h/3), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h*2/3), Offset(w, h*2/3), strokeWidth = strokeW)
+                        
+                        drawRect(Color.Black.copy(alpha = 0.35f), size = size)
+                        
+                        val md = minOf(w, h) * 0.8f; val cx = w/2; val cy = h/2; val half = md/2
+                        drawRect(Color.White, topLeft = Offset(cx - half, cy - half),
+                            size = androidx.compose.ui.geometry.Size(md, md), style = Stroke(2.dp.toPx()))
+                    }
+                }
+            )
+            
+            if (isPrimary && timeHint.isNotEmpty()) {
+                Box(Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(BRAND_PRIMARY).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text("推薦", color=Color.White, fontSize=10.sp, fontWeight=FontWeight.Bold)
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(8.dp))
+        Text(title, fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1)
+        Spacer(Modifier.height(6.dp))
+        
+        Button(
+            onClick = onClick, shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().height(36.dp),
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isPrimary) BRAND_PRIMARY else SURFACE_ELEVATED,
+                contentColor = if (isPrimary) Color.White else TEXT_PRIMARY
+            )
+        ) {
+            Text(if (isPrimary && timeHint.isNotEmpty()) "$buttonText $timeHint" else buttonText, 
+                 fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// =========================================================
 //  IconView + IconViewAdaptive
 // =========================================================
 private val AVATAR_TEXT_STYLE_BASE = TextStyle(
@@ -7654,5 +7494,3 @@ fun IconViewAdaptive(
         }
     }
 }
-
-// === 文件結束 ===
