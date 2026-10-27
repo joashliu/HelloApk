@@ -3410,15 +3410,15 @@ fun LedgerContent(
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
 
-    LaunchedEffect(shouldPlayWeeklyIntro) {
+        LaunchedEffect(shouldPlayWeeklyIntro) {
         if (!shouldPlayWeeklyIntro || weeklyIntroTriggered) return@LaunchedEffect
-        delay(150)
+        // ★ 移除 delay(150)，立即開始；820ms → 350ms，與 AnimatedContent 同步
         weeklyIntroTriggered = true
         if (!listState.isScrollInProgress) {
             weeklyIntroProgress.snapTo(0f)
             weeklyIntroProgress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(820, easing = FastOutSlowInEasing)
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
             )
         } else {
             weeklyIntroProgress.snapTo(1f)
@@ -3532,11 +3532,11 @@ fun LedgerContent(
         } catch (_: Exception) {}
     }
 
-    LaunchedEffect(filterMode) {
+        LaunchedEffect(filterMode) {
         try {
+            // ★ 移除 delay(420)，立即滾到頂，避免第二次位移
             if (listState.firstVisibleItemIndex > 0) {
-                delay(420)
-                listState.animateScrollToItem(0)
+                listState.scrollToItem(0)
             }
         } catch (_: Exception) {}
     }
@@ -3717,18 +3717,19 @@ fun LedgerContent(
                 }
             }
 
-            AnimatedContent(
+                        AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
+                    // ★ 移除 SizeTransform：高度切換瞬間完成，LazyColumn 只重新佈局一次
+                    //   動畫只做淡入 + 輕微滑入，兩個卡片一次性出現，無兩次位移
                     if (targetState) {
-                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(300))) togetherWith
-                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(250)))
+                        (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeIn(tween(300))) togetherWith
+                        (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeOut(tween(250)))
                     } else {
-                        (slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(300))) togetherWith
-                        (slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(250)))
+                        (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeIn(tween(300))) togetherWith
+                        (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeOut(tween(250)))
                     }
-                    .using(SizeTransform(clip = true) { _, _ -> tween(durationMillis = 400, easing = FastOutSlowInEasing) })
                 },
                 label = "filterContent"
             ) { isFilter ->
