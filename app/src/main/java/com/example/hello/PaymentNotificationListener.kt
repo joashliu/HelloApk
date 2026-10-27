@@ -40,7 +40,7 @@ class PaymentNotificationListener : NotificationListenerService() {
             if (amount != null && amount > 0) {
                 Log.d("LedgerNotif", "匹配成功！準備推送金額: $amount")
                 recentProcessed[hashKey] = now
-                NotificationCaptureBridge.pushCaptured("乘車扣費", amount, "交通")
+                NotificationCaptureBridge.pushCaptured("地鐵", amount, "交通")
             } else {
                 Log.d("LedgerNotif", "搵到關鍵字，但提取唔到金額: $fullText")
             }
