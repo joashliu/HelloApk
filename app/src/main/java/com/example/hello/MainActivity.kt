@@ -6263,12 +6263,11 @@ fun CalendarContent(
                             placeable.placeRelative(0, safeH - placeable.height)
                         }
                     }
-                    // ⚠️ 核心修改：移除 clipToBounds()，允許內容向外退入 Header 遮罩後方
                     .graphicsLayer {
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
-                Spacer(Modifier.height(14.dp)) // 加大 Spacer 確保完全展開時避開遮罩
+                Spacer(Modifier.height(14.dp)) // 14.dp 足夠避開上面縮細到 10.dp 嘅遮罩
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
@@ -6472,7 +6471,7 @@ fun CalendarContent(
         }
 
         // ==========================================
-        // 2. 頂部永久固定標題區 (實色 + 毛玻璃遮罩)
+        // 2. 頂部永久固定標題區 (實色 + 縮小版毛玻璃遮罩)
         // ==========================================
         Column(
             modifier = Modifier
@@ -6554,17 +6553,17 @@ fun CalendarContent(
                 }
             }
 
-            // 向下漸變毛玻璃遮罩 (高度 18.dp)
+            // 🟢 向下漸變毛玻璃遮罩 (高度改為 10.dp，避免遮擋初始狀態嘅 chips)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(18.dp)
+                    .height(10.dp) // 📉 將高度由 18.dp 縮細到 10.dp
                     .background(
                         Brush.verticalGradient(
                             colorStops = arrayOf(
                                 0.0f to SURFACE_BG,
-                                0.35f to SURFACE_BG.copy(alpha = 0.85f),
-                                0.65f to SURFACE_BG.copy(alpha = 0.45f),
+                                0.35f to SURFACE_BG.copy(alpha = 0.75f),
+                                0.7f to SURFACE_BG.copy(alpha = 0.3f),
                                 1.0f to SURFACE_BG.copy(alpha = 0f)
                             )
                         )
@@ -6582,7 +6581,7 @@ fun CalendarContent(
             contentColor = Color.White,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+            .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
         ) {
             Icon(Icons.Default.Add, "新增")
         }
