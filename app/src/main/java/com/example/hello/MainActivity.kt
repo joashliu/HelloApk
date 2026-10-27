@@ -4230,22 +4230,24 @@ fun WeeklyExpenseChart(
     modifier: Modifier = Modifier,
 ) {
     val chartHeight = 178.dp
-    val horizontalPadding = 16.dp   // ★ 跟 App 其他卡片一致
-    val innerPadding = 12.dp        // 内容到卡片边缘的内边距
+    val horizontalPadding = 16.dp
+    val innerPadding = 12.dp
+    val titleRowHeight = 20.dp
+    val titleGap = 10.dp
+    val labelRowHeight = 16.dp
 
     val density = LocalDensity.current
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
+    val labelReservedPx = remember(density) { with(density) { (labelRowHeight + innerPadding).toPx() } }
+    val titleReservedPx = remember(density) { with(density) { (titleRowHeight + titleGap + innerPadding).toPx() } }
+    val barAreaOriginalPx = (chartHeightPx - labelReservedPx - titleReservedPx).coerceAtLeast(1f)
 
-    val maxAmount = remember(data) {
-        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
-    }
+    val maxAmount = remember(data) { data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001 }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    // 讀取 chart item 的滾動偏移量（0 = 完全展開，chartHeightPx = 完全收起）
     val collapseOffsetPx by remember(listState, chartHeightPx) {
         derivedStateOf {
-            val info = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.key == "weekly_chart" }
+            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "weekly_chart" }
             if (info == null) chartHeightPx
             else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
         }
@@ -4253,16 +4255,16 @@ fun WeeklyExpenseChart(
 
     val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
-    // ★ 內容縮放比例（0..1）：只改 scaleY，不改文字/柱子的橫向佈局
-    val contentScaleY = if (chartHeightPx > 0f) {
-        (visibleHeightPx / chartHeightPx).coerceIn(0f, 1f)
-    } else 0f
+
+    // ★ 柱體層專屬 scaleY：只作用於柱體，文字層不受影響
+    val barAreaCurrentPx = (visibleHeightPx - labelReservedPx - titleReservedPx).coerceAtLeast(0f)
+    val barScaleY = (barAreaCurrentPx / barAreaOriginalPx).coerceIn(0f, 1f)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(chartHeight)
-            .padding(horizontal = horizontalPadding)   // ★ 固定左右 Padding（全程不變）
+            .padding(horizontal = horizontalPadding)   // ★ 左右固定 16dp，壓縮全程不變
     ) {
         if (visibleHeightPx > 0.5f) {
             Box(
@@ -4270,52 +4272,71 @@ fun WeeklyExpenseChart(
                     .fillMaxWidth()
                     .height(visibleHeightDp)
                     .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))   // ★ 圓角全程生效
+                    .clip(RoundedCornerShape(12.dp))   // ★ 圓角遮罩：文字超出直接隱藏
                     .background(SURFACE_CARD)
             ) {
-                // ★ 內容：固定 178dp 高，只做 scaleY，從底部縮放
-                //   縮放比例 = 卡片可見高度 / 178，視覺上正好貼合卡片
-                Column(
+                // ── 層1：柱體層（graphicsLayer { scaleY }，僅柱子縮放）
+                if (barScaleY > 0.001f) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { barAreaOriginalPx.toDp() })
+                            .align(Alignment.BottomCenter)
+                            .offset(y = with(density) { -labelReservedPx.toDp() })
+                            .padding(horizontal = innerPadding)
+                            .graphicsLayer {
+                                scaleY = barScaleY
+                                transformOrigin = TransformOrigin(0.5f, 1f)  // 底部為縮放基準
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            data.forEach { day ->
+                                WeeklyExpenseBarBody(
+                                    day = day,
+                                    maxAmount = maxAmount,
+                                    introProgress = introProgress,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ── 層2：標題行（文字，獨立不縮放，頂部固定，被遮罩裁切時自然隱藏）
+                Row(
                     Modifier
                         .fillMaxWidth()
-                        .height(chartHeight)
-                        .align(Alignment.BottomCenter)
-                        .graphicsLayer {
-                            scaleY = contentScaleY
-                            transformOrigin = TransformOrigin(0.5f, 1f)  // 從底部（柱根）縮放
-                        }
-                        .padding(horizontal = innerPadding, vertical = innerPadding)
+                        .align(Alignment.TopCenter)
+                        .padding(start = innerPadding, end = innerPadding, top = innerPadding)
+                        .height(titleRowHeight),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "近 7 日支出",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TEXT_PRIMARY
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "合計 $${formatAmountNoDecimal(totalAmount)}",
-                            fontSize = 12.sp,
-                            color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        data.forEach { day ->
-                            WeeklyExpenseBar(
-                                day = day,
-                                maxAmount = maxAmount,
-                                introProgress = introProgress,
-                                modifier = Modifier.weight(1f).fillMaxHeight()
+                    Text("近 7 日支出", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                    Spacer(Modifier.weight(1f))
+                    Text("合計 $${formatAmountNoDecimal(totalAmount)}", fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                }
+
+                // ── 層3：日期行（文字，獨立不縮放，底部固定）
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = innerPadding, bottom = innerPadding)
+                        .height(labelRowHeight),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    data.forEach { day ->
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = day.weekdayChar,
+                                fontSize = 11.sp,
+                                color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
+                                fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1
                             )
                         }
                     }
@@ -4324,7 +4345,6 @@ fun WeeklyExpenseChart(
         }
     }
 }
-
 @Composable
 fun WeeklyExpenseBar(
     day: WeeklyExpenseDay,
@@ -8178,4 +8198,68 @@ suspend fun enhanceAndTightCrop(src: Bitmap): Bitmap = withContext(Dispatchers.D
     val cropped = tightCropAroundSubject(enhanced)
     if (cropped !== enhanced) enhanced.recycle()
     cropped
+}
+
+// =========================================================
+//  ★ 只畫柱體（不含日期文字）
+//  用於 WeeklyExpenseChart 的柱體層（負責 scaleY 縮放）
+//  日期文字由 WeeklyExpenseChart 的文字層獨立渲染
+// =========================================================
+@Composable
+private fun WeeklyExpenseBarBody(
+    day: WeeklyExpenseDay,
+    maxAmount: Double,
+    introProgress: Float,
+    modifier: Modifier = Modifier,
+) {
+    val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
+    val animatedRatio by animateFloatAsState(
+        targetValue = targetRatio,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
+        label = "weeklyBarRatio_${day.dayOfMonth}"
+    )
+    val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
+    val hasAmount = day.amount > 0.0
+
+    val barShape = RoundedCornerShape(
+        topStart = 6.dp, topEnd = 6.dp,
+        bottomStart = 2.dp, bottomEnd = 2.dp
+    )
+
+    BoxWithConstraints(
+        modifier = modifier,
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        val maxBarHeight = maxHeight
+        val minBarHeight = 3.dp
+        val barHeight = if (hasAmount) {
+            (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
+        } else 0.dp
+
+        // 淺色軌道
+        Box(
+            modifier = Modifier
+                .width(22.dp)
+                .fillMaxHeight()
+                .clip(barShape)
+                .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
+        )
+
+        // 柱子
+        if (barHeight > 0.dp) {
+            Box(
+                modifier = Modifier
+                    .width(22.dp)
+                    .height(barHeight)
+                    .clip(barShape)
+                    .background(
+                        if (day.isToday) {
+                            Brush.verticalGradient(listOf(BRAND_PRIMARY_DARK, BRAND_PRIMARY.copy(alpha = 0.85f)))
+                        } else {
+                            Brush.verticalGradient(listOf(BRAND_PRIMARY.copy(alpha = 0.85f), BRAND_PRIMARY.copy(alpha = 0.55f)))
+                        }
+                    )
+            )
+        }
+    }
 }
