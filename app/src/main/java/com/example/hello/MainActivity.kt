@@ -7523,3 +7523,116 @@ fun KeyboardAndFabLayer(
         }
     }
 }
+
+// =========================================================
+//  ★ 补回：AnimatedFabLayer + AnimatedKeyboardLayer
+//  这两个原本是 private fun，被误删了；
+//  KeyboardAndFabLayer 内部要用它们。
+// =========================================================
+
+@Composable
+private fun AnimatedFabLayer(
+    progressProvider: () -> Float,
+    onFabTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isExpandedTint by remember {
+        derivedStateOf { progressProvider() > 0.35f }
+    }
+    val tintColor by animateColorAsState(
+        targetValue = if (isExpandedTint) TEXT_TERTIARY else Color.White,
+        animationSpec = tween(180),
+        label = "fabTint"
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                val currentP = progressProvider()
+                val fabX = lerp(20.dp, 24.dp, currentP).toPx()
+                val fabY = lerp(92.dp, 388.dp, currentP).toPx()
+                translationX = -fabX
+                translationY = -fabY
+                transformOrigin = TransformOrigin(1f, 1f)
+                shape = CircleShape
+                clip = true
+            }
+            .size(56.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onFabTap() },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.matchParentSize()) {
+            val currentP = progressProvider()
+            val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
+            drawCircle(color = BRAND_PRIMARY.copy(alpha = bgAlpha))
+        }
+
+        Icon(
+            Icons.Default.Add,
+            contentDescription = "Clear",
+            tint = tintColor,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(24.dp)
+                .graphicsLayer { rotationZ = progressProvider() * -405f }
+        )
+    }
+}
+
+@Composable
+private fun AnimatedKeyboardLayer(
+    showKeyboard: Boolean,
+    progressProvider: () -> Float,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
+    nameFlashTrigger: Int,
+    modifier: Modifier = Modifier
+) {
+    val currentP = progressProvider()
+    val isActive = currentP > 0f || showKeyboard
+
+    if (!isActive) return
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
+            .graphicsLayer {
+                alpha = currentP
+                val w = size.width
+                val h = size.height
+                if (w > 0f && h > 0f) {
+                    val ox = (1f - (32.dp.toPx() / w)).coerceIn(0.02f, 0.98f)
+                    val oy = (1f - (100.dp.toPx() / h)).coerceIn(0.02f, 0.98f)
+                    transformOrigin = TransformOrigin(ox, oy)
+                } else {
+                    transformOrigin = TransformOrigin(1f, 1f)
+                }
+                val s = 0.13f + 0.87f * currentP
+                scaleX = s
+                scaleY = s
+            }
+    ) {
+        LedgerKeyboardPanel(
+            state = keyboardState,
+            onStateChange = onKeyboardStateChange,
+            onDismiss = onKeyboardDismiss,
+            onConfirm = onKeyboardConfirm,
+            onNext = onKeyboardNext,
+            onPickCategory = { },
+            allNoteNames = allNoteNames,
+            noteCategoryMap = noteCategoryMap,
+            nameFlashTrigger = nameFlashTrigger,
+            showKeyboard = showKeyboard,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
