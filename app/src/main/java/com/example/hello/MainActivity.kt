@@ -1977,6 +1977,7 @@ fun MainApp(
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    // 🟢 焦點管理 (確保輸入框唔會自己偷偷獲取焦點)
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -2009,7 +2010,6 @@ fun MainApp(
     var showKeyboard by remember { mutableStateOf(false) }
 
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
-    var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
 
     val keyboardAnimProgress = remember { Animatable(0f) }
     LaunchedEffect(showKeyboard) {
@@ -2028,6 +2028,7 @@ fun MainApp(
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
 
+    // 🟢 徹底關閉鍵盤及清除所有焦點
     fun dismissKeyboard() {
         showKeyboard = false
         keyboardState = KeyboardState()
@@ -2035,12 +2036,14 @@ fun MainApp(
         focusManager.clearFocus()
     }
 
+    // 🟢 規則：切換頁面時，若鍵盤開啟，自動隱藏並移除焦點
     LaunchedEffect(currentPage) {
         if (currentPage != 0 && showKeyboard) {
             dismissKeyboard()
         }
     }
 
+    // 🟢 規則：App 進入後台 (如切換至其他 App 或鎖屏) 時，自動隱藏鍵盤
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -2085,13 +2088,9 @@ fun MainApp(
         if (uri != null && target != null) {
             scope.launch {
                 uploading = true
-                val bitmaps = loadAndProcessBitmaps(context, uri)
+                val db = withContext(Dispatchers.IO) { Firebase.firestore }
+                uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
-                if (bitmaps != null) {
-                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
-                } else {
-                    Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_SHORT).show()
-                }
             }
         }
         iconTargetRecord = null
@@ -2103,13 +2102,9 @@ fun MainApp(
         if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
-                val bitmaps = loadAndProcessBitmaps(context, uri)
+                val db = withContext(Dispatchers.IO) { Firebase.firestore }
+                uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
                 uploading = false
-                if (bitmaps != null) {
-                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
-                } else {
-                    Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_SHORT).show()
-                }
                 try {
                     uri.path?.let { p ->
                         val f = java.io.File(p)
@@ -2267,12 +2262,19 @@ fun MainApp(
         dismissKeyboard()
         scrollToTopTrigger++
 
+        // 清除原生系統通知
         keyboardPrefillNotifId.value?.let { notifId ->
             if (notifId != -1) {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 nm?.cancel(notifId)
                 keyboardPrefillNotifId.value = null
             }
+        }
+        
+        // 🟢 清除並銷毀 OPPO 流体云卡片
+        keyboardPrefillFluidCardId.value?.let { cardId ->
+            OppoFluidCloudBridge.dismissCard(context, cardId)
+            keyboardPrefillFluidCardId.value = null
         }
     }
 
@@ -2659,7 +2661,8 @@ fun MainApp(
                             uploading = false
                         }
                     } else if (!valid) {
-                        Toast.makeText(context, "網址要 http:// 或 https:// 開頭", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "網址要 http:// 或 https:// 開頭",
+                            Toast.LENGTH_SHORT).show()
                     }
                     showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null
                 }) { Text("確定") }
@@ -2671,6 +2674,148 @@ fun MainApp(
             }
         )
     }
+
+    if (webSearchTarget != null) {
+        val target = webSearchTarget!!
+        var selectedImageUrl by remember { mutableStateOf<String?>(null) }
+        BackHandler { webSearchTarget = null }
+
+        Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
+            Column(Modifier.fillMaxSize()) {
+                Surface(color = SURFACE_CARD, shadowElevation = 0.dp) {
+                    Row(
+                        Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { webSearchTarget = null }) {
+                            Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
+                        }
+                        Text("長按圖片設定圖標", fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                    }
+                }
+
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            webViewClient = android.webkit.WebViewClient()
+                            setOnTouchListener { v, event ->
+                                when (event.actionMasked) {
+                                    android.view.MotionEvent.ACTION_DOWN ->
+                                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                                    android.view.MotionEvent.ACTION_UP,
+                                    android.view.MotionEvent.ACTION_CANCEL ->
+                                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                                }
+                                false
+                            }
+                            setOnLongClickListener { v ->
+                                val result = (v as android.webkit.WebView).hitTestResult
+                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
+                                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                                    val url = result.extra
+                                    if (!url.isNullOrBlank()) selectedImageUrl = url
+                                }
+                                false
+                            }
+                            val q = Uri.encode(target.note + " icon")
+                            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
+                        }
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+            }
+
+            if (selectedImageUrl != null) {
+                AlertDialog(
+                    onDismissRequest = { selectedImageUrl = null },
+                    title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("將會設為「${target.note}」的專屬圖標",
+                                color = TEXT_SECONDARY, fontSize = 14.sp)
+                            Spacer(Modifier.height(16.dp))
+                            AsyncImage(
+                                model = selectedImageUrl,
+                                contentDescription = null,
+                                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val url = selectedImageUrl!!
+                            selectedImageUrl = null
+                            webSearchTarget = null
+                            scope.launch {
+                                uploading = true
+                                try {
+                                    val finalBytes = withContext(Dispatchers.IO) {
+                                        val rawBytes = if (url.startsWith("data:image")) {
+                                            val base64 = url.substringAfter(",")
+                                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                                        } else {
+                                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+                                            conn.connectTimeout = 10000
+                                            conn.readTimeout = 10000
+                                            conn.inputStream.readBytes()
+                                        }
+
+                                        // ═══════════════════════════════════════════════════
+                                        // ✅ 修改 1/2：decodeByteArray 可能返回 null（非圖片/
+                                        //            被 Cloudflare 攔截/HTML 錯誤頁），
+                                        //            先檢查再 removeBackground，避免 NPE。
+                                        //            其餘所有下載邏輯完全冇改。
+                                        // ═══════════════════════════════════════════════════
+                                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
+                                        if (srcBitmap == null) {
+                                            throw Exception("圖片解碼失敗（非圖片 / 被攔截 / 格式不支援）")
+                                        }
+                                        val processedBitmap = removeBackground(srcBitmap)
+
+                                        val baos = ByteArrayOutputStream()
+                                        processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                                        if (processedBitmap !== srcBitmap) processedBitmap.recycle()
+                                        srcBitmap.recycle()
+                                        baos.toByteArray()
+                                    }
+                                    val cloudUrl = uploadBytesToCloudinary(finalBytes)
+                                    if (cloudUrl != null) {
+                                        val db = withContext(Dispatchers.IO) { Firebase.firestore }
+                                        applyUrlToSameName(context, db, target.note, cloudUrl)
+                                    } else {
+                                        Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
+                                            Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    // ═══════════════════════════════════════════════════
+                                    // ✅ 修改 2/2：顯示真實失敗原因，唔再籠統講「版權保護」
+                                    // ═══════════════════════════════════════════════════
+                                    Toast.makeText(context, "下載失敗：${e.message ?: "未知錯誤"}",
+                                        Toast.LENGTH_LONG).show()
+                                    e.printStackTrace()
+                                } finally {
+                                    uploading = false
+                                }
+                            }
+                        }) { Text("使用", fontWeight = FontWeight.Bold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { selectedImageUrl = null }) {
+                            Text("取消", color = TEXT_SECONDARY)
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = SURFACE_CARD
+                )
+            }
+        }
+    }
+}
 
     if (webSearchTarget != null) {
         val target = webSearchTarget!!
