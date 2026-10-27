@@ -177,6 +177,11 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.asImageBitmap
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchToken = mutableStateOf(0)
@@ -1971,7 +1976,6 @@ fun MainApp(
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
-    // 🟢 焦點管理 (確保輸入框唔會自己偷偷獲取焦點)
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -2001,6 +2005,8 @@ fun MainApp(
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
+    // ★ 新增：待確認圖片效果
+    var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
     var showKeyboard by remember { mutableStateOf(false) }
 
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
@@ -2022,7 +2028,6 @@ fun MainApp(
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
 
-    // 🟢 徹底關閉鍵盤及清除所有焦點
     fun dismissKeyboard() {
         showKeyboard = false
         keyboardState = KeyboardState()
@@ -2030,14 +2035,12 @@ fun MainApp(
         focusManager.clearFocus()
     }
 
-    // 🟢 規則：切換頁面時，若鍵盤開啟，自動隱藏並移除焦點
     LaunchedEffect(currentPage) {
         if (currentPage != 0 && showKeyboard) {
             dismissKeyboard()
         }
     }
 
-    // 🟢 規則：App 進入後台 (如切換至其他 App 或鎖屏) 時，自動隱藏鍵盤
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -2077,28 +2080,38 @@ fun MainApp(
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
+    // ★ 改造：選圖後走 pendingImageUpload（彈效果選擇面板），不再直接上傳
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
         if (uri != null && target != null) {
             scope.launch {
                 uploading = true
-                val db = withContext(Dispatchers.IO) { Firebase.firestore }
-                uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
+                val bitmaps = loadAndProcessBitmaps(context, uri)
                 uploading = false
+                if (bitmaps != null) {
+                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
+                } else {
+                    Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_SHORT).show()
+                }
             }
         }
         iconTargetRecord = null
     }
 
+    // ★ 改造：拍照後走 pendingImageUpload
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val target = iconTargetRecord
         val uri = pendingCameraUri
         if (ok && target != null && uri != null) {
             scope.launch {
                 uploading = true
-                val db = withContext(Dispatchers.IO) { Firebase.firestore }
-                uploadIconAndApplyToSameName(context, db, target.id, target.note, uri)
+                val bitmaps = loadAndProcessBitmaps(context, uri)
                 uploading = false
+                if (bitmaps != null) {
+                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
+                } else {
+                    Toast.makeText(context, "讀取圖片失敗", Toast.LENGTH_SHORT).show()
+                }
                 try {
                     uri.path?.let { p ->
                         val f = java.io.File(p)
@@ -2256,7 +2269,6 @@ fun MainApp(
         dismissKeyboard()
         scrollToTopTrigger++
 
-        // 清除原生系統通知
         keyboardPrefillNotifId.value?.let { notifId ->
             if (notifId != -1) {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -2265,7 +2277,6 @@ fun MainApp(
             }
         }
         
-        // 🟢 清除並銷毀 OPPO 流体云卡片
         keyboardPrefillFluidCardId.value?.let { cardId ->
             OppoFluidCloudBridge.dismissCard(context, cardId)
             keyboardPrefillFluidCardId.value = null
@@ -2747,7 +2758,7 @@ fun MainApp(
                             scope.launch {
                                 uploading = true
                                 try {
-                                    val finalBytes = withContext(Dispatchers.IO) {
+                                    val bitmaps = withContext(Dispatchers.IO) {
                                         val rawBytes = if (url.startsWith("data:image")) {
                                             val base64 = url.substringAfter(",")
                                             android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
@@ -2758,36 +2769,22 @@ fun MainApp(
                                             conn.readTimeout = 10000
                                             conn.inputStream.readBytes()
                                         }
-
-                                        // ▼▼▼ 改動 1：decodeByteArray 可能返回 null（非圖片 /
-                                        //            被 Cloudflare 攔截 / HTML 錯誤頁），
-                                        //            先檢查再 removeBackground，避免 NPE。
-                                        //            其餘下載邏輯完全冇改。
                                         val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
                                             ?: throw Exception("圖片解碼失敗（非圖片 / 被攔截 / 格式不支援）")
-                                        // ▲▲▲
-
-                                        val processedBitmap = removeBackground(srcBitmap)
-                                        val baos = ByteArrayOutputStream()
-                                        processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                                        if (processedBitmap !== srcBitmap) processedBitmap.recycle()
-                                        srcBitmap.recycle()
-                                        baos.toByteArray()
+                                        val original = if (srcBitmap.width > 800 || srcBitmap.height > 800) {
+                                            val scaled = scaleKeepAspectWidth(srcBitmap, 800)
+                                            if (scaled !== srcBitmap) srcBitmap.recycle()
+                                            scaled
+                                        } else srcBitmap
+                                        val processed = removeBackground(original)
+                                        Pair(original, processed)
                                     }
-                                    val cloudUrl = uploadBytesToCloudinary(finalBytes)
-                                    if (cloudUrl != null) {
-                                        val db = withContext(Dispatchers.IO) { Firebase.firestore }
-                                        applyUrlToSameName(context, db, target.note, cloudUrl)
-                                    } else {
-                                        Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
-                                            Toast.LENGTH_SHORT).show()
-                                    }
+                                    // ★ 改造：下載完 → 彈效果面板，不直接上傳
+                                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
                                 } catch (e: Exception) {
-                                    // ▼▼▼ 改動 2：顯示真實失敗原因，唔再籠統講「版權保護」
                                     Toast.makeText(context, "下載失敗：${e.message ?: "未知錯誤"}",
                                         Toast.LENGTH_LONG).show()
                                     e.printStackTrace()
-                                    // ▲▲▲
                                 } finally {
                                     uploading = false
                                 }
@@ -2801,6 +2798,58 @@ fun MainApp(
                     },
                     shape = RoundedCornerShape(20.dp),
                     containerColor = SURFACE_CARD
+                )
+            }
+        }
+    }
+
+    // ★ 圖片效果選擇面板（Toast 風格置底、可交互、10 秒自動選去背圖）
+    if (pendingImageUpload != null) {
+        Box(Modifier.fillMaxSize().zIndex(200f)) {
+            // 半透明遮罩：阻止用戶點空白處關閉
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .pointerInput(Unit) { detectTapGestures { /* 故意吞掉，不關閉 */ } }
+            )
+            Box(Modifier.align(Alignment.BottomCenter)) {
+                ImageEffectSelectionPanel(
+                    state = pendingImageUpload!!,
+                    onSelect = { bitmap, forceCrop, isEnhanced ->
+                        // ★ 先檢查非 null，避免重複觸發 NPE
+                        val current = pendingImageUpload
+                        if (current != null) {
+                            pendingImageUpload = null
+                            val targetRecord = current.record
+                            val origBmp = current.originalBitmap
+                            val procBmp = current.processedBitmap
+
+                            scope.launch {
+                                uploading = true
+                                try {
+                                    val finalBmp = if (isEnhanced) applyEnhancedFilter(bitmap) else bitmap
+                                    val finalBytes = compressBitmapToPngForUpload(finalBmp, forceCrop)
+
+                                    if (finalBmp !== origBmp && finalBmp !== procBmp) finalBmp.recycle()
+                                    origBmp.recycle()
+                                    procBmp.recycle()
+
+                                    val url = uploadBytesToCloudinary(finalBytes)
+                                    if (url != null) {
+                                        val db = Firebase.firestore
+                                        applyUrlToSameName(context, db, targetRecord.note, url)
+                                    } else {
+                                        Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "處理失敗: ${e.message}", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    uploading = false
+                                }
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -7518,6 +7567,259 @@ fun IconViewAdaptive(
             AsyncImage(model = req, contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+// =========================================================
+//  ★ 圖片效果選擇面板 + 相關數據類和處理函數
+// =========================================================
+data class PendingImageUpload(
+    val record: Record,
+    val originalBitmap: Bitmap,
+    val processedBitmap: Bitmap
+)
+
+/** 讀取用戶選的圖片（相冊/相機），自動去背，返回 (原圖, 去背圖) */
+suspend fun loadAndProcessBitmaps(context: Context, uri: Uri): Pair<Bitmap, Bitmap>? = withContext(Dispatchers.IO) {
+    try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val w = bounds.outWidth; val h = bounds.outHeight
+        if (w <= 0 || h <= 0) return@withContext null
+
+        var s = 1; val md = maxOf(w, h)
+        while (md / (s * 2) >= 800) s *= 2
+
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = s
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val src = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, opts)
+        } ?: return@withContext null
+
+        val original = if (src.width > 800 || src.height > 800) {
+            val scaled = scaleKeepAspectWidth(src, 800)
+            if (scaled !== src) src.recycle()
+            scaled
+        } else src
+
+        val processed = removeBackground(original)
+        Pair(original, processed)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
+/** 強化去背 / 提亮主體：用 ColorMatrix 提高飽和與對比 */
+suspend fun applyEnhancedFilter(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+    val bmp = Bitmap.createBitmap(src.width, src.height, src.config ?: Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    val paint = android.graphics.Paint()
+    val cm = android.graphics.ColorMatrix().apply {
+        set(floatArrayOf(
+            1.15f, 0f, 0f, 0f, -5f,
+            0f, 1.15f, 0f, 0f, -5f,
+            0f, 0f, 1.15f, 0f, -5f,
+            0f, 0f, 0f, 1f, 0f
+        ))
+    }
+    paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+    canvas.drawBitmap(src, 0f, 0f, paint)
+    bmp
+}
+
+/** 把最終選定的 bitmap 壓成 PNG bytes 上傳 */
+suspend fun compressBitmapToPngForUpload(bitmap: Bitmap, forceCrop: Boolean, targetSize: Int = ICON_SIZE): ByteArray = withContext(Dispatchers.Default) {
+    val finalBitmap = if (forceCrop) {
+        scaleCropCenter(bitmap, targetSize)
+    } else {
+        if (bitmap.width > bitmap.height) scaleKeepAspectWidth(bitmap, targetSize)
+        else scaleCropCenter(bitmap, targetSize)
+    }
+    val baos = ByteArrayOutputStream()
+    finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+    if (finalBitmap !== bitmap) finalBitmap.recycle()
+    baos.toByteArray()
+}
+
+/**
+ * 圖片效果選擇面板
+ * - Toast 風格置底、卡片式
+ * - 4 個選項，每個都有真實預覽：自動去背 / 原始圖 / 手動裁剪(疊裁剪框) / 強化去背(高對比)
+ * - 10 秒倒數，逾時自動選「自動去背圖」
+ * - 點背景不會關閉（MainApp 那邊已用 pointerInput 吞點擊）
+ */
+@Composable
+fun ImageEffectSelectionPanel(
+    state: PendingImageUpload,
+    onSelect: (Bitmap, Boolean, Boolean) -> Unit
+) {
+    var timeLeft by remember { mutableIntStateOf(10) }
+    var dismissed by remember { mutableStateOf(false) }
+
+    fun select(bitmap: Bitmap, forceCrop: Boolean, isEnhanced: Boolean) {
+        if (dismissed) return
+        dismissed = true
+        onSelect(bitmap, forceCrop, isEnhanced)
+    }
+
+    LaunchedEffect(Unit) {
+        while (timeLeft > 0 && !dismissed) {
+            delay(1000)
+            timeLeft--
+        }
+        if (!dismissed) {
+            // 逾時 → 自動選「自動去背圖」（保持原有默認行為）
+            select(state.processedBitmap, false, false)
+        }
+    }
+
+    var isVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { isVisible = true }
+
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 300f)) { it } + fadeIn(),
+        exit = slideOutVertically { it } + fadeOut()
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(SURFACE_CARD)
+                .padding(bottom = 32.dp, top = 20.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("選擇圖片效果", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                Spacer(Modifier.weight(1f))
+                Text("${timeLeft}s", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TEXT_SECONDARY)
+            }
+            Spacer(Modifier.height(16.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp)
+            ) {
+                item {
+                    EffectOptionCard(
+                        title = "自動去背圖", bitmap = state.processedBitmap,
+                        buttonText = "使用去背圖", isPrimary = true, timeHint = "($timeLeft)",
+                        onClick = { select(state.processedBitmap, false, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "原始圖片", bitmap = state.originalBitmap,
+                        buttonText = "使用原圖", isPrimary = false,
+                        onClick = { select(state.originalBitmap, false, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "手動裁剪後重處理", bitmap = state.originalBitmap,
+                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
+                        onClick = { select(state.originalBitmap, true, false) }
+                    )
+                }
+                item {
+                    EffectOptionCard(
+                        title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
+                        buttonText = "強化去背", isPrimary = false, isEnhanced = true,
+                        onClick = { select(state.processedBitmap, false, true) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EffectOptionCard(
+    title: String, bitmap: Bitmap, buttonText: String, isPrimary: Boolean,
+    timeHint: String = "", showCropGrid: Boolean = false, isEnhanced: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.width(140.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
+                .background(SURFACE_ELEVATED)
+                .border(2.dp, if (isPrimary) BRAND_PRIMARY else Color.Transparent, RoundedCornerShape(16.dp))
+                .clickable { onClick() }
+        ) {
+            val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+            val colorFilter = remember(isEnhanced) {
+                if (isEnhanced) {
+                    ColorFilter.colorMatrix(
+                        ColorMatrix().apply { setToScale(1.15f, 1.15f, 1.15f, 1f) }
+                    )
+                } else null
+            }
+
+            Image(
+                bitmap = imageBitmap, contentDescription = null,
+                contentScale = ContentScale.Fit, colorFilter = colorFilter,
+                modifier = Modifier.fillMaxSize().drawWithContent {
+                    drawContent()
+                    if (showCropGrid) {
+                        // 疊加三分線 + 中央白框，模擬"手動裁剪"預覽
+                        val strokeW = 1.dp.toPx()
+                        val w = size.width; val h = size.height
+                        drawLine(Color.White.copy(alpha = 0.6f), Offset(w / 3, 0f), Offset(w / 3, h), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha = 0.6f), Offset(w * 2 / 3, 0f), Offset(w * 2 / 3, h), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, h / 3), Offset(w, h / 3), strokeWidth = strokeW)
+                        drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, h * 2 / 3), Offset(w, h * 2 / 3), strokeWidth = strokeW)
+
+                        // 外圍壓暗
+                        drawRect(Color.Black.copy(alpha = 0.35f), size = size)
+
+                        // 中央 80% 白框
+                        val md = minOf(w, h) * 0.8f
+                        val cx = w / 2; val cy = h / 2; val half = md / 2
+                        drawRect(
+                            Color.White,
+                            topLeft = Offset(cx - half, cy - half),
+                            size = androidx.compose.ui.geometry.Size(md, md),
+                            style = Stroke(2.dp.toPx())
+                        )
+                    }
+                }
+            )
+
+            if (isPrimary && timeHint.isNotEmpty()) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).padding(8.dp)
+                        .clip(RoundedCornerShape(8.dp)).background(BRAND_PRIMARY)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text("推薦", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(title, fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1)
+        Spacer(Modifier.height(6.dp))
+
+        Button(
+            onClick = onClick, shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().height(36.dp),
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isPrimary) BRAND_PRIMARY else SURFACE_ELEVATED,
+                contentColor = if (isPrimary) Color.White else TEXT_PRIMARY
+            )
+        ) {
+            Text(
+                if (isPrimary && timeHint.isNotEmpty()) "$buttonText $timeHint" else buttonText,
+                fontSize = 13.sp, fontWeight = FontWeight.Bold
+            )
         }
     }
 }
