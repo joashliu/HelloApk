@@ -1625,7 +1625,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PREFILL_NOTE = "extra_prefill_note"
         const val EXTRA_PREFILL_AMOUNT = "extra_prefill_amount"
         const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category"
-        const val EXTRA_CANCEL_NOTIF_ID = "extra_cancel_notif_id" // 🟢 新增
+        const val EXTRA_CANCEL_NOTIF_ID = "extra_cancel_notif_id"
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
@@ -1685,7 +1685,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         showQuickAddNotification()
-        handleLaunchIntent(intent)
+        // 🟢 徹底刪除 handleLaunchIntent(intent)
+        // 確保只有 onCreate 或 onNewIntent (真正嘅新點擊) 先會處理，防止由後台喚醒時重複彈出
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -1703,7 +1704,6 @@ class MainActivity : ComponentActivity() {
             keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
             
-            // 🟢 讀取傳入嘅通知 ID，交畀 MainApp 嘅 saveFromKeyboard 清理
             if (intent.hasExtra(EXTRA_CANCEL_NOTIF_ID)) {
                 keyboardPrefillNotifId.value = intent.getIntExtra(EXTRA_CANCEL_NOTIF_ID, -1)
             }
@@ -1786,6 +1786,10 @@ fun MainApp(
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    // 🟢 焦點管理 (確保輸入框唔會自己偷偷獲取焦點)
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     val lastSavedCategory by vm.lastSavedCategory.collectAsState()
     val ui by vm.ledgerUiState.collectAsState()
     val filter by vm.filterState.collectAsState()
@@ -1832,6 +1836,35 @@ fun MainApp(
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
+
+    // 🟢 徹底關閉鍵盤及清除所有焦點
+    fun dismissKeyboard() {
+        showKeyboard = false
+        keyboardState = KeyboardState()
+        keyboardController?.hide()
+        focusManager.clearFocus()
+    }
+
+    // 🟢 規則：切換頁面時，若鍵盤開啟，自動隱藏並移除焦點
+    LaunchedEffect(currentPage) {
+        if (currentPage != 0 && showKeyboard) {
+            dismissKeyboard()
+        }
+    }
+
+    // 🟢 規則：App 進入後台 (如切換至其他 App 或鎖屏) 時，自動隱藏鍵盤
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                if (showKeyboard) {
+                    dismissKeyboard()
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(filterSearch.text) {
         delay(250)
@@ -1983,11 +2016,6 @@ fun MainApp(
         showKeyboard = true
     }
 
-    fun dismissKeyboard() {
-        showKeyboard = false
-        keyboardState = KeyboardState()
-    }
-
     fun deleteRecordWithUndo(r: Record) {
         deleteJob?.cancel()
         vm.markAsDeleting(r.id)
@@ -2039,16 +2067,16 @@ fun MainApp(
                        timestamp = ts, iconUrl = inherited)
             ) { newId -> afterSaveHint = AfterSaveHint(newId, category, totalThisMonth) }
         }
-        showKeyboard = false
-        keyboardState = KeyboardState()
+        
+        // 🟢 成功後調用徹底清除焦點嘅函數
+        dismissKeyboard()
         scrollToTopTrigger++
 
-        // 🟢 成功入賬後，自動清除對應嘅系統通知
         keyboardPrefillNotifId.value?.let { notifId ->
             if (notifId != -1) {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 nm?.cancel(notifId)
-                keyboardPrefillNotifId.value = null // 清除紀錄
+                keyboardPrefillNotifId.value = null
             }
         }
     }
