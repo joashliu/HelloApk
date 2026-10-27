@@ -2748,8 +2748,7 @@ fun MainApp(
                             uploading = false
                         }
                     } else if (!valid) {
-                        Toast.makeText(context, "網址要 http:// 或 https:// 開頭",
-                            Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "網址要 http:// 或 https:// 開頭", Toast.LENGTH_SHORT).show()
                     }
                     showUrlInputDialog = false; urlInput = ""; iconTargetRecord = null
                 }) { Text("確定") }
@@ -2776,9 +2775,8 @@ fun MainApp(
                 try {
                     val bitmaps = withContext(Dispatchers.IO) {
                         val rawBytes = if (url.startsWith("data:image")) {
-                            val base64 = url.substringAfter(",")
-                            // 🟢 修復：明確轉換為 ByteArray，解決 Base64 decode 重載模糊錯誤
-                            android.util.Base64.decode(base64.toByteArray(), android.util.Base64.DEFAULT)
+                            val base64Str = url.substringAfter(",")
+                            android.util.Base64.decode(base64Str as String, android.util.Base64.DEFAULT)
                         } else {
                             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
@@ -2855,255 +2853,48 @@ fun MainApp(
         }
     }
 
-            if (selectedImageUrl != null) {
-                AlertDialog(
-                    onDismissRequest = { selectedImageUrl = null },
-                    title = { Text("使用這張圖片？", fontWeight = FontWeight.Bold) },
-                    text = {
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("將會設為「${target.note}」的專屬圖標",
-                                color = TEXT_SECONDARY, fontSize = 14.sp)
-                            Spacer(Modifier.height(16.dp))
-                            AsyncImage(
-                                model = selectedImageUrl,
-                                contentDescription = null,
-                                modifier = Modifier.size(120.dp).clip(RoundedCornerShape(24.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            val url = selectedImageUrl!!
-                            selectedImageUrl = null
-                            webSearchTarget = null
-                            scope.launch {
-                                uploading = true
-                                try {
-                                    val finalBytes = withContext(Dispatchers.IO) {
-                                        val rawBytes = if (url.startsWith("data:image")) {
-                                            val base64 = url.substringAfter(",")
-                                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                                        } else {
-                                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                                            conn.connectTimeout = 10000
-                                            conn.readTimeout = 10000
-                                            conn.inputStream.readBytes()
-                                        }
-                                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
-                                        val processedBitmap = removeBackground(srcBitmap)
-                                        val baos = ByteArrayOutputStream()
-                                        processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                                        if (processedBitmap !== srcBitmap) processedBitmap.recycle()
-                                        srcBitmap.recycle()
-                                        baos.toByteArray()
-                                    }
-                                    val cloudUrl = uploadBytesToCloudinary(finalBytes)
-                                    if (cloudUrl != null) {
-                                        val db = withContext(Dispatchers.IO) { Firebase.firestore }
-                                        applyUrlToSameName(context, db, target.note, cloudUrl)
-                                    } else {
-                                        Toast.makeText(context, "處理圖片失敗，請嘗試其他圖片",
-                                            Toast.LENGTH_SHORT).show()
-                                    }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "下載失敗，這張圖片可能有版權保護",
-                                        Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    uploading = false
+    if (pendingImageUpload != null) {
+        Box(Modifier.fillMaxSize().zIndex(200f)) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { detectTapGestures { } })
+            
+            Box(Modifier.align(Alignment.BottomCenter)) {
+                ImageEffectSelectionPanel(
+                    state = pendingImageUpload!!,
+                    onSelect = { bitmap, forceCrop, isEnhanced ->
+                        val targetRecord = pendingImageUpload!!.record
+                        val origBmp = pendingImageUpload!!.originalBitmap
+                        val procBmp = pendingImageUpload!!.processedBitmap
+                        pendingImageUpload = null
+                        
+                        scope.launch {
+                            uploading = true
+                            try {
+                                val finalBmp = if (isEnhanced) applyEnhancedFilter(bitmap) else bitmap
+                                val finalBytes = compressBitmapToPngForUpload(finalBmp, forceCrop)
+                                
+                                if (finalBmp !== origBmp && finalBmp !== procBmp) finalBmp.recycle()
+                                origBmp.recycle()
+                                procBmp.recycle()
+                                
+                                val url = uploadBytesToCloudinary(finalBytes)
+                                if (url != null) {
+                                    val db = Firebase.firestore
+                                    applyUrlToSameName(context, db, targetRecord.note, url)
+                                } else {
+                                    Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_SHORT).show()
                                 }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "處理失敗: ${e.message}", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                uploading = false
                             }
-                        }) { Text("使用", fontWeight = FontWeight.Bold) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { selectedImageUrl = null }) {
-                            Text("取消", color = TEXT_SECONDARY)
                         }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    containerColor = SURFACE_CARD
+                    }
                 )
             }
         }
     }
-}
-
-// =========================================================
-//  ★ KeyboardAndFabLayer
-// =========================================================
-@Composable
-private fun BoxScope.KeyboardAndFabLayer(
-    showKeyboard: Boolean,
-    progressProvider: () -> Float,
-    currentPage: Int,
-    filterModeOn: Boolean,
-    filterSearch: TextFieldValue,
-    onFilterSearchChange: (TextFieldValue) -> Unit,
-    filterSearchHasFocus: Boolean,
-    onFilterSearchFocusChange: (Boolean) -> Unit,
-    filterSearchFocusRequester: FocusRequester,
-    onFilterButtonTap: () -> Unit,
-    onFabTap: () -> Unit,
-    keyboardState: KeyboardState,
-    onKeyboardStateChange: (KeyboardState) -> Unit,
-    onKeyboardDismiss: () -> Unit,
-    onKeyboardConfirm: () -> Unit,
-    onKeyboardNext: () -> Unit,
-    allNoteNames: List<String>,
-    noteCategoryMap: Map<String, String>,
-    nameFlashTrigger: Int,
-) {
-    Row(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp,
-                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-            .height(56.dp)
-            .graphicsLayer {
-                val p = progressProvider()
-                alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
-                val s = 1f - (0.15f * p)
-                scaleX = s
-                scaleY = s
-                translationY = p * 60.dp.toPx()
-                transformOrigin = TransformOrigin(0.5f, 1f)
-            },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            if (currentPage == 0) {
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = filterModeOn,
-                    enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
-                    exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
-                ) {
-                    Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = SURFACE_CARD,
-                            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                        ) {
-                            Row(Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.weight(1f)) {
-                                    BasicTextField(
-                                        value = filterSearch,
-                                        onValueChange = onFilterSearchChange,
-                                        singleLine = true,
-                                        textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                        cursorBrush = SolidColor(BRAND_PRIMARY),
-                                        decorationBox = { inner ->
-                                            Box(Modifier.fillMaxWidth(),
-                                                contentAlignment = Alignment.CenterStart) {
-                                                if (filterSearch.text.isEmpty())
-                                                    Text("搜尋名稱或類別…", fontSize = 15.sp,
-                                                        color = TEXT_TERTIARY)
-                                                inner()
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .focusRequester(filterSearchFocusRequester)
-                                            .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
-                                    )
-                                }
-                                if (filterSearch.text.isNotBlank()) {
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                        modifier = Modifier.size(20.dp)
-                                            .clickable { onFilterSearchChange(TextFieldValue("")) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (filterModeOn && filterSearchHasFocus) {
-                    val filterSuggestions = remember(filterSearch.text, allNoteNames) {
-                        filterNoteSuggestions(filterSearch.text, allNoteNames)
-                    }
-                    if (filterSuggestions.isNotEmpty()) {
-                        androidx.compose.ui.window.Popup(
-                            popupPositionProvider = AboveAnchorPositionProvider,
-                            onDismissRequest = { },
-                            properties = PopupProperties(focusable = false)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = SURFACE_CARD,
-                                border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
-                            ) {
-                                Column(Modifier.verticalScroll(rememberScrollState())) {
-                                    filterSuggestions.forEach { s ->
-                                        Row(
-                                            Modifier.fillMaxWidth()
-                                                .clickable { onFilterSearchChange(TextFieldValue(s)) }
-                                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
-                                        HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Surface(
-            modifier = Modifier
-                .size(44.dp)
-                .pointerInput(filterModeOn, currentPage) {
-                    detectTapGestures(onTap = { onFilterButtonTap() })
-                },
-            shape = CircleShape,
-            color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else SURFACE_CARD,
-            border = if (filterModeOn && currentPage == 0) null
-                     else BorderStroke(0.5.dp, DIVIDER_COLOR)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.FilterAlt, "篩選",
-                    tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(60.dp))
-    }
-
-    AnimatedFabLayer(
-        progressProvider = progressProvider,
-        onFabTap = onFabTap,
-        modifier = Modifier.align(Alignment.BottomEnd)
-    )
-
-    AnimatedKeyboardLayer(
-        showKeyboard = showKeyboard,
-        progressProvider = progressProvider,
-        keyboardState = keyboardState,
-        onKeyboardStateChange = onKeyboardStateChange,
-        onKeyboardDismiss = onKeyboardDismiss,
-        onKeyboardConfirm = onKeyboardConfirm,
-        onKeyboardNext = onKeyboardNext,
-        allNoteNames = allNoteNames,
-        noteCategoryMap = noteCategoryMap,
-        nameFlashTrigger = nameFlashTrigger,
-        modifier = Modifier.align(Alignment.BottomCenter)
-    )
-}
+} // 🟢 這個括號就是 MainApp 函數的「最後一個」閉合括號！
 
 @Composable
 private fun AnimatedFabLayer(
