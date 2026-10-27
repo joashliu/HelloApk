@@ -1262,7 +1262,9 @@ fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
     val startDay = todayStart - 6 * dayMs
     val amountByDay = HashMap<Long, Double>(7)
     for (r in records) {
-        if (r.category == INCOME_CATEGORY) continue
+        // 🟢 修改：計算棒形圖時，直接跳過「收入」同「還錢」類別
+        if (r.category == INCOME_CATEGORY || r.category == "還錢") continue
+        
         val dayStart = getTimestampMeta(r.timestamp).startOfDayMillis
         if (dayStart in startDay..todayStart) {
             amountByDay[dayStart] = (amountByDay[dayStart] ?: 0.0) + r.amount
@@ -3066,12 +3068,10 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
-    // 🟢 快速輸入區滾動收縮狀態
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     
-    // 🟢 新增防護鎖：防止程式自動動畫與 NestedScroll / Snap 打交
     var isAutoAnimating by remember { mutableStateOf(false) }
 
     LaunchedEffect(filterMode) {
@@ -3081,7 +3081,6 @@ fun LedgerContent(
     val quickInputScrollConnection = remember(filterMode, topNotes, isAutoAnimating) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // 如果開啟篩選、冇項目、或者進行緊自動展開動畫，就唔攔截滾動
                 if (filterMode || topNotes.isEmpty() || isAutoAnimating) return Offset.Zero
                 
                 val delta = available.y
@@ -3096,7 +3095,6 @@ fun LedgerContent(
     val isListScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
     val scope = rememberCoroutineScope()
     
-    // 🟢 當滑動停止時，自動吸附 (加入 !isAutoAnimating 條件防止誤判)
     LaunchedEffect(isListScrolling) {
         if (!isListScrolling && !isAutoAnimating && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
             try {
@@ -3205,7 +3203,6 @@ fun LedgerContent(
         }
     }
 
-    // 🟢 打開鍵盤時，鎖定並自動平滑展開快速輸入區
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             if (quickInputCollapseOffset > 0f) {
@@ -3268,14 +3265,19 @@ fun LedgerContent(
     val activeFanId = activeFanRecord?.id
 
     data class DayStat(val income: Double, val expense: Double, val isGroupDeleting: Boolean)
+    
     val dayStats: Map<String, DayStat> = remember(displayGroups, deletingIds) {
         displayGroups.associate { (dateKey, records) ->
             var inc = 0.0
             var exp = 0.0
             for (r in records) {
                 if (r.id !in deletingIds) {
-                    if (r.category == INCOME_CATEGORY) inc += r.amount
-                    else exp += r.amount
+                    if (r.category == INCOME_CATEGORY) {
+                        inc += r.amount
+                    } else if (r.category != "還錢") {
+                        // 🟢 修改：當計算每日卡片 Header 時，排除「還錢」類別，唔計入支出
+                        exp += r.amount 
+                    }
                 }
             }
             val isGroupDeleting = records.size == 1 && records[0].id in deletingIds
