@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 網絡與相機權限 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -10,24 +9,23 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
-    <!-- 通知相關權限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission
         android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- 硬體需求聲明 -->
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
 
-    <!-- 查詢其他 App 嘅權限 (用於通知攔截匹配) -->
     <queries>
         <package android:name="com.mtr.mobile" />
         <package android:name="com.octopus.card" />
         <package android:name="com.octopuscards.oepay" />
         <package android:name="com.hsbc.hsbc_hk" />
         <package android:name="com.hangsengbank.hangseng" />
+        <!-- 🟢 加入 OPPO 泛在服務引擎包查詢 -->
+        <package android:name="com.oplus.pantanal.ums" />
         <intent>
             <action android:name="android.service.notification.NotificationListenerService" />
         </intent>
@@ -40,12 +38,10 @@
         android:enableOnBackInvokedCallback="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
-        <!-- ML Kit 依賴 -->
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="subject_segment" />
 
-        <!-- 主介面 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -55,9 +51,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 🟢 配置 DeepLink 攔截，接收來自流体云 UPK 嘅「新增記帳」指令 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ledgerapp" android:host="quickadd" />
+            </intent-filter>
         </activity>
 
-        <!-- 🟢 系統通知監聽服務 (自動記帳大腦) -->
         <service
             android:name=".PaymentNotificationListener"
             android:label="易乘碼記賬助手"
@@ -68,12 +70,10 @@
             </intent-filter>
         </service>
 
-        <!-- 🟢 通知操作廣播接收器 (處理「忽略」按鈕) -->
         <receiver
             android:name=".NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- 下拉選單快速記帳磁貼 -->
         <service
             android:name=".QuickAddTileService"
             android:label="快速記帳"
@@ -88,7 +88,6 @@
                 android:value="false" />
         </service>
 
-        <!-- 檔案存取 Provider (相機拍照用) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
