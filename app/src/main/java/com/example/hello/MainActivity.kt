@@ -4230,59 +4230,89 @@ fun WeeklyExpenseChart(
     modifier: Modifier = Modifier,
 ) {
     val chartHeight = 178.dp
+    val density = LocalDensity.current
+    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
     val maxAmount = remember(data) {
         data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    // ★ 不再用 listState 做 alpha / translationY
-    // 滾動時由 LazyColumn 天然裁掉超出頂部的部分，
-    // 可見高度 = 178dp - 滾動量，實現「滑幾多、壓幾多」線性壓縮；
-    // 向下回滾時自動展開；完全滾出後下方 item 無縫補位。
-    @Suppress("UNUSED_PARAMETER")
-    val _unusedListState = listState
-
-    Box(modifier = modifier.fillMaxWidth().height(chartHeight)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(SURFACE_CARD)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "近 7 日支出",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TEXT_PRIMARY
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "合計 $${formatAmountNoDecimal(totalAmount)}",
-                    fontSize = 12.sp,
-                    color = TEXT_SECONDARY,
-                    fontWeight = FontWeight.Medium
-                )
+    // 讀取 chart item 的滾動偏移量（0 = 完全展開，chartHeightPx = 完全收起）
+    val collapseOffsetPx by remember(listState) {
+        derivedStateOf {
+            val info = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key == "weekly_chart" }
+            if (info == null) {
+                // chart 不在可見列表（已完全滾出）→ 保守返回全高，卡片高度 0
+                chartHeightPx
+            } else {
+                (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
             }
-            Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.Bottom
+        }
+    }
+
+    val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
+    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
+
+    // ★ 外層 Box 高度固定 178dp：LazyColumn 視角的 item 高度不變，
+    //   避免 layout 反饋循環。內部卡片主動變矮，圓角全程保留。
+    Box(modifier = modifier.fillMaxWidth().height(chartHeight)) {
+
+        if (visibleHeightPx > 0.5f) {
+            // ★ 卡片：bottom 對齊 Box，高度隨滾動收縮
+            //   clip 在外層，卡片自身圓角全程生效、不被裁
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(visibleHeightDp)
+                    .align(Alignment.BottomCenter)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SURFACE_CARD)
             ) {
-                data.forEach { day ->
-                    WeeklyExpenseBar(
-                        day = day,
-                        maxAmount = maxAmount,
-                        introProgress = introProgress,
-                        modifier = Modifier.weight(1f).fillMaxHeight()
-                    )
+                // ★ 內容：固定 178dp 高，bottom 對齊卡片 bottom
+                //   不變比例、不扭曲；超出卡片頂部的部分由卡片 clip 裁掉
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(chartHeight)
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "近 7 日支出",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TEXT_PRIMARY
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "合計 $${formatAmountNoDecimal(totalAmount)}",
+                            fontSize = 12.sp,
+                            color = TEXT_SECONDARY,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        data.forEach { day ->
+                            WeeklyExpenseBar(
+                                day = day,
+                                maxAmount = maxAmount,
+                                introProgress = introProgress,
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                            )
+                        }
+                    }
                 }
             }
         }
