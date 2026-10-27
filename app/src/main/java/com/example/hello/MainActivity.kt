@@ -6259,7 +6259,6 @@ fun CalendarContent(
                         val safeH = targetH.coerceIn(constraints.minHeight, constraints.maxHeight)
                         val safeW = placeable.width.coerceIn(constraints.minWidth, constraints.maxWidth)
                         layout(safeW, safeH) {
-                            // 向上推移，內容會超出 bounds 滑入頂部遮罩下方
                             placeable.placeRelative(0, safeH - placeable.height)
                         }
                     }
@@ -6267,7 +6266,7 @@ fun CalendarContent(
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
-                Spacer(Modifier.height(14.dp)) // 14.dp 足夠避開上面縮細到 10.dp 嘅遮罩
+                Spacer(Modifier.height(14.dp)) // 保留適當間距
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
@@ -6471,7 +6470,7 @@ fun CalendarContent(
         }
 
         // ==========================================
-        // 2. 頂部永久固定標題區 (實色 + 縮小版毛玻璃遮罩)
+        // 2. 頂部永久固定標題區 (實色 + 極幼細版毛玻璃遮罩)
         // ==========================================
         Column(
             modifier = Modifier
@@ -6553,17 +6552,17 @@ fun CalendarContent(
                 }
             }
 
-            // 🟢 向下漸變毛玻璃遮罩 (高度改為 10.dp，避免遮擋初始狀態嘅 chips)
+            // 🟢 極幼細向下漸變毛玻璃遮罩 (高度改為 6.dp，超級邊緣淡出)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(10.dp) // 📉 將高度由 18.dp 縮細到 10.dp
+                    .height(6.dp) // 📉 縮減至極細微嘅邊界過渡
                     .background(
                         Brush.verticalGradient(
                             colorStops = arrayOf(
                                 0.0f to SURFACE_BG,
-                                0.35f to SURFACE_BG.copy(alpha = 0.75f),
-                                0.7f to SURFACE_BG.copy(alpha = 0.3f),
+                                0.4f to SURFACE_BG.copy(alpha = 0.8f),
+                                0.8f to SURFACE_BG.copy(alpha = 0.3f),
                                 1.0f to SURFACE_BG.copy(alpha = 0f)
                             )
                         )
