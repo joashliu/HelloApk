@@ -1,4 +1,4 @@
-import org.gradle.api.GradleException
+import org.gradle.api.GradleException // 🟢 新增：導入 GradleException
 
 plugins {
     id("com.android.application")
@@ -131,7 +131,13 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
+    // 圖像分割 (原有)
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+
+    // 🟢 新增 ============ ML Kit (OCR) & Vision ============
+    // 用於離線識別畫面中嘅文字同金額
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+    implementation("com.google.android.gms:play-services-vision:20.1.3")
 
     // ============ 測試 ============
     testImplementation("junit:junit:4.13.2")
