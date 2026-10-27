@@ -7668,10 +7668,27 @@ fun ImageEffectSelectionPanel(
     var showCropDialog by remember { mutableStateOf(false) }
     var dismissed by remember { mutableStateOf(false) }
 
-    // 預先計算「簡單去白底」（背景執行，唔會阻塞 UI）
+    // 預先計算：簡單去白底（第 2 格）
     val whiteRemovedBitmap by produceState<Bitmap?>(initialValue = null, key1 = state.originalBitmap) {
         value = withContext(Dispatchers.Default) {
             removeWhiteBackgroundSimple(state.originalBitmap)
+        }
+    }
+
+    // ★ 新增：預先計算「強化去背 + 緊裁」（第 4 格）
+    val tightCroppedEnhancedBitmap by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = state.processedBitmap
+    ) {
+        value = withContext(Dispatchers.Default) {
+            try {
+                val enhanced = applyEnhancedFilter(state.processedBitmap)
+                val cropped = tightCropAroundSubject(enhanced)
+                if (cropped !== enhanced) enhanced.recycle()
+                cropped
+            } catch (e: Exception) {
+                state.processedBitmap
+            }
         }
     }
 
@@ -7744,12 +7761,31 @@ fun ImageEffectSelectionPanel(
                         onClick = { showCropDialog = true }
                     )
                 }
-                // ④ 更乾淨去背 / 強化
+                // ④ ★ 強化去背 + 緊裁
                 item {
+                    val preview = tightCroppedEnhancedBitmap ?: state.processedBitmap
                     EffectOptionCard(
-                        title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
-                        buttonText = "強化去背", isPrimary = false, isEnhanced = true,
-                        onClick = { safeSelect(state.processedBitmap, false, true) }
+                        title = if (tightCroppedEnhancedBitmap == null)
+                                    "裁剪強化（計算中）"
+                                else
+                                    "緊裁 + 強化",
+                        bitmap = preview,
+                        buttonText = "使用緊裁版",
+                        isPrimary = false,
+                        onClick = {
+                            scope.launch {
+                                val target = tightCroppedEnhancedBitmap ?: withContext(Dispatchers.Default) {
+                                    try {
+                                        val enhanced = applyEnhancedFilter(state.processedBitmap)
+                                        tightCropAroundSubject(enhanced)
+                                    } catch (e: Exception) {
+                                        state.processedBitmap
+                                    }
+                                }
+                                // isEnhanced = false，因為 target 已經係最終結果
+                                safeSelect(target, false, false)
+                            }
+                        }
                     )
                 }
             }
@@ -8056,4 +8092,75 @@ fun CropDialog(
             }
         }
     }
+}
+
+// =========================================================
+//  ★ 主體緊裁：掃描 Alpha 通道，搵主體 Bounding Box，加 padding 裁成正方形
+//  用於「強化去背」第 4 格：主體細粒/偏一邊 → 自動居中放大
+// =========================================================
+suspend fun tightCropAroundSubject(
+    src: Bitmap,
+    paddingPercent: Float = 0.08f,   // 主體外圍留 8% 空間
+    alphaThreshold: Int = 20         // 忽略 Alpha < 20 的雜點
+): Bitmap = withContext(Dispatchers.Default) {
+    val w = src.width
+    val h = src.height
+    if (w <= 0 || h <= 0) return@withContext src
+
+    val pixels = IntArray(w * h)
+    src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+    var minX = w
+    var minY = h
+    var maxX = -1
+    var maxY = -1
+
+    for (y in 0 until h) {
+        val rowStart = y * w
+        for (x in 0 until w) {
+            val a = (pixels[rowStart + x] ushr 24) and 0xFF
+            if (a >= alphaThreshold) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
+    }
+
+    // 完全冇主體（純透明 / 全圖 Alpha 都 < 20）→ 返回原圖，唔搞
+    if (maxX < 0 || maxY < 0) return@withContext src
+
+    val subjectW = maxX - minX + 1
+    val subjectH = maxY - minY + 1
+
+    // 正方形邊長 = 主體最長邊 + 2 側 padding
+    val side = maxOf(subjectW, subjectH)
+    val padding = (side * paddingPercent).toInt().coerceAtLeast(2)
+    val finalSide = side + padding * 2
+
+    // 主體中心
+    val cx = (minX + maxX) / 2f
+    val cy = (minY + maxY) / 2f
+
+    // 開新正方形畫布，把主體中心 draw 到畫布中心
+    // 超出原圖範圍自然變成透明背景
+    val result = Bitmap.createBitmap(finalSide, finalSide, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(result)
+    val dx = finalSide / 2f - cx
+    val dy = finalSide / 2f - cy
+    canvas.drawBitmap(src, dx, dy, null)
+    result
+}
+
+// =========================================================
+//  ★ 強化去背 + 緊裁（第 4 格用）
+//  1) applyEnhancedFilter：ColorMatrix 提亮提飽和
+//  2) tightCropAroundSubject：Alpha 緊裁 + 居中放大
+// =========================================================
+suspend fun enhanceAndTightCrop(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+    val enhanced = applyEnhancedFilter(src)
+    val cropped = tightCropAroundSubject(enhanced)
+    if (cropped !== enhanced) enhanced.recycle()
+    cropped
 }
