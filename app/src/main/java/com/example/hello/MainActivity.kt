@@ -1686,13 +1686,20 @@ class MainActivity : ComponentActivity() {
                     if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
                         LightweightEntryApp(
                             vm = viewModel(),
-                            // 🟢 接收 nullable state。有 state = 打開鍵盤帶入資料；冇 state = 純粹切換介面
                             onTransitionToMain = { stateToTransfer ->
                                 if (stateToTransfer != null) {
+                                    // 用戶點擊「完整模式」，保留打到一半嘅資料並觸發鍵盤打開
                                     keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
                                     keyboardPrefillNote.value = stateToTransfer.noteText
                                     keyboardPrefillCategory.value = stateToTransfer.category
                                     keyboardLaunchToken.value += 1
+                                } else {
+                                    // 🟢 核心修復：成功入帳後切換主程式，必須清空啟動標記！
+                                    // 咁樣 MainApp 載入時就唔會以為仲要自動彈出鍵盤
+                                    keyboardLaunchToken.value = 0
+                                    keyboardPrefillAmount.value = null
+                                    keyboardPrefillNote.value = null
+                                    keyboardPrefillCategory.value = null
                                 }
                                 // 切換至主介面
                                 currentAppMode = AppUiMode.FULL
