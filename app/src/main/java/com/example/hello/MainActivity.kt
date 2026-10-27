@@ -3409,6 +3409,13 @@ fun LedgerContent(
 
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
+        // ★ filter 切換的圖表收起進度（0 = 展開, 1 = 收起），用統一 spring 曲線
+    //   與 AnimatedContent 的 SizeTransform spring 保持一致節奏
+    val filterChartCollapse by animateFloatAsState(
+        targetValue = if (filterMode) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+        label = "chartFilterCollapse"
+    )
 
         LaunchedEffect(shouldPlayWeeklyIntro) {
         if (!shouldPlayWeeklyIntro || weeklyIntroTriggered) return@LaunchedEffect
@@ -3848,12 +3855,15 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        if (!filterMode && weeklyExpenses.isNotEmpty()) {
+                                                // ★ 移除 if (!filterMode)：chart item 始終存在
+                        //   收起動畫由 filterChartCollapse 驅動 item 高度，不瞬間消失
+                        if (weeklyExpenses.isNotEmpty()) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
                                 WeeklyExpenseChart(
                                     data = weeklyExpenses,
                                     listState = listState,
                                     introProgress = weeklyIntroProgress.value,
+                                    filterCollapseProgress = filterChartCollapse,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -4233,53 +4243,66 @@ fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
     listState: LazyListState,
     introProgress: Float,
+    filterCollapseProgress: Float = 0f,   // ★ 新增：filter 切換收起進度 (0 = 完全展開, 1 = 完全收起)
     modifier: Modifier = Modifier,
 ) {
     val chartHeight = 178.dp
     val horizontalPadding = 16.dp
     val innerPadding = 12.dp
     val titleRowHeight = 20.dp
-    val titleGap = 8.dp              // ★ 從 10 減到 8，省回 2dp
-    val labelRowHeight = 20.dp       // ★ 從 16 增加到 20，保證文字完整
+    val titleGap = 8.dp
+    val labelRowHeight = 20.dp
 
     val density = LocalDensity.current
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
+
+    // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
+    val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
+    val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
+    val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
 
     val maxAmount = remember(data) {
         data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    val collapseOffsetPx by remember(listState, chartHeightPx) {
+    // 滾動偏移：只反映「用戶手動滾動」造成的裁切
+    val scrollOffsetPx by remember(listState, chartHeightPx) {
         derivedStateOf {
-            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "weekly_chart" }
-            if (info == null) chartHeightPx
+            val info = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key == "weekly_chart" }
+            if (info == null) 0f
             else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
         }
     }
 
-    val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
+    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移（兩者疊加，效果跟手動滾動一致）
+    val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
+
+    if (maxBoxHeightPx <= 0.5f) {
+        // 完全收起：item 高度 0，LazyColumn 裡下面的 stickyHeader 已平滑移動到位
+        Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
+        return
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(chartHeight)
+            .height(maxBoxHeightDp)             // ★ 外層高度隨 filter 收起而變矮（連續插值）
             .padding(horizontal = horizontalPadding)
     ) {
         if (visibleHeightPx > 0.5f) {
-            // ★ 卡片主動變矮，底部對齊；頂部/底部圓角由 .clip() 全程繪製
+            // 卡片主動變矮，底部對齊；四角圓角由 .clip() 全程繪製
+            // filter 收起時效果跟手動滾動完全一致（clip 裁切頂部）
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(visibleHeightDp)
                     .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))   // 四角圓角：全程生效
-                    .background(SURFACE_CARD)          // 白色背景：全程覆蓋可見區域
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SURFACE_CARD)
             ) {
-                // ★ 內容固定 178dp，底部對齊卡片底部
-                //   卡片變矮時，內容超出卡片頂部的部分被 .clip() 裁掉
-                //   裁切邊界是卡片自己的圓角矩形 → 頂部兩角永遠是圓角
                 Column(
                     Modifier
                         .fillMaxWidth()
@@ -4287,7 +4310,7 @@ fun WeeklyExpenseChart(
                         .align(Alignment.BottomCenter)
                         .padding(horizontal = innerPadding, vertical = innerPadding)
                 ) {
-                    // ── 標題行（卡片變矮時最先被裁掉，屬於卡片內部內容）
+                    // ── 標題行
                     Row(
                         Modifier.fillMaxWidth().height(titleRowHeight),
                         verticalAlignment = Alignment.CenterVertically
@@ -4306,10 +4329,8 @@ fun WeeklyExpenseChart(
                             fontWeight = FontWeight.Medium
                         )
                     }
-
                     Spacer(Modifier.height(titleGap))
-
-                    // ── 柱體（中間佔滿，文字不縮放，柱高靠卡片裁切呈現「變矮」）
+                    // ── 柱體（文字不縮放，柱高靠卡片 clip 裁切呈現「變矮」）
                     Row(
                         Modifier.fillMaxWidth().weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -4324,12 +4345,9 @@ fun WeeklyExpenseChart(
                             )
                         }
                     }
-
-                    // ── 日期行（★ 修復：min 20dp + 文字 lineHeight 14sp + 無 font padding）
+                    // ── 日期行（文字完整顯示，min 20dp + lineHeight 14sp + 無 font padding）
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = labelRowHeight),   // 內容可撐開，不會被裁
+                        Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         data.forEach { day ->
@@ -4337,9 +4355,9 @@ fun WeeklyExpenseChart(
                                 Text(
                                     text = day.weekdayChar,
                                     fontSize = 11.sp,
-                                    lineHeight = 14.sp,             // ★ 行高固定 14dp
+                                    lineHeight = 14.sp,
                                     style = TextStyle(
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)  // ★ 無 font padding
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
                                     ),
                                     color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
                                     fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
