@@ -4241,6 +4241,7 @@ fun WeeklyExpenseChart(
     val labelReservedPx = remember(density) { with(density) { (labelRowHeight + innerPadding).toPx() } }
     val titleReservedPx = remember(density) { with(density) { (titleRowHeight + titleGap + innerPadding).toPx() } }
     val barAreaOriginalPx = (chartHeightPx - labelReservedPx - titleReservedPx).coerceAtLeast(1f)
+    val labelReservedDp = with(density) { labelReservedPx.toDp() }
 
     val maxAmount = remember(data) { data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001 }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
@@ -4256,15 +4257,19 @@ fun WeeklyExpenseChart(
     val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
-    // ★ 柱體層專屬 scaleY：只作用於柱體，文字層不受影響
+    // 柱體層 scaleY：只作用於柱子，文字層不縮放
     val barAreaCurrentPx = (visibleHeightPx - labelReservedPx - titleReservedPx).coerceAtLeast(0f)
     val barScaleY = (barAreaCurrentPx / barAreaOriginalPx).coerceIn(0f, 1f)
+
+    // 日期行頂部位置：低於 titleReservedPx 時表示已入侵標題區
+    val dateRowTopPx = visibleHeightPx - labelReservedPx
+    val hasOverlap = dateRowTopPx < titleReservedPx && visibleHeightPx > 0.5f
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(chartHeight)
-            .padding(horizontal = horizontalPadding)   // ★ 左右固定 16dp，壓縮全程不變
+            .padding(horizontal = horizontalPadding)   // 左右固定 16dp，全程不變
     ) {
         if (visibleHeightPx > 0.5f) {
             Box(
@@ -4272,10 +4277,10 @@ fun WeeklyExpenseChart(
                     .fillMaxWidth()
                     .height(visibleHeightDp)
                     .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))   // ★ 圓角遮罩：文字超出直接隱藏
+                    .clip(RoundedCornerShape(12.dp))   // 圓角全程生效
                     .background(SURFACE_CARD)
             ) {
-                // ── 層1：柱體層（graphicsLayer { scaleY }，僅柱子縮放）
+                // ── 層1：柱體層（graphicsLayer scaleY，僅柱子縮放）
                 if (barScaleY > 0.001f) {
                     Box(
                         Modifier
@@ -4286,7 +4291,7 @@ fun WeeklyExpenseChart(
                             .padding(horizontal = innerPadding)
                             .graphicsLayer {
                                 scaleY = barScaleY
-                                transformOrigin = TransformOrigin(0.5f, 1f)  // 底部為縮放基準
+                                transformOrigin = TransformOrigin(0.5f, 1f)
                             }
                     ) {
                         Row(
@@ -4306,21 +4311,7 @@ fun WeeklyExpenseChart(
                     }
                 }
 
-                // ── 層2：標題行（文字，獨立不縮放，頂部固定，被遮罩裁切時自然隱藏）
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopCenter)
-                        .padding(start = innerPadding, end = innerPadding, top = innerPadding)
-                        .height(titleRowHeight),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("近 7 日支出", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                    Spacer(Modifier.weight(1f))
-                    Text("合計 $${formatAmountNoDecimal(totalAmount)}", fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                }
-
-                // ── 層3：日期行（文字，獨立不縮放，底部固定）
+                // ── 層2：日期行（不縮放、原字體大小、底部對齊）
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -4340,6 +4331,34 @@ fun WeeklyExpenseChart(
                             )
                         }
                     }
+                }
+
+                // ── 層3：蒙布遮罩（SURFACE_BG 實色，蓋住日期行）
+                //   僅在日期行入侵標題區時出現；此時柱體已 scaleY = 0 不可見，遮罩不會誤傷柱體
+                if (hasOverlap) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(labelReservedDp)
+                            .align(Alignment.BottomCenter)
+                            .background(SURFACE_BG)
+                            .zIndex(2f)
+                    )
+                }
+
+                // ── 層4：標題行（zIndex 最高，永遠清晰可見）
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .padding(start = innerPadding, end = innerPadding, top = innerPadding)
+                        .height(titleRowHeight)
+                        .zIndex(3f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("近 7 日支出", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                    Spacer(Modifier.weight(1f))
+                    Text("合計 $${formatAmountNoDecimal(totalAmount)}", fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
                 }
             }
         }
