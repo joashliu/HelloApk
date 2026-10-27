@@ -5,4 +5,3 @@
     android:notificationTimeout="100"
     android:canRetrieveWindowContent="false"
     android:description="@string/accessibility_description" />
-<!-- canRetrieveWindowContent 設為 false，保證唔會遍歷用戶畫面節點，增強私隱 -->
