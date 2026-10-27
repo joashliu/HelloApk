@@ -266,8 +266,9 @@ object NotificationCaptureBridge {
             .trimEnd('0').trimEnd('.').ifEmpty { "0" }
 }
 
-private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add"
-private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v3"
+// 🟢 升級 Channel ID，強制系統重置橫幅權限
+private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add_v2"
+private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v5"
 private const val QUICK_ADD_NOTIFICATION_ID = 1001
 private const val CONFIRM_NOTIFICATION_BASE_ID = 2000
 
@@ -275,39 +276,35 @@ fun ensureNotificationChannels(context: Context) {
     if (Build.VERSION.SDK_INT < 26) return
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
     try {
+        // 清理所有舊版殘留嘅頻道
         val staleIds = listOf(
-            "ledger_capture_confirm",
-            "ledger_capture_confirm_v2",
-            "ledger_capture_confirm_v3_old"
+            "ledger_capture_confirm", "ledger_capture_confirm_v2",
+            "ledger_capture_confirm_v3", "ledger_capture_confirm_v3_old",
+            "ledger_capture_confirm_v4", "ledger_quick_add"
         )
         for (oldId in staleIds) {
-            if (oldId == CONFIRM_CHANNEL_ID) continue
-            try {
-                if (nm.getNotificationChannel(oldId) != null) {
-                    nm.deleteNotificationChannel(oldId)
-                }
-            } catch (_: Exception) {}
+            try { nm.deleteNotificationChannel(oldId) } catch (_: Exception) {}
         }
     } catch (_: Exception) {}
 
     val quick = NotificationChannel(
-        QUICK_ADD_CHANNEL_ID, "快速記帳", NotificationManager.IMPORTANCE_LOW
+        QUICK_ADD_CHANNEL_ID, "快速記帳 (常駐)", NotificationManager.IMPORTANCE_LOW
     ).apply {
         description = "常駐快速記賬入口"
         setShowBadge(false)
     }
     val confirm = NotificationChannel(
-        CONFIRM_CHANNEL_ID, "消費確認", NotificationManager.IMPORTANCE_HIGH
+        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH // 🟢 確保高優先級
     ).apply {
-        description = "檢測到消費通知時，詢問你是否記賬"
+        description = "檢測到消費通知時，強制橫幅彈出詢問"
         enableVibration(true)
         enableLights(true)
+        setBypassDnd(true) // 嘗試繞過勿擾模式
     }
     nm.createNotificationChannel(quick)
     nm.createNotificationChannel(confirm)
 }
 
-// 🟢 只清已知固定 ID，唔好 loop 10 萬次
 fun cleanupStaleConfirmNotifications(context: Context) {
     try {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
@@ -411,7 +408,9 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
             context, captured.note, captured.amount, captured.category, notifId
         )
         val addPi = PendingIntent.getActivity(context, notifId, addIntent, piFlags)
-        val fullScreenPi = PendingIntent.getActivity(context, notifId, addIntent, piFlags)
+        
+        // 🟢 加入 FullScreenIntent，強烈要求系統彈出橫幅/喚醒螢幕
+        val fullScreenPi = PendingIntent.getActivity(context, notifId + 100, addIntent, piFlags)
 
         val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
             action = "com.example.hello.ACTION_IGNORE_CAPTURE"
@@ -428,11 +427,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
                     .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
             )
             .setContentIntent(addPi)
-            .setFullScreenIntent(fullScreenPi, true)
+            .setFullScreenIntent(fullScreenPi, true) // 🟢 霸道喚醒橫幅
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setPriority(NotificationCompat.PRIORITY_MAX) // 🟢 MAX 等級
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setCategory(NotificationCompat.CATEGORY_CALL) // 🟢 偽裝成來電級別中斷
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
             .setTimeoutAfter(10 * 60 * 1000L)
