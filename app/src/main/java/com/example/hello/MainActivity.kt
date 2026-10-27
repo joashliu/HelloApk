@@ -6171,7 +6171,6 @@ fun CalendarContent(
     val calendarExpansion = remember { Animatable(1f) }
     val maxDragPx = remember(density) { with(density) { 250.dp.toPx() } }
 
-    // 🟢 動態記錄頂部實色標題嘅真實高度
     var topBarHeight by remember { mutableStateOf(56.dp) }
 
     LaunchedEffect(currentMonthKey) {
@@ -6244,15 +6243,14 @@ fun CalendarContent(
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         
         // ==========================================
-        // 1. 底層滾動區 (包含 Chips、Stats 同月曆網格)
+        // 1. 底層滾動區
         // ==========================================
         Column(
             Modifier
                 .fillMaxSize()
-                // 🟢 避開頂部真實高度，保證唔會被遮
                 .padding(top = topBarHeight) 
         ) {
-            // 展開收縮區 (Chips + Stats)
+            // 🟢 展開收縮區 (Chips + Stats)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6270,39 +6268,38 @@ fun CalendarContent(
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
-                Spacer(Modifier.height(12.dp))
+                // 🟢 增加預設間距，等 Chips 乖乖留喺月份下方，絕對睇得哂
+                Spacer(Modifier.height(24.dp))
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
                 }
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 72.dp),
-                    modifier = Modifier.fillMaxWidth().animateContentSize(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    userScrollEnabled = false
-                ) {
-                    item(key = "__all__") {
-                        CalendarFilterChip(
-                            modifier = Modifier.fillMaxWidth(),
-                            selected = filterCategory == null,
-                            label = "全部",
-                            onClick = { onFilterCategoryChange(null) }
-                        )
-                    }
-                    items(items = visibleCategories, key = { it }) { cat ->
-                        CalendarFilterChip(
-                            modifier = Modifier.animateItem().fillMaxWidth(),
-                            selected = filterCategory == cat,
-                            label = cat,
-                            onClick = {
-                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                // 🟢 替換為穩定嘅 Chunked Row 排版，確保測量高度 100% 準確
+                val rows = remember(allCategories) { allCategories.chunked(4) }
+                
+                Column(Modifier.fillMaxWidth().animateContentSize()) {
+                    rows.forEach { row ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            row.forEach { cat ->
+                                CalendarFilterChip(
+                                    modifier = Modifier.weight(1f),
+                                    selected = filterCategory == cat,
+                                    label = cat ?: "全部",
+                                    onClick = {
+                                        onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                                    }
+                                )
                             }
-                        )
+                            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                        Spacer(Modifier.height(6.dp))
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AnimatedInfoChip(
                         label = "總計",
@@ -6482,7 +6479,7 @@ fun CalendarContent(
                 .fillMaxWidth()
                 .zIndex(10f)
         ) {
-            // 實色背景區 (自動適應字體高度)
+            // 實色背景區
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -6490,7 +6487,6 @@ fun CalendarContent(
                     .padding(horizontal = 10.dp)
                     .padding(top = 10.dp, bottom = 10.dp)
                     .onSizeChanged { size ->
-                        // 🟢 自動量度頂部高度，確保下方內容完美貼齊
                         val h = with(density) { size.height.toDp() }
                         if (h != topBarHeight) {
                             topBarHeight = h
@@ -6563,7 +6559,7 @@ fun CalendarContent(
                 }
             }
 
-            // 🟢 智能遮罩：冇拉起日曆嘅時候 100% 隱形，拉起時先平滑淡出 16.dp 高嘅靚靚遮罩
+            // 智能遮罩：冇拉起日曆嘅時候 100% 隱形，拉起時先平滑淡出 6.dp 高嘅靚靚遮罩
             val showMask = calendarExpansion.value < 0.99f
             val maskAlpha by animateFloatAsState(
                 targetValue = if (showMask) 1f else 0f,
@@ -6574,14 +6570,14 @@ fun CalendarContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(16.dp) 
+                    .height(6.dp) 
                     .graphicsLayer { alpha = maskAlpha }
                     .background(
                         Brush.verticalGradient(
                             colorStops = arrayOf(
                                 0.0f to SURFACE_BG,
-                                0.35f to SURFACE_BG.copy(alpha = 0.85f),
-                                0.70f to SURFACE_BG.copy(alpha = 0.35f),
+                                0.4f to SURFACE_BG.copy(alpha = 0.8f),
+                                0.8f to SURFACE_BG.copy(alpha = 0.3f),
                                 1.0f to SURFACE_BG.copy(alpha = 0f)
                             )
                         )
