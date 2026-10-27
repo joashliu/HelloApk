@@ -2677,7 +2677,7 @@ fun MainApp(
         var selectedImageUrl by remember { mutableStateOf<String?>(null) }
         BackHandler { webSearchTarget = null }
 
-        LaunchedEffect(selectedImageUrl) {
+                LaunchedEffect(selectedImageUrl) {
             val url = selectedImageUrl
             if (url != null) {
                 selectedImageUrl = null
@@ -2685,29 +2685,22 @@ fun MainApp(
                 uploading = true
                 try {
                     val bitmaps = withContext(Dispatchers.IO) {
-                        val rawBytes = if (url.startsWith("data:image")) {
-                            val base64Str = url.substringAfter(",")
-                            android.util.Base64.decode(base64Str as String, android.util.Base64.DEFAULT)
-                        } else {
-                            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                            conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                            conn.connectTimeout = 10000
-                            conn.readTimeout = 10000
-                            conn.inputStream.readBytes()
-                        }
-                        val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
-                        val original = if (srcBitmap.width > 800 || srcBitmap.height > 800) {
-                            val scaled = scaleKeepAspectWidth(srcBitmap, 800)
-                            if (scaled !== srcBitmap) srcBitmap.recycle()
+                        val rawBitmap = downloadImageBitmap(context, url)
+                            ?: throw Exception("HTTP 下載被拒 / 非圖片 / 格式不支援")
+                        val original = if (rawBitmap.width > 800 || rawBitmap.height > 800) {
+                            val scaled = scaleKeepAspectWidth(rawBitmap, 800)
+                            if (scaled !== rawBitmap) rawBitmap.recycle()
                             scaled
-                        } else srcBitmap
-                        
+                        } else rawBitmap
+
                         val processed = removeBackground(original)
                         Pair(original, processed)
                     }
                     pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
                 } catch (e: Exception) {
-                    Toast.makeText(context, "下載失敗或圖片受保護", Toast.LENGTH_SHORT).show()
+                    val errMsg = e.message ?: e.javaClass.simpleName
+                    Toast.makeText(context, "下載失敗：$errMsg", Toast.LENGTH_LONG).show()
+                    e.printStackTrace()
                 } finally {
                     uploading = false
                 }
@@ -7635,4 +7628,74 @@ private fun AnimatedKeyboardLayer(
             modifier = Modifier.fillMaxWidth()
         )
     }
+}
+
+// =========================================================
+//  ★ 健壮下載圖片：支援 data:image / 協議相對 / 重定向 /
+//    WebP / AVIF（透過 Coil，自動帶 UA + Referer）
+// =========================================================
+private suspend fun downloadImageBitmap(context: Context, url: String): Bitmap? =
+    withContext(Dispatchers.IO) {
+        try {
+            // 1) data:image/...;base64,...
+            if (url.startsWith("data:image")) {
+                val base64Str = url.substringAfter(",")
+                val bytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
+                return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+
+            // 2) 協議相對 URL (//encrypted-tbn0.gstatic.com/...)
+            val fixedUrl = when {
+                url.startsWith("//") -> "https:$url"
+                url.startsWith("http://") || url.startsWith("https://") -> url
+                else -> return@withContext null
+            }
+
+            // 3) Referer 取源域名；無域名時 fallback Google
+            val referer = runCatching {
+                val uri = java.net.URI(fixedUrl)
+                val host = uri.host ?: return@runCatching "https://www.google.com/"
+                "${uri.scheme ?: "https"}://$host/"
+            }.getOrDefault("https://www.google.com/")
+
+            // 4) 用 Coil 下載：自動處理 WebP / AVIF / 3xx 重定向
+            val request = ImageRequest.Builder(context)
+                .data(fixedUrl)
+                .addHeader(
+                    "User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                .addHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
+                .addHeader("Accept-Language", "en-US,en;q=0.9,zh-HK;q=0.8")
+                .addHeader("Referer", referer)
+                .allowHardware(false)
+                .build()
+
+            val result = context.imageLoader.execute(request)
+            val drawable = when (result) {
+                is coil.request.SuccessResult -> result.drawable
+                is coil.request.ErrorResult -> {
+                    result.throwable.printStackTrace()
+                    return@withContext null
+                }
+                else -> null
+            } ?: return@withContext null
+
+            drawableToBitmap(drawable)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+private fun drawableToBitmap(drawable: android.graphics.drawable.Drawable): Bitmap? {
+    if (drawable is android.graphics.drawable.BitmapDrawable) return drawable.bitmap
+    val w = drawable.intrinsicWidth.coerceAtLeast(1)
+    val h = drawable.intrinsicHeight.coerceAtLeast(1)
+    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    drawable.setBounds(0, 0, canvas.width, canvas.height)
+    drawable.draw(canvas)
+    return bmp
 }
