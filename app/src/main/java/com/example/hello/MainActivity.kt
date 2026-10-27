@@ -1,5 +1,6 @@
 package com.example.hello 
 
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 import androidx.compose.ui.unit.Velocity
@@ -2776,7 +2777,8 @@ fun MainApp(
                     val bitmaps = withContext(Dispatchers.IO) {
                         val rawBytes = if (url.startsWith("data:image")) {
                             val base64 = url.substringAfter(",")
-                            android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                            // 🟢 修復：明確轉換為 ByteArray，解決 Base64 decode 重載模糊錯誤
+                            android.util.Base64.decode(base64.toByteArray(), android.util.Base64.DEFAULT)
                         } else {
                             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
@@ -7524,8 +7526,8 @@ fun ImageEffectSelectionPanel(
     AnimatedVisibility(
         visible = isVisible,
         enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 300f)) { it } + fadeIn(),
-        exit = slideOutVertically { it } + fadeOut(),
-        modifier = Modifier.align(Alignment.BottomCenter)
+        exit = slideOutVertically { it } + fadeOut()
+        // 🟢 修復：移除了 Modifier.align，交由外層調用時嘅 Box 處理
     ) {
         Column(
             Modifier
