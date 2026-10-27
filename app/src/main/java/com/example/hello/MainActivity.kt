@@ -1632,7 +1632,7 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PREFILL_AMOUNT = "extra_prefill_amount"
         const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category"
         const val EXTRA_CANCEL_NOTIF_ID = "extra_cancel_notif_id"
-        const val EXTRA_FROM_TILE = "extra_from_tile" // 🟢 磁鐵專用標記
+        const val EXTRA_FROM_TILE = "extra_from_tile"
         private const val CHANNEL_ID = "ledger_quick_add"
         private const val NOTIFICATION_ID = 1001
     }
@@ -1645,12 +1645,10 @@ class MainActivity : ComponentActivity() {
         splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
 
-        // 🟢 判斷是否冷啟動及是否來自磁鐵
         val isColdStart = !isProcessAlive
         isProcessAlive = true
         val isFromTile = intent?.getBooleanExtra(EXTRA_FROM_TILE, false) == true
         
-        // 只有【冷啟動】+【來自磁鐵】先會進入極速輕量模式
         val startLightweight = isColdStart && isFromTile
 
         handleLaunchIntent(intent)
@@ -1669,7 +1667,6 @@ class MainActivity : ComponentActivity() {
             val prefillCategory = keyboardPrefillCategory.value
             val notesInfo = topQuickNotesInfo.value
 
-            // 🟢 控制當前 UI 模式
             var currentAppMode by rememberSaveable {
                 mutableStateOf(if (startLightweight) AppUiMode.LIGHTWEIGHT else AppUiMode.FULL)
             }
@@ -1687,21 +1684,21 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
                     if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
-                        // 🟢 獨立極速渲染分支：唔載入 List、動畫同圖表，達到 0 延遲
                         LightweightEntryApp(
-                            vm = viewModel(), // 共享同一個 ViewModel，資料庫底層同步
-                            onDismiss = { finish() },
+                            vm = viewModel(),
+                            // 🟢 接收 nullable state。有 state = 打開鍵盤帶入資料；冇 state = 純粹切換介面
                             onTransitionToMain = { stateToTransfer ->
-                                // 將輕量模式打到一半嘅字，帶入主程式
-                                keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
-                                keyboardPrefillNote.value = stateToTransfer.noteText
-                                keyboardPrefillCategory.value = stateToTransfer.category
-                                keyboardLaunchToken.value += 1
+                                if (stateToTransfer != null) {
+                                    keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
+                                    keyboardPrefillNote.value = stateToTransfer.noteText
+                                    keyboardPrefillCategory.value = stateToTransfer.category
+                                    keyboardLaunchToken.value += 1
+                                }
+                                // 切換至主介面
                                 currentAppMode = AppUiMode.FULL
                             }
                         )
                     } else {
-                        // 🟢 正常主介面分支
                         MainApp(
                             keyboardLaunchToken = token,
                             prefillNoteOnLaunch = prefillNote,
@@ -1790,14 +1787,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun LightweightEntryApp(
     vm: LedgerViewModel,
-    onDismiss: () -> Unit,
-    onTransitionToMain: (KeyboardState) -> Unit
+    // 🟢 移除 onDismiss，改為統一使用 onTransitionToMain 處理所有離場邏輯
+    onTransitionToMain: (KeyboardState?) -> Unit
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     
-    // 獲取快取數據以供鍵盤聯想及 Chips 渲染使用
     val ui by vm.ledgerUiState.collectAsState()
     val lastSavedCategory by vm.lastSavedCategory.collectAsState()
     
@@ -1833,11 +1829,13 @@ fun LightweightEntryApp(
                    timestamp = ts, iconUrl = inherited)
         )
         Toast.makeText(context, "✅ 記帳成功", Toast.LENGTH_SHORT).show()
-        onDismiss() 
+        
+        // 🟢 成功記帳後，清空焦點並平滑過渡去正常 App 介面
+        focusManager.clearFocus()
+        onTransitionToMain(null)
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        // 頂部大字標題與切換按鈕
         Row(
             Modifier.fillMaxWidth().padding(top = 64.dp, start = 24.dp, end = 20.dp)
                 .graphicsLayer {
@@ -1856,7 +1854,7 @@ fun LightweightEntryApp(
             Surface(
                 onClick = {
                     focusManager.clearFocus()
-                    // 🟢 切換去完整版時，將目前打到一半嘅資料傳送過去
+                    // 點擊完整模式時，將未打完嘅資料帶過去
                     onTransitionToMain(keyboardState) 
                 },
                 shape = CircleShape,
@@ -1870,7 +1868,6 @@ fun LightweightEntryApp(
             }
         }
         
-        // 🟢 將 Chips 區同鍵盤綁定喺底部一齊升起
         Column(
             Modifier.align(Alignment.BottomCenter)
                 .padding(bottom = 20.dp)
@@ -1880,14 +1877,13 @@ fun LightweightEntryApp(
                 }
         ) {
             
-            // 🟢 載入快速輸入 Chips (極速模式專用設定)
             if (ui.topNotes.isNotEmpty()) {
                 QuickInputSection(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
-                    maxRowsPerPage = 3, // 設定最多 3 行，為頂部保留充足空間
+                    maxRowsPerPage = 3,
                     skipAppearAnimation = false,
-                    collapseProgress = 0f, // 輕量模式下永遠完全展開，唔會出現收縮按鈕
+                    collapseProgress = 0f,
                     onExpandClick = {},
                     onClick = { name ->
                         val amt = ui.recentAmountByNote[name]
@@ -1895,26 +1891,28 @@ fun LightweightEntryApp(
                         val cur = if (cat == "旅遊") "JPY" else "HKD"
                         val amtText = amt?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: ""
                         
-                        // 點擊 Chips 自動更新鍵盤狀態 (類似主介面 openKeyboardForNew)
                         keyboardState = keyboardState.copy(
                             noteText = name,
                             amountText = amtText,
                             category = cat,
                             currency = cur,
                             selectAmountOnInput = amt != null && amt > 0.0,
-                            focusedField = "amount" // 自動聚焦金額
+                            focusedField = "amount"
                         )
                     }
                 )
                 Spacer(Modifier.height(8.dp))
             }
 
-            // 底部獨立嘅輸入鍵盤
             LedgerKeyboardPanel(
                 state = keyboardState,
                 onStateChange = { keyboardState = it },
-                onDismiss = onDismiss, // 收起 = 關閉 App
-                onConfirm = { performSave() }, // 點擊入帳
+                // 🟢 收起鍵盤時，直接變返正常 App，唔會退出桌面
+                onDismiss = {
+                    focusManager.clearFocus()
+                    onTransitionToMain(null)
+                }, 
+                onConfirm = { performSave() },
                 onNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onPickCategory = { },
                 allNoteNames = ui.allNoteNames,
