@@ -4236,74 +4236,53 @@ fun WeeklyExpenseChart(
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
+    // ★ 不再用 listState 做 alpha / translationY
+    // 滾動時由 LazyColumn 天然裁掉超出頂部的部分，
+    // 可見高度 = 178dp - 滾動量，實現「滑幾多、壓幾多」線性壓縮；
+    // 向下回滾時自動展開；完全滾出後下方 item 無縫補位。
+    @Suppress("UNUSED_PARAMETER")
+    val _unusedListState = listState
+
     Box(modifier = modifier.fillMaxWidth().height(chartHeight)) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                .graphicsLayer {
-                    var offsetPx = 0f
-                    var p = 0f
-                    
-                    val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "weekly_chart" }
-                    if (info == null) {
-                        p = if (listState.firstVisibleItemIndex > 0) 1f else 0f
-                    } else {
-                        val offset = info.offset
-                        if (offset < 0) {
-                            offsetPx = offset.toFloat()
-                            p = (-offset / info.size.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
-                        }
-                    }
-
-                    // 🟢 1. 純粹平滑淡出，移除所有 scaleX / scaleY 縮放邏輯
-                    // 唔會再有向內擠壓或者變形消失嘅感覺
-                    alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
-                    
-                    // 🟢 2. 完美視覺停留 (Sticky 效果)
-                    // 卡片會原尺寸定格喺頂部，下面嘅 LazyColumn 內容會自然向上滑過並覆蓋佢
-                    translationY = -offsetPx 
-                }
+                .clip(RoundedCornerShape(12.dp))
+                .background(SURFACE_CARD)
+                .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SURFACE_CARD)
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "近 7 日支出",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TEXT_PRIMARY
+                Text(
+                    "近 7 日支出",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TEXT_PRIMARY
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "合計 $${formatAmountNoDecimal(totalAmount)}",
+                    fontSize = 12.sp,
+                    color = TEXT_SECONDARY,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                data.forEach { day ->
+                    WeeklyExpenseBar(
+                        day = day,
+                        maxAmount = maxAmount,
+                        introProgress = introProgress,
+                        modifier = Modifier.weight(1f).fillMaxHeight()
                     )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        "合計 $${formatAmountNoDecimal(totalAmount)}",
-                        fontSize = 12.sp,
-                        color = TEXT_SECONDARY,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    data.forEach { day ->
-                        WeeklyExpenseBar(
-                            day = day,
-                            maxAmount = maxAmount,
-                            introProgress = introProgress,
-                            modifier = Modifier.weight(1f).fillMaxHeight()
-                        )
-                    }
                 }
             }
         }
