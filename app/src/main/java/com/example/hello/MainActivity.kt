@@ -1,4 +1,4 @@
-package com.example.hello 
+package com.example.hello
 
 import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.isActive
@@ -34,7 +34,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,7 +48,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -88,7 +86,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asComposeRenderEffect
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -268,6 +265,7 @@ object NotificationCaptureBridge {
             .trimEnd('0').trimEnd('.').ifEmpty { "0" }
 }
 
+// 🟢 升級 Channel ID，強制系統重置橫幅權限
 private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add_v2"
 private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v5"
 private const val QUICK_ADD_NOTIFICATION_ID = 1001
@@ -277,6 +275,7 @@ fun ensureNotificationChannels(context: Context) {
     if (Build.VERSION.SDK_INT < 26) return
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
     try {
+        // 清理所有舊版殘留嘅頻道
         val staleIds = listOf(
             "ledger_capture_confirm", "ledger_capture_confirm_v2",
             "ledger_capture_confirm_v3", "ledger_capture_confirm_v3_old",
@@ -294,12 +293,12 @@ fun ensureNotificationChannels(context: Context) {
         setShowBadge(false)
     }
     val confirm = NotificationChannel(
-        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH
+        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH // 🟢 確保高優先級
     ).apply {
         description = "檢測到消費通知時，強制橫幅彈出詢問"
         enableVibration(true)
         enableLights(true)
-        setBypassDnd(true)
+        setBypassDnd(true) // 嘗試繞過勿擾模式
     }
     nm.createNotificationChannel(quick)
     nm.createNotificationChannel(confirm)
@@ -409,6 +408,7 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
         )
         val addPi = PendingIntent.getActivity(context, notifId, addIntent, piFlags)
         
+        // 🟢 加入 FullScreenIntent，強烈要求系統彈出橫幅/喚醒螢幕
         val fullScreenPi = PendingIntent.getActivity(context, notifId + 100, addIntent, piFlags)
 
         val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
@@ -426,11 +426,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
                     .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
             )
             .setContentIntent(addPi)
-            .setFullScreenIntent(fullScreenPi, true) 
+            .setFullScreenIntent(fullScreenPi, true) // 🟢 霸道喚醒橫幅
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX) 
+            .setPriority(NotificationCompat.PRIORITY_MAX) // 🟢 MAX 等級
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_CALL) 
+            .setCategory(NotificationCompat.CATEGORY_CALL) // 🟢 偽裝成來電級別中斷
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
             .setTimeoutAfter(10 * 60 * 1000L)
@@ -451,10 +451,12 @@ val BRAND_PRIMARY = Color(0xFF6366F1)
 val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
 val BRAND_PRIMARY_LIGHT = Color(0xFFE0E7FF)
 
+// iOS systemGroupedBackground / secondarySystemGroupedBackground
 val SURFACE_BG = Color(0xFFF2F2F7)
 val SURFACE_CARD = Color(0xFFFFFFFF)
 val SURFACE_ELEVATED = Color(0xFFE9E9EF)
 
+// iOS label / secondaryLabel / tertiaryLabel
 val TEXT_PRIMARY = Color(0xFF1C1C1E)
 val TEXT_SECONDARY = Color(0xFF8E8E93)
 val TEXT_TERTIARY = Color(0xFFC7C7CC)
@@ -1001,19 +1003,9 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
     val noteCategoryMap = HashMap<String, String>()
     val allNoteNames = ArrayList<String>()
 
-    val noteCountMap = HashMap<String, Int>()
-    val latestTimestampByNote = HashMap<String, Long>()
-
     for (r in records) {
         val note = r.note
         if (note.isBlank()) continue
-
-        noteCountMap[note] = (noteCountMap[note] ?: 0) + 1
-        val currentLatest = latestTimestampByNote[note] ?: 0L
-        if (r.timestamp > currentLatest) {
-            latestTimestampByNote[note] = r.timestamp
-        }
-
         val sec = getTimestampMeta(r.timestamp).secOfDay
         val d = abs(secNow - sec)
         val dist = if (d < 86400 - d) d else 86400 - d
@@ -1032,19 +1024,7 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
         }
     }
 
-    val timeSorted = minDistByNote.entries.sortedBy { it.value }.map { it.key }
-
-    val topNotes = if (timeSorted.isEmpty()) {
-        emptyList()
-    } else {
-        val firstNote = timeSorted.first()
-        val restNotes = timeSorted.drop(1).sortedWith(
-            compareByDescending<String> { noteCountMap[it] ?: 0 }
-                .thenByDescending { latestTimestampByNote[it] ?: 0L }
-        )
-        (listOf(firstNote) + restNotes).take(42).map { it to (noteCountMap[it] ?: 0) }
-    }
-
+    val topNotes = minDistByNote.entries.sortedBy { it.value }.take(42).map { it.key to 0 }
     val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
         if (note.isBlank()) null
         else QuickNoteInfo(
@@ -1281,6 +1261,7 @@ fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
     val startDay = todayStart - 6 * dayMs
     val amountByDay = HashMap<Long, Double>(7)
     for (r in records) {
+        // 🟢 計算棒形圖時，直接跳過「收入」同「還錢」類別
         if (r.category == INCOME_CATEGORY || r.category == "還錢") continue
         
         val dayStart = getTimestampMeta(r.timestamp).startOfDayMillis
@@ -1312,17 +1293,21 @@ object CategoryMenuPositionProvider : PopupPositionProvider {
         popupContentSize: IntSize
     ): IntOffset {
         val margin = 8
+        // 水平居中于 anchor
         val targetX = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
         val x = targetX.coerceIn(
             margin,
             (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
         )
+        // 优先显示在 anchor 上方
         val yAbove = anchorBounds.top - popupContentSize.height - margin
         if (yAbove >= margin) return IntOffset(x, yAbove)
+        // 上方不够就显示在下方
         val yBelow = anchorBounds.bottom + margin
         if (yBelow + popupContentSize.height <= windowSize.height - margin) {
             return IntOffset(x, yBelow)
         }
+        // 都不够就贴边挤压
         val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
         return IntOffset(x, yAbove.coerceIn(margin, maxY))
     }
@@ -1418,19 +1403,24 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     val mo = p[1].toIntOrNull() ?: return null
     val d = p[2].toIntOrNull() ?: return null
 
+    // 🟢 修復關鍵：必須【先】獲取 todayStart！
+    // 確保 getTodayStartMillis() 就算觸發咗 30 秒快取刷新並修改咗 threadLocalCal，
+    // 都唔會影響到下面設定好嘅目標日期。
     val todayStart = getTodayStartMillis()
 
+    // 設定目標 header 嘅時間
     val cal = threadLocalCal.get()!!.apply {
         set(y, mo - 1, d)
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
     
-    val targetMillis = cal.timeInMillis
+    val targetMillis = cal.timeInMillis // 獲取並鎖定目標時間
     val dow = cal.get(Calendar.DAY_OF_WEEK)
     val weekdayChar = WEEKDAY_CHARS[dow - 1]
     val isWeekend = dow == Calendar.SUNDAY || dow == Calendar.SATURDAY
 
+    // 使用穩定嘅 targetMillis 計算差距
     val diff = ((todayStart - targetMillis) / 86_400_000L).toInt()
     val tag = when {
         diff == -1 -> "明日"
@@ -1624,8 +1614,10 @@ fun FanMenuOverlay(
     }
 }
 
+// 🟢 定義 APP 當前渲染模式
 enum class AppUiMode { LIGHTWEIGHT, FULL }
 
+// 🟢 判斷進程係咪啱啱啟動 (冷啟動)
 private var isProcessAlive = false
 
 // =========================================================
@@ -1739,6 +1731,7 @@ class MainActivity : ComponentActivity() {
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
         
+        // 🟢 處理來自 UPK 流体云嘅 DeepLink 指令
         val uri = intent.data
         if (uri != null && uri.scheme == "ledgerapp" && uri.host == "quickadd") {
             keyboardLaunchToken.value += 1
@@ -1746,8 +1739,9 @@ class MainActivity : ComponentActivity() {
             keyboardPrefillCategory.value = uri.getQueryParameter("category")
             keyboardPrefillAmount.value = uri.getQueryParameter("amount")?.toDoubleOrNull()
             keyboardPrefillFluidCardId.value = uri.getQueryParameter("card_id")
-            intent.data = null 
+            intent.data = null // 清除 Data 防止重覆處理
         } 
+        // 處理原生通知 / 磁貼啟動
         else if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = intent.getStringExtra(EXTRA_PREFILL_NOTE)
@@ -2765,18 +2759,15 @@ fun MainApp(
                                             conn.inputStream.readBytes()
                                         }
 
-                                        // ═══════════════════════════════════════════════════
-                                        // ✅ 修改 1/2：decodeByteArray 可能返回 null（非圖片/
-                                        //            被 Cloudflare 攔截/HTML 錯誤頁），
+                                        // ▼▼▼ 改動 1：decodeByteArray 可能返回 null（非圖片 /
+                                        //            被 Cloudflare 攔截 / HTML 錯誤頁），
                                         //            先檢查再 removeBackground，避免 NPE。
-                                        //            其餘所有下載邏輯完全冇改。
-                                        // ═══════════════════════════════════════════════════
+                                        //            其餘下載邏輯完全冇改。
                                         val srcBitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size)
-                                        if (srcBitmap == null) {
-                                            throw Exception("圖片解碼失敗（非圖片 / 被攔截 / 格式不支援）")
-                                        }
-                                        val processedBitmap = removeBackground(srcBitmap)
+                                            ?: throw Exception("圖片解碼失敗（非圖片 / 被攔截 / 格式不支援）")
+                                        // ▲▲▲
 
+                                        val processedBitmap = removeBackground(srcBitmap)
                                         val baos = ByteArrayOutputStream()
                                         processedBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
                                         if (processedBitmap !== srcBitmap) processedBitmap.recycle()
@@ -2792,12 +2783,11 @@ fun MainApp(
                                             Toast.LENGTH_SHORT).show()
                                     }
                                 } catch (e: Exception) {
-                                    // ═══════════════════════════════════════════════════
-                                    // ✅ 修改 2/2：顯示真實失敗原因，唔再籠統講「版權保護」
-                                    // ═══════════════════════════════════════════════════
+                                    // ▼▼▼ 改動 2：顯示真實失敗原因，唔再籠統講「版權保護」
                                     Toast.makeText(context, "下載失敗：${e.message ?: "未知錯誤"}",
                                         Toast.LENGTH_LONG).show()
                                     e.printStackTrace()
+                                    // ▲▲▲
                                 } finally {
                                     uploading = false
                                 }
@@ -2817,134 +2807,385 @@ fun MainApp(
     }
 }
 
-    if (webSearchTarget != null) {
-        val target = webSearchTarget!!
-        var selectedImageUrl by remember { mutableStateOf<String?>(null) }
-        BackHandler { webSearchTarget = null }
-
-                LaunchedEffect(selectedImageUrl) {
-            val url = selectedImageUrl
-            if (url != null) {
-                selectedImageUrl = null
-                webSearchTarget = null
-                uploading = true
-                try {
-                    val bitmaps = withContext(Dispatchers.IO) {
-                        val rawBitmap = downloadImageBitmap(context, url)
-                            ?: throw Exception("HTTP 下載被拒 / 非圖片 / 格式不支援")
-                        val original = if (rawBitmap.width > 800 || rawBitmap.height > 800) {
-                            val scaled = scaleKeepAspectWidth(rawBitmap, 800)
-                            if (scaled !== rawBitmap) rawBitmap.recycle()
-                            scaled
-                        } else rawBitmap
-
-                        val processed = removeBackground(original)
-                        Pair(original, processed)
+// =========================================================
+//  ★ KeyboardAndFabLayer
+// =========================================================
+@Composable
+private fun BoxScope.KeyboardAndFabLayer(
+    showKeyboard: Boolean,
+    progressProvider: () -> Float,
+    currentPage: Int,
+    filterModeOn: Boolean,
+    filterSearch: TextFieldValue,
+    onFilterSearchChange: (TextFieldValue) -> Unit,
+    filterSearchHasFocus: Boolean,
+    onFilterSearchFocusChange: (Boolean) -> Unit,
+    filterSearchFocusRequester: FocusRequester,
+    onFilterButtonTap: () -> Unit,
+    onFabTap: () -> Unit,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
+    nameFlashTrigger: Int,
+) {
+    Row(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp,
+                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+            .height(56.dp)
+            .graphicsLayer {
+                val p = progressProvider()
+                alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                val s = 1f - (0.15f * p)
+                scaleX = s
+                scaleY = s
+                translationY = p * 60.dp.toPx()
+                transformOrigin = TransformOrigin(0.5f, 1f)
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            if (currentPage == 0) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = filterModeOn,
+                    enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
+                    exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
+                ) {
+                    Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = SURFACE_CARD,
+                            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+                        ) {
+                            Row(Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) {
+                                    BasicTextField(
+                                        value = filterSearch,
+                                        onValueChange = onFilterSearchChange,
+                                        singleLine = true,
+                                        textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                        cursorBrush = SolidColor(BRAND_PRIMARY),
+                                        decorationBox = { inner ->
+                                            Box(Modifier.fillMaxWidth(),
+                                                contentAlignment = Alignment.CenterStart) {
+                                                if (filterSearch.text.isEmpty())
+                                                    Text("搜尋名稱或類別…", fontSize = 15.sp,
+                                                        color = TEXT_TERTIARY)
+                                                inner()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusRequester(filterSearchFocusRequester)
+                                            .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
+                                    )
+                                }
+                                if (filterSearch.text.isNotBlank()) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                        modifier = Modifier.size(20.dp)
+                                            .clickable { onFilterSearchChange(TextFieldValue("")) }
+                                    )
+                                }
+                            }
+                        }
                     }
-                    pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
-                } catch (e: Exception) {
-                    val errMsg = e.message ?: e.javaClass.simpleName
-                    Toast.makeText(context, "下載失敗：$errMsg", Toast.LENGTH_LONG).show()
-                    e.printStackTrace()
-                } finally {
-                    uploading = false
+                }
+
+                if (filterModeOn && filterSearchHasFocus) {
+                    val filterSuggestions = remember(filterSearch.text, allNoteNames) {
+                        filterNoteSuggestions(filterSearch.text, allNoteNames)
+                    }
+                    if (filterSuggestions.isNotEmpty()) {
+                        androidx.compose.ui.window.Popup(
+                            popupPositionProvider = AboveAnchorPositionProvider,
+                            onDismissRequest = { },
+                            properties = PopupProperties(focusable = false)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = SURFACE_CARD,
+                                border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                            ) {
+                                Column(Modifier.verticalScroll(rememberScrollState())) {
+                                    filterSuggestions.forEach { s ->
+                                        Row(
+                                            Modifier.fillMaxWidth()
+                                                .clickable { onFilterSearchChange(TextFieldValue(s)) }
+                                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Box(Modifier.fillMaxSize().zIndex(100f).background(SURFACE_BG)) {
-            Column(Modifier.fillMaxSize()) {
-                Surface(color = SURFACE_CARD, shadowElevation = 0.dp) {
-                    Row(
-                        Modifier.fillMaxWidth().height(NAV_HEIGHT + 24.dp).padding(top = 24.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { webSearchTarget = null }) {
-                            Icon(Icons.Default.ArrowBack, "返回", tint = TEXT_PRIMARY)
-                        }
-                        Text("長按圖片設定圖標", fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                    }
-                }
-
-                androidx.compose.ui.viewinterop.AndroidView(
-                    factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            webViewClient = android.webkit.WebViewClient()
-                            setOnTouchListener { v, event ->
-                                when (event.actionMasked) {
-                                    android.view.MotionEvent.ACTION_DOWN ->
-                                        v.parent?.requestDisallowInterceptTouchEvent(true)
-                                    android.view.MotionEvent.ACTION_UP,
-                                    android.view.MotionEvent.ACTION_CANCEL ->
-                                        v.parent?.requestDisallowInterceptTouchEvent(false)
-                                }
-                                false
-                            }
-                            setOnLongClickListener { v ->
-                                val result = (v as android.webkit.WebView).hitTestResult
-                                if (result.type == android.webkit.WebView.HitTestResult.IMAGE_TYPE ||
-                                    result.type == android.webkit.WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                                    val url = result.extra
-                                    if (!url.isNullOrBlank()) selectedImageUrl = url
-                                }
-                                false
-                            }
-                            val q = Uri.encode(target.note + " icon")
-                            loadUrl("https://www.google.com/search?tbm=isch&q=$q")
-                        }
-                    },
-                    modifier = Modifier.weight(1f).fillMaxWidth()
+        Surface(
+            modifier = Modifier
+                .size(44.dp)
+                .pointerInput(filterModeOn, currentPage) {
+                    detectTapGestures(onTap = { onFilterButtonTap() })
+                },
+            shape = CircleShape,
+            color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else SURFACE_CARD,
+            border = if (filterModeOn && currentPage == 0) null
+                     else BorderStroke(0.5.dp, DIVIDER_COLOR)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.FilterAlt, "篩選",
+                    tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
+
+        Spacer(modifier = Modifier.width(60.dp))
     }
 
-    if (pendingImageUpload != null) {
-        Box(Modifier.fillMaxSize().zIndex(200f)) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).pointerInput(Unit) { detectTapGestures { } })
-            
-            Box(Modifier.align(Alignment.BottomCenter)) {
-                ImageEffectSelectionPanel(
-                    state = pendingImageUpload!!,
-                    onSelect = { bitmap, forceCrop, isEnhanced ->
-                        val targetRecord = pendingImageUpload!!.record
-                        val origBmp = pendingImageUpload!!.originalBitmap
-                        val procBmp = pendingImageUpload!!.processedBitmap
-                        pendingImageUpload = null
-                        
-                        scope.launch {
-                            uploading = true
-                            try {
-                                val finalBmp = if (isEnhanced) applyEnhancedFilter(bitmap) else bitmap
-                                val finalBytes = compressBitmapToPngForUpload(finalBmp, forceCrop)
-                                
-                                if (finalBmp !== origBmp && finalBmp !== procBmp) finalBmp.recycle()
-                                origBmp.recycle()
-                                procBmp.recycle()
-                                
-                                val url = uploadBytesToCloudinary(finalBytes)
-                                if (url != null) {
-                                    val db = Firebase.firestore
-                                    applyUrlToSameName(context, db, targetRecord.note, url)
-                                } else {
-                                    Toast.makeText(context, "上傳失敗,請檢查網絡", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "處理失敗: ${e.message}", Toast.LENGTH_SHORT).show()
-                            } finally {
-                                uploading = false
+    AnimatedFabLayer(
+        progressProvider = progressProvider,
+        onFabTap = onFabTap,
+        modifier = Modifier.align(Alignment.BottomEnd)
+    )
+
+    AnimatedKeyboardLayer(
+        showKeyboard = showKeyboard,
+        progressProvider = progressProvider,
+        keyboardState = keyboardState,
+        onKeyboardStateChange = onKeyboardStateChange,
+        onKeyboardDismiss = onKeyboardDismiss,
+        onKeyboardConfirm = onKeyboardConfirm,
+        onKeyboardNext = onKeyboardNext,
+        allNoteNames = allNoteNames,
+        noteCategoryMap = noteCategoryMap,
+        nameFlashTrigger = nameFlashTrigger,
+        modifier = Modifier.align(Alignment.BottomCenter)
+    )
+}
+
+@Composable
+private fun AnimatedFabLayer(
+    progressProvider: () -> Float,
+    onFabTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isExpandedTint by remember {
+        derivedStateOf { progressProvider() > 0.35f }
+    }
+    val tintColor by animateColorAsState(
+        targetValue = if (isExpandedTint) TEXT_TERTIARY else Color.White,
+        animationSpec = tween(180),
+        label = "fabTint"
+    )
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                val currentP = progressProvider()
+                val fabX = lerp(20.dp, 24.dp, currentP).toPx()
+                val fabY = lerp(92.dp, 388.dp, currentP).toPx()
+                translationX = -fabX
+                translationY = -fabY
+                transformOrigin = TransformOrigin(1f, 1f)
+                shape = CircleShape
+                clip = true
+            }
+            .size(56.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onFabTap() },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.matchParentSize()) {
+            val currentP = progressProvider()
+            val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
+            drawCircle(color = BRAND_PRIMARY.copy(alpha = bgAlpha))
+        }
+
+        Icon(
+            Icons.Default.Add,
+            contentDescription = "Clear",
+            tint = tintColor,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(24.dp)
+                .graphicsLayer { rotationZ = progressProvider() * -405f }
+        )
+    }
+}
+
+@Composable
+private fun AnimatedKeyboardLayer(
+    showKeyboard: Boolean,
+    progressProvider: () -> Float,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
+    nameFlashTrigger: Int,
+    modifier: Modifier = Modifier
+) {
+    val currentP = progressProvider()
+    val isActive = currentP > 0f || showKeyboard
+
+    if (!isActive) return
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
+            .graphicsLayer {
+                alpha = currentP
+                val w = size.width
+                val h = size.height
+                if (w > 0f && h > 0f) {
+                    val ox = (1f - (32.dp.toPx() / w)).coerceIn(0.02f, 0.98f)
+                    val oy = (1f - (100.dp.toPx() / h)).coerceIn(0.02f, 0.98f)
+                    transformOrigin = TransformOrigin(ox, oy)
+                } else {
+                    transformOrigin = TransformOrigin(1f, 1f)
+                }
+                val s = 0.13f + 0.87f * currentP
+                scaleX = s
+                scaleY = s
+            }
+    ) {
+        LedgerKeyboardPanel(
+            state = keyboardState,
+            onStateChange = onKeyboardStateChange,
+            onDismiss = onKeyboardDismiss,
+            onConfirm = onKeyboardConfirm,
+            onNext = onKeyboardNext,
+            onPickCategory = { },
+            allNoteNames = allNoteNames,
+            noteCategoryMap = noteCategoryMap,
+            nameFlashTrigger = nameFlashTrigger,
+            showKeyboard = showKeyboard,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun FloatingNavBar(
+    items: List<NavItem>,
+    selectedIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
+    val maxOffset = tabWidthPx * items.size - tabWidthPx
+    val vc = LocalViewConfiguration.current
+    val latestSel by rememberUpdatedState(selectedIndex)
+    val latestOnChange by rememberUpdatedState(onIndexChange)
+    val latestSize by rememberUpdatedState(items.size)
+    var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedIndex) { if (!isDragging) bubbleOffset = selectedIndex * tabWidthPx }
+    val animatedOffset by animateFloatAsState(
+        bubbleOffset,
+        if (isDragging) snap() else spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioNoBouncy),
+        label = "bubble"
+    )
+
+    Box(
+        modifier = modifier
+            .width(NAV_TAB_WIDTH * items.size)
+            .height(NAV_HEIGHT)
+            .clip(RoundedCornerShape(NAV_HEIGHT / 2))
+            .background(SURFACE_CARD)
+            .border(0.5.dp, DIVIDER_COLOR, RoundedCornerShape(NAV_HEIGHT / 2))
+    ) {
+        Box(Modifier.fillMaxSize().pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downX = down.position.x
+                    val pid = down.id
+                    var dx = 0f; var dragged = false
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        val c = e.changes.firstOrNull { it.id == pid }
+                        if (c == null || !c.pressed) {
+                            if (!dragged) {
+                                val i = (downX / tabWidthPx).toInt().coerceIn(0, latestSize - 1)
+                                if (i != latestSel) latestOnChange(i)
+                                bubbleOffset = i * tabWidthPx
+                            } else {
+                                val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
+                                bubbleOffset = i * tabWidthPx
+                                if (i != latestSel) latestOnChange(i)
                             }
+                            isDragging = false; break
+                        }
+                        val d = c.positionChange().x; dx += d
+                        if (!dragged && abs(dx) > vc.touchSlop) { dragged = true; isDragging = true }
+                        if (dragged) {
+                            bubbleOffset = (bubbleOffset + d).coerceIn(0f, maxOffset)
+                            c.consume()
+                            val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
+                            if (i != latestSel) latestOnChange(i)
                         }
                     }
-                )
+                }
+            }
+        }) {
+            Box(
+                Modifier
+                    .offset { IntOffset(animatedOffset.roundToInt(), 0) }
+                    .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
+                    .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
+                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.9f))
+            )
+            Row(Modifier.fillMaxSize()) {
+                items.forEachIndexed { idx, item ->
+                    val sel = idx == selectedIndex
+                    val tint = if (sel) BRAND_PRIMARY_DARK else Color(0xFF636366)
+                    Box(Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(),
+                        contentAlignment = Alignment.Center) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(item.label, fontSize = 14.sp,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
+                                color = tint)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+// =========================================================
+//  ★ NotificationAccessGuide
+// =========================================================
 @Composable
 fun NotificationAccessGuide(context: Context) {
     var isGranted by remember { mutableStateOf<Boolean?>(null) }
@@ -2976,6 +3217,7 @@ fun NotificationAccessGuide(context: Context) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // 🟢 檢查流体云/泛在服務權限是否正常
     LaunchedEffect(showPantanalHint) {
         if (showPantanalHint) {
             Toast.makeText(context, "提示：如需使用流体云體驗，請確保在系統設定開啟「泛在服務」", Toast.LENGTH_LONG).show()
@@ -2994,6 +3236,11 @@ fun NotificationAccessGuide(context: Context) {
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                         )
+                        // 🟢 開啟權限時，順便檢查潘塔納爾服務
+                        if (OppoFluidCloudBridge.isPantanalSupported(context) && 
+                            !OppoFluidCloudBridge.hasPantanalPermission(context)) {
+                            showPantanalHint = true
+                        }
                     } catch (_: Exception) { }
                 },
             shape = RoundedCornerShape(12.dp),
@@ -3270,6 +3517,7 @@ fun LedgerContent(
                     if (r.category == INCOME_CATEGORY) {
                         inc += r.amount
                     } else if (r.category != "還錢") {
+                        // 🟢 修改：當計算每日卡片 Header 時，排除「還錢」類別，唔計入支出
                         exp += r.amount 
                     }
                 }
@@ -3597,6 +3845,7 @@ fun LedgerContent(
 private enum class StatBlockType { CAT, INC, EXP, AVG, BAL }
 private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp)
 
+// 🟢 核心：全局統一嘅物理彈簧，保證高度、位置、大小、內部排版「完美同步」
 private val MASTER_SPRING_DP = spring<Dp>(dampingRatio = 0.9f, stiffness = 400f)
 private val MASTER_SPRING_FLOAT = spring<Float>(dampingRatio = 0.9f, stiffness = 400f)
 
@@ -3615,20 +3864,23 @@ fun TopStats(
     val showBal = true
     val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
 
+    // 1. 決定目前有哪些板塊需要顯示，並根據模式智能排序！
     val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, showBal, isFilterMode) {
         val list = mutableListOf<StatBlockType>()
         if (isFilterMode) {
+            // 🟢 篩選模式：將「筆數」同「類別」放埋一齊；「支出」同「均支」放埋一齊
             if (showCategory) list.add(StatBlockType.CAT)
-            if (showBal) list.add(StatBlockType.BAL)
+            if (showBal) list.add(StatBlockType.BAL) // 筆數提早上嚟
             if (showIncome) list.add(StatBlockType.INC)
             if (showExpense) list.add(StatBlockType.EXP)
             if (showAvg) list.add(StatBlockType.AVG)
         } else {
+            // 🟢 正常模式：傳統排序
             if (showCategory) list.add(StatBlockType.CAT)
             if (showIncome) list.add(StatBlockType.INC)
             if (showExpense) list.add(StatBlockType.EXP)
             if (showAvg) list.add(StatBlockType.AVG)
-            if (showBal) list.add(StatBlockType.BAL)
+            if (showBal) list.add(StatBlockType.BAL) // 餘額喺最後
         }
         list
     }
@@ -3641,14 +3893,15 @@ fun TopStats(
         val gapY = 2.dp
         val rowH = 52.dp
 
+        // 2. 佈局大腦：精確計算每個板塊嘅 X, Y, Width
         val geoMap = remember(activeBlocks, totalW) {
             val map = mutableMapOf<StatBlockType, BlockGeometry>()
             val rows = when (activeBlocks.size) {
                 1 -> listOf(activeBlocks)
                 2 -> listOf(activeBlocks)
                 3 -> listOf(activeBlocks)
-                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
-                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2)) // 4個時：完美 2x2
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3)) // 5個時：上3 下2
                 else -> emptyList()
             }
             
@@ -3664,11 +3917,14 @@ fun TopStats(
             map
         }
 
+        // 3. 高度動畫
         val targetHeight = if (activeBlocks.size > 3) (rowH * 2 + gapY) else rowH
         val animHeight by animateDpAsState(targetValue = targetHeight, animationSpec = MASTER_SPRING_DP, label = "containerHeight")
 
+        // 畫布區域
         Box(Modifier.fillMaxWidth().height(animHeight)) {
             
+            // 類別 (Category)
             StatBlockItem(
                 type = StatBlockType.CAT, isActive = activeBlocks.contains(StatBlockType.CAT),
                 geoMap = geoMap, rowH = rowH
@@ -3686,6 +3942,7 @@ fun TopStats(
                 )
             }
 
+            // 收入 (Income)
             StatBlockItem(
                 type = StatBlockType.INC, isActive = activeBlocks.contains(StatBlockType.INC),
                 geoMap = geoMap, rowH = rowH
@@ -3699,6 +3956,7 @@ fun TopStats(
                 )
             }
 
+            // 支出 (Expense)
             StatBlockItem(
                 type = StatBlockType.EXP, isActive = activeBlocks.contains(StatBlockType.EXP),
                 geoMap = geoMap, rowH = rowH
@@ -3712,6 +3970,7 @@ fun TopStats(
                 )
             }
 
+            // 均支 (Average)
             StatBlockItem(
                 type = StatBlockType.AVG, isActive = activeBlocks.contains(StatBlockType.AVG),
                 geoMap = geoMap, rowH = rowH
@@ -3725,6 +3984,7 @@ fun TopStats(
                 )
             }
 
+            // 餘額 / 筆數 (Balance)
             StatBlockItem(
                 type = StatBlockType.BAL, isActive = activeBlocks.contains(StatBlockType.BAL),
                 geoMap = geoMap, rowH = rowH
@@ -3788,6 +4048,7 @@ private fun StatBlockItem(
     }
 }
 
+// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局 
 @Composable
 private fun AnimatedStatBlock(
     isFilterMode: Boolean,
@@ -3813,6 +4074,7 @@ private fun AnimatedStatBlock(
     
     val currentIconColor = androidx.compose.ui.graphics.lerp(iconColorNormal, iconColorFilter, progress)
     val currentValueColor = androidx.compose.ui.graphics.lerp(valueColorNormal, valueColorFilter, progress)
+    // 🟢 標籤顏色由淺灰(Normal) 過渡到深黑(FilterMode)
     val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, progress)
     
     val targetValueText = if (isFilterMode) valueFilter else valueNormal
@@ -3825,25 +4087,30 @@ private fun AnimatedStatBlock(
 
     androidx.compose.ui.layout.Layout(
         content = {
+            // [0] 圖標
             Crossfade(targetState = targetIcon, label = "icon", animationSpec = tween(200)) { ico ->
                 Icon(ico, null, tint = currentIconColor, modifier = Modifier.size((16f - 1f * progress).dp))
             }
             
+            // [1] 標籤
             val currentLabel = if (isFilterMode && labelFilter.isEmpty()) labelNormal else if (isFilterMode) labelFilter else labelNormal
             val labelAlpha = if (isFilterMode && labelFilter.isEmpty()) (1f - progress * 2.5f).coerceIn(0f, 1f) else 1f
             Text(
                 text = currentLabel,
+                // 🟢 字體大小同步！由 11sp 放大至 15sp，同數值字體一樣大
                 fontSize = (11f + 4f * progress).sp, 
                 color = currentLabelColor.copy(alpha = labelAlpha),
+                // 🟢 粗度加強，更清晰醒目
                 fontWeight = if (progress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false
             )
             
+            // [2] 數值
             Text(
                 text = finalValueString,
                 color = currentValueColor,
-                fontSize = (19f - 4f * progress).sp,
+                fontSize = (19f - 4f * progress).sp, // 🟢 字體流暢縮小 (19sp -> 15sp)
                 fontWeight = FontWeight.ExtraBold,
                 maxLines = 1,
                 softWrap = false
@@ -3862,21 +4129,25 @@ private fun AnimatedStatBlock(
             val gap1 = 4.dp.roundToPx()
             val gap2 = 5.dp.roundToPx()
             
+            // 📍 正常模式 (上下排列)
             val topRowWNormal = iconP.width + titleGapNormal + labelP.width
             val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
             
+            // 🟢 修正：計算 Icon 同 Label 嘅最高點，做絕對垂直居中，保證平排！
             val topRowHNormal = maxOf(iconP.height, labelP.height)
             val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
             
             val iconXNormal = topRowXNormal
             val labelXNormal = iconXNormal + iconP.width + titleGapNormal
             
+            // 確保 Icon 同文字喺同一條基準線上
             val iconYNormal = topRowYNormal + (topRowHNormal - iconP.height) / 2
             val labelYNormal = topRowYNormal + (topRowHNormal - labelP.height) / 2
             
             val valueXNormal = (constraints.maxWidth - valueP.width) / 2
             val valueYNormal = (constraints.maxHeight / 2) + 1.dp.roundToPx()
             
+            // 📍 篩選模式 (左右平排)
             val effectiveLabelW = if (labelFilter.isEmpty()) 0 else labelP.width
             val effectiveGap1 = if (effectiveLabelW > 0) gap1 else 0
             val totalWFilter = iconP.width + effectiveGap1 + effectiveLabelW + gap2 + valueP.width
@@ -3890,12 +4161,14 @@ private fun AnimatedStatBlock(
             val labelYFilter = (constraints.maxHeight - labelP.height) / 2
             val valueYFilter = (constraints.maxHeight - valueP.height) / 2
             
+            // ✨ 平滑過渡坐標
             iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(iconYNormal, iconYFilter, progress))
             labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(labelYNormal, labelYFilter, progress))
             valueP.placeRelative(lerpI(valueXNormal, valueXFilter, progress), lerpI(valueYNormal, valueYFilter, progress))
         }
     }
 }
+
 @Composable
 fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
@@ -3930,7 +4203,12 @@ fun WeeklyExpenseChart(
                         }
                     }
 
+                    // 🟢 1. 純粹平滑淡出，移除所有 scaleX / scaleY 縮放邏輯
+                    // 唔會再有向內擠壓或者變形消失嘅感覺
                     alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                    
+                    // 🟢 2. 完美視覺停留 (Sticky 效果)
+                    // 卡片會原尺寸定格喺頂部，下面嘅 LazyColumn 內容會自然向上滑過並覆蓋佢
                     translationY = -offsetPx 
                 }
         ) {
@@ -3995,6 +4273,7 @@ fun WeeklyExpenseBar(
     val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
     val hasAmount = day.amount > 0.0
 
+    // 顶部圆角大、底部圆角小，视觉上像从底部“长出来”
     val barShape = RoundedCornerShape(
         topStart = 6.dp, topEnd = 6.dp,
         bottomStart = 2.dp, bottomEnd = 2.dp
@@ -4015,6 +4294,7 @@ fun WeeklyExpenseBar(
                 (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
             } else 0.dp
 
+            // 浅色轨道底，统一颜色
             Box(
                 modifier = Modifier
                     .width(22.dp)
@@ -4023,6 +4303,7 @@ fun WeeklyExpenseBar(
                     .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
             )
 
+            // 前景柱子
             if (barHeight > 0.dp) {
                 Box(
                     modifier = Modifier
@@ -4447,10 +4728,12 @@ fun SwipeableRecordItem(
                     fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
+                // 🟢 詳情文字顏色改深：由 TEXT_TERTIARY 改為 TEXT_SECONDARY
                 Text(metaText, fontSize = META_FONT_SIZE, color = TEXT_SECONDARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
+            // 🟢 金額粗度加強：由 FontWeight.Bold 改為 FontWeight.ExtraBold
             Text(amtText, color = amtColor, fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.ExtraBold)
         }
     }
@@ -5013,6 +5296,7 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
+                // ================= 类别按钮 + 菜单 =================
                 val currentStyle = CATEGORY_STYLES[state.category]
                 val menuVisibleState = remember { MutableTransitionState(false) }
                 Box {
@@ -5147,6 +5431,7 @@ fun LedgerKeyboardPanel(
                         }
                     }
                 }
+                // =================================================
             }
 
             Spacer(Modifier.height(10.dp))
@@ -5183,6 +5468,7 @@ fun LedgerKeyboardPanel(
         }
     }
 }
+
 @Composable
 fun KeyboardKey(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val src = remember { MutableInteractionSource() }
@@ -5321,6 +5607,7 @@ fun AnimatedAmount(
     var displayedText by remember { mutableStateOf(text) }
 
     LaunchedEffect(Unit) {
+        // 🟢 修正這裡：直接使用 isActive，因為 LaunchedEffect 已經提供了 CoroutineScope
         while (isActive) {
             val target = currentText
             if (displayedText == target) {
@@ -5421,6 +5708,7 @@ fun DayHeader(
                     Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                     Spacer(Modifier.height(1.dp))
+                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，加深「週幾」顏色
                     Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                 }
@@ -5432,6 +5720,7 @@ fun DayHeader(
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
+                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
                     Text("收入", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
@@ -5439,6 +5728,7 @@ fun DayHeader(
             }
             if (expense > 0) {
                 Column(horizontalAlignment = Alignment.End) {
+                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
                     Text("支出", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
@@ -5522,6 +5812,7 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                 fontWeight = FontWeight.Medium, 
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                // 🟢 關鍵修改：加入彈性權重，文字超長時會縮短並顯示「...」，同時保證左邊 Icon 及文字開頭可見
                 modifier = Modifier.weight(1f, fill = false)
             )
         }
@@ -5539,8 +5830,8 @@ fun QuickInputSection(
     noteIconMap: Map<String, String>,
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
-    collapseProgress: Float = 0f,
-    onExpandClick: () -> Unit = {},
+    collapseProgress: Float = 0f, // 🟢 接收滾動收縮進度 (0f: 展開, 1f: 隱藏)
+    onExpandClick: () -> Unit = {}, // 🟢 收縮後嘅點擊事件
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -5649,6 +5940,7 @@ fun QuickInputSection(
                 label = "quickPanelHeight"
             )
 
+            // 🟢 最終高度會根據滾動進度在 原始高度 同 收縮形態（44dp） 之間平滑轉換
             val collapsedHeight = 44.dp
             val finalHeight = androidx.compose.ui.unit.lerp(animatedHeight, collapsedHeight, collapseProgress)
 
@@ -5657,6 +5949,7 @@ fun QuickInputSection(
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
             ) {
+                // 原有常用項目的淡出同縮放
                 val mainAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
                 val mainScale = 1f - (collapseProgress * 0.08f)
 
@@ -5728,6 +6021,7 @@ fun QuickInputSection(
                     }
                 }
 
+                // 🟢 收縮形態：當滾動過半，淡入一個長形按鈕，提示可展開
                 val pillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
                 if (pillAlpha > 0.01f) {
                     Box(
@@ -5782,7 +6076,7 @@ fun CalendarRow(
     isCurrentMonth: Boolean, recordsByDay: Map<Int, List<Record>>,
     displayMode: Int, maxAbsNet: Double,
     selectedDay: Int?, selectedCol: Int?,
-    expansionFraction: Float,
+    expansionFraction: Float, // 🟢 新增：由 0f 到 1f 嘅展開比例
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -5812,6 +6106,7 @@ fun CalendarRow(
     val verticalPad = (contentHeight * (cellMaxScale - 1f) / 2f + 2.dp).coerceAtLeast(4.dp)
     val horizontalPad = 3.dp
 
+    // 🟢 移除 animateDpAsState，直接根據手勢進度即時計算高度，做到完美跟手
     val targetHeight = contentHeight + verticalPad * 2
     val rowHeight = targetHeight * expansionFraction
 
@@ -5832,7 +6127,7 @@ fun CalendarRow(
                         day = dayOfMonth,
                         isToday = isCurrentMonth && dayOfMonth == todayDayOfMonth,
                         isSelected = selectedDay == dayOfMonth,
-                        visibilityScale = expansionFraction,
+                        visibilityScale = expansionFraction, // 🟢 傳入縮放比例
                         records = dayRecords,
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
@@ -5852,7 +6147,7 @@ private data class DayCellSummary(
 
 @Composable
 fun CalendarDayCell(
-    day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f,
+    day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f, // 🟢 修改參數
     records: List<Record>, displayMode: Int, maxAbsNet: Double, onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -5913,8 +6208,8 @@ fun CalendarDayCell(
     Box(
         Modifier.fillMaxSize()
             .graphicsLayer {
-                val s = selectionScale * visibilityScale
-                scaleX = s; scaleY = s; alpha = visibilityScale
+                val s = selectionScale * visibilityScale // 🟢 疊加手勢嘅縮放
+                scaleX = s; scaleY = s; alpha = visibilityScale // 🟢 透明度跟隨手勢
             }
             .shadow(elevation, shape, clip = false,
                 ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000))
@@ -6192,11 +6487,15 @@ fun CalendarContent(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         
+        // ==========================================
+        // 1. 底層滾動區
+        // ==========================================
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(top = topBarHeight) 
         ) {
+            // 🟢 展開收縮區 (Chips + Stats)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6214,11 +6513,13 @@ fun CalendarContent(
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
+                // 🟢 增加預設間距，等 Chips 乖乖留喺月份下方，絕對睇得哂
                 Spacer(Modifier.height(24.dp))
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
                 }
+                // 🟢 替換為穩定嘅 Chunked Row 排版，確保測量高度 100% 準確
                 val rows = remember(allCategories) { allCategories.chunked(4) }
                 
                 Column(Modifier.fillMaxWidth().animateContentSize()) {
@@ -6268,6 +6569,7 @@ fun CalendarContent(
                 Spacer(Modifier.height(12.dp))
             }
 
+            // 星期標題
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
                 CALENDAR_WEEKDAY_HEADERS.forEach { w ->
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -6278,6 +6580,7 @@ fun CalendarContent(
             }
             Spacer(Modifier.height(6.dp))
 
+            // 滾動月曆網格
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
                 val cellWidth = (screenWidthDp - 20.dp) / 7
@@ -6412,12 +6715,16 @@ fun CalendarContent(
             }
         }
 
+        // ==========================================
+        // 2. 頂部永久固定標題區 (實色 + 智能漸變遮罩)
+        // ==========================================
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .zIndex(10f)
         ) {
+            // 實色背景區
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -6497,6 +6804,7 @@ fun CalendarContent(
                 }
             }
 
+            // 智能遮罩：冇拉起日曆嘅時候 100% 隱形，拉起時先平滑淡出 6.dp 高嘅靚靚遮罩
             val showMask = calendarExpansion.value < 0.99f
             val maskAlpha by animateFloatAsState(
                 targetValue = if (showMask) 1f else 0f,
@@ -6522,6 +6830,9 @@ fun CalendarContent(
             )
         }
 
+        // ==========================================
+        // 3. FAB 同埋 FanMenu
+        // ==========================================
         FloatingActionButton(
             onClick = onAddClick,
             shape = CircleShape,
@@ -6709,6 +7020,7 @@ fun CompareValueCell(
         Spacer(Modifier.width(4.dp))
         Box(Modifier.width(38.dp), contentAlignment = Alignment.CenterEnd) {
             if (pctText != null) {
+                // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，令百分比顏色深色啲
                 Text(pctText, fontSize = 11.sp, color = TEXT_SECONDARY,
                     fontWeight = FontWeight.Medium, textAlign = TextAlign.End, maxLines = 1)
             }
@@ -6961,7 +7273,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
 }
 
 // =========================================================
-//  圖片處理函數 (包含新增的去背預覽相關邏輯)
+//  圖片處理函數
 // =========================================================
 fun createTempImageUri(context: Context): Uri? {
     return try {
@@ -6992,74 +7304,6 @@ fun scaleKeepAspectWidth(src: Bitmap, maxWidth: Int): Bitmap {
     val ratio = maxWidth.toFloat() / src.width
     val newH = (src.height * ratio).roundToInt().coerceAtLeast(1)
     return Bitmap.createScaledBitmap(src, maxWidth, newH, true)
-}
-
-data class PendingImageUpload(
-    val record: Record,
-    val originalBitmap: Bitmap,
-    val processedBitmap: Bitmap
-)
-
-suspend fun loadAndProcessBitmaps(context: Context, uri: Uri): Pair<Bitmap, Bitmap>? = withContext(Dispatchers.IO) {
-    try {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        val w = bounds.outWidth; val h = bounds.outHeight
-        if (w <= 0 || h <= 0) return@withContext null
-
-        var s = 1; val md = maxOf(w, h)
-        while (md / (s * 2) >= 800) s *= 2
-
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = s
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val src = context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, opts)
-        } ?: return@withContext null
-
-        val original = if (src.width > 800 || src.height > 800) {
-            val scaled = scaleKeepAspectWidth(src, 800)
-            if (scaled !== src) src.recycle()
-            scaled
-        } else src
-
-        val processed = removeBackground(original)
-        Pair(original, processed)
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
-
-suspend fun applyEnhancedFilter(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
-    val bmp = Bitmap.createBitmap(src.width, src.height, src.config ?: Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bmp)
-    val paint = android.graphics.Paint()
-    val cm = android.graphics.ColorMatrix().apply {
-        set(floatArrayOf(
-            1.15f, 0f, 0f, 0f, -5f,
-            0f, 1.15f, 0f, 0f, -5f,
-            0f, 0f, 1.15f, 0f, -5f,
-            0f, 0f, 0f, 1f, 0f
-        ))
-    }
-    paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
-    canvas.drawBitmap(src, 0f, 0f, paint)
-    bmp
-}
-
-suspend fun compressBitmapToPngForUpload(bitmap: Bitmap, forceCrop: Boolean, targetSize: Int = ICON_SIZE): ByteArray = withContext(Dispatchers.Default) {
-    val finalBitmap = if (forceCrop) {
-        scaleCropCenter(bitmap, targetSize)
-    } else {
-        if (bitmap.width > bitmap.height) scaleKeepAspectWidth(bitmap, targetSize)
-        else scaleCropCenter(bitmap, targetSize)
-    }
-    val baos = ByteArrayOutputStream()
-    finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-    if (finalBitmap !== bitmap) finalBitmap.recycle()
-    baos.toByteArray()
 }
 
 private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions.Builder()
@@ -7199,156 +7443,6 @@ suspend fun uploadBytesToCloudinary(bytes: ByteArray): String? = withContext(Dis
 }
 
 // =========================================================
-//  新 UI 面板組件
-// =========================================================
-@Composable
-fun ImageEffectSelectionPanel(
-    state: PendingImageUpload,
-    onSelect: (Bitmap, Boolean, Boolean) -> Unit
-) {
-    var timeLeft by remember { mutableIntStateOf(10) }
-    
-    LaunchedEffect(Unit) {
-        while (timeLeft > 0) {
-            delay(1000)
-            timeLeft--
-        }
-        onSelect(state.processedBitmap, false, false)
-    }
-
-    var isVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { isVisible = true }
-    
-    AnimatedVisibility(
-        visible = isVisible,
-        enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 300f)) { it } + fadeIn(),
-        exit = slideOutVertically { it } + fadeOut()
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-                .background(SURFACE_CARD)
-                .padding(bottom = 32.dp, top = 20.dp)
-        ) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("選擇圖片效果", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
-                Spacer(Modifier.weight(1f))
-                Text("${timeLeft}s", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TEXT_SECONDARY)
-            }
-            Spacer(Modifier.height(16.dp))
-            
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp)
-            ) {
-                item {
-                    EffectOptionCard(
-                        title = "自動去背圖", bitmap = state.processedBitmap,
-                        buttonText = "使用去背圖", isPrimary = true, timeHint = "($timeLeft)",
-                        onClick = { onSelect(state.processedBitmap, false, false) }
-                    )
-                }
-                item {
-                    EffectOptionCard(
-                        title = "原始圖片", bitmap = state.originalBitmap,
-                        buttonText = "使用原圖", isPrimary = false,
-                        onClick = { onSelect(state.originalBitmap, false, false) }
-                    )
-                }
-                item {
-                    EffectOptionCard(
-                        title = "手動裁剪後重處理", bitmap = state.originalBitmap,
-                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
-                        onClick = { onSelect(state.originalBitmap, true, false) }
-                    )
-                }
-                item {
-                    EffectOptionCard(
-                        title = "更乾淨去背 / 強化", bitmap = state.processedBitmap,
-                        buttonText = "強化去背", isPrimary = false, isEnhanced = true,
-                        onClick = { onSelect(state.processedBitmap, false, true) }
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun EffectOptionCard(
-    title: String, bitmap: Bitmap, buttonText: String, isPrimary: Boolean,
-    timeHint: String = "", showCropGrid: Boolean = false, isEnhanced: Boolean = false,
-    onClick: () -> Unit
-) {
-    Column(modifier = Modifier.width(140.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
-                .background(SURFACE_ELEVATED)
-                .border(2.dp, if(isPrimary) BRAND_PRIMARY else Color.Transparent, RoundedCornerShape(16.dp))
-                .clickable { onClick() }
-        ) {
-            val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
-            val colorFilter = remember(isEnhanced) {
-                if (isEnhanced) {
-                    androidx.compose.ui.graphics.ColorFilter.colorMatrix(
-                        androidx.compose.ui.graphics.ColorMatrix().apply {
-                            setToScale(1.15f, 1.15f, 1.15f, 1f)
-                        }
-                    )
-                } else null
-            }
-            
-            Image(
-                bitmap = imageBitmap, contentDescription = null,
-                contentScale = ContentScale.Fit, colorFilter = colorFilter,
-                modifier = Modifier.fillMaxSize().drawWithContent {
-                    drawContent()
-                    if (showCropGrid) {
-                        val strokeW = 1.dp.toPx()
-                        val w = size.width; val h = size.height
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(w/3, 0f), Offset(w/3, h), strokeWidth = strokeW)
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(w*2/3, 0f), Offset(w*2/3, h), strokeWidth = strokeW)
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h/3), Offset(w, h/3), strokeWidth = strokeW)
-                        drawLine(Color.White.copy(alpha=0.6f), Offset(0f, h*2/3), Offset(w, h*2/3), strokeWidth = strokeW)
-                        
-                        drawRect(Color.Black.copy(alpha = 0.35f), size = size)
-                        
-                        val md = minOf(w, h) * 0.8f; val cx = w/2; val cy = h/2; val half = md/2
-                        drawRect(Color.White, topLeft = Offset(cx - half, cy - half),
-                            size = androidx.compose.ui.geometry.Size(md, md), style = Stroke(2.dp.toPx()))
-                    }
-                }
-            )
-            
-            if (isPrimary && timeHint.isNotEmpty()) {
-                Box(Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(BRAND_PRIMARY).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    Text("推薦", color=Color.White, fontSize=10.sp, fontWeight=FontWeight.Bold)
-                }
-            }
-        }
-        
-        Spacer(Modifier.height(8.dp))
-        Text(title, fontSize = 12.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium, maxLines = 1)
-        Spacer(Modifier.height(6.dp))
-        
-        Button(
-            onClick = onClick, shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().height(36.dp),
-            contentPadding = PaddingValues(0.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (isPrimary) BRAND_PRIMARY else SURFACE_ELEVATED,
-                contentColor = if (isPrimary) Color.White else TEXT_PRIMARY
-            )
-        ) {
-            Text(if (isPrimary && timeHint.isNotEmpty()) "$buttonText $timeHint" else buttonText, 
-                 fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-// =========================================================
 //  IconView + IconViewAdaptive
 // =========================================================
 private val AVATAR_TEXT_STYLE_BASE = TextStyle(
@@ -7426,421 +7520,4 @@ fun IconViewAdaptive(
                 modifier = Modifier.fillMaxSize())
         }
     }
-}
-
-@Composable
-fun FloatingNavBar(
-    items: List<NavItem>,
-    selectedIndex: Int,
-    onIndexChange: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val density = LocalDensity.current
-    val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
-    val maxOffset = tabWidthPx * items.size - tabWidthPx
-    val vc = LocalViewConfiguration.current
-    val latestSel by rememberUpdatedState(selectedIndex)
-    val latestOnChange by rememberUpdatedState(onIndexChange)
-    val latestSize by rememberUpdatedState(items.size)
-    var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
-    var isDragging by remember { mutableStateOf(false) }
-
-    LaunchedEffect(selectedIndex) { if (!isDragging) bubbleOffset = selectedIndex * tabWidthPx }
-    val animatedOffset by animateFloatAsState(
-        bubbleOffset,
-        if (isDragging) snap() else spring(
-            stiffness = Spring.StiffnessMediumLow,
-            dampingRatio = Spring.DampingRatioNoBouncy
-        ),
-        label = "bubble"
-    )
-
-    Box(
-        modifier = modifier
-            .width(NAV_TAB_WIDTH * items.size)
-            .height(NAV_HEIGHT)
-            .clip(RoundedCornerShape(NAV_HEIGHT / 2))
-            .background(SURFACE_CARD)
-            .border(0.5.dp, DIVIDER_COLOR, RoundedCornerShape(NAV_HEIGHT / 2))
-    ) {
-        Box(Modifier.fillMaxSize().pointerInput(Unit) {
-            awaitPointerEventScope {
-                while (true) {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val downX = down.position.x
-                    val pid = down.id
-                    var dx = 0f; var dragged = false
-                    while (true) {
-                        val e = awaitPointerEvent()
-                        val c = e.changes.firstOrNull { it.id == pid }
-                        if (c == null || !c.pressed) {
-                            if (!dragged) {
-                                val i = (downX / tabWidthPx).toInt().coerceIn(0, latestSize - 1)
-                                if (i != latestSel) latestOnChange(i)
-                                bubbleOffset = i * tabWidthPx
-                            } else {
-                                val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
-                                bubbleOffset = i * tabWidthPx
-                                if (i != latestSel) latestOnChange(i)
-                            }
-                            isDragging = false; break
-                        }
-                        val d = c.positionChange().x; dx += d
-                        if (!dragged && abs(dx) > vc.touchSlop) { dragged = true; isDragging = true }
-                        if (dragged) {
-                            bubbleOffset = (bubbleOffset + d).coerceIn(0f, maxOffset)
-                            c.consume()
-                            val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
-                            if (i != latestSel) latestOnChange(i)
-                        }
-                    }
-                }
-            }
-        }) {
-            Box(
-                Modifier
-                    .offset { IntOffset(animatedOffset.roundToInt(), 0) }
-                    .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
-                    .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
-                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.9f))
-            )
-            Row(Modifier.fillMaxSize()) {
-                items.forEachIndexed { idx, item ->
-                    val sel = idx == selectedIndex
-                    val tint = if (sel) BRAND_PRIMARY_DARK else Color(0xFF636366)
-                    Box(Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(),
-                        contentAlignment = Alignment.Center) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(item.label, fontSize = 14.sp,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
-                                color = tint)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun KeyboardAndFabLayer(
-    showKeyboard: Boolean,
-    progressProvider: () -> Float,
-    currentPage: Int,
-    filterModeOn: Boolean,
-    filterSearch: TextFieldValue,
-    onFilterSearchChange: (TextFieldValue) -> Unit,
-    filterSearchHasFocus: Boolean,
-    onFilterSearchFocusChange: (Boolean) -> Unit,
-    filterSearchFocusRequester: FocusRequester,
-    onFilterButtonTap: () -> Unit,
-    onFabTap: () -> Unit,
-    keyboardState: KeyboardState,
-    onKeyboardStateChange: (KeyboardState) -> Unit,
-    onKeyboardDismiss: () -> Unit,
-    onKeyboardConfirm: () -> Unit,
-    onKeyboardNext: () -> Unit,
-    allNoteNames: List<String>,
-    noteCategoryMap: Map<String, String>,
-    nameFlashTrigger: Int
-) {
-    Box(Modifier.fillMaxSize()) {
-
-        // ---- 篩選搜索欄（僅在篩選模式且記帳頁顯示）----
-        AnimatedVisibility(
-            visible = filterModeOn && currentPage == 0,
-            enter = fadeIn(tween(220)) + slideInVertically(tween(260)) { -it },
-            exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp, start = 16.dp, end = 16.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = SURFACE_CARD,
-                border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                shadowElevation = 2.dp
-            ) {
-                TextField(
-                    value = filterSearch,
-                    onValueChange = onFilterSearchChange,
-                    placeholder = { Text("搜尋名稱或分類", color = TEXT_SECONDARY) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY)
-                    },
-                    trailingIcon = {
-                        if (filterSearch.text.isNotEmpty()) {
-                            IconButton(onClick = { onFilterSearchChange(TextFieldValue("")) }) {
-                                Icon(Icons.Default.Close, "清除", tint = TEXT_SECONDARY)
-                            }
-                        }
-                    },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = SURFACE_CARD,
-                        unfocusedContainerColor = SURFACE_CARD,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(filterSearchFocusRequester)
-                        .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
-                )
-            }
-        }
-
-        // ---- 篩選按鈕（FAB 左側，僅記帳頁且非鍵盤狀態顯示）----
-        if (currentPage == 0 && !showKeyboard) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(
-                        end = 20.dp + 56.dp + 12.dp,
-                        bottom = NAV_BOTTOM_PADDING + 92.dp + 6.dp
-                    )
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (filterModeOn) BRAND_PRIMARY else SURFACE_CARD)
-                    .border(
-                        0.5.dp,
-                        if (filterModeOn) Color.Transparent else DIVIDER_COLOR,
-                        CircleShape
-                    )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onFilterButtonTap() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.FilterList,
-                    "篩選",
-                    tint = if (filterModeOn) Color.White else TEXT_PRIMARY,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        // ---- FAB（僅記帳頁顯示）----
-        if (currentPage == 0) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = NAV_BOTTOM_PADDING)
-            ) {
-                AnimatedFabLayer(
-                    progressProvider = progressProvider,
-                    onFabTap = onFabTap
-                )
-            }
-        }
-
-        // ---- 鍵盤層 ----
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-        ) {
-            AnimatedKeyboardLayer(
-                showKeyboard = showKeyboard,
-                progressProvider = progressProvider,
-                keyboardState = keyboardState,
-                onKeyboardStateChange = onKeyboardStateChange,
-                onKeyboardDismiss = onKeyboardDismiss,
-                onKeyboardConfirm = onKeyboardConfirm,
-                onKeyboardNext = onKeyboardNext,
-                allNoteNames = allNoteNames,
-                noteCategoryMap = noteCategoryMap,
-                nameFlashTrigger = nameFlashTrigger
-            )
-        }
-    }
-}
-
-// =========================================================
-//  ★ 补回：AnimatedFabLayer + AnimatedKeyboardLayer
-//  这两个原本是 private fun，被误删了；
-//  KeyboardAndFabLayer 内部要用它们。
-// =========================================================
-
-@Composable
-private fun AnimatedFabLayer(
-    progressProvider: () -> Float,
-    onFabTap: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isExpandedTint by remember {
-        derivedStateOf { progressProvider() > 0.35f }
-    }
-    val tintColor by animateColorAsState(
-        targetValue = if (isExpandedTint) TEXT_TERTIARY else Color.White,
-        animationSpec = tween(180),
-        label = "fabTint"
-    )
-
-    Box(
-        modifier = modifier
-            .graphicsLayer {
-                val currentP = progressProvider()
-                val fabX = lerp(20.dp, 24.dp, currentP).toPx()
-                val fabY = lerp(92.dp, 388.dp, currentP).toPx()
-                translationX = -fabX
-                translationY = -fabY
-                transformOrigin = TransformOrigin(1f, 1f)
-                shape = CircleShape
-                clip = true
-            }
-            .size(56.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onFabTap() },
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(Modifier.matchParentSize()) {
-            val currentP = progressProvider()
-            val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
-            drawCircle(color = BRAND_PRIMARY.copy(alpha = bgAlpha))
-        }
-
-        Icon(
-            Icons.Default.Add,
-            contentDescription = "Clear",
-            tint = tintColor,
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(24.dp)
-                .graphicsLayer { rotationZ = progressProvider() * -405f }
-        )
-    }
-}
-
-@Composable
-private fun AnimatedKeyboardLayer(
-    showKeyboard: Boolean,
-    progressProvider: () -> Float,
-    keyboardState: KeyboardState,
-    onKeyboardStateChange: (KeyboardState) -> Unit,
-    onKeyboardDismiss: () -> Unit,
-    onKeyboardConfirm: () -> Unit,
-    onKeyboardNext: () -> Unit,
-    allNoteNames: List<String>,
-    noteCategoryMap: Map<String, String>,
-    nameFlashTrigger: Int,
-    modifier: Modifier = Modifier
-) {
-    val currentP = progressProvider()
-    val isActive = currentP > 0f || showKeyboard
-
-    if (!isActive) return
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
-            .graphicsLayer {
-                alpha = currentP
-                val w = size.width
-                val h = size.height
-                if (w > 0f && h > 0f) {
-                    val ox = (1f - (32.dp.toPx() / w)).coerceIn(0.02f, 0.98f)
-                    val oy = (1f - (100.dp.toPx() / h)).coerceIn(0.02f, 0.98f)
-                    transformOrigin = TransformOrigin(ox, oy)
-                } else {
-                    transformOrigin = TransformOrigin(1f, 1f)
-                }
-                val s = 0.13f + 0.87f * currentP
-                scaleX = s
-                scaleY = s
-            }
-    ) {
-        LedgerKeyboardPanel(
-            state = keyboardState,
-            onStateChange = onKeyboardStateChange,
-            onDismiss = onKeyboardDismiss,
-            onConfirm = onKeyboardConfirm,
-            onNext = onKeyboardNext,
-            onPickCategory = { },
-            allNoteNames = allNoteNames,
-            noteCategoryMap = noteCategoryMap,
-            nameFlashTrigger = nameFlashTrigger,
-            showKeyboard = showKeyboard,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
-// =========================================================
-//  ★ 健壮下載圖片：支援 data:image / 協議相對 / 重定向 /
-//    WebP / AVIF（透過 Coil，自動帶 UA + Referer）
-// =========================================================
-private suspend fun downloadImageBitmap(context: Context, url: String): Bitmap? =
-    withContext(Dispatchers.IO) {
-        try {
-            // 1) data:image/...;base64,...
-            if (url.startsWith("data:image")) {
-                val base64Str = url.substringAfter(",")
-                val bytes = android.util.Base64.decode(base64Str, android.util.Base64.DEFAULT)
-                return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            }
-
-            // 2) 協議相對 URL (//encrypted-tbn0.gstatic.com/...)
-            val fixedUrl = when {
-                url.startsWith("//") -> "https:$url"
-                url.startsWith("http://") || url.startsWith("https://") -> url
-                else -> return@withContext null
-            }
-
-            // 3) Referer 取源域名；無域名時 fallback Google
-            val referer = runCatching {
-                val uri = java.net.URI(fixedUrl)
-                val host = uri.host ?: return@runCatching "https://www.google.com/"
-                "${uri.scheme ?: "https"}://$host/"
-            }.getOrDefault("https://www.google.com/")
-
-            // 4) 用 Coil 下載：自動處理 WebP / AVIF / 3xx 重定向
-            val request = ImageRequest.Builder(context)
-                .data(fixedUrl)
-                .addHeader(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-                .addHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8")
-                .addHeader("Accept-Language", "en-US,en;q=0.9,zh-HK;q=0.8")
-                .addHeader("Referer", referer)
-                .allowHardware(false)
-                .build()
-
-            val result = context.imageLoader.execute(request)
-            val drawable = when (result) {
-                is coil.request.SuccessResult -> result.drawable
-                is coil.request.ErrorResult -> {
-                    result.throwable.printStackTrace()
-                    return@withContext null
-                }
-                else -> null
-            } ?: return@withContext null
-
-            drawableToBitmap(drawable)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
-    }
-
-private fun drawableToBitmap(drawable: android.graphics.drawable.Drawable): Bitmap? {
-    if (drawable is android.graphics.drawable.BitmapDrawable) return drawable.bitmap
-    val w = drawable.intrinsicWidth.coerceAtLeast(1)
-    val h = drawable.intrinsicHeight.coerceAtLeast(1)
-    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bmp)
-    drawable.setBounds(0, 0, canvas.width, canvas.height)
-    drawable.draw(canvas)
-    return bmp
 }
