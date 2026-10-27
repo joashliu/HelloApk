@@ -7289,3 +7289,237 @@ fun IconViewAdaptive(
         }
     }
 }
+
+@Composable
+fun FloatingNavBar(
+    items: List<NavItem>,
+    selectedIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val tabWidthPx = with(density) { NAV_TAB_WIDTH.toPx() }
+    val maxOffset = tabWidthPx * items.size - tabWidthPx
+    val vc = LocalViewConfiguration.current
+    val latestSel by rememberUpdatedState(selectedIndex)
+    val latestOnChange by rememberUpdatedState(onIndexChange)
+    val latestSize by rememberUpdatedState(items.size)
+    var bubbleOffset by remember { mutableFloatStateOf(selectedIndex * tabWidthPx) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedIndex) { if (!isDragging) bubbleOffset = selectedIndex * tabWidthPx }
+    val animatedOffset by animateFloatAsState(
+        bubbleOffset,
+        if (isDragging) snap() else spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioNoBouncy
+        ),
+        label = "bubble"
+    )
+
+    Box(
+        modifier = modifier
+            .width(NAV_TAB_WIDTH * items.size)
+            .height(NAV_HEIGHT)
+            .clip(RoundedCornerShape(NAV_HEIGHT / 2))
+            .background(SURFACE_CARD)
+            .border(0.5.dp, DIVIDER_COLOR, RoundedCornerShape(NAV_HEIGHT / 2))
+    ) {
+        Box(Modifier.fillMaxSize().pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val downX = down.position.x
+                    val pid = down.id
+                    var dx = 0f; var dragged = false
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        val c = e.changes.firstOrNull { it.id == pid }
+                        if (c == null || !c.pressed) {
+                            if (!dragged) {
+                                val i = (downX / tabWidthPx).toInt().coerceIn(0, latestSize - 1)
+                                if (i != latestSel) latestOnChange(i)
+                                bubbleOffset = i * tabWidthPx
+                            } else {
+                                val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
+                                bubbleOffset = i * tabWidthPx
+                                if (i != latestSel) latestOnChange(i)
+                            }
+                            isDragging = false; break
+                        }
+                        val d = c.positionChange().x; dx += d
+                        if (!dragged && abs(dx) > vc.touchSlop) { dragged = true; isDragging = true }
+                        if (dragged) {
+                            bubbleOffset = (bubbleOffset + d).coerceIn(0f, maxOffset)
+                            c.consume()
+                            val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
+                            if (i != latestSel) latestOnChange(i)
+                        }
+                    }
+                }
+            }
+        }) {
+            Box(
+                Modifier
+                    .offset { IntOffset(animatedOffset.roundToInt(), 0) }
+                    .width(NAV_TAB_WIDTH).fillMaxHeight().padding(6.dp)
+                    .clip(RoundedCornerShape((NAV_HEIGHT - 12.dp) / 2))
+                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.9f))
+            )
+            Row(Modifier.fillMaxSize()) {
+                items.forEachIndexed { idx, item ->
+                    val sel = idx == selectedIndex
+                    val tint = if (sel) BRAND_PRIMARY_DARK else Color(0xFF636366)
+                    Box(Modifier.width(NAV_TAB_WIDTH).fillMaxHeight(),
+                        contentAlignment = Alignment.Center) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(item.icon, item.label, tint = tint, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(item.label, fontSize = 14.sp,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Medium,
+                                color = tint)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun KeyboardAndFabLayer(
+    showKeyboard: Boolean,
+    progressProvider: () -> Float,
+    currentPage: Int,
+    filterModeOn: Boolean,
+    filterSearch: TextFieldValue,
+    onFilterSearchChange: (TextFieldValue) -> Unit,
+    filterSearchHasFocus: Boolean,
+    onFilterSearchFocusChange: (Boolean) -> Unit,
+    filterSearchFocusRequester: FocusRequester,
+    onFilterButtonTap: () -> Unit,
+    onFabTap: () -> Unit,
+    keyboardState: KeyboardState,
+    onKeyboardStateChange: (KeyboardState) -> Unit,
+    onKeyboardDismiss: () -> Unit,
+    onKeyboardConfirm: () -> Unit,
+    onKeyboardNext: () -> Unit,
+    allNoteNames: List<String>,
+    noteCategoryMap: Map<String, String>,
+    nameFlashTrigger: Int
+) {
+    Box(Modifier.fillMaxSize()) {
+
+        // ---- 篩選搜索欄（僅在篩選模式且記帳頁顯示）----
+        AnimatedVisibility(
+            visible = filterModeOn && currentPage == 0,
+            enter = fadeIn(tween(220)) + slideInVertically(tween(260)) { -it },
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp, start = 16.dp, end = 16.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = SURFACE_CARD,
+                border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                shadowElevation = 2.dp
+            ) {
+                TextField(
+                    value = filterSearch,
+                    onValueChange = onFilterSearchChange,
+                    placeholder = { Text("搜尋名稱或分類", color = TEXT_SECONDARY) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, null, tint = TEXT_SECONDARY)
+                    },
+                    trailingIcon = {
+                        if (filterSearch.text.isNotEmpty()) {
+                            IconButton(onClick = { onFilterSearchChange(TextFieldValue("")) }) {
+                                Icon(Icons.Default.Close, "清除", tint = TEXT_SECONDARY)
+                            }
+                        }
+                    },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = SURFACE_CARD,
+                        unfocusedContainerColor = SURFACE_CARD,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(filterSearchFocusRequester)
+                        .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
+                )
+            }
+        }
+
+        // ---- 篩選按鈕（FAB 左側，僅記帳頁且非鍵盤狀態顯示）----
+        if (currentPage == 0 && !showKeyboard) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(
+                        end = 20.dp + 56.dp + 12.dp,
+                        bottom = NAV_BOTTOM_PADDING + 92.dp + 6.dp
+                    )
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(if (filterModeOn) BRAND_PRIMARY else SURFACE_CARD)
+                    .border(
+                        0.5.dp,
+                        if (filterModeOn) Color.Transparent else DIVIDER_COLOR,
+                        CircleShape
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { onFilterButtonTap() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.FilterList,
+                    "篩選",
+                    tint = if (filterModeOn) Color.White else TEXT_PRIMARY,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // ---- FAB（僅記帳頁顯示）----
+        if (currentPage == 0) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = NAV_BOTTOM_PADDING)
+            ) {
+                AnimatedFabLayer(
+                    progressProvider = progressProvider,
+                    onFabTap = onFabTap
+                )
+            }
+        }
+
+        // ---- 鍵盤層 ----
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+        ) {
+            AnimatedKeyboardLayer(
+                showKeyboard = showKeyboard,
+                progressProvider = progressProvider,
+                keyboardState = keyboardState,
+                onKeyboardStateChange = onKeyboardStateChange,
+                onKeyboardDismiss = onKeyboardDismiss,
+                onKeyboardConfirm = onKeyboardConfirm,
+                onKeyboardNext = onKeyboardNext,
+                allNoteNames = allNoteNames,
+                noteCategoryMap = noteCategoryMap,
+                nameFlashTrigger = nameFlashTrigger
+            )
+        }
+    }
+}
