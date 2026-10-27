@@ -4236,83 +4236,104 @@ fun WeeklyExpenseChart(
     val titleGap = 10.dp
     val labelRowHeight = 16.dp
 
+    val density = LocalDensity.current
+    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
+
     val maxAmount = remember(data) {
         data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    // ★ 卡片始终完整 178dp，白色背景 + 四角圆角全程不变。
-    //   LazyColumn 天然裁切 → 卡片顶部随滚动被裁，裁切边界从顶部往下移。
-    //   卡片底部圆角全程可见；卡片下半截不会被任何遮罩覆盖变浅灰。
+    val collapseOffsetPx by remember(listState, chartHeightPx) {
+        derivedStateOf {
+            val info = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "weekly_chart" }
+            if (info == null) chartHeightPx
+            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
+        }
+    }
+
+    val visibleHeightPx = (chartHeightPx - collapseOffsetPx).coerceAtLeast(0f)
+    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
+
+    // 外層佔位：固定 178dp（LazyColumn 項高度不變，避免 layout 反饋循環）
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(chartHeight)
             .padding(horizontal = horizontalPadding)   // 左右 16dp 全程固定
     ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .clip(RoundedCornerShape(12.dp))       // 四角圆角：卡片整体形状
-                .background(SURFACE_CARD)              // 白色背景：全程覆盖完整 178dp
-        ) {
-            Column(
+        if (visibleHeightPx > 0.5f) {
+            // ★ 卡片主動變矮，底部對齊
+            //   卡片 height = visibleHeightDp，四角圓角由 .clip() 全程繪製
+            //   頂部圓角 = 卡片自己的圓角（不被 LazyColumn 裁成直角）
+            Box(
                 Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
+                    .fillMaxWidth()
+                    .height(visibleHeightDp)
+                    .align(Alignment.BottomCenter)
+                    .clip(RoundedCornerShape(12.dp))   // 四角圓角：全程生效
+                    .background(SURFACE_CARD)          // 白色背景：覆蓋完整可見區域
             ) {
-                // ── 标题行（顶部固定，卡片被裁到此处时一起消失）
-                Row(
-                    Modifier.fillMaxWidth().height(titleRowHeight),
-                    verticalAlignment = Alignment.CenterVertically
+                // ★ 內容固定 178dp，底部對齊卡片底部
+                //   卡片變矮時，內容超出卡片頂部的部分被 .clip() 裁掉
+                //   裁切的是卡片自己的圓角邊界 → 頂部兩個角永遠是圓角
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(chartHeight)
+                        .align(Alignment.BottomCenter)
+                        .padding(innerPadding)
                 ) {
-                    Text(
-                        "近 7 日支出",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TEXT_PRIMARY
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        "合計 $${formatAmountNoDecimal(totalAmount)}",
-                        fontSize = 12.sp,
-                        color = TEXT_SECONDARY,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Spacer(Modifier.height(titleGap))
-
-                // ── 柱体区域（中间占满，文字不缩放，柱高靠 LazyColumn 裁切呈现「变矮」）
-                Row(
-                    Modifier.fillMaxWidth().weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    data.forEach { day ->
-                        WeeklyExpenseBarBody(
-                            day = day,
-                            maxAmount = maxAmount,
-                            introProgress = introProgress,
-                            modifier = Modifier.weight(1f).fillMaxHeight()
+                    // 標題行（卡片變矮時最先被裁掉）
+                    Row(
+                        Modifier.fillMaxWidth().height(titleRowHeight),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "近 7 日支出",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TEXT_PRIMARY
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "合計 $${formatAmountNoDecimal(totalAmount)}",
+                            fontSize = 12.sp,
+                            color = TEXT_SECONDARY,
+                            fontWeight = FontWeight.Medium
                         )
                     }
-                }
-
-                // ── 日期行（底部固定，卡片被裁到此处时一起消失）
-                Row(
-                    Modifier.fillMaxWidth().height(labelRowHeight),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    data.forEach { day ->
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = day.weekdayChar,
-                                fontSize = 11.sp,
-                                color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
-                                fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1
+                    Spacer(Modifier.height(titleGap))
+                    // 柱體（中間佔滿，文字不縮放，柱高靠卡片裁切呈現「變矮」）
+                    Row(
+                        Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        data.forEach { day ->
+                            WeeklyExpenseBarBody(
+                                day = day,
+                                maxAmount = maxAmount,
+                                introProgress = introProgress,
+                                modifier = Modifier.weight(1f).fillMaxHeight()
                             )
+                        }
+                    }
+                    // 日期行（卡片底部，全程可見；卡片變矮時最後被裁掉）
+                    Row(
+                        Modifier.fillMaxWidth().height(labelRowHeight),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        data.forEach { day ->
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = day.weekdayChar,
+                                    fontSize = 11.sp,
+                                    color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
+                                    fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
