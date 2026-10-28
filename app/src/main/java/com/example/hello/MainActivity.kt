@@ -5682,144 +5682,12 @@ fun CalendarFilterChip(
     }
 }
 
-@Composable
-private fun DollarAmount(
-    text: String,
-    color: Color,
-    fontSize: TextUnit,
-    fontWeight: FontWeight = FontWeight.Bold,
-    showDollar: Boolean = true,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        when {
-            !showDollar -> {
-                AnimatedAmount(
-                    text = text, color = color,
-                    fontSize = fontSize, fontWeight = fontWeight
-                )
-            }
-            text.startsWith("-") -> {
-                Text("-$", color = color, fontSize = fontSize,
-                    fontWeight = fontWeight, maxLines = 1, softWrap = false)
-                AnimatedAmount(
-                    text = text.substring(1), color = color,
-                    fontSize = fontSize, fontWeight = fontWeight
-                )
-            }
-            else -> {
-                Text("$", color = color, fontSize = fontSize,
-                    fontWeight = fontWeight, maxLines = 1, softWrap = false)
-                AnimatedAmount(
-                    text = text, color = color,
-                    fontSize = fontSize, fontWeight = fontWeight
-                )
-            }
-        }
-    }
-}
-
 private val DIGIT_SLIDE_ENTER = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
 private val DIGIT_SLIDE_EXIT = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
 private val DIGIT_FLOAT_ENTER = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
 private val DIGIT_FLOAT_EXIT = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
 private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
-@Composable
-fun AnimatedAmount(
-    text: String, color: Color, fontSize: TextUnit,
-    fontWeight: FontWeight = FontWeight.Bold,
-    animateChanges: Boolean = true,   // ★ 新增：false 時直接切換，不播動畫
-    modifier: Modifier = Modifier,
-) {
-    val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
-    LaunchedEffect(text.length) {
-        if (text.length > maxSlots.value) maxSlots.value = text.length
-    }
-
-    val currentText by rememberUpdatedState(text)
-    val currentAnimate by rememberUpdatedState(animateChanges)
-    var displayedText by remember { mutableStateOf(text) }
-
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            val target = currentText
-            if (displayedText == target) {
-                kotlinx.coroutines.delay(16)
-            } else if (!currentAnimate) {
-                // ★ animateChanges = false：直接切換（冷啟動/首次載入）
-                displayedText = target
-                kotlinx.coroutines.delay(16)
-            } else {
-                // ★ 打字機漸進邏輯（與 Top Stats 一致）
-                if (target.length < displayedText.length || !target.startsWith(displayedText)) {
-                    displayedText = target
-                } else {
-                    displayedText += target[displayedText.length]
-                    kotlinx.coroutines.delay(60)
-                }
-            }
-        }
-    }
-
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        for (i in 0 until maxSlots.value) {
-            val char = displayedText.getOrNull(i)
-            key(i) {
-                AnimatedContent(
-                    targetState = char,
-                    transitionSpec = {
-                        if (!currentAnimate) {
-                            // ★ 無動畫直接切換（冷啟動用）
-                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        } else {
-                            // ★ 判斷變化方向：數值變大向上滾、變小向下滾
-                            val initialDigit = initialState?.digitToIntOrNull() ?: -1
-                            val targetDigit = targetState?.digitToIntOrNull() ?: -1
-                            val goingUp = when {
-                                initialDigit >= 0 && targetDigit >= 0 -> targetDigit >= initialDigit
-                                else -> true  // 非數字字符（符號、K、M）默認向上
-                            }
-                            when {
-                                targetState != null && initialState == null -> {
-                                    // 新字符出現（位數增加）：從下往上
-                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
-                                     fadeIn(tween(200)) +
-                                     scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith
-                                    fadeOut(tween(0))
-                                }
-                                targetState == null && initialState != null -> {
-                                    // 字符消失（位數減少）：往上離開
-                                    fadeIn(tween(0)) togetherWith
-                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
-                                     fadeOut(tween(180)) +
-                                     scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
-                                }
-                                goingUp -> {
-                                    // ★ 數值變大：新字符從下往上、舊字符往上走
-                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
-                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
-                                }
-                                else -> {
-                                    // ★ 數值變小：新字符從上往下、舊字符往下走
-                                    (slideInVertically(DIGIT_SLIDE_ENTER) { -it } + fadeIn(tween(220))) togetherWith
-                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it } + fadeOut(tween(220)))
-                                }
-                            }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
-                        }
-                    },
-                    label = "digit_$i"
-                ) { c ->
-                    if (c != null) {
-                        Text(text = c.toString(), color = color, fontSize = fontSize,
-                            fontWeight = fontWeight, maxLines = 1, softWrap = false)
-                    } else {
-                        Spacer(Modifier.width(0.dp))
-                    }
-                }
-            }
-        }
-    }
-}
 @Composable
 fun SmartElement(
     listState: LazyListState?, dateKey: String,
@@ -8373,23 +8241,21 @@ fun RollingNumber(
 
     val totalSlots = maxLen.value
 
-    // ★ 紧凑排版样式：tnum 等宽 + 无 font padding + 原生字距
+    // ★ 緊湊排版樣式：取消 tnum，取消所有 padding，恢復原生字距，確保數字緊貼
     val compactStyle = remember(fontSize, fontWeight) {
         TextStyle(
             fontSize = fontSize,
             fontWeight = fontWeight,
-            fontFeatureSettings = "tnum",           // 等宽数字：滚动时不抖宽
+            // 🔴 嚴格禁止使用 "tnum"，允許各數字有自己原生實際寬度
             platformStyle = PlatformTextStyle(includeFontPadding = false),
             lineHeightStyle = LineHeightStyle(
                 alignment = LineHeightStyle.Alignment.Center,
                 trim = LineHeightStyle.Trim.Both
             )
-            // 注意：不设置 letterSpacing，使用字体原生字距
         )
     }
 
-    // ★ 用 TextMeasurer 精确测量行高（仅一次）
-    //   宽度完全不测量、不设置！宽度由 Text 自然决定
+    // 只測量高度以確保對齊，寬度交由 Compose 自然 Wrap
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val density = LocalDensity.current
     val cellHeight: Dp = remember(compactStyle) {
@@ -8397,13 +8263,36 @@ fun RollingNumber(
         with(density) { layout.size.height.toDp() }
     }
 
+    val currentText by rememberUpdatedState(text)
+    val currentAnimate by rememberUpdatedState(animateChanges)
+    var displayedText by remember { mutableStateOf(text) }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            val target = currentText
+            if (displayedText == target) {
+                kotlinx.coroutines.delay(16)
+            } else if (!currentAnimate) {
+                displayedText = target
+                kotlinx.coroutines.delay(16)
+            } else {
+                if (target.length < displayedText.length || !target.startsWith(displayedText)) {
+                    displayedText = target
+                } else {
+                    displayedText += target[displayedText.length]
+                    kotlinx.coroutines.delay(60)
+                }
+            }
+        }
+    }
+
     Row(
-        modifier = modifier,
+        modifier = modifier.wrapContentWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start   // ★ 零自动间距
+        horizontalArrangement = Arrangement.Start   // ★ 零自動間距，完全貼合
     ) {
         for (i in 0 until totalSlots) {
-            val char = text.getOrNull(i)
+            val char = displayedText.getOrNull(i)
             key(i) {
                 val delayMs = (totalSlots - 1 - i) * 8
                 RollingDigit(
@@ -8411,8 +8300,9 @@ fun RollingNumber(
                     color = color,
                     style = compactStyle,
                     cellHeight = cellHeight,
-                    animate = animateChanges,
-                    delayMs = delayMs
+                    animate = currentAnimate,
+                    delayMs = delayMs,
+                    modifier = Modifier.wrapContentWidth() // ★ 強制包裹內容
                 )
             }
         }
@@ -8462,13 +8352,17 @@ fun RollingDigit(
 
         val currentDigit = (baseDigit + progressInt) % 10
         val nextDigit = (baseDigit + progressInt + 1) % 10
+        
+        // ★ 智能包裝：只有當真係滾動緊，先將下一個數字加入排版樹
+        val isAnimating = progressFrac > 0f
 
-        // ★ 不设置 width！宽度由内容自然决定
-        //   由于 tnum 等宽，所有数字天然等宽；滚动时宽度稳定不抖
+        // ★ 唔設置固定 Width！靜止時 Box 大細會完全等於 currentDigit
         Box(
             modifier = modifier
                 .height(cellHeight)
-                .clipToBounds()
+                .wrapContentWidth()
+                .clipToBounds(),
+            contentAlignment = Alignment.Center
         ) {
             Text(
                 text = currentDigit.toString(),
@@ -8476,19 +8370,26 @@ fun RollingDigit(
                 style = style,
                 maxLines = 1,
                 softWrap = false,
-                modifier = Modifier.offset(y = (-progressFrac * cellHeight.value).dp)
+                modifier = Modifier
+                    .offset(y = (-progressFrac * cellHeight.value).dp)
+                    .wrapContentWidth() // 確保 Text 唔預留空間
             )
-            Text(
-                text = nextDigit.toString(),
-                color = color,
-                style = style,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier.offset(y = ((1f - progressFrac) * cellHeight.value).dp)
-            )
+            // 只有動畫中，先強行渲染下一個數字，令 Box 短暫借用兩者最闊嘅寬度，完美防止閃動
+            if (isAnimating) {
+                Text(
+                    text = nextDigit.toString(),
+                    color = color,
+                    style = style,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier
+                        .offset(y = ((1f - progressFrac) * cellHeight.value).dp)
+                        .wrapContentWidth()
+                )
+            }
         }
     } else {
-        // 固定字符（$ , . - K M）：宽度由字体自然决定，与相邻数字紧贴
+        // 固定字符（$ , . - 等）：與數字極限緊貼，保持基線一致
         if (targetChar != null) {
             Text(
                 text = targetChar.toString(),
@@ -8496,10 +8397,158 @@ fun RollingDigit(
                 style = style,
                 maxLines = 1,
                 softWrap = false,
-                modifier = modifier.height(cellHeight),
+                modifier = modifier.height(cellHeight).wrapContentWidth(),
             )
         } else {
             Spacer(Modifier.width(0.dp))
+        }
+    }
+}
+
+@Composable
+fun AnimatedAmount(
+    text: String, color: Color, fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.Bold,
+    animateChanges: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
+    LaunchedEffect(text.length) {
+        if (text.length > maxSlots.value) maxSlots.value = text.length
+    }
+
+    val currentText by rememberUpdatedState(text)
+    val currentAnimate by rememberUpdatedState(animateChanges)
+    var displayedText by remember { mutableStateOf(text) }
+
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            val target = currentText
+            if (displayedText == target) {
+                kotlinx.coroutines.delay(16)
+            } else if (!currentAnimate) {
+                displayedText = target
+                kotlinx.coroutines.delay(16)
+            } else {
+                if (target.length < displayedText.length || !target.startsWith(displayedText)) {
+                    displayedText = target
+                } else {
+                    displayedText += target[displayedText.length]
+                    kotlinx.coroutines.delay(60)
+                }
+            }
+        }
+    }
+    
+    // ★ 統一風格，套用無 Padding 修飾
+    val style = remember(fontSize, fontWeight) {
+        TextStyle(
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.Both
+            )
+        )
+    }
+
+    Row(
+        modifier = modifier.wrapContentWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start // ★ 零間距
+    ) {
+        for (i in 0 until maxSlots.value) {
+            val char = displayedText.getOrNull(i)
+            key(i) {
+                AnimatedContent(
+                    targetState = char,
+                    transitionSpec = {
+                        if (!currentAnimate) {
+                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                        } else {
+                            val initialDigit = initialState?.digitToIntOrNull() ?: -1
+                            val targetDigit = targetState?.digitToIntOrNull() ?: -1
+                            val goingUp = when {
+                                initialDigit >= 0 && targetDigit >= 0 -> targetDigit >= initialDigit
+                                else -> true 
+                            }
+                            when {
+                                targetState != null && initialState == null -> {
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
+                                     fadeIn(tween(200)) +
+                                     scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith fadeOut(tween(0))
+                                }
+                                targetState == null && initialState != null -> {
+                                    fadeIn(tween(0)) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
+                                     fadeOut(tween(180)) +
+                                     scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
+                                }
+                                goingUp -> {
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
+                                }
+                                else -> {
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { -it } + fadeIn(tween(220))) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it } + fadeOut(tween(220)))
+                                }
+                            }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
+                        }
+                    },
+                    label = "digit_$i"
+                ) { c ->
+                    if (c != null) {
+                        Text(
+                            text = c.toString(), color = color, style = style,
+                            maxLines = 1, softWrap = false,
+                            modifier = Modifier.wrapContentWidth()
+                        )
+                    } else {
+                        Spacer(Modifier.width(0.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DollarAmount(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.Bold,
+    showDollar: Boolean = true,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start // ★ 明確宣告靠齊，無額外空白
+    ) {
+        when {
+            !showDollar -> {
+                AnimatedAmount(
+                    text = text, color = color,
+                    fontSize = fontSize, fontWeight = fontWeight
+                )
+            }
+            text.startsWith("-") -> {
+                // 原生緊貼字距
+                Text("-$", color = color, fontSize = fontSize,
+                    fontWeight = fontWeight, maxLines = 1, softWrap = false)
+                AnimatedAmount(
+                    text = text.substring(1), color = color,
+                    fontSize = fontSize, fontWeight = fontWeight
+                )
+            }
+            else -> {
+                Text("$", color = color, fontSize = fontSize,
+                    fontWeight = fontWeight, maxLines = 1, softWrap = false)
+                AnimatedAmount(
+                    text = text, color = color,
+                    fontSize = fontSize, fontWeight = fontWeight
+                )
+            }
         }
     }
 }
