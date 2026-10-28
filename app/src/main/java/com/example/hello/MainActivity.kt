@@ -284,7 +284,6 @@ fun ensureNotificationChannels(context: Context) {
     if (Build.VERSION.SDK_INT < 26) return
     val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
     try {
-        // 清理所有舊版殘留嘅頻道
         val staleIds = listOf(
             "ledger_capture_confirm", "ledger_capture_confirm_v2",
             "ledger_capture_confirm_v3", "ledger_capture_confirm_v3_old",
@@ -302,12 +301,12 @@ fun ensureNotificationChannels(context: Context) {
         setShowBadge(false)
     }
     val confirm = NotificationChannel(
-        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH // 🟢 確保高優先級
+        CONFIRM_CHANNEL_ID, "消費確認 (強制橫幅)", NotificationManager.IMPORTANCE_HIGH
     ).apply {
         description = "檢測到消費通知時，強制橫幅彈出詢問"
         enableVibration(true)
         enableLights(true)
-        setBypassDnd(true) // 嘗試繞過勿擾模式
+        setBypassDnd(true)
     }
     nm.createNotificationChannel(quick)
     nm.createNotificationChannel(confirm)
@@ -411,13 +410,12 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
         val title = "檢測到消費：${captured.note} · HKD $amountStr"
 
         val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        
+
         val addIntent = buildLaunchIntentForMain(
             context, captured.note, captured.amount, captured.category, notifId
         )
         val addPi = PendingIntent.getActivity(context, notifId, addIntent, piFlags)
-        
-        // 🟢 加入 FullScreenIntent，強烈要求系統彈出橫幅/喚醒螢幕
+
         val fullScreenPi = PendingIntent.getActivity(context, notifId + 100, addIntent, piFlags)
 
         val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
@@ -435,11 +433,11 @@ fun showCaptureConfirmNotification(context: Context, captured: CapturedNotificat
                     .bigText("是否新增這筆記錄？\n\n📝 名稱：${captured.note}\n💰 金額：HKD $amountStr\n🏷 分類：${captured.category}")
             )
             .setContentIntent(addPi)
-            .setFullScreenIntent(fullScreenPi, true) // 🟢 霸道喚醒橫幅
+            .setFullScreenIntent(fullScreenPi, true)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_MAX) // 🟢 MAX 等級
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setCategory(NotificationCompat.CATEGORY_CALL) // 🟢 偽裝成來電級別中斷
+            .setCategory(NotificationCompat.CATEGORY_CALL)
             .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
             .setVibrate(longArrayOf(0, 300, 200, 300))
             .setTimeoutAfter(10 * 60 * 1000L)
@@ -767,22 +765,20 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val _deletingIds = MutableStateFlow<Set<String>>(emptySet())
     val deletingIds: StateFlow<Set<String>> = _deletingIds.asStateFlow()
 
-    // ★ 新增：比較頁快照源（只喺比較頁激活時先同步）
-    //   目標：其他頁面改動數據唔會打斷比較頁嘅背景快照，
-    //        只有切換返比較頁時先一次性刷新，觸發全套動畫。
+    // ★ 比較頁快照源（只喺比較頁激活時先同步，並且永遠過濾「還錢」分類）
     private val _compareSnapshotRecords = MutableStateFlow<List<Record>>(emptyList())
     private val _isComparePageActive = MutableStateFlow(false)
     @Volatile private var hasInitializedCompareSnapshot = false
 
     /** 進入比較頁時呼叫：將底層最新數據一次性推入快照，觸發比較頁動畫 */
-fun onComparePageEnter() {
-    _isComparePageActive.value = true
-    if (!_loading.value) {
-        // ★ 比較頁永遠過濾「還錢」
-        _compareSnapshotRecords.value = _records.value.filter { it.category != "還錢" }
-        hasInitializedCompareSnapshot = true
+    fun onComparePageEnter() {
+        _isComparePageActive.value = true
+        if (!_loading.value) {
+            // ★ 比較頁永遠過濾「還錢」分類
+            _compareSnapshotRecords.value = _records.value.filter { it.category != "還錢" }
+            hasInitializedCompareSnapshot = true
+        }
     }
-}
 
     /** 離開比較頁時呼叫：快照凍結，其他頁面改動唔會流入 */
     fun onComparePageExit() {
@@ -837,8 +833,7 @@ fun onComparePageEnter() {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
 
-    // ★ 改動：compareUiState 以「快照源」為數據基礎，而非 _records。
-    //   只有當 onComparePageEnter() 或比較頁內操作時，快照先會被更新。
+    // ★ compareUiState 以「快照源」為數據基礎
     val compareUiState: StateFlow<CompareUiState> = combine(
         _compareSnapshotRecords, _compareMonthA, _compareMonthB
     ) { records, a, b -> computeCompareUiState(records, a, b) }
@@ -862,22 +857,19 @@ fun onComparePageEnter() {
             withContext(Dispatchers.Default) { listenToFirestore() }
         }
 
-        // ★ 新增：快照同步邏輯
-//   規則 1：比較頁激活時 → 底層數據任何變化（頁內操作 / Firestore 推送）都同步到快照
-//   規則 2：比較頁未激活時 → 只有「首次 loading 完成」允許初始化一次快照
-//   規則 3：比較頁快照永遠過濾「還錢」分類
-viewModelScope.launch {
-    _records.collect { records ->
-        val shouldSync =
-            _isComparePageActive.value ||
-            (!hasInitializedCompareSnapshot && !_loading.value)
-        if (shouldSync) {
-            // ★ 比較頁永遠過濾「還錢」
-            _compareSnapshotRecords.value = records.filter { it.category != "還錢" }
-            hasInitializedCompareSnapshot = true
+        // ★ 快照同步邏輯 + 永遠過濾「還錢」
+        viewModelScope.launch {
+            _records.collect { records ->
+                val shouldSync =
+                    _isComparePageActive.value ||
+                    (!hasInitializedCompareSnapshot && !_loading.value)
+                if (shouldSync) {
+                    // ★ 比較頁永遠過濾「還錢」分類
+                    _compareSnapshotRecords.value = records.filter { it.category != "還錢" }
+                    hasInitializedCompareSnapshot = true
+                }
+            }
         }
-    }
-}
     }
 
     private fun buildSortedList(): List<Record> {
@@ -1199,7 +1191,7 @@ private fun computeLedgerUiState(
 private fun computeCompareUiState(records: List<Record>, monthA: String, monthB: String): CompareUiState {
     val categoryMonthSum = HashMap<String, HashMap<String, Double>>()
     for (r in records) {
-        // ★ 比較頁永遠排除「還錢」分類（雙重保險）
+        // ★ 比較頁永遠排除「還錢」分類（雙重保險，上游快照已過濾）
         if (r.category == "還錢") continue
         val inner = categoryMonthSum.getOrPut(r.category) { HashMap() }
         val key = getTimestampMeta(r.timestamp).monthKey
@@ -1344,21 +1336,17 @@ object CategoryMenuPositionProvider : PopupPositionProvider {
         popupContentSize: IntSize
     ): IntOffset {
         val margin = 8
-        // 水平居中于 anchor
         val targetX = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
         val x = targetX.coerceIn(
             margin,
             (windowSize.width - popupContentSize.width - margin).coerceAtLeast(margin)
         )
-        // 优先显示在 anchor 上方
         val yAbove = anchorBounds.top - popupContentSize.height - margin
         if (yAbove >= margin) return IntOffset(x, yAbove)
-        // 上方不够就显示在下方
         val yBelow = anchorBounds.bottom + margin
         if (yBelow + popupContentSize.height <= windowSize.height - margin) {
             return IntOffset(x, yBelow)
         }
-        // 都不够就贴边挤压
         val maxY = (windowSize.height - popupContentSize.height - margin).coerceAtLeast(margin)
         return IntOffset(x, yAbove.coerceIn(margin, maxY))
     }
@@ -1454,24 +1442,19 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     val mo = p[1].toIntOrNull() ?: return null
     val d = p[2].toIntOrNull() ?: return null
 
-    // 🟢 修復關鍵：必須【先】獲取 todayStart！
-    // 確保 getTodayStartMillis() 就算觸發咗 30 秒快取刷新並修改咗 threadLocalCal，
-    // 都唔會影響到下面設定好嘅目標日期。
     val todayStart = getTodayStartMillis()
 
-    // 設定目標 header 嘅時間
     val cal = threadLocalCal.get()!!.apply {
         set(y, mo - 1, d)
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
         set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
-    
-    val targetMillis = cal.timeInMillis // 獲取並鎖定目標時間
+
+    val targetMillis = cal.timeInMillis
     val dow = cal.get(Calendar.DAY_OF_WEEK)
     val weekdayChar = WEEKDAY_CHARS[dow - 1]
     val isWeekend = dow == Calendar.SUNDAY || dow == Calendar.SATURDAY
 
-    // 使用穩定嘅 targetMillis 計算差距
     val diff = ((todayStart - targetMillis) / 86_400_000L).toInt()
     val tag = when {
         diff == -1 -> "明日"
@@ -1781,7 +1764,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
-        
+
         // 🟢 處理來自 UPK 流体云嘅 DeepLink 指令
         val uri = intent.data
         if (uri != null && uri.scheme == "ledgerapp" && uri.host == "quickadd") {
@@ -1790,8 +1773,8 @@ class MainActivity : ComponentActivity() {
             keyboardPrefillCategory.value = uri.getQueryParameter("category")
             keyboardPrefillAmount.value = uri.getQueryParameter("amount")?.toDoubleOrNull()
             keyboardPrefillFluidCardId.value = uri.getQueryParameter("card_id")
-            intent.data = null // 清除 Data 防止重覆處理
-        } 
+            intent.data = null
+        }
         // 處理原生通知 / 磁貼啟動
         else if (intent.getBooleanExtra(EXTRA_OPEN_KEYBOARD, false)) {
             keyboardLaunchToken.value += 1
@@ -1799,11 +1782,11 @@ class MainActivity : ComponentActivity() {
             keyboardPrefillCategory.value = intent.getStringExtra(EXTRA_PREFILL_CATEGORY)
             keyboardPrefillAmount.value = if (intent.hasExtra(EXTRA_PREFILL_AMOUNT))
                 intent.getDoubleExtra(EXTRA_PREFILL_AMOUNT, 0.0) else null
-            
+
             if (intent.hasExtra(EXTRA_CANCEL_NOTIF_ID)) {
                 keyboardPrefillNotifId.value = intent.getIntExtra(EXTRA_CANCEL_NOTIF_ID, -1)
             }
-            
+
             intent.removeExtra(EXTRA_OPEN_KEYBOARD)
         }
     }
@@ -1855,16 +1838,16 @@ fun LightweightEntryApp(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    
+
     val ui by vm.ledgerUiState.collectAsState()
     val lastSavedCategory by vm.lastSavedCategory.collectAsState()
-    
+
     var keyboardState by remember {
         val cat = if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val cur = if (cat == "旅遊") "JPY" else "HKD"
         mutableStateOf(KeyboardState(category = cat, currency = cur, selectAmountOnInput = false))
     }
-    
+
     val appearProgress = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         appearProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 300f))
@@ -1881,17 +1864,17 @@ fun LightweightEntryApp(
             val rate = keyboardState.exchangeRateText.toDoubleOrNull() ?: 0.052
             inputAmt * rate
         } else inputAmt
-        
+
         val ts = keyboardState.timestamp
         val inherited = vm.latestIconForNote(keyboardState.noteText)
-        
+
         vm.updateLastSavedCategory(keyboardState.category)
         vm.addRecord(
             Record(amount = amt, note = keyboardState.noteText, category = keyboardState.category,
                    timestamp = ts, iconUrl = inherited)
         )
         Toast.makeText(context, "✅ 記帳成功", Toast.LENGTH_SHORT).show()
-        
+
         focusManager.clearFocus()
         onTransitionToMain(null)
     }
@@ -1911,11 +1894,11 @@ fun LightweightEntryApp(
                 Spacer(Modifier.height(4.dp))
                 Text("極速啟動模式", fontSize = 14.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
             }
-            
+
             Surface(
                 onClick = {
                     focusManager.clearFocus()
-                    onTransitionToMain(keyboardState) 
+                    onTransitionToMain(keyboardState)
                 },
                 shape = CircleShape,
                 color = BRAND_PRIMARY_LIGHT
@@ -1927,7 +1910,7 @@ fun LightweightEntryApp(
                 }
             }
         }
-        
+
         Column(
             Modifier.align(Alignment.BottomCenter)
                 .padding(bottom = 20.dp)
@@ -1936,7 +1919,7 @@ fun LightweightEntryApp(
                     translationY = (1f - appearProgress.value) * 150f
                 }
         ) {
-            
+
             if (ui.topNotes.isNotEmpty()) {
                 QuickInputSection(
                     topNotes = ui.topNotes,
@@ -1950,7 +1933,7 @@ fun LightweightEntryApp(
                         val cat = ui.noteCategoryMap[name] ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
                         val cur = if (cat == "旅遊") "JPY" else "HKD"
                         val amtText = amt?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: ""
-                        
+
                         keyboardState = keyboardState.copy(
                             noteText = name,
                             amountText = amtText,
@@ -1970,7 +1953,7 @@ fun LightweightEntryApp(
                 onDismiss = {
                     focusManager.clearFocus()
                     onTransitionToMain(null)
-                }, 
+                },
                 onConfirm = { performSave() },
                 onNext = { keyboardState = keyboardState.copy(editingNote = true) },
                 onPickCategory = { },
@@ -2050,7 +2033,7 @@ fun MainApp(
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     var uploading by remember { mutableStateOf(false) }
-    // ★ 新增：待確認圖片效果
+    // ★ 待確認圖片效果
     var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
     var showKeyboard by remember { mutableStateOf(false) }
 
@@ -2086,10 +2069,10 @@ fun MainApp(
         }
     }
 
-    // ★ 新增：比較頁快照 - 導航切換觸發
-    //   規則 1：切換到比較頁（currentPage == 1）→ onComparePageEnter() 一次性拉入最新數據觸發動畫
-    //   規則 2：離開比較頁 → onComparePageExit() 快照凍結
-    //   規則 3：比較頁內操作時 isComparePageActive == true → 內部實時同步（維持原即時動畫）
+    // ★ 比較頁快照 - 導航切換觸發
+    //   - 切換到比較頁（currentPage == 1）→ onComparePageEnter() 一次性拉入最新數據（自動過濾「還錢」）
+    //   - 離開比較頁 → onComparePageExit() 快照凍結
+    //   - 比較頁內操作時 isComparePageActive == true → 內部實時同步（維持原即時動畫）
     LaunchedEffect(currentPage) {
         if (currentPage == 1) vm.onComparePageEnter()
         else vm.onComparePageExit()
@@ -2134,7 +2117,7 @@ fun MainApp(
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
-    // ★ 改造：選圖後走 pendingImageUpload（彈效果選擇面板），不再直接上傳
+    // ★ 選圖後走 pendingImageUpload（彈效果選擇面板）
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
         if (uri != null && target != null) {
@@ -2152,7 +2135,7 @@ fun MainApp(
         iconTargetRecord = null
     }
 
-    // ★ 改造：拍照後走 pendingImageUpload
+    // ★ 拍照後走 pendingImageUpload
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val target = iconTargetRecord
         val uri = pendingCameraUri
@@ -2319,7 +2302,7 @@ fun MainApp(
                        timestamp = ts, iconUrl = inherited)
             ) { newId -> afterSaveHint = AfterSaveHint(newId, category, totalThisMonth) }
         }
-        
+
         dismissKeyboard()
         scrollToTopTrigger++
 
@@ -2330,7 +2313,7 @@ fun MainApp(
                 keyboardPrefillNotifId.value = null
             }
         }
-        
+
         keyboardPrefillFluidCardId.value?.let { cardId ->
             OppoFluidCloudBridge.dismissCard(context, cardId)
             keyboardPrefillFluidCardId.value = null
@@ -2833,7 +2816,7 @@ fun MainApp(
                                         val processed = removeBackground(original)
                                         Pair(original, processed)
                                     }
-                                    // ★ 改造：下載完 → 彈效果面板，不直接上傳
+                                    // ★ 下載完 → 彈效果面板，不直接上傳
                                     pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "下載失敗：${e.message ?: "未知錯誤"}",
@@ -2857,21 +2840,19 @@ fun MainApp(
         }
     }
 
-    // ★ 圖片效果選擇面板（Toast 風格置底、可交互、10 秒自動選去背圖）
+    // ★ 圖片效果選擇面板（Toast 風格置底、可交互）
     if (pendingImageUpload != null) {
         Box(Modifier.fillMaxSize().zIndex(200f)) {
-            // 半透明遮罩：阻止用戶點空白處關閉
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.35f))
-                    .pointerInput(Unit) { detectTapGestures { /* 故意吞掉，不關閉 */ } }
+                    .pointerInput(Unit) { detectTapGestures { } }
             )
             Box(Modifier.align(Alignment.BottomCenter)) {
                 ImageEffectSelectionPanel(
                     state = pendingImageUpload!!,
                     onSelect = { bitmap, forceCrop, isEnhanced ->
-                        // ★ 先檢查非 null，避免重複觸發 NPE
                         val current = pendingImageUpload
                         if (current != null) {
                             pendingImageUpload = null
@@ -3338,8 +3319,7 @@ fun NotificationAccessGuide(context: Context) {
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                         )
-                        // 🟢 開啟權限時，順便檢查潘塔納爾服務
-                        if (OppoFluidCloudBridge.isPantanalSupported(context) && 
+                        if (OppoFluidCloudBridge.isPantanalSupported(context) &&
                             !OppoFluidCloudBridge.hasPantanalPermission(context)) {
                             showPantanalHint = true
                         }
@@ -3424,7 +3404,7 @@ fun LedgerContent(
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
-    
+
     var isAutoAnimating by remember { mutableStateOf(false) }
 
     LaunchedEffect(filterMode) {
@@ -3435,7 +3415,7 @@ fun LedgerContent(
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (filterMode || topNotes.isEmpty() || isAutoAnimating) return Offset.Zero
-                
+
                 val delta = available.y
                 val next = (quickInputCollapseOffset - delta).coerceIn(0f, maxCollapsePx)
                 val consumed = quickInputCollapseOffset - next
@@ -3447,7 +3427,7 @@ fun LedgerContent(
 
     val isListScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
     val scope = rememberCoroutineScope()
-    
+
     LaunchedEffect(isListScrolling) {
         if (!isListScrolling && !isAutoAnimating && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
             try {
@@ -3477,7 +3457,6 @@ fun LedgerContent(
 
     LaunchedEffect(shouldPlayWeeklyIntro) {
         if (!shouldPlayWeeklyIntro || weeklyIntroTriggered) return@LaunchedEffect
-        // ★ 移除 delay(150)，立即開始；820ms → 350ms，與 AnimatedContent 同步
         weeklyIntroTriggered = true
         if (!listState.isScrollInProgress) {
             weeklyIntroProgress.snapTo(0f)
@@ -3599,8 +3578,6 @@ fun LedgerContent(
 
     LaunchedEffect(filterMode) {
         try {
-            // ★ 移除 delay(420) 與強制 scrollToItem(0)：不再打斷 SizeTransform 的平滑過渡
-            //   僅當用戶滾得很深（> 20 items）時才平滑回頂，避免篩選欄被遮住
             if (listState.firstVisibleItemIndex > 20) {
                 listState.animateScrollToItem(0)
             }
@@ -3626,7 +3603,7 @@ fun LedgerContent(
     val activeFanId = activeFanRecord?.id
 
     data class DayStat(val income: Double, val expense: Double, val isGroupDeleting: Boolean)
-    
+
     val dayStats: Map<String, DayStat> = remember(displayGroups, deletingIds) {
         displayGroups.associate { (dateKey, records) ->
             var inc = 0.0
@@ -3636,7 +3613,7 @@ fun LedgerContent(
                     if (r.category == INCOME_CATEGORY) {
                         inc += r.amount
                     } else if (r.category != "還錢") {
-                        exp += r.amount 
+                        exp += r.amount
                     }
                 }
             }
@@ -3771,7 +3748,7 @@ fun LedgerContent(
                         filteredCount = if (filterMode) filtered.size else null,
                         showCategory = showCategoryChip, categoryName = cachedCategory,
                         avgExpense = avgExpense,
-                        animateValues = animateTopStats   // ★ 新增
+                        animateValues = animateTopStats
                     )
                 }
                 IconButton(onClick = { onShowFutureChange(!showFuture) }) {
@@ -3787,8 +3764,6 @@ fun LedgerContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
-                    // ★ 恢復 SizeTransform：柔和 spring 驅動高度平滑過渡
-                    //   LazyColumn 平滑重排，stickyHeader 跟隨內容平滑移動，不閃動
                     if (targetState) {
                         (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeIn(tween(300))) togetherWith
                         (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeOut(tween(250)))
@@ -3887,7 +3862,7 @@ fun LedgerContent(
                     .weight(1f)
                     .fillMaxWidth()
                     .clipToBounds()
-                    .nestedScroll(quickInputScrollConnection) 
+                    .nestedScroll(quickInputScrollConnection)
                     .graphicsLayer {
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
@@ -3912,8 +3887,6 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // ★ 移除 if (!filterMode)：chart item 始終存在
-                        //   收起動畫由 filterChartCollapse 驅動 item 高度，不瞬間消失
                         if (weeklyExpenses.isNotEmpty()) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
                                 WeeklyExpenseChart(
@@ -3982,7 +3955,7 @@ fun TopStats(
     isFilterMode: Boolean = false, filteredCount: Int? = null,
     showCategory: Boolean = false, categoryName: String = "",
     avgExpense: Double? = null,
-    animateValues: Boolean = false   // ★ 新增
+    animateValues: Boolean = false
 ) {
     val balance = income - expense
     val showIncome = hasIncome || (!hasIncome && !hasExpense)
@@ -3995,19 +3968,17 @@ fun TopStats(
     val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, showBal, isFilterMode) {
         val list = mutableListOf<StatBlockType>()
         if (isFilterMode) {
-            // 🟢 篩選模式：將「筆數」同「類別」放埋一齊；「支出」同「均支」放埋一齊
             if (showCategory) list.add(StatBlockType.CAT)
-            if (showBal) list.add(StatBlockType.BAL) // 筆數提早上嚟
+            if (showBal) list.add(StatBlockType.BAL)
             if (showIncome) list.add(StatBlockType.INC)
             if (showExpense) list.add(StatBlockType.EXP)
             if (showAvg) list.add(StatBlockType.AVG)
         } else {
-            // 🟢 正常模式：傳統排序
             if (showCategory) list.add(StatBlockType.CAT)
             if (showIncome) list.add(StatBlockType.INC)
             if (showExpense) list.add(StatBlockType.EXP)
             if (showAvg) list.add(StatBlockType.AVG)
-            if (showBal) list.add(StatBlockType.BAL) // 餘額喺最後
+            if (showBal) list.add(StatBlockType.BAL)
         }
         list
     }
@@ -4027,11 +3998,11 @@ fun TopStats(
                 1 -> listOf(activeBlocks)
                 2 -> listOf(activeBlocks)
                 3 -> listOf(activeBlocks)
-                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2)) // 4個時：完美 2x2
-                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3)) // 5個時：上3 下2
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
                 else -> emptyList()
             }
-            
+
             rows.forEachIndexed { rIdx, row ->
                 val itemsInRow = row.size
                 val w = (totalW - gapX * (itemsInRow - 1).coerceAtLeast(0)) / itemsInRow
@@ -4050,14 +4021,14 @@ fun TopStats(
 
         // 畫布區域
         Box(Modifier.fillMaxWidth().height(animHeight)) {
-            
+
             // 類別 (Category)
             StatBlockItem(
                 type = StatBlockType.CAT, isActive = activeBlocks.contains(StatBlockType.CAT),
                 geoMap = geoMap, rowH = rowH
             ) {
                 val catStyle = CATEGORY_STYLES[categoryName]
-                                AnimatedStatBlock(
+                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = catStyle?.icon ?: Icons.Default.Category,
                     iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
@@ -4065,7 +4036,7 @@ fun TopStats(
                     valueNormal = categoryName, valueFilter = categoryName,
                     valueColorNormal = TEXT_PRIMARY,
                     showDollarNormal = false, showDollarFilter = false,
-                    animateValues = animateValues,   // ★
+                    animateValues = animateValues,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4075,13 +4046,13 @@ fun TopStats(
                 type = StatBlockType.INC, isActive = activeBlocks.contains(StatBlockType.INC),
                 geoMap = geoMap, rowH = rowH
             ) {
-                                AnimatedStatBlock(
+                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME,
                     labelNormal = "收入", labelFilter = "收入",
                     valueNormal = formatAmountNoDecimal(income), valueFilter = formatAmountNoDecimal(income),
                     valueColorNormal = COLOR_INCOME,
-                    animateValues = animateValues,   // ★
+                    animateValues = animateValues,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4091,13 +4062,13 @@ fun TopStats(
                 type = StatBlockType.EXP, isActive = activeBlocks.contains(StatBlockType.EXP),
                 geoMap = geoMap, rowH = rowH
             ) {
-                                AnimatedStatBlock(
+                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE,
                     labelNormal = "支出", labelFilter = "支出",
                     valueNormal = formatAmountNoDecimal(expense), valueFilter = formatAmountNoDecimal(expense),
                     valueColorNormal = COLOR_EXPENSE,
-                    animateValues = animateValues,   // ★
+                    animateValues = animateValues,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4107,13 +4078,13 @@ fun TopStats(
                 type = StatBlockType.AVG, isActive = activeBlocks.contains(StatBlockType.AVG),
                 geoMap = geoMap, rowH = rowH
             ) {
-                                                AnimatedStatBlock(
+                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B),
                     labelNormal = "均支", labelFilter = "均支",
                     valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueFilter = formatAmountNoDecimal(avgExpense ?: 0.0),
                     valueColorNormal = Color(0xFFF59E0B),
-                    animateValues = animateValues,   // ★
+                    animateValues = animateValues,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4123,7 +4094,7 @@ fun TopStats(
                 type = StatBlockType.BAL, isActive = activeBlocks.contains(StatBlockType.BAL),
                 geoMap = geoMap, rowH = rowH
             ) {
-                                AnimatedStatBlock(
+                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.AccountBalanceWallet, iconFilter = Icons.Default.FilterList,
                     iconColorNormal = targetBalColor, iconColorFilter = BRAND_PRIMARY,
@@ -4131,7 +4102,7 @@ fun TopStats(
                     valueNormal = formatAmountNoDecimal(balance), valueFilter = "${filteredCount ?: 0} 筆",
                     valueColorNormal = targetBalColor, valueColorFilter = BRAND_PRIMARY,
                     showDollarNormal = true, showDollarFilter = false,
-                    animateValues = animateValues,   // ★
+                    animateValues = animateValues,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4183,7 +4154,7 @@ private fun StatBlockItem(
     }
 }
 
-// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局 
+// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局
 @Composable
 private fun AnimatedStatBlock(
     isFilterMode: Boolean,
@@ -4199,7 +4170,7 @@ private fun AnimatedStatBlock(
     valueColorFilter: Color = valueColorNormal,
     showDollarNormal: Boolean = true,
     showDollarFilter: Boolean = true,
-    animateValues: Boolean = false,   // ★ 新增
+    animateValues: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val progress by animateFloatAsState(
@@ -4207,16 +4178,15 @@ private fun AnimatedStatBlock(
         animationSpec = MASTER_SPRING_FLOAT,
         label = "statBlockAnim"
     )
-    
+
     val currentIconColor = androidx.compose.ui.graphics.lerp(iconColorNormal, iconColorFilter, progress)
     val currentValueColor = androidx.compose.ui.graphics.lerp(valueColorNormal, valueColorFilter, progress)
-    // 🟢 標籤顏色由淺灰(Normal) 過渡到深黑(FilterMode)
     val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, progress)
-    
+
     val targetValueText = if (isFilterMode) valueFilter else valueNormal
     val targetShowDollar = if (isFilterMode) showDollarFilter else showDollarNormal
     val targetIcon = if (isFilterMode) iconFilter else iconNormal
-    
+
     val finalValueString = if (targetShowDollar) {
         if (targetValueText.startsWith("-")) "-$" + targetValueText.substring(1) else "$" + targetValueText
     } else targetValueText
@@ -4227,22 +4197,20 @@ private fun AnimatedStatBlock(
             Crossfade(targetState = targetIcon, label = "icon", animationSpec = tween(200)) { ico ->
                 Icon(ico, null, tint = currentIconColor, modifier = Modifier.size((16f - 1f * progress).dp))
             }
-            
+
             // [1] 標籤
             val currentLabel = if (isFilterMode && labelFilter.isEmpty()) labelNormal else if (isFilterMode) labelFilter else labelNormal
             val labelAlpha = if (isFilterMode && labelFilter.isEmpty()) (1f - progress * 2.5f).coerceIn(0f, 1f) else 1f
             Text(
                 text = currentLabel,
-                // 🟢 字體大小同步！由 11sp 放大至 15sp，同數值字體一樣大
-                fontSize = (11f + 4f * progress).sp, 
+                fontSize = (11f + 4f * progress).sp,
                 color = currentLabelColor.copy(alpha = labelAlpha),
-                // 🟢 粗度加強，更清晰醒目
                 fontWeight = if (progress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false
             )
-            
-                        // [2] 數值（★ 逐位獨立滾動，僅變動位動畫）
+
+            // [2] 數值（★ 逐位獨立滾動，僅變動位動畫）
             RollingNumber(
                 text = finalValueString,
                 color = currentValueColor,
@@ -4256,46 +4224,44 @@ private fun AnimatedStatBlock(
         val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
         val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
         val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        
+
         layout(constraints.maxWidth, constraints.maxHeight) {
             fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
-            
+
             val titleGapNormal = 4.dp.roundToPx()
             val gap1 = 4.dp.roundToPx()
             val gap2 = 5.dp.roundToPx()
-            
+
             // 📍 正常模式 (上下排列)
             val topRowWNormal = iconP.width + titleGapNormal + labelP.width
             val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
-            
-            // 🟢 修正：計算 Icon 同 Label 嘅最高點，做絕對垂直居中，保證平排！
+
             val topRowHNormal = maxOf(iconP.height, labelP.height)
             val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
-            
+
             val iconXNormal = topRowXNormal
             val labelXNormal = iconXNormal + iconP.width + titleGapNormal
-            
-            // 確保 Icon 同文字喺同一條基準線上
+
             val iconYNormal = topRowYNormal + (topRowHNormal - iconP.height) / 2
             val labelYNormal = topRowYNormal + (topRowHNormal - labelP.height) / 2
-            
+
             val valueXNormal = (constraints.maxWidth - valueP.width) / 2
             val valueYNormal = (constraints.maxHeight / 2) + 1.dp.roundToPx()
-            
+
             // 📍 篩選模式 (左右平排)
             val effectiveLabelW = if (labelFilter.isEmpty()) 0 else labelP.width
             val effectiveGap1 = if (effectiveLabelW > 0) gap1 else 0
             val totalWFilter = iconP.width + effectiveGap1 + effectiveLabelW + gap2 + valueP.width
             val startXFilter = (constraints.maxWidth - totalWFilter) / 2
-            
+
             val iconXFilter = startXFilter
             val labelXFilter = iconXFilter + iconP.width + effectiveGap1
             val valueXFilter = startXFilter + totalWFilter - valueP.width
-            
+
             val iconYFilter = (constraints.maxHeight - iconP.height) / 2
             val labelYFilter = (constraints.maxHeight - labelP.height) / 2
             val valueYFilter = (constraints.maxHeight - valueP.height) / 2
-            
+
             // ✨ 平滑過渡坐標
             iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(iconYNormal, iconYFilter, progress))
             labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(labelYNormal, labelYFilter, progress))
@@ -4309,7 +4275,7 @@ fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
     listState: LazyListState,
     introProgress: Float,
-    filterCollapseProgress: Float = 0f,   // ★ 新增：filter 切換收起進度 (0 = 完全展開, 1 = 完全收起)
+    filterCollapseProgress: Float = 0f,
     modifier: Modifier = Modifier,
 ) {
     val chartHeight = 178.dp
@@ -4320,7 +4286,6 @@ fun WeeklyExpenseChart(
     val labelRowHeight = 20.dp
 
     val density = LocalDensity.current
-    // ★ 提升到頂層，供滾動內容與明細 overlay 共用
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
     // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
@@ -4348,7 +4313,6 @@ fun WeeklyExpenseChart(
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
     if (maxBoxHeightPx <= 0.5f) {
-        // 完全收起：item 高度 0，LazyColumn 裡下面的 stickyHeader 已平滑移動到位
         Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
         return
     }
@@ -4356,12 +4320,10 @@ fun WeeklyExpenseChart(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(maxBoxHeightDp)             // ★ 外層高度隨 filter 收起而變矮（連續插值）
+            .height(maxBoxHeightDp)
             .padding(horizontal = horizontalPadding)
     ) {
         if (visibleHeightPx > 0.5f) {
-            // 卡片主動變矮，底部對齊；四角圓角由 .clip() 全程繪製
-            // filter 收起時效果跟手動滾動完全一致（clip 裁切頂部）
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -4397,7 +4359,7 @@ fun WeeklyExpenseChart(
                         )
                     }
                     Spacer(Modifier.height(titleGap))
-                    // ── 柱體（文字不縮放，柱高靠卡片 clip 裁切呈現「變矮」）
+                    // ── 柱體
                     Row(
                         Modifier.fillMaxWidth().weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -4412,7 +4374,7 @@ fun WeeklyExpenseChart(
                             )
                         }
                     }
-                    // ── 日期行（文字完整顯示，min 20dp + lineHeight 14sp + 無 font padding）
+                    // ── 日期行
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
                         verticalAlignment = Alignment.CenterVertically
@@ -4455,7 +4417,6 @@ fun WeeklyExpenseBar(
     val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
     val hasAmount = day.amount > 0.0
 
-    // 顶部圆角大、底部圆角小，视觉上像从底部“长出来”
     val barShape = RoundedCornerShape(
         topStart = 6.dp, topEnd = 6.dp,
         bottomStart = 2.dp, bottomEnd = 2.dp
@@ -4476,7 +4437,6 @@ fun WeeklyExpenseBar(
                 (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
             } else 0.dp
 
-            // 浅色轨道底，统一颜色
             Box(
                 modifier = Modifier
                     .width(22.dp)
@@ -4485,7 +4445,6 @@ fun WeeklyExpenseBar(
                     .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
             )
 
-            // 前景柱子
             if (barHeight > 0.dp) {
                 Box(
                     modifier = Modifier
@@ -5561,7 +5520,7 @@ fun LedgerKeyboardPanel(
                                                     val s = CATEGORY_STYLES[cat]
                                                     val sel = cat == state.category
                                                     val chipShape = RoundedCornerShape(12.dp)
-                                                    
+
                                                     Row(
                                                         Modifier
                                                             .weight(1f)
@@ -5881,10 +5840,10 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
             IconView(iconUrl, name, size = 18.dp)
             Spacer(Modifier.width(6.dp))
             Text(
-                text = name, 
-                fontSize = 13.sp, 
+                text = name,
+                fontSize = 13.sp,
                 color = TEXT_PRIMARY,
-                fontWeight = FontWeight.Medium, 
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false)
@@ -5942,9 +5901,9 @@ fun QuickInputSection(
                     val textW = noteTextWidthCache.getOrPut(name) {
                         textMeasurer.measure(name, textStyle).size.width.toFloat()
                     }
-                    
+
                     val itemPx = (baseItemPx + textW).coerceAtMost(contentWidthPx)
-                    
+
                     val needed = if (currentRow.isEmpty()) itemPx else currentRowWidth + gapPx + itemPx
                     if (currentRow.isNotEmpty() && needed > contentWidthPx) {
                         intrinsicRows.add(currentRow)
@@ -6208,6 +6167,7 @@ fun CalendarRow(
         }
     }
 }
+
 @Immutable
 private data class DayCellSummary(
     val net: Double, val absNet: Double, val compactNet: String,
@@ -6277,7 +6237,6 @@ fun CalendarDayCell(
 
     Box(
         Modifier.fillMaxSize()
-            // ★ 只保留「選中」縮放，移除 visibilityScale 相關的縮放和 alpha
             .graphicsLayer {
                 scaleX = selectionScale
                 scaleY = selectionScale
@@ -6412,11 +6371,15 @@ fun CalendarContent(
     var topBarHeightPx by remember { mutableStateOf(0f) }
     var weekdayHeaderHeightPx by remember { mutableStateOf(0f) }
 
-    // Fan menu 狀態（保留原樣）
+    // ★ density + cellWidth 提升到頂層（避免「重複聲明」與「作用域」編譯錯誤）
+    val density = LocalDensity.current
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+    val cellWidth = (screenWidthDp - 20.dp) / 7
+
+    // Fan menu 狀態
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
     val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
-    val density = LocalDensity.current
 
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
@@ -6507,7 +6470,6 @@ fun CalendarContent(
 
     var topBarHeight by remember { mutableStateOf(56.dp) }
 
-    // 切換月份時重置
     LaunchedEffect(currentMonthKey) {
         autoScrollJob?.cancel()
         autoScrollJob = null
@@ -6520,13 +6482,12 @@ fun CalendarContent(
         try { scrollState.scrollTo(0) } catch (_: Exception) {}
     }
 
-    // 打開新日期時重置明細內滾動
     LaunchedEffect(selectedDay) {
         try { detailScrollState.scrollTo(0) } catch (_: Exception) {}
     }
 
     // ★ 點擊日期格 → 強制平滑滾動到 Header 正下方
-    //   智能等待：先等 rowRootY 有值，再等 Chips 让位動畫結束（rowRootY 穩定），再執行滾動
+    //   智能等待：先等 rowRootY 有值，再等 Chips 讓位動畫結束（rowRootY 穩定），再執行滾動
     LaunchedEffect(selectedDay, selectedRowIdx) {
         val rowIdx = selectedRowIdx ?: return@LaunchedEffect
         if (selectedDay == null) return@LaunchedEffect
@@ -6536,15 +6497,13 @@ fun CalendarContent(
             try {
                 withFrameNanos { }
 
-                // 等 row 有 Y 值
                 var attempts = 0
                 while (rowRootYMap[rowIdx] == null && attempts < 10) {
                     withFrameNanos { }
                     attempts++
                 }
 
-                // ★ 等 rowRootY 穩定（Chips 让位動畫過程中位置會持續變化）
-                //   連續 3 幀變化 < 0.5px 視為穩定
+                // 等 rowRootY 穩定（Chips 讓位動畫過程中位置會持續變化）
                 var lastY = -1f
                 var stableFrames = 0
                 var waitFrames = 0
@@ -6576,9 +6535,11 @@ fun CalendarContent(
                     targetValue = targetScroll.toFloat(),
                     animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
                 ) {
-                    val current = scrollState.value.toFloat()
+                    // ★ Animatable.animateTo 的 block 簽名係 `Animatable<T, V>.() -> Unit`，
+                    //   唔係 suspend，所以改用 dispatchRawDelta 實現每 frame 動態 clamp 到最新 maxValue
+                    val currentScroll = scrollState.value.toFloat()
                     val desired = this.value.coerceIn(0f, scrollState.maxValue.toFloat())
-                    val delta = desired - current
+                    val delta = desired - currentScroll
                     if (delta != 0f) scrollState.dispatchRawDelta(delta)
                 }
             } catch (_: Exception) {}
@@ -6594,11 +6555,9 @@ fun CalendarContent(
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
 
-        // 用 BoxWithConstraints 取整個 CalendarContent 高度，計算 FAB 頂邊
-        val screenHeightPx = with(LocalDensity.current) { maxHeight.toPx() }
-        // FAB 高度 56dp + bottom padding (NAV_HEIGHT + NAV_BOTTOM_PADDING + 12dp)
+        val screenHeightPx = with(density) { maxHeight.toPx() }
         // FAB 頂邊（root Y）= screenHeight - (56 + NAV_HEIGHT + NAV_BOTTOM_PADDING + 12) dp
-        val fabTopInRootPx = screenHeightPx - with(LocalDensity.current) {
+        val fabTopInRootPx = screenHeightPx - with(density) {
             (56.dp + NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp).toPx()
         }
 
@@ -6731,6 +6690,7 @@ fun CalendarContent(
                         }
                     }
 
+                    // ── 月曆格
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -6794,14 +6754,13 @@ fun CalendarContent(
                     val contentTopInRoot = topBarHeightPx + weekdayHeaderHeightPx
 
                     if (rowRootY != null && rowHeight != null && contentTopInRoot > 0f) {
-                        // 相對於 Box(weight 1f) 頂部嘅坐標
                         val detailTopInBox = (rowRootY + rowHeight - contentTopInRoot)
                             .coerceAtLeast(0f)
                         val detailBottomInBox = (fabTopInRootPx - contentTopInRoot)
                             .coerceAtLeast(0f)
                         val detailHeightPx = (detailBottomInBox - detailTopInBox)
                             .coerceAtLeast(0f)
-                        val detailHeightDp = with(LocalDensity.current) { detailHeightPx.toDp() }
+                        val detailHeightDp = with(density) { detailHeightPx.toDp() }
 
                         if (detailHeightPx > 40f) {
                             Box(
@@ -6811,7 +6770,6 @@ fun CalendarContent(
                                     .height(detailHeightDp)
                             ) {
                                 Column(Modifier.fillMaxSize()) {
-                                    // 三角 pointer
                                     TrianglePointer(
                                         colIndex = cachedSelectedCol,
                                         cellWidth = cellWidth,
@@ -6819,7 +6777,6 @@ fun CalendarContent(
                                     )
                                     Spacer(Modifier.height(4.dp))
 
-                                    // 明細內容區（可獨立內滾動）
                                     Box(
                                         Modifier
                                             .fillMaxWidth()
@@ -6952,7 +6909,7 @@ fun CalendarContent(
                 }
             }
 
-            // 智能遮罩
+            // 智能遮罩：只要 scroll 離開頂就淡入
             val showMask = scrollState.value > 0
             val maskAlpha by animateFloatAsState(
                 targetValue = if (showMask) 1f else 0f,
@@ -7142,7 +7099,7 @@ fun MiniHistogram(
     }
 }
 
-// ★ 改動：CompareValueCell 支援 animateValues（逐位滾動），金額對齊右邊
+// ★ CompareValueCell 支援 animateValues（逐位滾動），金額對齊右邊
 @Composable
 fun CompareValueCell(
     amount: Double,
@@ -7166,7 +7123,6 @@ fun CompareValueCell(
     }
 
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        // ★ 改動：Box 右對齊包裹，內容改用 AnimatedAmount 逐位滾動
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             AnimatedAmount(
                 text = amtDisplay,
@@ -7196,9 +7152,7 @@ fun CompareContent(
     onMonthBChange: (String) -> Unit,
     onAddClick: () -> Unit,
 ) {
-    // ★ 新增：數字滾動開關（冷啟動 / 首次載入不播，800ms 後才開）
-    //   比較頁快照式數據：切回比較頁時 compareUi 會整體刷新，
-    //   animateValues 已為 true 就會自然觸發逐位滾動 + 列表移動動畫
+    // ★ 數字滾動開關（冷啟動 / 首次載入不播，800ms 後才開）
     var animateValues by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(800)
@@ -7342,7 +7296,6 @@ fun CompareContent(
                                                     }
                                                 }
 
-                                                // ★ 傳入 animateValues
                                                 CompareValueCell(
                                                     amount = amtA, isIncome = isIncome, pct = pctA,
                                                     animateValues = animateValues,
@@ -7777,14 +7730,12 @@ fun ImageEffectSelectionPanel(
     var showCropDialog by remember { mutableStateOf(false) }
     var dismissed by remember { mutableStateOf(false) }
 
-    // 預先計算：簡單去白底（第 2 格）
     val whiteRemovedBitmap by produceState<Bitmap?>(initialValue = null, key1 = state.originalBitmap) {
         value = withContext(Dispatchers.Default) {
             removeWhiteBackgroundSimple(state.originalBitmap)
         }
     }
 
-    // ★ 新增：預先計算「強化去背 + 緊裁」（第 4 格）
     val tightCroppedEnhancedBitmap by produceState<Bitmap?>(
         initialValue = null,
         key1 = state.processedBitmap
@@ -8409,7 +8360,7 @@ fun RollingDigit(
 
         val currentDigit = (baseDigit + progressInt) % 10
         val nextDigit = (baseDigit + progressInt + 1) % 10
-        
+
         val isAnimating = progressFrac > 0f
 
         Box(
@@ -8492,7 +8443,7 @@ fun AnimatedAmount(
             }
         }
     }
-    
+
     val style = remember(fontSize, fontWeight) {
         TextStyle(
             fontSize = fontSize,
@@ -8523,7 +8474,7 @@ fun AnimatedAmount(
                             val targetDigit = targetState?.digitToIntOrNull() ?: -1
                             val goingUp = when {
                                 initialDigit >= 0 && targetDigit >= 0 -> targetDigit >= initialDigit
-                                else -> true 
+                                else -> true
                             }
                             when {
                                 targetState != null && initialState == null -> {
