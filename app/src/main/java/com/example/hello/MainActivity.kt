@@ -6401,13 +6401,19 @@ fun CalendarContent(
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
 
     val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    var autoScrollJob by remember { mutableStateOf<Job?>(null) }
 
-    // Fan menu 狀態（保留不變）
+    // ★ 用於精確計算 scroll 目標：記錄每個 row 喺 root 嘅 Y、以及兩個固定高度
+    val rowRootYMap = remember { mutableStateMapOf<Int, Float>() }
+    var topBarHeightPx by remember { mutableStateOf(0f) }
+    var weekdayHeaderHeightPx by remember { mutableStateOf(0f) }
+
+    // Fan menu 狀態（保留原樣）
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
     val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
 
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
@@ -6499,10 +6505,13 @@ fun CalendarContent(
     var topBarHeight by remember { mutableStateOf(56.dp) }
 
     LaunchedEffect(currentMonthKey) {
+        autoScrollJob?.cancel()
+        autoScrollJob = null
         selectedDay = null
         selectedRowIdx = null
         selectedColIdx = null
         detailExpandedId = null
+        try { scrollState.scrollTo(0) } catch (_: Exception) {}
     }
 
     BackHandler(enabled = selectedDay != null) {
@@ -6514,189 +6523,252 @@ fun CalendarContent(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
 
-        // =====================================================
-        // 主滾動區：chips + stats + 星期標題 + 月曆格 + 詳情
-        // 全部喺同一個 verticalScroll 裡面 → 天然跟手
-        // 頂部被 TopBar 自然遮蓋（scroll 出去），格子尺寸永遠固定
-        // =====================================================
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(top = topBarHeight)
         ) {
-            Column(
+            // ★ 固定星期 Header（永久置頂，跟月曆列對齊）
+            //   結構：外層 10dp 對齊月曆格外 padding；內層 3dp + spacing 6dp 對齊 CalendarRow
+            Box(
                 Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
+                    .fillMaxWidth()
+                    .background(SURFACE_BG)
+                    .onSizeChanged { weekdayHeaderHeightPx = it.height.toFloat() }
             ) {
-                // ── chips + stats（原尺寸，跟 scroll 走）
-                Column(
-                    modifier = Modifier
+                Row(
+                    Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
+                        .padding(horizontal = 13.dp)
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Spacer(Modifier.height(24.dp))
-
-                    val allCategories: List<String?> = remember(visibleCategories) {
-                        listOf(null) + visibleCategories
+                    CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            Text(
+                                w, fontSize = 12.sp, color = Color.Black,
+                                fontWeight = FontWeight.SemiBold,
+                                style = TextStyle(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                )
+                            )
+                        }
                     }
-                    val rows = remember(allCategories) { allCategories.chunked(4) }
-                    Column(Modifier.fillMaxWidth().animateContentSize()) {
-                        rows.forEach { row ->
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                row.forEach { cat ->
-                                    CalendarFilterChip(
-                                        modifier = Modifier.weight(1f),
-                                        selected = filterCategory == cat,
-                                        label = cat ?: "全部",
-                                        onClick = {
-                                            onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                }
+            }
+
+            // ★ 可滾動區（星期 Header 下方）：chips + stats + 月曆格 + 明細
+            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            // 手動拖動／按下即打斷自動滾動
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val e = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
+                                        autoScrollJob?.cancel()
+                                        autoScrollJob = null
+                                    }
+                                }
+                            }
+                        }
+                        .verticalScroll(scrollState)
+                ) {
+                    // ── chips + stats
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                    ) {
+                        Spacer(Modifier.height(8.dp))
+
+                        val allCategories: List<String?> = remember(visibleCategories) {
+                            listOf(null) + visibleCategories
+                        }
+                        val rows = remember(allCategories) { allCategories.chunked(4) }
+                        Column(Modifier.fillMaxWidth().animateContentSize()) {
+                            rows.forEach { row ->
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    row.forEach { cat ->
+                                        CalendarFilterChip(
+                                            modifier = Modifier.weight(1f),
+                                            selected = filterCategory == cat,
+                                            label = cat ?: "全部",
+                                            onClick = {
+                                                onFilterCategoryChange(if (filterCategory == cat) null else cat)
+                                            }
+                                        )
+                                    }
+                                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AnimatedInfoChip(
+                                label = "總計",
+                                valueText = "$${formatAmountNoDecimal(totalNet)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp,
+                                valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                            )
+                            AnimatedInfoChip(
+                                label = "平均每項",
+                                valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp
+                            )
+                            AnimatedInfoChip(
+                                label = "日均支出",
+                                valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    // ── 月曆格 + 明細
+                    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
+                    val cellWidth = (screenWidthDp - 20.dp) / 7
+
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                            .padding(top = 2.dp)
+                            .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
+                    ) {
+                        val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
+                        val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
+
+                        for (rowIdx in 0 until totalRows) {
+                            val isThisRowSelected = selectedRowIdx == rowIdx
+
+                            Column(Modifier.fillMaxWidth()) {
+                                Box(
+                                    Modifier.onGloballyPositioned { coords ->
+                                        rowRootYMap[rowIdx] = coords.positionInRoot().y
+                                    }
+                                ) {
+                                    CalendarRow(
+                                        rowIdx = rowIdx,
+                                        firstDayOffset = firstDayOffset,
+                                        daysInMonth = daysInMonth,
+                                        today = today,
+                                        isCurrentMonth = isCurrentMonth,
+                                        recordsByDay = recordsByDay,
+                                        displayMode = displayMode,
+                                        maxAbsNet = maxAbsNet,
+                                        selectedDay = if (isThisRowSelected) selectedDay else null,
+                                        selectedCol = if (isThisRowSelected) selectedColIdx else null,
+                                        animateValues = animateValues,
+                                        onCellClick = { day, col ->
+                                            val wasAlreadySelected = selectedDay == day
+
+                                            if (wasAlreadySelected) {
+                                                selectedDay = null
+                                                selectedRowIdx = null
+                                                selectedColIdx = null
+                                                detailExpandedId = null
+                                            } else {
+                                                selectedDay = day
+                                                selectedRowIdx = rowIdx
+                                                selectedColIdx = col
+                                                cachedSelectedDay = day
+                                                cachedSelectedCol = col
+                                                cachedSelectedRowIdx = rowIdx
+                                                detailExpandedId = null
+
+                                                // ★ 自動滾動：將此 row 停靠到固定星期 Header 正下方
+                                                val rowRootY = rowRootYMap[rowIdx]
+                                                val contentTopInRoot = topBarHeightPx + weekdayHeaderHeightPx
+                                                if (rowRootY != null && contentTopInRoot > 0f) {
+                                                    // scroll 內容頂部 = 星期 Header 底邊（root Y）
+                                                    // row 喺 scroll 內容中嘅視覺 Y = rowRootY - contentTopInRoot
+                                                    val visualOffset = rowRootY - contentTopInRoot
+                                                    val targetScroll =
+                                                        (scrollState.value + visualOffset).roundToInt()
+
+                                                    if (abs(targetScroll - scrollState.value) > 4) {
+                                                        autoScrollJob?.cancel()
+                                                        autoScrollJob = scope.launch {
+                                                            try {
+                                                                scrollState.animateScrollTo(
+                                                                    value = targetScroll,
+                                                                    animationSpec = spring(
+                                                                        dampingRatio = 0.85f,
+                                                                        stiffness = 300f
+                                                                    )
+                                                                )
+                                                            } catch (_: Exception) {}
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     )
                                 }
-                                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
-                            }
-                            Spacer(Modifier.height(6.dp))
-                        }
-                    }
 
-                    Spacer(Modifier.height(4.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(
-                            label = "總計",
-                            valueText = "$${formatAmountNoDecimal(totalNet)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp,
-                            valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
-                        )
-                        AnimatedInfoChip(
-                            label = "平均每項",
-                            valueText = "$${formatAmountNoDecimal(avgPerItem)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp
-                        )
-                        AnimatedInfoChip(
-                            label = "日均支出",
-                            valueText = "$${formatAmountNoDecimal(avgPerDay)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
+                                AnimatedVisibility(
+                                    visible = isThisRowSelected && selectedDay != null,
+                                    enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
+                                    exit = shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) + fadeOut(fadeAnim)
+                                ) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Spacer(Modifier.height(8.dp))
 
-                // ── 星期標題
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
-                    CALENDAR_WEEKDAY_HEADERS.forEach { w ->
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Text(w, fontSize = 12.sp, color = Color.Black,
-                                fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
+                                        val activeDay = if (isThisRowSelected && selectedDay != null)
+                                            selectedDay!! else cachedSelectedDay
+                                        val activeCol = if (isThisRowSelected && selectedColIdx != null)
+                                            selectedColIdx!! else cachedSelectedCol
 
-                // ── 月曆格 + 詳情
-                val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
-                val cellWidth = (screenWidthDp - 20.dp) / 7
+                                        TrianglePointer(
+                                            colIndex = activeCol,
+                                            cellWidth = cellWidth,
+                                            color = SURFACE_CARD
+                                        )
 
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .padding(top = 2.dp)
-                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp)
-                ) {
-                    val masterSpring = spring<IntSize>(dampingRatio = 0.85f, stiffness = 350f)
-                    val fadeAnim = tween<Float>(250, easing = FastOutSlowInEasing)
+                                        val dateKey = "$year-${pad2(month)}-${pad2(activeDay)}"
 
-                    for (rowIdx in 0 until totalRows) {
-                        val isThisRowSelected = selectedRowIdx == rowIdx
-
-                        Column(Modifier.fillMaxWidth()) {
-                            CalendarRow(
-                                rowIdx = rowIdx,
-                                firstDayOffset = firstDayOffset,
-                                daysInMonth = daysInMonth,
-                                today = today,
-                                isCurrentMonth = isCurrentMonth,
-                                recordsByDay = recordsByDay,
-                                displayMode = displayMode,
-                                maxAbsNet = maxAbsNet,
-                                selectedDay = if (isThisRowSelected) selectedDay else null,
-                                selectedCol = if (isThisRowSelected) selectedColIdx else null,
-                                animateValues = animateValues,
-                                onCellClick = { day, col ->
-                                    if (selectedDay == day) {
-                                        selectedDay = null
-                                        selectedRowIdx = null
-                                        selectedColIdx = null
-                                        detailExpandedId = null
-                                    } else {
-                                        selectedDay = day
-                                        selectedRowIdx = rowIdx
-                                        selectedColIdx = col
-                                        cachedSelectedDay = day
-                                        cachedSelectedCol = col
-                                        cachedSelectedRowIdx = rowIdx
-                                        detailExpandedId = null
+                                        DayDetailPanel(
+                                            dateKey = dateKey,
+                                            records = recordsByDay[activeDay] ?: emptyList(),
+                                            expandedId = detailExpandedId,
+                                            onExpandChange = { detailExpandedId = it },
+                                            onCopy = { onCopyClick(it) },
+                                            onEdit = { onEditClick(it) },
+                                            onFilter = { onFilterClick(it) },
+                                            onDelete = { onDeleteClick(it) },
+                                            onChangeIcon = { onChangeIconClick(it) },
+                                            onDismiss = {
+                                                selectedDay = null
+                                                selectedRowIdx = null
+                                                selectedColIdx = null
+                                                detailExpandedId = null
+                                            },
+                                            deletingIds = deletingIds,
+                                            justAddedIds = justAddedIds,
+                                            onFanMenuStart = handleFanStart,
+                                            onFanMenuDrag = handleFanDrag,
+                                            onFanMenuEnd = handleFanEnd,
+                                            activeFanRecord = activeFanRecord
+                                        )
+                                        Spacer(Modifier.height(6.dp))
                                     }
                                 }
-                            )
 
-                            AnimatedVisibility(
-                                visible = isThisRowSelected && selectedDay != null,
-                                enter = expandVertically(masterSpring, expandFrom = Alignment.Top) + fadeIn(fadeAnim),
-                                exit = shrinkVertically(masterSpring, shrinkTowards = Alignment.Top) + fadeOut(fadeAnim)
-                            ) {
-                                Column(Modifier.fillMaxWidth()) {
-                                    Spacer(Modifier.height(8.dp))
-
-                                    val activeDay = if (isThisRowSelected && selectedDay != null)
-                                        selectedDay!! else cachedSelectedDay
-                                    val activeCol = if (isThisRowSelected && selectedColIdx != null)
-                                        selectedColIdx!! else cachedSelectedCol
-
-                                    TrianglePointer(
-                                        colIndex = activeCol,
-                                        cellWidth = cellWidth,
-                                        color = SURFACE_CARD
-                                    )
-
-                                    val dateKey = "$year-${pad2(month)}-${pad2(activeDay)}"
-
-                                    DayDetailPanel(
-                                        dateKey = dateKey,
-                                        records = recordsByDay[activeDay] ?: emptyList(),
-                                        expandedId = detailExpandedId,
-                                        onExpandChange = { detailExpandedId = it },
-                                        onCopy = { onCopyClick(it) },
-                                        onEdit = { onEditClick(it) },
-                                        onFilter = { onFilterClick(it) },
-                                        onDelete = { onDeleteClick(it) },
-                                        onChangeIcon = { onChangeIconClick(it) },
-                                        onDismiss = {
-                                            selectedDay = null
-                                            selectedRowIdx = null
-                                            selectedColIdx = null
-                                            detailExpandedId = null
-                                        },
-                                        deletingIds = deletingIds,
-                                        justAddedIds = justAddedIds,
-                                        onFanMenuStart = handleFanStart,
-                                        onFanMenuDrag = handleFanDrag,
-                                        onFanMenuEnd = handleFanEnd,
-                                        activeFanRecord = activeFanRecord
-                                    )
+                                if (rowIdx < totalRows - 1) {
                                     Spacer(Modifier.height(6.dp))
                                 }
-                            }
-
-                            if (rowIdx < totalRows - 1) {
-                                Spacer(Modifier.height(6.dp))
                             }
                         }
                     }
@@ -6704,9 +6776,7 @@ fun CalendarContent(
             }
         }
 
-        // =====================================================
-        // 頂部永久固定標題區（月份切換）
-        // =====================================================
+        // ── 頂部永久固定標題（月份切換）
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -6720,10 +6790,9 @@ fun CalendarContent(
                     .padding(horizontal = 10.dp)
                     .padding(top = 10.dp, bottom = 10.dp)
                     .onSizeChanged { size ->
+                        topBarHeightPx = size.height.toFloat()
                         val h = with(density) { size.height.toDp() }
-                        if (h != topBarHeight) {
-                            topBarHeight = h
-                        }
+                        if (h != topBarHeight) topBarHeight = h
                     }
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
