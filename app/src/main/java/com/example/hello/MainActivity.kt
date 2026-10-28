@@ -775,13 +775,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var hasInitializedCompareSnapshot = false
 
     /** 進入比較頁時呼叫：將底層最新數據一次性推入快照，觸發比較頁動畫 */
-    fun onComparePageEnter() {
-        _isComparePageActive.value = true
-        if (!_loading.value) {
-            _compareSnapshotRecords.value = _records.value
-            hasInitializedCompareSnapshot = true
-        }
+fun onComparePageEnter() {
+    _isComparePageActive.value = true
+    if (!_loading.value) {
+        // ★ 比較頁永遠過濾「還錢」
+        _compareSnapshotRecords.value = _records.value.filter { it.category != "還錢" }
+        hasInitializedCompareSnapshot = true
     }
+}
 
     /** 離開比較頁時呼叫：快照凍結，其他頁面改動唔會流入 */
     fun onComparePageExit() {
@@ -862,20 +863,21 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // ★ 新增：快照同步邏輯
-        //   規則 1：比較頁激活時 → 底層數據任何變化（頁內操作 / Firestore 推送）都同步到快照（維持原即時更新 + 即時動畫）
-        //   規則 2：比較頁未激活時 → 只有「首次 loading 完成」允許初始化一次快照
-        //           避免冷啟動直接打開比較頁時，由 0 忽然跳到目標值（多餘動畫）
-        viewModelScope.launch {
-            _records.collect { records ->
-                val shouldSync =
-                    _isComparePageActive.value ||
-                    (!hasInitializedCompareSnapshot && !_loading.value)
-                if (shouldSync) {
-                    _compareSnapshotRecords.value = records
-                    hasInitializedCompareSnapshot = true
-                }
-            }
+//   規則 1：比較頁激活時 → 底層數據任何變化（頁內操作 / Firestore 推送）都同步到快照
+//   規則 2：比較頁未激活時 → 只有「首次 loading 完成」允許初始化一次快照
+//   規則 3：比較頁快照永遠過濾「還錢」分類
+viewModelScope.launch {
+    _records.collect { records ->
+        val shouldSync =
+            _isComparePageActive.value ||
+            (!hasInitializedCompareSnapshot && !_loading.value)
+        if (shouldSync) {
+            // ★ 比較頁永遠過濾「還錢」
+            _compareSnapshotRecords.value = records.filter { it.category != "還錢" }
+            hasInitializedCompareSnapshot = true
         }
+    }
+}
     }
 
     private fun buildSortedList(): List<Record> {
@@ -1197,6 +1199,8 @@ private fun computeLedgerUiState(
 private fun computeCompareUiState(records: List<Record>, monthA: String, monthB: String): CompareUiState {
     val categoryMonthSum = HashMap<String, HashMap<String, Double>>()
     for (r in records) {
+        // ★ 比較頁永遠排除「還錢」分類（雙重保險）
+        if (r.category == "還錢") continue
         val inner = categoryMonthSum.getOrPut(r.category) { HashMap() }
         val key = getTimestampMeta(r.timestamp).monthKey
         inner[key] = (inner[key] ?: 0.0) + r.amount
