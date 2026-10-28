@@ -6563,11 +6563,13 @@ fun CalendarContent(
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
+                                                .pointerInput(Unit) {
                             // 手動拖動／按下即打斷自動滾動
                             awaitPointerEventScope {
                                 while (true) {
-                                    val e = awaitPointerEvent(PointerEventPass.Initial)
+                                    val e = awaitPointerEvent(
+                                        androidx.compose.ui.input.pointer.PointerEventPass.Initial
+                                    )
                                     if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
                                         autoScrollJob?.cancel()
                                         autoScrollJob = null
@@ -6654,9 +6656,9 @@ fun CalendarContent(
                             val isThisRowSelected = selectedRowIdx == rowIdx
 
                             Column(Modifier.fillMaxWidth()) {
-                                Box(
+                                                                Box(
                                     Modifier.onGloballyPositioned { coords ->
-                                        rowRootYMap[rowIdx] = coords.positionInRoot().y
+                                        rowRootYMap[rowIdx] = coords.boundsInRoot().topLeft.y
                                     }
                                 ) {
                                     CalendarRow(
