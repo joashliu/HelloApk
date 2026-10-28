@@ -5710,7 +5710,9 @@ private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness 
 @Composable
 fun AnimatedAmount(
     text: String, color: Color, fontSize: TextUnit,
-    fontWeight: FontWeight = FontWeight.Bold, modifier: Modifier = Modifier,
+    fontWeight: FontWeight = FontWeight.Bold,
+    animateChanges: Boolean = true,   // ★ 新增：false 時直接切換，不播動畫
+    modifier: Modifier = Modifier,
 ) {
     val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
     LaunchedEffect(text.length) {
@@ -5718,15 +5720,20 @@ fun AnimatedAmount(
     }
 
     val currentText by rememberUpdatedState(text)
+    val currentAnimate by rememberUpdatedState(animateChanges)
     var displayedText by remember { mutableStateOf(text) }
 
     LaunchedEffect(Unit) {
-        // 🟢 修正這裡：直接使用 isActive，因為 LaunchedEffect 已經提供了 CoroutineScope
         while (isActive) {
             val target = currentText
             if (displayedText == target) {
                 kotlinx.coroutines.delay(16)
+            } else if (!currentAnimate) {
+                // ★ animateChanges = false：直接切換（冷啟動/首次載入）
+                displayedText = target
+                kotlinx.coroutines.delay(16)
             } else {
+                // ★ 打字機漸進邏輯（與 Top Stats 一致）
                 if (target.length < displayedText.length || !target.startsWith(displayedText)) {
                     displayedText = target
                 } else {
@@ -5744,20 +5751,44 @@ fun AnimatedAmount(
                 AnimatedContent(
                     targetState = char,
                     transitionSpec = {
-                        if (targetState != null && initialState == null) {
-                            (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
-                             fadeIn(tween(200)) +
-                             scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith
-                            fadeOut(tween(0))
-                        } else if (targetState == null && initialState != null) {
-                            fadeIn(tween(0)) togetherWith
-                            (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
-                             fadeOut(tween(180)) +
-                             scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
+                        if (!currentAnimate) {
+                            // ★ 無動畫直接切換（冷啟動用）
+                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                         } else {
-                            (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
-                            (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
-                        }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
+                            // ★ 判斷變化方向：數值變大向上滾、變小向下滾
+                            val initialDigit = initialState?.digitToIntOrNull() ?: -1
+                            val targetDigit = targetState?.digitToIntOrNull() ?: -1
+                            val goingUp = when {
+                                initialDigit >= 0 && targetDigit >= 0 -> targetDigit >= initialDigit
+                                else -> true  // 非數字字符（符號、K、M）默認向上
+                            }
+                            when {
+                                targetState != null && initialState == null -> {
+                                    // 新字符出現（位數增加）：從下往上
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
+                                     fadeIn(tween(200)) +
+                                     scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith
+                                    fadeOut(tween(0))
+                                }
+                                targetState == null && initialState != null -> {
+                                    // 字符消失（位數減少）：往上離開
+                                    fadeIn(tween(0)) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
+                                     fadeOut(tween(180)) +
+                                     scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
+                                }
+                                goingUp -> {
+                                    // ★ 數值變大：新字符從下往上、舊字符往上走
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
+                                }
+                                else -> {
+                                    // ★ 數值變小：新字符從上往下、舊字符往下走
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { -it } + fadeIn(tween(220))) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it } + fadeOut(tween(220)))
+                                }
+                            }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
+                        }
                     },
                     label = "digit_$i"
                 ) { c ->
@@ -6190,7 +6221,8 @@ fun CalendarRow(
     isCurrentMonth: Boolean, recordsByDay: Map<Int, List<Record>>,
     displayMode: Int, maxAbsNet: Double,
     selectedDay: Int?, selectedCol: Int?,
-    expansionFraction: Float, // 🟢 新增：由 0f 到 1f 嘅展開比例
+    expansionFraction: Float,
+    animateValues: Boolean = false,   // ★ 新增
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -6220,7 +6252,6 @@ fun CalendarRow(
     val verticalPad = (contentHeight * (cellMaxScale - 1f) / 2f + 2.dp).coerceAtLeast(4.dp)
     val horizontalPad = 3.dp
 
-    // 🟢 移除 animateDpAsState，直接根據手勢進度即時計算高度，做到完美跟手
     val targetHeight = contentHeight + verticalPad * 2
     val rowHeight = targetHeight * expansionFraction
 
@@ -6241,11 +6272,12 @@ fun CalendarRow(
                         day = dayOfMonth,
                         isToday = isCurrentMonth && dayOfMonth == todayDayOfMonth,
                         isSelected = selectedDay == dayOfMonth,
-                        visibilityScale = expansionFraction, // 🟢 傳入縮放比例
+                        visibilityScale = expansionFraction,
                         records = dayRecords,
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
-                        onClick = { onCellClick(dayOfMonth, col) }
+                        onClick = { onCellClick(dayOfMonth, col) },
+                        animateValues = animateValues   // ★ 傳遞
                     )
                 }
             }
@@ -6261,8 +6293,9 @@ private data class DayCellSummary(
 
 @Composable
 fun CalendarDayCell(
-    day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f, // 🟢 修改參數
+    day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f,
     records: List<Record>, displayMode: Int, maxAbsNet: Double, onClick: () -> Unit,
+    animateValues: Boolean = false,   // ★ 新增
 ) {
     val shape = RoundedCornerShape(12.dp)
     val hasRecords = records.isNotEmpty()
@@ -6322,8 +6355,8 @@ fun CalendarDayCell(
     Box(
         Modifier.fillMaxSize()
             .graphicsLayer {
-                val s = selectionScale * visibilityScale // 🟢 疊加手勢嘅縮放
-                scaleX = s; scaleY = s; alpha = visibilityScale // 🟢 透明度跟隨手勢
+                val s = selectionScale * visibilityScale
+                scaleX = s; scaleY = s; alpha = visibilityScale
             }
             .shadow(elevation, shape, clip = false,
                 ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000))
@@ -6352,11 +6385,19 @@ fun CalendarDayCell(
             when (displayMode) {
                 0 -> {
                     if (absNet > 0) {
-                        Text(text = summary.compactNet, fontSize = 11.sp, lineHeight = 13.sp,
-                            color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
-                            fontWeight = FontWeight.Black, maxLines = 1, softWrap = false,
-                            overflow = TextOverflow.Clip, textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth())
+                        // ★ 從普通 Text 換成 AnimatedAmount：逐位滾動、變大向上、變小向下
+                        Box(
+                            Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AnimatedAmount(
+                                text = summary.compactNet,
+                                color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                animateChanges = animateValues
+                            )
+                        }
                     }
                 }
                 1 -> {
@@ -6417,6 +6458,14 @@ fun CalendarContent(
     deletingIds: Set<String> = emptySet(),
     justAddedIds: Set<String> = emptySet()
 ) {
+        // ★ 月曆數字滾動動畫開關：
+    //   冷啟動 / 首次載入數據 → false（不播，避免閃動）
+    //   800ms 後 → true（之後切換 filter、類別時播放逐位滾動）
+    var animateValues by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(800)
+        animateValues = true
+    }
     val today = remember { Calendar.getInstance() }
     val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
@@ -6733,6 +6782,7 @@ fun CalendarContent(
                                 selectedDay = if (isThisRowSelected) selectedDay else null,
                                 selectedCol = if (isThisRowSelected) selectedColIdx else null,
                                 expansionFraction = rowExpansion,
+                                animateValues = animateValues,
                                 onCellClick = { day, col ->
                                     if (selectedDay == day) {
                                         selectedDay = null
