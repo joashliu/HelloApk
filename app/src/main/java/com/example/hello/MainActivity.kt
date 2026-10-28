@@ -4320,10 +4320,7 @@ fun WeeklyExpenseChart(
     val labelRowHeight = 20.dp
 
     val density = LocalDensity.current
-        val density = LocalDensity.current
     // ★ 提升到頂層，供滾動內容與明細 overlay 共用
-    val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
-    val cellWidth = (screenWidthDp - 20.dp) / 7
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
     // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
