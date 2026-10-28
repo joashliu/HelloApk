@@ -4688,6 +4688,8 @@ fun CalendarContent(
     var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
     var selectedColIdx by remember { mutableStateOf<Int?>(null) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
+    
+    // 讓明細Box喺動畫期間保持可見
     var isDetailVisible by remember { mutableStateOf(false) }
 
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
@@ -4697,8 +4699,9 @@ fun CalendarContent(
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     var autoScrollJob by remember { mutableStateOf<Job?>(null) }
-    val dismissAccum = remember { mutableFloatStateOf(0f) }
+    
     val detailAlpha = remember { Animatable(0f) }
+    val interactiveDragOffset = remember { Animatable(0f) }
 
     val density = LocalDensity.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
@@ -4795,7 +4798,7 @@ fun CalendarContent(
     val totalCells = firstDayOffset + daysInMonth
     val totalRows = (totalCells + 6) / 7
 
-    // ── 預先精算每行高度，棄用有延遲嘅 onGloballyPositioned
+    // ── 預先精算每行高度
     val rowHeightsPx = remember(totalRows, firstDayOffset, daysInMonth, recordsByDay, displayMode, density) {
         val heights = FloatArray(totalRows)
         for (rowIdx in 0 until totalRows) {
@@ -4845,7 +4848,7 @@ fun CalendarContent(
         detailExpandedId = null
         isDetailVisible = false
         detailAlpha.snapTo(0f)
-        dismissAccum.floatValue = 0f
+        interactiveDragOffset.snapTo(0f)
         try { scrollState.scrollTo(0) } catch (_: Exception) {}
     }
 
@@ -4853,35 +4856,31 @@ fun CalendarContent(
         try { detailScrollState.scrollTo(0) } catch (_: Exception) {}
     }
 
-    // ── 點擊日期：平滑滾動並展開明細
+    // ── 點擊日期 / 處理明細展開與收起
     LaunchedEffect(selectedDay, selectedRowIdx) {
-        val rowIdx = selectedRowIdx ?: return@LaunchedEffect
-        if (selectedDay == null) return@LaunchedEffect
-
-        autoScrollJob?.cancel()
-        autoScrollJob = scope.launch {
-            // 根據預先精算嘅位移，無論 Chips 係咪同步收縮，都能絕對精準定位
-            val targetScroll = calendarGridOffsetsPx[rowIdx].roundToInt()
-            scrollState.animateScrollTo(
-                value = targetScroll,
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
-            )
-        }
-
-        withContext(Dispatchers.Main) {
+        if (selectedDay != null && selectedRowIdx != null) {
+            val rowIdx = selectedRowIdx!!
+            autoScrollJob?.cancel()
+            autoScrollJob = scope.launch {
+                val targetScroll = calendarGridOffsetsPx[rowIdx].roundToInt()
+                scrollState.animateScrollTo(
+                    value = targetScroll,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                )
+            }
             isDetailVisible = true
             detailAlpha.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 300f))
-        }
-    }
-
-    // ── 收起明細動畫
-    LaunchedEffect(selectedDay) {
-        if (selectedDay == null && isDetailVisible) {
-            try {
-                detailAlpha.animateTo(0f, tween(220, easing = FastOutSlowInEasing))
-            } catch (_: Exception) {}
+        } else if (selectedDay == null && isDetailVisible) {
+            // 如果透過滑動已經收起咗部分，就繼續滑到底；否則原位 fade out
+            if (interactiveDragOffset.value > 0f) {
+                // 給定一個大數值保證滑到底，實際高度會 coerceAtLeast(0f)
+                interactiveDragOffset.animateTo(2000f, spring(dampingRatio = 0.85f, stiffness = 300f))
+            } else {
+                detailAlpha.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
+            }
             isDetailVisible = false
-            dismissAccum.floatValue = 0f
+            interactiveDragOffset.snapTo(0f)
+            detailAlpha.snapTo(0f)
         }
     }
 
@@ -4892,49 +4891,81 @@ fun CalendarContent(
         detailExpandedId = null
     }
 
-    // ── 監聽全局向下滑動，模擬下拉收起
+    // ── 監聽外部手動月曆滾動，自動收起
+    var lastScrollValue by remember { mutableIntStateOf(0) }
     LaunchedEffect(scrollState.value) {
         if (isDetailVisible && autoScrollJob?.isActive != true && selectedRowIdx != null) {
-            val targetScroll = calendarGridOffsetsPx[selectedRowIdx!!].roundToInt()
-            // 支援小幅度自由滑動，超出閾值自動收縮
-            if (scrollState.value < targetScroll - 60 || scrollState.value > targetScroll + 200) {
+            val delta = scrollState.value - lastScrollValue
+            if (abs(delta) > 10) {
                 selectedDay = null
                 selectedRowIdx = null
                 selectedColIdx = null
                 detailExpandedId = null
             }
         }
-    }
-
-    // 明細區域內嘅下拉收起攔截
-    val dismissConnection = remember {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset, available: Offset, source: NestedScrollSource
-            ): Offset {
-                if (available.y > 0f) { // 向下滑動
-                    if (detailScrollState.value == 0) {
-                        dismissAccum.floatValue += available.y
-                        if (dismissAccum.floatValue > 120f) {
-                            dismissAccum.floatValue = 0f
-                            selectedDay = null
-                            selectedRowIdx = null
-                            selectedColIdx = null
-                            detailExpandedId = null
-                        }
-                        return Offset(0f, available.y)
-                    }
-                } else {
-                    dismissAccum.floatValue = 0f
-                }
-                return Offset.Zero
-            }
-        }
+        lastScrollValue = scrollState.value
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
         val viewportHeightPx = constraints.maxHeight.toFloat()
-        val viewportHeightDp = with(density) { viewportHeightPx.toDp() }
+        
+        // 嚴格 FAB 頂邊距保護：NAV高度 + 底部Padding + 兩側12dp/8dp + FAB本身56dp
+        val fabSpaceDp = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 8.dp
+        val fabSpacePx = with(density) { fabSpaceDp.toPx() }
+
+        // ── 實時跟手互動拖動邏輯
+        val rigidHeightPx = remember(selectedRowIdx, viewportHeightPx) {
+            if (selectedRowIdx != null) {
+                (viewportHeightPx - rowHeightsPx[selectedRowIdx!!] - fabSpacePx).coerceAtLeast(0f)
+            } else 0f
+        }
+
+        val dismissConnection = remember(rigidHeightPx) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    // 向上滑動時 (available.y < 0)，如果已經有下拉 offset，就消費並抵消 offset
+                    if (interactiveDragOffset.value > 0f && available.y < 0f) {
+                        val newVal = interactiveDragOffset.value + available.y
+                        val consumedY = if (newVal < 0f) -interactiveDragOffset.value else available.y
+                        scope.launch { interactiveDragOffset.snapTo(newVal.coerceAtLeast(0f)) }
+                        return Offset(0f, consumedY)
+                    }
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    // 向下滑動時 (available.y > 0)，如果明細內容已經喺最頂，就增加下拉 offset
+                    if (available.y > 0f && detailScrollState.value == 0) {
+                        val newVal = interactiveDragOffset.value + available.y
+                        scope.launch { interactiveDragOffset.snapTo(newVal) }
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (interactiveDragOffset.value > 0f) {
+                        // 慣性滑動或者下拉超過 35% 就觸發關閉
+                        if (available.y > 600f || interactiveDragOffset.value > rigidHeightPx * 0.35f) {
+                            scope.launch {
+                                interactiveDragOffset.animateTo(rigidHeightPx, spring(dampingRatio = 0.85f, stiffness = 300f))
+                                selectedDay = null
+                                selectedRowIdx = null
+                                selectedColIdx = null
+                                detailExpandedId = null
+                            }
+                        } else {
+                            // 未過閾值自動彈簧還原
+                            scope.launch {
+                                interactiveDragOffset.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = 400f))
+                            }
+                        }
+                        return available
+                    }
+                    return Velocity.Zero
+                }
+            }
+        }
 
         Column(Modifier.fillMaxSize()) {
             // ═══════════════════════════════════════════════════
@@ -5009,7 +5040,7 @@ fun CalendarContent(
             }
 
             // ═══════════════════════════════════════════════════
-            // ★ 星期 Header (抽離於 Lazy 外，設實色背景遮擋滾動項目)
+            // ★ 星期 Header (固定置頂，實色背景覆蓋下方滾動項目)
             // ═══════════════════════════════════════════════════
             Box(Modifier.fillMaxWidth().background(SURFACE_BG).zIndex(10f)) {
                 Row(
@@ -5040,7 +5071,6 @@ fun CalendarContent(
                                 while (true) {
                                     val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
                                     if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
-                                        // 手動干預立即中斷自動滾動
                                         autoScrollJob?.cancel()
                                         autoScrollJob = null
                                     }
@@ -5051,7 +5081,7 @@ fun CalendarContent(
                 ) {
                     NotificationAccessGuide(context = LocalContext.current)
 
-                    // ── 點擊日期時自動向上折疊隱藏
+                    // ── 點擊日期時自動向上折疊隱藏 Chips
                     AnimatedVisibility(
                         visible = selectedDay == null,
                         enter = expandVertically(spring(dampingRatio = 0.85f, stiffness = 300f)) + fadeIn(tween(200)),
@@ -5097,7 +5127,7 @@ fun CalendarContent(
                         }
                     }
 
-                    // ── 月曆 Grid 容器 (與明細 Box 位於同一個座標系，實現 100% 精準跟蹤)
+                    // ── 月曆 Grid 容器 (與明細 Box 位於同一個座標系)
                     Box(Modifier.fillMaxWidth()) {
                         
                         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
@@ -5136,59 +5166,53 @@ fun CalendarContent(
                                     Spacer(Modifier.height(6.dp))
                                 }
                             }
-                            // 預留足夠空間保證最後一行都可以滾動到頂部
-                            Spacer(Modifier.height(viewportHeightDp)) 
+                            
+                            // 頂部滾動邊界鎖定：Spacer 高度精確等於 viewport 減去最後一行高度，保證唔會拉出無限空白
+                            val extraSpacerHeightPx = (viewportHeightPx - rowHeightsPx.last()).coerceAtLeast(0f)
+                            Spacer(Modifier.height(with(density) { extraSpacerHeightPx.toDp() })) 
                         }
 
-                        // ── 當日明細 Overlay (動態高度計算，精準填滿至底邊)
+                        // ── 當日明細 Overlay (精準跟手拖放 + 無縫背景遮擋)
                         if (isDetailVisible && selectedRowIdx != null) {
                             val rowIdx = selectedRowIdx!!
                             
-                            // 絕對定錨於選中行嘅底邊
                             val overlayTopPx = calendarGridOffsetsPx[rowIdx] + rowHeightsPx[rowIdx]
                             val overlayTopDp = with(density) { overlayTopPx.toDp() }
-
-                            // 該行折疊態時會停靠於畫面最頂，其視覺 Y 座標即為自身高度
-                            val idealVisualYPx = rowHeightsPx[rowIdx]
                             
-                            // 計算覆蓋到底部嘅堅固高度 (Occlusion area)
-                            val rigidHeightPx = (viewportHeightPx - idealVisualYPx).coerceAtLeast(0f)
-                            val rigidHeightDp = with(density) { rigidHeightPx.toDp() }
-                            
-                            // 動畫展開高度
-                            val displayHeightDp = rigidHeightDp * detailAlpha.value
-                            val fabSpaceDp = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp
+                            // 實時計算動畫與拖放後嘅高度
+                            val displayHeightDp = with(density) { 
+                                val draggedHeight = (rigidHeightPx - interactiveDragOffset.value).coerceAtLeast(0f)
+                                (draggedHeight * detailAlpha.value).toDp() 
+                            }
 
                             Box(
                                 Modifier
                                     .fillMaxWidth()
-                                    .padding(top = overlayTopDp) // 與 Scroll 同步移動
+                                    .padding(top = overlayTopDp)
                                     .height(displayHeightDp)
-                                    .clipToBounds() // 動畫時從下往上漸進式展露背景
+                                    .clipToBounds() // 保證內部背景由下往上展露
                                     .graphicsLayer { alpha = detailAlpha.value }
-                                    .zIndex(5f) // 確保遮蓋下方月曆格
+                                    .zIndex(5f)
                             ) {
                                 Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .height(rigidHeightDp)
-                                        .background(SURFACE_BG) // 實心背景，完美隱藏底部 CalendarRow
+                                        .height(with(density) { rigidHeightPx.toDp() }) // 強制畫滿最大高度，確保背景完整
+                                        .background(SURFACE_BG) // 實心背景完美隱藏下方月曆格
                                 ) {
                                     TrianglePointer(colIndex = cachedSelectedCol, color = SURFACE_CARD)
-                                    // 移除 4dp 縫隙 Spacer，確保無縫連接
                                     Box(
                                         Modifier
                                             .fillMaxWidth()
-                                            .weight(1f)
+                                            .weight(1f) // 填滿剩餘可用空間
                                             .padding(horizontal = 10.dp)
-                                            .padding(bottom = fabSpaceDp) // 預留 FAB 及導航欄空間
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp, topStart = 12.dp, topEnd = 12.dp))
                                             .background(SURFACE_CARD)
                                     ) {
                                         Column(
                                             Modifier
                                                 .fillMaxSize()
-                                                .nestedScroll(dismissConnection) // 加入防呆向下滑動收起
+                                                .nestedScroll(dismissConnection) // 加入實時跟手滑動
                                                 .verticalScroll(detailScrollState)
                                         ) {
                                             DayDetailPanel(
@@ -5224,7 +5248,6 @@ fun CalendarContent(
             }
         }
 
-        // 底部智能過渡遮罩
         val showMask = scrollState.value > 0
         val maskAlpha by animateFloatAsState(
             targetValue = if (showMask) 1f else 0f,
