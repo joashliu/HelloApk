@@ -6549,7 +6549,7 @@ fun CalendarContent(
                 // 若與當前位置差距不足 1px，唔使動畫
                 if (abs(targetScroll - scrollState.value) < 1) return@launch
 
-                val startValue = scrollState.value.toFloat()
+                                val startValue = scrollState.value.toFloat()
                 val anim = Animatable(startValue)
                 anim.animateTo(
                     targetValue = targetScroll.toFloat(),
@@ -6558,11 +6558,18 @@ fun CalendarContent(
                         stiffness = 300f
                     )
                 ) {
-                    // ★ 每 frame 動態 clamp 到「當下」嘅 maxValue：
-                    //   明細 expandVertically 期間 maxValue 會慢慢變大，
-                    //   呢度會自動跟隨，最終落喺精確目標位置（或 maxValue 上限）。
-                    val clamped = value.coerceIn(0f, scrollState.maxValue.toFloat())
-                    scrollState.scrollTo(clamped.roundToInt())
+                    // ★ Animatable.animateTo 的 block 簽名係 `Animatable<T, V>.() -> Unit`，
+                    //   唔係 suspend，所以唔可以喺裡面調 scrollState.scrollTo()。
+                    //   改用同步 API `dispatchRawDelta` 實現每 frame 動態 clamp 到最新 maxValue：
+                    //   - 明細 expandVertically 期間 maxValue 會變大
+                    //   - 每 frame 讀取最新 maxValue，並用 delta 推進 ScrollState
+                    //   - 效果等同 scrollTo(clamped)，但唔需要 suspend
+                    val currentScroll = scrollState.value.toFloat()
+                    val desired = this.value.coerceIn(0f, scrollState.maxValue.toFloat())
+                    val delta = desired - currentScroll
+                    if (delta != 0f) {
+                        scrollState.dispatchRawDelta(delta)
+                    }
                 }
             } catch (_: Exception) {}
         }
