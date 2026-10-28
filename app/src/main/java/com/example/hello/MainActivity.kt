@@ -8372,42 +8372,35 @@ fun RollingNumber(
     }
 
     val totalSlots = maxLen.value
-    val density = LocalDensity.current
-    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
 
-    // ★ 紧凑排版样式：tnum 等宽 + 负 letterSpacing + 无 font padding
+    // ★ 紧凑排版样式：tnum 等宽 + 无 font padding + 原生字距
     val compactStyle = remember(fontSize, fontWeight) {
         TextStyle(
             fontSize = fontSize,
             fontWeight = fontWeight,
-            letterSpacing = (-0.3).sp,             // 字符间略微收紧
-            fontFeatureSettings = "tnum",           // 等宽数字，滚动不抖动
+            fontFeatureSettings = "tnum",           // 等宽数字：滚动时不抖宽
             platformStyle = PlatformTextStyle(includeFontPadding = false),
             lineHeightStyle = LineHeightStyle(
                 alignment = LineHeightStyle.Alignment.Center,
                 trim = LineHeightStyle.Trim.Both
             )
+            // 注意：不设置 letterSpacing，使用字体原生字距
         )
     }
 
-    // ★ 字符宽度缓存：每种字符只测量一次，避免 recompose 重复计算
-    val charWidthCache = remember(fontSize, fontWeight, compactStyle) {
-        mutableMapOf<Char, Dp>()
-    }
-
-    @Composable
-    fun widthFor(ch: Char?): Dp {
-        if (ch == null) return 0.dp
-        return charWidthCache.getOrPut(ch) {
-            val px = textMeasurer.measure(ch.toString(), compactStyle).size.width
-            with(density) { px.toDp() }
-        }
+    // ★ 用 TextMeasurer 精确测量行高（仅一次）
+    //   宽度完全不测量、不设置！宽度由 Text 自然决定
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = LocalDensity.current
+    val cellHeight: Dp = remember(compactStyle) {
+        val layout = textMeasurer.measure("0", compactStyle)
+        with(density) { layout.size.height.toDp() }
     }
 
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(0.dp)   // ★ 位与位之间零间距
+        horizontalArrangement = Arrangement.Start   // ★ 零自动间距
     ) {
         for (i in 0 until totalSlots) {
             val char = text.getOrNull(i)
@@ -8416,9 +8409,8 @@ fun RollingNumber(
                 RollingDigit(
                     targetChar = char,
                     color = color,
-                    fontSize = fontSize,
                     style = compactStyle,
-                    width = widthFor(char),
+                    cellHeight = cellHeight,
                     animate = animateChanges,
                     delayMs = delayMs
                 )
@@ -8431,16 +8423,12 @@ fun RollingNumber(
 fun RollingDigit(
     targetChar: Char?,
     color: Color,
-    fontSize: TextUnit,
     style: TextStyle,
-    width: Dp,
+    cellHeight: Dp,
     animate: Boolean,
     delayMs: Int,
     modifier: Modifier = Modifier,
 ) {
-    val density = LocalDensity.current
-    val cellHeight: Dp = with(density) { fontSize.toDp() }
-
     val targetDigit: Int? = targetChar?.digitToIntOrNull()
 
     if (targetDigit != null) {
@@ -8475,24 +8463,20 @@ fun RollingDigit(
         val currentDigit = (baseDigit + progressInt) % 10
         val nextDigit = (baseDigit + progressInt + 1) % 10
 
-        // ★ Box 宽度 = 字符真实宽度（精确、紧凑、无多余空白）
+        // ★ 不设置 width！宽度由内容自然决定
+        //   由于 tnum 等宽，所有数字天然等宽；滚动时宽度稳定不抖
         Box(
             modifier = modifier
-                .width(width)
                 .height(cellHeight)
                 .clipToBounds()
         ) {
-            // ★ textAlign = Center + fillMaxWidth：即使字体不支持 tnum，也精确居中
             Text(
                 text = currentDigit.toString(),
                 color = color,
                 style = style,
                 maxLines = 1,
                 softWrap = false,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .offset(y = (-progressFrac * cellHeight.value).dp)
+                modifier = Modifier.offset(y = (-progressFrac * cellHeight.value).dp)
             )
             Text(
                 text = nextDigit.toString(),
@@ -8500,14 +8484,11 @@ fun RollingDigit(
                 style = style,
                 maxLines = 1,
                 softWrap = false,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .offset(y = ((1f - progressFrac) * cellHeight.value).dp)
+                modifier = Modifier.offset(y = ((1f - progressFrac) * cellHeight.value).dp)
             )
         }
     } else {
-        // 固定字符（$ , . - K M）：直接静态显示，宽度已由调用方测量传入
+        // 固定字符（$ , . - K M）：宽度由字体自然决定，与相邻数字紧贴
         if (targetChar != null) {
             Text(
                 text = targetChar.toString(),
@@ -8515,10 +8496,10 @@ fun RollingDigit(
                 style = style,
                 maxLines = 1,
                 softWrap = false,
-                modifier = modifier
+                modifier = modifier.height(cellHeight),
             )
         } else {
-            Spacer(modifier.width(0.dp))
+            Spacer(Modifier.width(0.dp))
         }
     }
 }
