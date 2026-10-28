@@ -8359,14 +8359,9 @@ private fun WeeklyExpenseBarBody(
 
 // =========================================================
 //  ★ RollingNumber：Top Stats 专用的逐位独立滚动数字
-//  - 每位独立 AnimatedContent，仅变动的位滚动
-//  - 动画时长按 |新值 - 旧值| 独立计算：差值越大越慢
-//      公式：180 + diff × 55 ms，clamp 到 180~650ms
-//      例：1→2（差1）= 235ms；1→9（差8）= 620ms
-//  - 方向始终向上滚（机械计数器质感，变细都顺向，不反向倒转）
-//  - FastOutSlowInEasing：末段减速，模拟真实机械计数器
-//  - 低位先动、高位后动，微弱错落（≤ 48ms）
-//  - 固定字符（$、,、.、-、K、M）不参与滚动，快速淡切 150ms
+//  - 每位交给 RollingDigit 独立处理（真正的逐格滚动）
+//  - 低位先动、高位后动（≤ 48ms 错落）
+//  - 固定字符（$ , . - K M）不参与滚动
 //  - animateChanges = false 时无动画（冷启动）
 // =========================================================
 @Composable
@@ -8383,111 +8378,21 @@ fun RollingNumber(
         if (text.length > maxLen.value) maxLen.value = text.length
     }
 
-    val currentAnimate by rememberUpdatedState(animateChanges)
     val totalSlots = maxLen.value
 
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         for (i in 0 until totalSlots) {
             val char = text.getOrNull(i)
             key(i) {
-                AnimatedContent(
-                    targetState = char,
-                    transitionSpec = {
-                        if (!currentAnimate) {
-                            // 冷启动 / 首次载入：无动画直接切换
-                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                        } else {
-                            val initialChar = initialState
-                            val targetChar = targetState
-                            val initialDigit = initialChar?.digitToIntOrNull()
-                            val targetDigit = targetChar?.digitToIntOrNull()
-
-                            when {
-                                // ── 数字 → 数字：差越大时长越长，始终向上滚
-                                initialDigit != null && targetDigit != null -> {
-                                    val diff = kotlin.math.abs(targetDigit - initialDigit)
-                                    // 时长：180 + diff × 55，clamp 到 180~650ms
-                                    val durationMs = (180 + diff * 55).coerceIn(180, 650)
-                                    // 错落：低位先动、高位后动，最多 48ms 差距
-                                    val delayMs = (totalSlots - 1 - i) * 8
-                                    // 始终向上：新值从下进、旧值往上出
-                                    (
-                                        slideInVertically(
-                                            animationSpec = tween(
-                                                durationMillis = durationMs,
-                                                delayMillis = delayMs,
-                                                easing = FastOutSlowInEasing
-                                            )
-                                        ) { it } +
-                                        fadeIn(
-                                            animationSpec = tween(
-                                                durationMillis = durationMs,
-                                                delayMillis = delayMs
-                                            )
-                                        )
-                                    ) togetherWith (
-                                        slideOutVertically(
-                                            animationSpec = tween(
-                                                durationMillis = durationMs,
-                                                delayMillis = delayMs,
-                                                easing = FastOutSlowInEasing
-                                            )
-                                        ) { -it } +
-                                        fadeOut(
-                                            animationSpec = tween(
-                                                durationMillis = durationMs,
-                                                delayMillis = delayMs
-                                            )
-                                        )
-                                    )
-                                }
-                                // ── 新出现（位数增加）：从下往上来
-                                initialChar == null && targetChar != null -> {
-                                    (
-                                        slideInVertically(
-                                            animationSpec = tween(
-                                                durationMillis = 250,
-                                                easing = FastOutSlowInEasing
-                                            )
-                                        ) { it } +
-                                        fadeIn(tween(200))
-                                    ) togetherWith fadeOut(tween(0))
-                                }
-                                // ── 消失（位数减少）：往上飞出
-                                initialChar != null && targetChar == null -> {
-                                    fadeIn(tween(0)) togetherWith (
-                                        slideOutVertically(
-                                            animationSpec = tween(
-                                                durationMillis = 250,
-                                                easing = FastOutSlowInEasing
-                                            )
-                                        ) { -it } +
-                                        fadeOut(tween(200))
-                                    )
-                                }
-                                // ── 固定字符变化（$、,、.、-、K、M）：快速淡切，不滚
-                                else -> {
-                                    fadeIn(tween(150, easing = FastOutSlowInEasing)) togetherWith
-                                        fadeOut(tween(150, easing = FastOutSlowInEasing))
-                                }
-                            }
-                        }
-                    },
-                    label = "roll_$i"
-                ) { c ->
-                    if (c != null) {
-                        Text(
-                            text = c.toString(),
-                            color = color,
-                            fontSize = fontSize,
-                            fontWeight = fontWeight,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    } else {
-                        Spacer(Modifier.width(0.dp))
-                    }
-                }
+                val delayMs = (totalSlots - 1 - i) * 8
+                RollingDigit(
+                    targetChar = char,
+                    color = color,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight,
+                    animate = animateChanges,
+                    delayMs = delayMs
+                )
             }
         }
     }
