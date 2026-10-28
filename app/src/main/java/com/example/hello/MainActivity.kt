@@ -767,6 +767,27 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val _deletingIds = MutableStateFlow<Set<String>>(emptySet())
     val deletingIds: StateFlow<Set<String>> = _deletingIds.asStateFlow()
 
+    // ★ 新增：比較頁快照源（只喺比較頁激活時先同步）
+    //   目標：其他頁面改動數據唔會打斷比較頁嘅背景快照，
+    //        只有切換返比較頁時先一次性刷新，觸發全套動畫。
+    private val _compareSnapshotRecords = MutableStateFlow<List<Record>>(emptyList())
+    private val _isComparePageActive = MutableStateFlow(false)
+    @Volatile private var hasInitializedCompareSnapshot = false
+
+    /** 進入比較頁時呼叫：將底層最新數據一次性推入快照，觸發比較頁動畫 */
+    fun onComparePageEnter() {
+        _isComparePageActive.value = true
+        if (!_loading.value) {
+            _compareSnapshotRecords.value = _records.value
+            hasInitializedCompareSnapshot = true
+        }
+    }
+
+    /** 離開比較頁時呼叫：快照凍結，其他頁面改動唔會流入 */
+    fun onComparePageExit() {
+        _isComparePageActive.value = false
+    }
+
     private val _defaultMonthA = monthKeyFromTimestamp(System.currentTimeMillis())
     private val _defaultMonthB = shiftMonthKey(_defaultMonthA, -1)
 
@@ -815,8 +836,10 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
 
+    // ★ 改動：compareUiState 以「快照源」為數據基礎，而非 _records。
+    //   只有當 onComparePageEnter() 或比較頁內操作時，快照先會被更新。
     val compareUiState: StateFlow<CompareUiState> = combine(
-        _records, _compareMonthA, _compareMonthB
+        _compareSnapshotRecords, _compareMonthA, _compareMonthB
     ) { records, a, b -> computeCompareUiState(records, a, b) }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CompareUiState())
@@ -836,6 +859,22 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             _compareMonthA.value = savedMonthA
             _compareMonthB.value = savedMonthB
             withContext(Dispatchers.Default) { listenToFirestore() }
+        }
+
+        // ★ 新增：快照同步邏輯
+        //   規則 1：比較頁激活時 → 底層數據任何變化（頁內操作 / Firestore 推送）都同步到快照（維持原即時更新 + 即時動畫）
+        //   規則 2：比較頁未激活時 → 只有「首次 loading 完成」允許初始化一次快照
+        //           避免冷啟動直接打開比較頁時，由 0 忽然跳到目標值（多餘動畫）
+        viewModelScope.launch {
+            _records.collect { records ->
+                val shouldSync =
+                    _isComparePageActive.value ||
+                    (!hasInitializedCompareSnapshot && !_loading.value)
+                if (shouldSync) {
+                    _compareSnapshotRecords.value = records
+                    hasInitializedCompareSnapshot = true
+                }
+            }
         }
     }
 
@@ -1000,7 +1039,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         return sum
     }
 }
-
 private fun buildNoteIndex(records: List<Record>): NoteIndex {
     if (records.isEmpty()) return NoteIndex()
     val now = System.currentTimeMillis()
@@ -1272,7 +1310,7 @@ fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
     for (r in records) {
         // 🟢 計算棒形圖時，直接跳過「收入」同「還錢」類別
         if (r.category == INCOME_CATEGORY || r.category == "還錢") continue
-        
+
         val dayStart = getTimestampMeta(r.timestamp).startOfDayMillis
         if (dayStart in startDay..todayStart) {
             amountByDay[dayStart] = (amountByDay[dayStart] ?: 0.0) + r.amount
@@ -1802,7 +1840,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
 // =========================================================
 //  ★ LightweightEntryApp (極簡冷啟動介面)
 // =========================================================
@@ -2043,6 +2080,15 @@ fun MainApp(
         if (currentPage != 0 && showKeyboard) {
             dismissKeyboard()
         }
+    }
+
+    // ★ 新增：比較頁快照 - 導航切換觸發
+    //   規則 1：切換到比較頁（currentPage == 1）→ onComparePageEnter() 一次性拉入最新數據觸發動畫
+    //   規則 2：離開比較頁 → onComparePageExit() 快照凍結
+    //   規則 3：比較頁內操作時 isComparePageActive == true → 內部實時同步（維持原即時動畫）
+    LaunchedEffect(currentPage) {
+        if (currentPage == 1) vm.onComparePageEnter()
+        else vm.onComparePageExit()
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -2859,7 +2905,6 @@ fun MainApp(
         }
     }
 }
-
 // =========================================================
 //  ★ KeyboardAndFabLayer
 // =========================================================
@@ -4388,6 +4433,7 @@ fun WeeklyExpenseChart(
         }
     }
 }
+
 @Composable
 fun WeeklyExpenseBar(
     day: WeeklyExpenseDay,
@@ -4473,7 +4519,6 @@ fun WeeklyExpenseBar(
         )
     }
 }
-
 private val PARTICLE_COLORS = listOf(
     BRAND_PRIMARY, BRAND_PRIMARY_DARK, Color(0xFF818CF8), Color(0xFFFBBF24), Color(0xFF34D399)
 )
@@ -4859,12 +4904,10 @@ fun SwipeableRecordItem(
                     fontWeight = FontWeight.SemiBold, color = TEXT_PRIMARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
-                // 🟢 詳情文字顏色改深：由 TEXT_TERTIARY 改為 TEXT_SECONDARY
                 Text(metaText, fontSize = META_FONT_SIZE, color = TEXT_SECONDARY,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.width(8.dp))
-            // 🟢 金額粗度加強：由 FontWeight.Bold 改為 FontWeight.ExtraBold
             Text(amtText, color = amtColor, fontSize = AMOUNT_FONT_SIZE, fontWeight = FontWeight.ExtraBold)
         }
     }
@@ -5738,7 +5781,6 @@ fun DayHeader(
                     Text(monthStr, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                     Spacer(Modifier.height(1.dp))
-                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，加深「週幾」顏色
                     Text(weekStr, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                         color = if (isToday) BRAND_PRIMARY else TEXT_SECONDARY)
                 }
@@ -5750,7 +5792,6 @@ fun DayHeader(
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (income > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
                     Text("收入", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(incStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_INCOME)
@@ -5758,7 +5799,6 @@ fun DayHeader(
             }
             if (expense > 0) {
                 Column(horizontalAlignment = Alignment.End) {
-                    // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，並加強粗度至 SemiBold
                     Text("支出", fontSize = 10.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(expStr, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = COLOR_EXPENSE)
@@ -5842,7 +5882,6 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
                 fontWeight = FontWeight.Medium, 
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                // 🟢 關鍵修改：加入彈性權重，文字超長時會縮短並顯示「...」，同時保證左邊 Icon 及文字開頭可見
                 modifier = Modifier.weight(1f, fill = false)
             )
         }
@@ -5860,8 +5899,8 @@ fun QuickInputSection(
     noteIconMap: Map<String, String>,
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
-    collapseProgress: Float = 0f, // 🟢 接收滾動收縮進度 (0f: 展開, 1f: 隱藏)
-    onExpandClick: () -> Unit = {}, // 🟢 收縮後嘅點擊事件
+    collapseProgress: Float = 0f,
+    onExpandClick: () -> Unit = {},
     onClick: (String) -> Unit
 ) {
     if (topNotes.isEmpty()) return
@@ -5970,7 +6009,6 @@ fun QuickInputSection(
                 label = "quickPanelHeight"
             )
 
-            // 🟢 最終高度會根據滾動進度在 原始高度 同 收縮形態（44dp） 之間平滑轉換
             val collapsedHeight = 44.dp
             val finalHeight = androidx.compose.ui.unit.lerp(animatedHeight, collapsedHeight, collapseProgress)
 
@@ -5979,7 +6017,6 @@ fun QuickInputSection(
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
             ) {
-                // 原有常用項目的淡出同縮放
                 val mainAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
                 val mainScale = 1f - (collapseProgress * 0.08f)
 
@@ -6051,7 +6088,6 @@ fun QuickInputSection(
                     }
                 }
 
-                // 🟢 收縮形態：當滾動過半，淡入一個長形按鈕，提示可展開
                 val pillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
                 if (pillAlpha > 0.01f) {
                     Box(
@@ -6107,7 +6143,7 @@ fun CalendarRow(
     displayMode: Int, maxAbsNet: Double,
     selectedDay: Int?, selectedCol: Int?,
     expansionFraction: Float,
-    animateValues: Boolean = false,   // ★ 新增
+    animateValues: Boolean = false,
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -6162,7 +6198,7 @@ fun CalendarRow(
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
                         onClick = { onCellClick(dayOfMonth, col) },
-                        animateValues = animateValues   // ★ 傳遞
+                        animateValues = animateValues
                     )
                 }
             }
@@ -6180,7 +6216,7 @@ private data class DayCellSummary(
 fun CalendarDayCell(
     day: Int, isToday: Boolean, isSelected: Boolean, visibilityScale: Float = 1f,
     records: List<Record>, displayMode: Int, maxAbsNet: Double, onClick: () -> Unit,
-    animateValues: Boolean = false,   // ★ 新增
+    animateValues: Boolean = false,
 ) {
     val shape = RoundedCornerShape(12.dp)
     val hasRecords = records.isNotEmpty()
@@ -6270,7 +6306,6 @@ fun CalendarDayCell(
             when (displayMode) {
                 0 -> {
                     if (absNet > 0) {
-                        // ★ 從普通 Text 換成 AnimatedAmount：逐位滾動、變大向上、變小向下
                         Box(
                             Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
@@ -6343,9 +6378,6 @@ fun CalendarContent(
     deletingIds: Set<String> = emptySet(),
     justAddedIds: Set<String> = emptySet()
 ) {
-        // ★ 月曆數字滾動動畫開關：
-    //   冷啟動 / 首次載入數據 → false（不播，避免閃動）
-    //   800ms 後 → true（之後切換 filter、類別時播放逐位滾動）
     var animateValues by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(800)
@@ -6535,15 +6567,12 @@ fun CalendarContent(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         
-        // ==========================================
         // 1. 底層滾動區
-        // ==========================================
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(top = topBarHeight) 
         ) {
-            // 🟢 展開收縮區 (Chips + Stats)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -6561,13 +6590,11 @@ fun CalendarContent(
                         alpha = (calendarExpansion.value * 1.5f).coerceIn(0f, 1f)
                     }
             ) {
-                // 🟢 增加預設間距，等 Chips 乖乖留喺月份下方，絕對睇得哂
                 Spacer(Modifier.height(24.dp))
 
                 val allCategories: List<String?> = remember(visibleCategories) {
                     listOf(null) + visibleCategories
                 }
-                // 🟢 替換為穩定嘅 Chunked Row 排版，確保測量高度 100% 準確
                 val rows = remember(allCategories) { allCategories.chunked(4) }
                 
                 Column(Modifier.fillMaxWidth().animateContentSize()) {
@@ -6617,7 +6644,6 @@ fun CalendarContent(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // 星期標題
             Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
                 CALENDAR_WEEKDAY_HEADERS.forEach { w ->
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -6628,7 +6654,6 @@ fun CalendarContent(
             }
             Spacer(Modifier.height(6.dp))
 
-            // 滾動月曆網格
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
                 val cellWidth = (screenWidthDp - 20.dp) / 7
@@ -6764,16 +6789,13 @@ fun CalendarContent(
             }
         }
 
-        // ==========================================
-        // 2. 頂部永久固定標題區 (實色 + 智能漸變遮罩)
-        // ==========================================
+        // 2. 頂部永久固定標題區
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .zIndex(10f)
         ) {
-            // 實色背景區
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -6853,7 +6875,6 @@ fun CalendarContent(
                 }
             }
 
-            // 智能遮罩：冇拉起日曆嘅時候 100% 隱形，拉起時先平滑淡出 6.dp 高嘅靚靚遮罩
             val showMask = calendarExpansion.value < 0.99f
             val maskAlpha by animateFloatAsState(
                 targetValue = if (showMask) 1f else 0f,
@@ -6879,9 +6900,7 @@ fun CalendarContent(
             )
         }
 
-        // ==========================================
         // 3. FAB 同埋 FanMenu
-        // ==========================================
         FloatingActionButton(
             onClick = onAddClick,
             shape = CircleShape,
@@ -6901,6 +6920,7 @@ fun CalendarContent(
         )
     }
 }
+
 private val SEGMENTED_MODES = listOf(
     Triple("金額", Icons.Default.AttachMoney, 0),
     Triple("項目", Icons.Default.List, 1),
@@ -7044,9 +7064,14 @@ fun MiniHistogram(
     }
 }
 
+// ★ 改動：CompareValueCell 支援 animateValues（逐位滾動），金額對齊右邊
 @Composable
 fun CompareValueCell(
-    amount: Double, isIncome: Boolean, pct: Double?, modifier: Modifier = Modifier
+    amount: Double,
+    isIncome: Boolean,
+    pct: Double?,
+    animateValues: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val amtDisplay = remember(amount, isIncome) {
         val formattedAmt = formatAmountNoDecimal(abs(amount))
@@ -7063,13 +7088,19 @@ fun CompareValueCell(
     }
 
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(amtDisplay, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
-            color = amtColor, textAlign = TextAlign.End, maxLines = 1, softWrap = false,
-            overflow = TextOverflow.Clip, modifier = Modifier.weight(1f))
+        // ★ 改動：Box 右對齊包裹，內容改用 AnimatedAmount 逐位滾動
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            AnimatedAmount(
+                text = amtDisplay,
+                color = amtColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                animateChanges = animateValues
+            )
+        }
         Spacer(Modifier.width(4.dp))
         Box(Modifier.width(38.dp), contentAlignment = Alignment.CenterEnd) {
             if (pctText != null) {
-                // 🟢 將 TEXT_TERTIARY 改為 TEXT_SECONDARY，令百分比顏色深色啲
                 Text(pctText, fontSize = 11.sp, color = TEXT_SECONDARY,
                     fontWeight = FontWeight.Medium, textAlign = TextAlign.End, maxLines = 1)
             }
@@ -7087,6 +7118,15 @@ fun CompareContent(
     onMonthBChange: (String) -> Unit,
     onAddClick: () -> Unit,
 ) {
+    // ★ 新增：數字滾動開關（冷啟動 / 首次載入不播，800ms 後才開）
+    //   比較頁快照式數據：切回比較頁時 compareUi 會整體刷新，
+    //   animateValues 已為 true 就會自然觸發逐位滾動 + 列表移動動畫
+    var animateValues by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(800)
+        animateValues = true
+    }
+
     val categoryMonthSum = compareUi.categoryMonthSum
     fun sumLocal(cat: String, month: String): Double =
         categoryMonthSum[cat]?.get(month) ?: 0.0
@@ -7224,13 +7264,16 @@ fun CompareContent(
                                                     }
                                                 }
 
+                                                // ★ 傳入 animateValues
                                                 CompareValueCell(
                                                     amount = amtA, isIncome = isIncome, pct = pctA,
+                                                    animateValues = animateValues,
                                                     modifier = Modifier.weight(1.55f)
                                                 )
                                                 Spacer(Modifier.width(6.dp))
                                                 CompareValueCell(
                                                     amount = amtB, isIncome = isIncome, pct = pctB,
+                                                    animateValues = animateValues,
                                                     modifier = Modifier.weight(1.55f)
                                                 )
                                             }
@@ -7262,11 +7305,13 @@ fun CompareContent(
 
                         CompareValueCell(
                             amount = balanceA, isIncome = balanceA >= 0, pct = null,
+                            animateValues = animateValues,
                             modifier = Modifier.weight(1.55f)
                         )
                         Spacer(Modifier.width(6.dp))
                         CompareValueCell(
                             amount = balanceB, isIncome = balanceB >= 0, pct = null,
+                            animateValues = animateValues,
                             modifier = Modifier.weight(1.55f)
                         )
                     }
@@ -7645,16 +7690,6 @@ suspend fun compressBitmapToPngForUpload(bitmap: Bitmap, forceCrop: Boolean, tar
     baos.toByteArray()
 }
 
-/**
- * 圖片效果選擇面板
- * - Toast 風格置底、卡片式、無時間限制
- * - 4 個選項：
- *   1. 自動去背圖 (ML Kit 主體分割)
- *   2. 簡單去白底 (像素級別，R/G/B 都接近白色 → 透明)
- *   3. 手動裁剪 (彈出 CropDialog，可拖動 + 雙指縮放)
- *   4. 強化去背 (ML Kit 去背 + ColorMatrix 提高飽和對比)
- * - 點背景不關閉（MainApp 那邊用 pointerInput 吞掉）
- */
 @Composable
 fun ImageEffectSelectionPanel(
     state: PendingImageUpload,
@@ -7723,7 +7758,6 @@ fun ImageEffectSelectionPanel(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp)
             ) {
-                // ① 自動去背（ML Kit 主體分割）
                 item {
                     EffectOptionCard(
                         title = "自動去背圖", bitmap = state.processedBitmap,
@@ -7731,7 +7765,6 @@ fun ImageEffectSelectionPanel(
                         onClick = { safeSelect(state.processedBitmap, false, false) }
                     )
                 }
-                // ② 簡單去白底（像素級別）
                 item {
                     val preview = whiteRemovedBitmap ?: state.originalBitmap
                     EffectOptionCard(
@@ -7749,7 +7782,6 @@ fun ImageEffectSelectionPanel(
                         }
                     )
                 }
-                // ③ 手動裁剪（彈出 CropDialog）
                 item {
                     EffectOptionCard(
                         title = "手動裁剪", bitmap = state.originalBitmap,
@@ -7757,7 +7789,6 @@ fun ImageEffectSelectionPanel(
                         onClick = { showCropDialog = true }
                     )
                 }
-                // ④ ★ 強化去背 + 緊裁
                 item {
                     val preview = tightCroppedEnhancedBitmap ?: state.processedBitmap
                     EffectOptionCard(
@@ -7778,7 +7809,6 @@ fun ImageEffectSelectionPanel(
                                         state.processedBitmap
                                     }
                                 }
-                                // isEnhanced = false，因為 target 已經係最終結果
                                 safeSelect(target, false, false)
                             }
                         }
@@ -7829,7 +7859,6 @@ fun EffectOptionCard(
                 modifier = Modifier.fillMaxSize().drawWithContent {
                     drawContent()
                     if (showCropGrid) {
-                        // 疊加三分線 + 中央白框，模擬"手動裁剪"預覽
                         val strokeW = 1.dp.toPx()
                         val w = size.width; val h = size.height
                         drawLine(Color.White.copy(alpha = 0.6f), Offset(w / 3, 0f), Offset(w / 3, h), strokeWidth = strokeW)
@@ -7837,10 +7866,8 @@ fun EffectOptionCard(
                         drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, h / 3), Offset(w, h / 3), strokeWidth = strokeW)
                         drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, h * 2 / 3), Offset(w, h * 2 / 3), strokeWidth = strokeW)
 
-                        // 外圍壓暗
                         drawRect(Color.Black.copy(alpha = 0.35f), size = size)
 
-                        // 中央 80% 白框
                         val md = minOf(w, h) * 0.8f
                         val cx = w / 2; val cy = h / 2; val half = md / 2
                         drawRect(
@@ -7885,11 +7912,6 @@ fun EffectOptionCard(
     }
 }
 
-// =========================================================
-//  ★ 簡單去除白色背景（像素級別，跟 ML Kit 主體分割完全不同的算法）
-//  R/G/B 三通道都接近白色（>= 255 - tolerance）的像素 → 完全透明
-//  默認 tolerance = 30，可調 10~60
-// =========================================================
 suspend fun removeWhiteBackgroundSimple(
     src: Bitmap,
     tolerance: Int = 30
@@ -7910,21 +7932,15 @@ suspend fun removeWhiteBackgroundSimple(
         val g = (p shr 8) and 0xFF
         val b = p and 0xFF
         out[i] = if (r >= threshold && g >= threshold && b >= threshold) {
-            0x00000000  // 完全透明
+            0x00000000
         } else {
-            p           // 保持原像素
+            p
         }
     }
     result.setPixels(out, 0, w, 0, 0, w, h)
     result
 }
 
-// =========================================================
-//  ★ 手動裁剪彈窗
-//  - 圖片可拖動、雙指縮放
-//  - 中間固定正方形裁剪框（= 圖標 1:1 比例）
-//  - 所見即所得：裁剪框內的就是最終裁剪結果
-// =========================================================
 @Composable
 fun CropDialog(
     sourceBitmap: Bitmap,
@@ -7944,20 +7960,17 @@ fun CropDialog(
         BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
             val screenW = with(density) { maxWidth.toPx() }
             val screenH = with(density) { maxHeight.toPx() }
-            // 裁剪框：屏幕短邊的 85%，正方形
             val boxSize = minOf(screenW, screenH) * 0.85f
             val boxLeft = (screenW - boxSize) / 2f
             val boxTop = (screenH - boxSize) / 2f
 
             val bitmapW = sourceBitmap.width.toFloat()
             val bitmapH = sourceBitmap.height.toFloat()
-            // 基礎 cover 縮放：讓圖片至少填滿裁剪框
             val baseScale = boxSize / minOf(bitmapW, bitmapH)
             val finalScale = baseScale * userScale
             val displayW = bitmapW * finalScale
             val displayH = bitmapH * finalScale
 
-            // 拖動 + 縮放手勢
             Box(
                 Modifier
                     .fillMaxSize()
@@ -7992,21 +8005,15 @@ fun CropDialog(
                 )
             }
 
-            // 遮罩 + 邊框 + 三分線
             Canvas(Modifier.fillMaxSize()) {
                 val maskColor = Color.Black.copy(alpha = 0.6f)
-                // 上
                 drawRect(maskColor, topLeft = Offset(0f, 0f), size = Size(size.width, boxTop))
-                // 下
                 drawRect(maskColor, topLeft = Offset(0f, boxTop + boxSize),
                     size = Size(size.width, size.height - boxTop - boxSize))
-                // 左
                 drawRect(maskColor, topLeft = Offset(0f, boxTop), size = Size(boxLeft, boxSize))
-                // 右
                 drawRect(maskColor, topLeft = Offset(boxLeft + boxSize, boxTop),
                     size = Size(size.width - boxLeft - boxSize, boxSize))
 
-                // 白色邊框
                 drawRect(
                     Color.White,
                     topLeft = Offset(boxLeft, boxTop),
@@ -8014,7 +8021,6 @@ fun CropDialog(
                     style = Stroke(2.dp.toPx())
                 )
 
-                // 三分線（幫助構圖）
                 val gridColor = Color.White.copy(alpha = 0.45f)
                 val gridW = 1.dp.toPx()
                 drawLine(gridColor, Offset(boxLeft + boxSize / 3f, boxTop),
@@ -8027,7 +8033,6 @@ fun CropDialog(
                     Offset(boxLeft + boxSize, boxTop + boxSize * 2f / 3f), gridW)
             }
 
-            // 頂部標題
             Row(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -8044,7 +8049,6 @@ fun CropDialog(
                     fontSize = 12.sp)
             }
 
-            // 底部按鈕
             Row(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -8064,7 +8068,6 @@ fun CropDialog(
 
                 Button(
                     onClick = {
-                        // ★ 所見即所得：按當前縮放/偏移計算裁剪框對應原圖的區域
                         val cropSizePx = (boxSize / finalScale).roundToInt().coerceAtLeast(1)
                         val actualSize = minOf(
                             cropSizePx,
@@ -8090,14 +8093,10 @@ fun CropDialog(
     }
 }
 
-// =========================================================
-//  ★ 主體緊裁：掃描 Alpha 通道，搵主體 Bounding Box，加 padding 裁成正方形
-//  用於「強化去背」第 4 格：主體細粒/偏一邊 → 自動居中放大
-// =========================================================
 suspend fun tightCropAroundSubject(
     src: Bitmap,
-    paddingPercent: Float = 0.08f,   // 主體外圍留 8% 空間
-    alphaThreshold: Int = 20         // 忽略 Alpha < 20 的雜點
+    paddingPercent: Float = 0.08f,
+    alphaThreshold: Int = 20
 ): Bitmap = withContext(Dispatchers.Default) {
     val w = src.width
     val h = src.height
@@ -8124,23 +8123,18 @@ suspend fun tightCropAroundSubject(
         }
     }
 
-    // 完全冇主體（純透明 / 全圖 Alpha 都 < 20）→ 返回原圖，唔搞
     if (maxX < 0 || maxY < 0) return@withContext src
 
     val subjectW = maxX - minX + 1
     val subjectH = maxY - minY + 1
 
-    // 正方形邊長 = 主體最長邊 + 2 側 padding
     val side = maxOf(subjectW, subjectH)
     val padding = (side * paddingPercent).toInt().coerceAtLeast(2)
     val finalSide = side + padding * 2
 
-    // 主體中心
     val cx = (minX + maxX) / 2f
     val cy = (minY + maxY) / 2f
 
-    // 開新正方形畫布，把主體中心 draw 到畫布中心
-    // 超出原圖範圍自然變成透明背景
     val result = Bitmap.createBitmap(finalSide, finalSide, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(result)
     val dx = finalSide / 2f - cx
@@ -8149,11 +8143,6 @@ suspend fun tightCropAroundSubject(
     result
 }
 
-// =========================================================
-//  ★ 強化去背 + 緊裁（第 4 格用）
-//  1) applyEnhancedFilter：ColorMatrix 提亮提飽和
-//  2) tightCropAroundSubject：Alpha 緊裁 + 居中放大
-// =========================================================
 suspend fun enhanceAndTightCrop(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
     val enhanced = applyEnhancedFilter(src)
     val cropped = tightCropAroundSubject(enhanced)
@@ -8161,11 +8150,6 @@ suspend fun enhanceAndTightCrop(src: Bitmap): Bitmap = withContext(Dispatchers.D
     cropped
 }
 
-// =========================================================
-//  ★ 只畫柱體（不含日期文字）
-//  用於 WeeklyExpenseChart 的柱體層（負責 scaleY 縮放）
-//  日期文字由 WeeklyExpenseChart 的文字層獨立渲染
-// =========================================================
 @Composable
 private fun WeeklyExpenseBarBody(
     day: WeeklyExpenseDay,
@@ -8197,7 +8181,6 @@ private fun WeeklyExpenseBarBody(
             (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
         } else 0.dp
 
-        // 淺色軌道
         Box(
             modifier = Modifier
                 .width(22.dp)
@@ -8206,7 +8189,6 @@ private fun WeeklyExpenseBarBody(
                 .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
         )
 
-        // 柱子
         if (barHeight > 0.dp) {
             Box(
                 modifier = Modifier
@@ -8241,12 +8223,10 @@ fun RollingNumber(
 
     val totalSlots = maxLen.value
 
-    // ★ 緊湊排版樣式：取消 tnum，取消所有 padding，恢復原生字距，確保數字緊貼
     val compactStyle = remember(fontSize, fontWeight) {
         TextStyle(
             fontSize = fontSize,
             fontWeight = fontWeight,
-            // 🔴 嚴格禁止使用 "tnum"，允許各數字有自己原生實際寬度
             platformStyle = PlatformTextStyle(includeFontPadding = false),
             lineHeightStyle = LineHeightStyle(
                 alignment = LineHeightStyle.Alignment.Center,
@@ -8255,7 +8235,6 @@ fun RollingNumber(
         )
     }
 
-    // 只測量高度以確保對齊，寬度交由 Compose 自然 Wrap
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val density = LocalDensity.current
     val cellHeight: Dp = remember(compactStyle) {
@@ -8289,7 +8268,7 @@ fun RollingNumber(
     Row(
         modifier = modifier.wrapContentWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start   // ★ 零自動間距，完全貼合
+        horizontalArrangement = Arrangement.Start
     ) {
         for (i in 0 until totalSlots) {
             val char = displayedText.getOrNull(i)
@@ -8302,7 +8281,7 @@ fun RollingNumber(
                     cellHeight = cellHeight,
                     animate = currentAnimate,
                     delayMs = delayMs,
-                    modifier = Modifier.wrapContentWidth() // ★ 強制包裹內容
+                    modifier = Modifier.wrapContentWidth()
                 )
             }
         }
@@ -8353,10 +8332,8 @@ fun RollingDigit(
         val currentDigit = (baseDigit + progressInt) % 10
         val nextDigit = (baseDigit + progressInt + 1) % 10
         
-        // ★ 智能包裝：只有當真係滾動緊，先將下一個數字加入排版樹
         val isAnimating = progressFrac > 0f
 
-        // ★ 唔設置固定 Width！靜止時 Box 大細會完全等於 currentDigit
         Box(
             modifier = modifier
                 .height(cellHeight)
@@ -8372,9 +8349,8 @@ fun RollingDigit(
                 softWrap = false,
                 modifier = Modifier
                     .offset(y = (-progressFrac * cellHeight.value).dp)
-                    .wrapContentWidth() // 確保 Text 唔預留空間
+                    .wrapContentWidth()
             )
-            // 只有動畫中，先強行渲染下一個數字，令 Box 短暫借用兩者最闊嘅寬度，完美防止閃動
             if (isAnimating) {
                 Text(
                     text = nextDigit.toString(),
@@ -8389,7 +8365,6 @@ fun RollingDigit(
             }
         }
     } else {
-        // 固定字符（$ , . - 等）：與數字極限緊貼，保持基線一致
         if (targetChar != null) {
             Text(
                 text = targetChar.toString(),
@@ -8440,7 +8415,6 @@ fun AnimatedAmount(
         }
     }
     
-    // ★ 統一風格，套用無 Padding 修飾
     val style = remember(fontSize, fontWeight) {
         TextStyle(
             fontSize = fontSize,
@@ -8456,7 +8430,7 @@ fun AnimatedAmount(
     Row(
         modifier = modifier.wrapContentWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start // ★ 零間距
+        horizontalArrangement = Arrangement.Start
     ) {
         for (i in 0 until maxSlots.value) {
             val char = displayedText.getOrNull(i)
@@ -8523,7 +8497,7 @@ private fun DollarAmount(
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start // ★ 明確宣告靠齊，無額外空白
+        horizontalArrangement = Arrangement.Start
     ) {
         when {
             !showDollar -> {
@@ -8533,7 +8507,6 @@ private fun DollarAmount(
                 )
             }
             text.startsWith("-") -> {
-                // 原生緊貼字距
                 Text("-$", color = color, fontSize = fontSize,
                     fontWeight = fontWeight, maxLines = 1, softWrap = false)
                 AnimatedAmount(
