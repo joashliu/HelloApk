@@ -4699,6 +4699,7 @@ fun CalendarContent(
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     var autoScrollJob by remember { mutableStateOf<Job?>(null) }
+    val dismissAccum = remember { mutableFloatStateOf(0f) }
     
     val detailAlpha = remember { Animatable(0f) }
     val interactiveDragOffset = remember { Animatable(0f) }
@@ -4856,7 +4857,7 @@ fun CalendarContent(
         try { detailScrollState.scrollTo(0) } catch (_: Exception) {}
     }
 
-    // ── 點擊日期 / 處理明細展開與收起
+    // ── 點擊日期 / 處理明細展開與收起 (★ 包含滾動返頁頂嘅修正)
     LaunchedEffect(selectedDay, selectedRowIdx) {
         if (selectedDay != null && selectedRowIdx != null) {
             val rowIdx = selectedRowIdx!!
@@ -4871,13 +4872,19 @@ fun CalendarContent(
             isDetailVisible = true
             detailAlpha.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 300f))
         } else if (selectedDay == null && isDetailVisible) {
+            // ★ 修復：再次點擊格仔收起明細時，同步平滑滾動返去頁頂 (0)，配合 Chips 還原
+            autoScrollJob?.cancel()
+            autoScrollJob = scope.launch {
+                scrollState.animateScrollTo(0, spring(dampingRatio = 0.85f, stiffness = 300f))
+            }
+            
             // 如果透過滑動已經收起咗部分，就繼續滑到底；否則原位 fade out
             if (interactiveDragOffset.value > 0f) {
-                // 給定一個大數值保證滑到底，實際高度會 coerceAtLeast(0f)
                 interactiveDragOffset.animateTo(2000f, spring(dampingRatio = 0.85f, stiffness = 300f))
             } else {
                 detailAlpha.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
             }
+            
             isDetailVisible = false
             interactiveDragOffset.snapTo(0f)
             detailAlpha.snapTo(0f)
@@ -4948,7 +4955,7 @@ fun CalendarContent(
                         // 慣性滑動或者下拉超過 35% 就觸發關閉
                         if (available.y > 600f || interactiveDragOffset.value > rigidHeightPx * 0.35f) {
                             scope.launch {
-                                interactiveDragOffset.animateTo(rigidHeightPx, spring(dampingRatio = 0.85f, stiffness = 300f))
+                                // 觸發清空 selectedDay，LaunchedEffect 會接管收起同埋置頂動畫
                                 selectedDay = null
                                 selectedRowIdx = null
                                 selectedColIdx = null
@@ -5206,6 +5213,7 @@ fun CalendarContent(
                                             .fillMaxWidth()
                                             .weight(1f) // 填滿剩餘可用空間
                                             .padding(horizontal = 10.dp)
+                                            .padding(bottom = fabSpaceDp) // 預留 FAB 及導航欄空間
                                             .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp, topStart = 12.dp, topEnd = 12.dp))
                                             .background(SURFACE_CARD)
                                     ) {
