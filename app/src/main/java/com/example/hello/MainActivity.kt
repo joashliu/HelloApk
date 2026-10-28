@@ -8397,3 +8397,137 @@ fun RollingNumber(
         }
     }
 }
+
+// =========================================================
+//  ★ RollingDigit：单个数字位的机械滚轮
+//  - Animatable<Float> 从 0 跑到 steps（steps = (target-base+10)%10）
+//  - 每帧：currentDigit = (base + floor(progress)) % 10
+//          位移 = progressFrac * cellHeight（连续滑动）
+//  - FastOutSlowInEasing：末段减速，像真实转盘惯性停下
+//  - 时长：180 + steps × 60，clamp 到 180~700ms（差越大越慢）
+//  - 固定字符（$ , . - K M）不滚动，直接静态显示
+//  - 相同数字不触发（LaunchedEffect key 未变）
+// =========================================================
+@Composable
+fun RollingDigit(
+    targetChar: Char?,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight,
+    animate: Boolean,
+    delayMs: Int,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    // 每格高度 = 字体的 dp 换算值（与字号严格同步）
+    val cellHeight: Dp = with(density) { fontSize.toDp() }
+
+    val targetDigit = targetChar?.digitToIntOrNull()
+    val isDigit = targetDigit != null
+
+    if (isDigit) {
+        val continuousValue = remember { Animatable(0f) }
+        // baseDigit = 上次动画完成后的"基准数字"（0-9）
+        var baseDigit by remember { mutableIntStateOf(targetDigit!!) }
+
+        LaunchedEffect(targetDigit, animate) {
+            if (!animate) {
+                // 冷启动 / 首次载入：无动画，直接落位
+                baseDigit = targetDigit
+                continuousValue.snapTo(0f)
+                return@LaunchedEffect
+            }
+            if (baseDigit == targetDigit) {
+                // 数字未变：不触发
+                return@LaunchedEffect
+            }
+
+            // 计算正向滚动步数（0-9 循环，只朝一个方向转）
+            val steps = (targetDigit - baseDigit + 10) % 10
+            if (steps == 0) return@LaunchedEffect
+
+            // 时长：差越大越慢，clamp 180~700ms
+            val durationMs = (180 + steps * 60).coerceIn(180, 700)
+
+            // 低位先动、高位后动，微弱错落
+            if (delayMs > 0) delay(delayMs.toLong())
+
+            continuousValue.snapTo(0f)
+            continuousValue.animateTo(
+                targetValue = steps.toFloat(),
+                animationSpec = tween(
+                    durationMillis = durationMs,
+                    easing = FastOutSlowInEasing
+                )
+            )
+            // 动画完成：更新 base，复位 progress
+            // 视觉上完全无缝（target 位置就是新 base，progressFrac = 0）
+            baseDigit = targetDigit
+            continuousValue.snapTo(0f)
+        }
+
+        val progress = continuousValue.value
+        val progressInt = progress.toInt()
+        val progressFrac = progress - progressInt
+
+        val currentDigit = (baseDigit + progressInt) % 10
+        val nextDigit = (baseDigit + progressInt + 1) % 10
+
+        Box(
+            modifier = modifier
+                .width(cellHeight)
+                .height(cellHeight)
+                .clipToBounds()
+        ) {
+            // 当前数字：随 progressFrac 上移
+            Text(
+                text = currentDigit.toString(),
+                color = color,
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                maxLines = 1,
+                softWrap = false,
+                style = TextStyle(
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim = LineHeightStyle.Trim.Both
+                    )
+                ),
+                modifier = Modifier.offset(y = (-progressFrac * cellHeight.value).dp)
+            )
+            // 下一个数字：从下方进入
+            Text(
+                text = nextDigit.toString(),
+                color = color,
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                maxLines = 1,
+                softWrap = false,
+                style = TextStyle(
+                    platformStyle = PlatformTextStyle(includeFontPadding = false),
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim = LineHeightStyle.Trim.Both
+                    )
+                ),
+                modifier = Modifier.offset(y = ((1f - progressFrac) * cellHeight.value).dp)
+            )
+        }
+    } else {
+        // 固定字符（$ , . - K M）或 null：不滚动，直接静态显示
+        if (targetChar != null) {
+            Text(
+                text = targetChar.toString(),
+                color = color,
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                maxLines = 1,
+                softWrap = false,
+                modifier = modifier
+            )
+        } else {
+            Spacer(modifier.width(0.dp))
+        }
+    }
+}
