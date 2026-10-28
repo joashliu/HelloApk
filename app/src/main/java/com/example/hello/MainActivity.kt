@@ -4627,17 +4627,23 @@ fun CategoryTotalHint(hint: AfterSaveHint, visible: Boolean) {
 
 @Composable
 fun TrianglePointer(
-    colIndex: Int, cellWidth: Dp, color: Color = SURFACE_CARD,
+    colIndex: Int, color: Color = SURFACE_CARD,
     triangleWidth: Dp = 22.dp, triangleHeight: Dp = 11.dp,
 ) {
-    // 網格橫向 Padding 10.dp + 行內 Padding 3.dp = 13.dp，完美對齊日曆格中心
-    val targetX = 13.dp + cellWidth * colIndex + cellWidth / 2 - triangleWidth / 2
-    val animatedX by animateDpAsState(
-        targetValue = targetX,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 300f),
-        label = "triangleX"
-    )
-    Box(Modifier.fillMaxWidth().height(triangleHeight)) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(triangleHeight)) {
+        val gridPad = 10.dp
+        val rowPad = 3.dp
+        val spacing = 6.dp
+        // 精確計算：總寬 - 外框Padding - 行內Padding - 6個間距
+        val cellWidth = (maxWidth - gridPad * 2 - rowPad * 2 - spacing * 6) / 7
+        // 絕對中心點 X 坐標
+        val targetX = gridPad + rowPad + (cellWidth + spacing) * colIndex + cellWidth / 2 - triangleWidth / 2
+
+        val animatedX by animateDpAsState(
+            targetValue = targetX,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 300f),
+            label = "triangleX"
+        )
         Canvas(Modifier.offset(x = animatedX).size(triangleWidth, triangleHeight)) {
             val path = Path().apply {
                 moveTo(0f, size.height)
@@ -4858,13 +4864,13 @@ fun CalendarContent(
             val targetScroll = calendarGridOffsetsPx[rowIdx].roundToInt()
             scrollState.animateScrollTo(
                 value = targetScroll,
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f)
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
             )
         }
 
         withContext(Dispatchers.Main) {
             isDetailVisible = true
-            detailAlpha.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 350f))
+            detailAlpha.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 300f))
         }
     }
 
@@ -4887,16 +4893,15 @@ fun CalendarContent(
     }
 
     // ── 監聽全局向下滑動，模擬下拉收起
-    var lastScrollValue by remember { mutableIntStateOf(0) }
     LaunchedEffect(scrollState.value) {
-        val delta = scrollState.value - lastScrollValue
-        lastScrollValue = scrollState.value
-        if (isDetailVisible && autoScrollJob?.isActive != true) {
-            // 數值下降代表畫面向上滾，即係手看向下拉
-            if (delta < -20) {
+        if (isDetailVisible && autoScrollJob?.isActive != true && selectedRowIdx != null) {
+            val targetScroll = calendarGridOffsetsPx[selectedRowIdx!!].roundToInt()
+            // 支援小幅度自由滑動，超出閾值自動收縮
+            if (scrollState.value < targetScroll - 60 || scrollState.value > targetScroll + 200) {
                 selectedDay = null
                 selectedRowIdx = null
                 selectedColIdx = null
+                detailExpandedId = null
             }
         }
     }
@@ -4907,7 +4912,7 @@ fun CalendarContent(
             override fun onPostScroll(
                 consumed: Offset, available: Offset, source: NestedScrollSource
             ): Offset {
-                if (available.y > 0f) { // dragging down
+                if (available.y > 0f) { // 向下滑動
                     if (detailScrollState.value == 0) {
                         dismissAccum.floatValue += available.y
                         if (dismissAccum.floatValue > 120f) {
@@ -4915,6 +4920,7 @@ fun CalendarContent(
                             selectedDay = null
                             selectedRowIdx = null
                             selectedColIdx = null
+                            detailExpandedId = null
                         }
                         return Offset(0f, available.y)
                     }
@@ -4926,9 +4932,11 @@ fun CalendarContent(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
+        val viewportHeightPx = constraints.maxHeight.toFloat()
+        val viewportHeightDp = with(density) { viewportHeightPx.toDp() }
+
         Column(Modifier.fillMaxSize()) {
-            
             // ═══════════════════════════════════════════════════
             // ★ 月份選擇 & 分類切換 (永遠置頂)
             // ═══════════════════════════════════════════════════
@@ -5023,10 +5031,7 @@ fun CalendarContent(
             // ═══════════════════════════════════════════════════
             // ★ 可滾動區 (Calendar Grid + 明細 Overlay)
             // ═══════════════════════════════════════════════════
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                val viewportHeightPx = constraints.maxHeight.toFloat()
-                val viewportHeightDp = with(density) { viewportHeightPx.toDp() }
-
+            Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -5135,7 +5140,7 @@ fun CalendarContent(
                             Spacer(Modifier.height(viewportHeightDp)) 
                         }
 
-                        // ── 當日明細 Overlay (動態高度計算，精準填滿至 FAB 邊界)
+                        // ── 當日明細 Overlay (動態高度計算，精準填滿至底邊)
                         if (isDetailVisible && selectedRowIdx != null) {
                             val rowIdx = selectedRowIdx!!
                             
@@ -5143,61 +5148,73 @@ fun CalendarContent(
                             val overlayTopPx = calendarGridOffsetsPx[rowIdx] + rowHeightsPx[rowIdx]
                             val overlayTopDp = with(density) { overlayTopPx.toDp() }
 
-                            // 折疊態時，該行會停靠於畫面最頂，所以其視覺 Y 座標就是自身高度
+                            // 該行折疊態時會停靠於畫面最頂，其視覺 Y 座標即為自身高度
                             val idealVisualYPx = rowHeightsPx[rowIdx]
-                            val fabSpacePx = with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp).toPx() }
                             
-                            // 確保底邊頂住 FAB
-                            val rigidHeightPx = (viewportHeightPx - idealVisualYPx - fabSpacePx).coerceAtLeast(0f)
-                            val displayHeightDp = with(density) { (rigidHeightPx * detailAlpha.value).toDp() }
+                            // 計算覆蓋到底部嘅堅固高度 (Occlusion area)
+                            val rigidHeightPx = (viewportHeightPx - idealVisualYPx).coerceAtLeast(0f)
+                            val rigidHeightDp = with(density) { rigidHeightPx.toDp() }
+                            
+                            // 動畫展開高度
+                            val displayHeightDp = rigidHeightDp * detailAlpha.value
+                            val fabSpaceDp = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 12.dp
 
-                            Column(
+                            Box(
                                 Modifier
                                     .fillMaxWidth()
                                     .padding(top = overlayTopDp) // 與 Scroll 同步移動
                                     .height(displayHeightDp)
+                                    .clipToBounds() // 動畫時從下往上漸進式展露背景
                                     .graphicsLayer { alpha = detailAlpha.value }
                                     .zIndex(5f) // 確保遮蓋下方月曆格
                             ) {
-                                TrianglePointer(colIndex = cachedSelectedCol, cellWidth = cellWidth)
-                                Spacer(Modifier.height(4.dp))
-                                Box(
+                                Column(
                                     Modifier
                                         .fillMaxWidth()
-                                        .weight(1f)
-                                        .padding(horizontal = 10.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(SURFACE_CARD)
+                                        .height(rigidHeightDp)
+                                        .background(SURFACE_BG) // 實心背景，完美隱藏底部 CalendarRow
                                 ) {
-                                    Column(
+                                    TrianglePointer(colIndex = cachedSelectedCol, color = SURFACE_CARD)
+                                    // 移除 4dp 縫隙 Spacer，確保無縫連接
+                                    Box(
                                         Modifier
-                                            .fillMaxSize()
-                                            .nestedScroll(dismissConnection) // 加入防呆向下滑動收起
-                                            .verticalScroll(detailScrollState)
+                                            .fillMaxWidth()
+                                            .weight(1f)
+                                            .padding(horizontal = 10.dp)
+                                            .padding(bottom = fabSpaceDp) // 預留 FAB 及導航欄空間
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(SURFACE_CARD)
                                     ) {
-                                        DayDetailPanel(
-                                            dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
-                                            records = recordsByDay[cachedSelectedDay] ?: emptyList(),
-                                            expandedId = detailExpandedId,
-                                            onExpandChange = { detailExpandedId = it },
-                                            onCopy = { onCopyClick(it) },
-                                            onEdit = { onEditClick(it) },
-                                            onFilter = { onFilterClick(it) },
-                                            onDelete = { onDeleteClick(it) },
-                                            onChangeIcon = { onChangeIconClick(it) },
-                                            onDismiss = {
-                                                selectedDay = null
-                                                selectedRowIdx = null
-                                                selectedColIdx = null
-                                                detailExpandedId = null
-                                            },
-                                            deletingIds = deletingIds,
-                                            justAddedIds = justAddedIds,
-                                            onFanMenuStart = handleFanStart,
-                                            onFanMenuDrag = handleFanDrag,
-                                            onFanMenuEnd = handleFanEnd,
-                                            activeFanRecord = activeFanRecord
-                                        )
+                                        Column(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .nestedScroll(dismissConnection) // 加入防呆向下滑動收起
+                                                .verticalScroll(detailScrollState)
+                                        ) {
+                                            DayDetailPanel(
+                                                dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
+                                                records = recordsByDay[cachedSelectedDay] ?: emptyList(),
+                                                expandedId = detailExpandedId,
+                                                onExpandChange = { detailExpandedId = it },
+                                                onCopy = { onCopyClick(it) },
+                                                onEdit = { onEditClick(it) },
+                                                onFilter = { onFilterClick(it) },
+                                                onDelete = { onDeleteClick(it) },
+                                                onChangeIcon = { onChangeIconClick(it) },
+                                                onDismiss = {
+                                                    selectedDay = null
+                                                    selectedRowIdx = null
+                                                    selectedColIdx = null
+                                                    detailExpandedId = null
+                                                },
+                                                deletingIds = deletingIds,
+                                                justAddedIds = justAddedIds,
+                                                onFanMenuStart = handleFanStart,
+                                                onFanMenuDrag = handleFanDrag,
+                                                onFanMenuEnd = handleFanEnd,
+                                                activeFanRecord = activeFanRecord
+                                            )
+                                        }
                                     }
                                 }
                             }
