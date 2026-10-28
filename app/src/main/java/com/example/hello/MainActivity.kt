@@ -8357,13 +8357,6 @@ private fun WeeklyExpenseBarBody(
     }
 }
 
-// =========================================================
-//  ★ RollingNumber：Top Stats 专用的逐位独立滚动数字
-//  - 每位交给 RollingDigit 独立处理（真正的逐格滚动）
-//  - 低位先动、高位后动（≤ 48ms 错落）
-//  - 固定字符（$ , . - K M）不参与滚动
-//  - animateChanges = false 时无动画（冷启动）
-// =========================================================
 @Composable
 fun RollingNumber(
     text: String,
@@ -8379,8 +8372,43 @@ fun RollingNumber(
     }
 
     val totalSlots = maxLen.value
+    val density = LocalDensity.current
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
 
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+    // ★ 紧凑排版样式：tnum 等宽 + 负 letterSpacing + 无 font padding
+    val compactStyle = remember(fontSize, fontWeight) {
+        TextStyle(
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            letterSpacing = (-0.3).sp,             // 字符间略微收紧
+            fontFeatureSettings = "tnum",           // 等宽数字，滚动不抖动
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.Both
+            )
+        )
+    }
+
+    // ★ 字符宽度缓存：每种字符只测量一次，避免 recompose 重复计算
+    val charWidthCache = remember(fontSize, fontWeight, compactStyle) {
+        mutableMapOf<Char, Dp>()
+    }
+
+    @Composable
+    fun widthFor(ch: Char?): Dp {
+        if (ch == null) return 0.dp
+        return charWidthCache.getOrPut(ch) {
+            val px = textMeasurer.measure(ch.toString(), compactStyle).size.width
+            with(density) { px.toDp() }
+        }
+    }
+
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(0.dp)   // ★ 位与位之间零间距
+    ) {
         for (i in 0 until totalSlots) {
             val char = text.getOrNull(i)
             key(i) {
@@ -8389,7 +8417,8 @@ fun RollingNumber(
                     targetChar = char,
                     color = color,
                     fontSize = fontSize,
-                    fontWeight = fontWeight,
+                    style = compactStyle,
+                    width = widthFor(char),
                     animate = animateChanges,
                     delayMs = delayMs
                 )
@@ -8403,7 +8432,8 @@ fun RollingDigit(
     targetChar: Char?,
     color: Color,
     fontSize: TextUnit,
-    fontWeight: FontWeight,
+    style: TextStyle,
+    width: Dp,
     animate: Boolean,
     delayMs: Int,
     modifier: Modifier = Modifier,
@@ -8414,7 +8444,6 @@ fun RollingDigit(
     val targetDigit: Int? = targetChar?.digitToIntOrNull()
 
     if (targetDigit != null) {
-        // ★ 显式非空局部变量，避免 lambda 内智能转换失效
         val digit: Int = targetDigit
         val continuousValue = remember { Animatable(0f) }
         var baseDigit by remember { mutableIntStateOf(digit) }
@@ -8425,24 +8454,15 @@ fun RollingDigit(
                 continuousValue.snapTo(0f)
                 return@LaunchedEffect
             }
-            if (baseDigit == digit) {
-                return@LaunchedEffect
-            }
-
+            if (baseDigit == digit) return@LaunchedEffect
             val steps = (digit - baseDigit + 10) % 10
             if (steps == 0) return@LaunchedEffect
-
             val durationMs = (180 + steps * 60).coerceIn(180, 700)
-
             if (delayMs > 0) delay(delayMs.toLong())
-
             continuousValue.snapTo(0f)
             continuousValue.animateTo(
                 targetValue = steps.toFloat(),
-                animationSpec = tween(
-                    durationMillis = durationMs,
-                    easing = FastOutSlowInEasing
-                )
+                animationSpec = tween(durationMs, easing = FastOutSlowInEasing)
             )
             baseDigit = digit
             continuousValue.snapTo(0f)
@@ -8455,52 +8475,44 @@ fun RollingDigit(
         val currentDigit = (baseDigit + progressInt) % 10
         val nextDigit = (baseDigit + progressInt + 1) % 10
 
+        // ★ Box 宽度 = 字符真实宽度（精确、紧凑、无多余空白）
         Box(
             modifier = modifier
-                .width(cellHeight)
+                .width(width)
                 .height(cellHeight)
                 .clipToBounds()
         ) {
+            // ★ textAlign = Center + fillMaxWidth：即使字体不支持 tnum，也精确居中
             Text(
                 text = currentDigit.toString(),
                 color = color,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
+                style = style,
                 maxLines = 1,
                 softWrap = false,
-                style = TextStyle(
-                    platformStyle = PlatformTextStyle(includeFontPadding = false),
-                    lineHeightStyle = LineHeightStyle(
-                        alignment = LineHeightStyle.Alignment.Center,
-                        trim = LineHeightStyle.Trim.Both
-                    )
-                ),
-                modifier = Modifier.offset(y = (-progressFrac * cellHeight.value).dp)
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset(y = (-progressFrac * cellHeight.value).dp)
             )
             Text(
                 text = nextDigit.toString(),
                 color = color,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
+                style = style,
                 maxLines = 1,
                 softWrap = false,
-                style = TextStyle(
-                    platformStyle = PlatformTextStyle(includeFontPadding = false),
-                    lineHeightStyle = LineHeightStyle(
-                        alignment = LineHeightStyle.Alignment.Center,
-                        trim = LineHeightStyle.Trim.Both
-                    )
-                ),
-                modifier = Modifier.offset(y = ((1f - progressFrac) * cellHeight.value).dp)
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset(y = ((1f - progressFrac) * cellHeight.value).dp)
             )
         }
     } else {
+        // 固定字符（$ , . - K M）：直接静态显示，宽度已由调用方测量传入
         if (targetChar != null) {
             Text(
                 text = targetChar.toString(),
                 color = color,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
+                style = style,
                 maxLines = 1,
                 softWrap = false,
                 modifier = modifier
