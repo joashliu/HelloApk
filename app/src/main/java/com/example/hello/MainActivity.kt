@@ -6511,7 +6511,61 @@ fun CalendarContent(
         selectedRowIdx = null
         selectedColIdx = null
         detailExpandedId = null
+        rowRootYMap.clear()
         try { scrollState.scrollTo(0) } catch (_: Exception) {}
+    }
+
+    // ★ 點擊日期格 → 強制平滑滾動到 Header 正下方
+    //   - 任何情況都執行（唔理明細多少、唔理係咪已可見）
+    //   - 每 frame 動態 clamp 到 scrollState.maxValue（處理明細展開時 maxValue 增長）
+    //   - 連續點擊自動 cancel 舊 job 重算
+    //   - 頂部 / 底部邊界智能保護
+    LaunchedEffect(selectedDay, selectedRowIdx) {
+        val rowIdx = selectedRowIdx ?: return@LaunchedEffect
+        if (selectedDay == null) return@LaunchedEffect
+
+        autoScrollJob?.cancel()
+        autoScrollJob = scope.launch {
+            try {
+                // 等 layout 穩定（rowRootY 已記錄、selectedDay 狀態已生效）
+                var attempts = 0
+                while (rowRootYMap[rowIdx] == null && attempts < 5) {
+                    withFrameNanos { }
+                    attempts++
+                }
+                // 再等一 frame 讓明細的 AnimatedVisibility 起始佈局生效
+                withFrameNanos { }
+
+                val rowY = rowRootYMap[rowIdx] ?: return@launch
+                val contentTopInRoot = topBarHeightPx + weekdayHeaderHeightPx
+                if (contentTopInRoot <= 0f) return@launch
+
+                // 該 row 喺 scroll 內容座標系嘅 Y = 頂對齊 Header 底所需嘅 scroll 值
+                val visualOffset = rowY - contentTopInRoot
+                val targetScroll = (scrollState.value + visualOffset)
+                    .roundToInt()
+                    .coerceAtLeast(0)
+
+                // 若與當前位置差距不足 1px，唔使動畫
+                if (abs(targetScroll - scrollState.value) < 1) return@launch
+
+                val startValue = scrollState.value.toFloat()
+                val anim = Animatable(startValue)
+                anim.animateTo(
+                    targetValue = targetScroll.toFloat(),
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = 300f
+                    )
+                ) {
+                    // ★ 每 frame 動態 clamp 到「當下」嘅 maxValue：
+                    //   明細 expandVertically 期間 maxValue 會慢慢變大，
+                    //   呢度會自動跟隨，最終落喺精確目標位置（或 maxValue 上限）。
+                    val clamped = value.coerceIn(0f, scrollState.maxValue.toFloat())
+                    scrollState.scrollTo(clamped.roundToInt())
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     BackHandler(enabled = selectedDay != null) {
@@ -6529,7 +6583,7 @@ fun CalendarContent(
                 .padding(top = topBarHeight)
         ) {
             // ★ 固定星期 Header（永久置頂，跟月曆列對齊）
-            //   結構：外層 10dp 對齊月曆格外 padding；內層 3dp + spacing 6dp 對齊 CalendarRow
+            //   外層 padding 13dp = 月曆格外層 10dp + 內層 3dp；spacedBy(6dp) 與 CalendarRow 一致
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -6563,7 +6617,7 @@ fun CalendarContent(
                 Column(
                     Modifier
                         .fillMaxSize()
-                                                .pointerInput(Unit) {
+                        .pointerInput(Unit) {
                             // 手動拖動／按下即打斷自動滾動
                             awaitPointerEventScope {
                                 while (true) {
@@ -6656,8 +6710,9 @@ fun CalendarContent(
                             val isThisRowSelected = selectedRowIdx == rowIdx
 
                             Column(Modifier.fillMaxWidth()) {
-                                                                Box(
+                                Box(
                                     Modifier.onGloballyPositioned { coords ->
+                                        // ★ 用 boundsInRoot().topLeft.y 取代 positionInRoot()
                                         rowRootYMap[rowIdx] = coords.boundsInRoot().topLeft.y
                                     }
                                 ) {
@@ -6677,11 +6732,13 @@ fun CalendarContent(
                                             val wasAlreadySelected = selectedDay == day
 
                                             if (wasAlreadySelected) {
+                                                // 再點同一日 → 收起明細
                                                 selectedDay = null
                                                 selectedRowIdx = null
                                                 selectedColIdx = null
                                                 detailExpandedId = null
                                             } else {
+                                                // ★ 只設狀態，滾動由上面的 LaunchedEffect 統一處理
                                                 selectedDay = day
                                                 selectedRowIdx = rowIdx
                                                 selectedColIdx = col
@@ -6689,32 +6746,6 @@ fun CalendarContent(
                                                 cachedSelectedCol = col
                                                 cachedSelectedRowIdx = rowIdx
                                                 detailExpandedId = null
-
-                                                // ★ 自動滾動：將此 row 停靠到固定星期 Header 正下方
-                                                val rowRootY = rowRootYMap[rowIdx]
-                                                val contentTopInRoot = topBarHeightPx + weekdayHeaderHeightPx
-                                                if (rowRootY != null && contentTopInRoot > 0f) {
-                                                    // scroll 內容頂部 = 星期 Header 底邊（root Y）
-                                                    // row 喺 scroll 內容中嘅視覺 Y = rowRootY - contentTopInRoot
-                                                    val visualOffset = rowRootY - contentTopInRoot
-                                                    val targetScroll =
-                                                        (scrollState.value + visualOffset).roundToInt()
-
-                                                    if (abs(targetScroll - scrollState.value) > 4) {
-                                                        autoScrollJob?.cancel()
-                                                        autoScrollJob = scope.launch {
-                                                            try {
-                                                                scrollState.animateScrollTo(
-                                                                    value = targetScroll,
-                                                                    animationSpec = spring(
-                                                                        dampingRatio = 0.85f,
-                                                                        stiffness = 300f
-                                                                    )
-                                                                )
-                                                            } catch (_: Exception) {}
-                                                        }
-                                                    }
-                                                }
                                             }
                                         }
                                     )
