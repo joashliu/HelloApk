@@ -3363,6 +3363,15 @@ fun LedgerContent(
 ) {
     val listState = rememberLazyListState()
 
+    // ★ Top Stats 數字滾動開關：冷啟動 / 首次載入不播，800ms 後才開啟
+    var animateTopStats by remember { mutableStateOf(false) }
+    LaunchedEffect(loading) {
+        if (!loading) {
+            delay(800)
+            animateTopStats = true
+        }
+    }
+
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
@@ -3409,15 +3418,15 @@ fun LedgerContent(
 
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
-        // ★ filter 切換的圖表收起進度（0 = 展開, 1 = 收起），用統一 spring 曲線
-    //   與 AnimatedContent 的 SizeTransform spring 保持一致節奏
+
+    // ★ filter 切換的圖表收起進度（0 = 展開, 1 = 收起），統一 spring 曲線
     val filterChartCollapse by animateFloatAsState(
         targetValue = if (filterMode) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
         label = "chartFilterCollapse"
     )
 
-        LaunchedEffect(shouldPlayWeeklyIntro) {
+    LaunchedEffect(shouldPlayWeeklyIntro) {
         if (!shouldPlayWeeklyIntro || weeklyIntroTriggered) return@LaunchedEffect
         // ★ 移除 delay(150)，立即開始；820ms → 350ms，與 AnimatedContent 同步
         weeklyIntroTriggered = true
@@ -3539,11 +3548,10 @@ fun LedgerContent(
         } catch (_: Exception) {}
     }
 
-            LaunchedEffect(filterMode) {
+    LaunchedEffect(filterMode) {
         try {
-            // ★ 移除強制 scrollToItem(0)：不再打斷 SizeTransform 的平滑過渡
+            // ★ 移除 delay(420) 與強制 scrollToItem(0)：不再打斷 SizeTransform 的平滑過渡
             //   僅當用戶滾得很深（> 20 items）時才平滑回頂，避免篩選欄被遮住
-            //   animateScrollToItem 用動畫，不瞬間跳轉
             if (listState.firstVisibleItemIndex > 20) {
                 listState.animateScrollToItem(0)
             }
@@ -3579,7 +3587,6 @@ fun LedgerContent(
                     if (r.category == INCOME_CATEGORY) {
                         inc += r.amount
                     } else if (r.category != "還錢") {
-                        // 🟢 修改：當計算每日卡片 Header 時，排除「還錢」類別，唔計入支出
                         exp += r.amount 
                     }
                 }
@@ -3714,7 +3721,8 @@ fun LedgerContent(
                         isFilterMode = filterMode,
                         filteredCount = if (filterMode) filtered.size else null,
                         showCategory = showCategoryChip, categoryName = cachedCategory,
-                        avgExpense = avgExpense
+                        avgExpense = avgExpense,
+                        animateValues = animateTopStats   // ★ 新增
                     )
                 }
                 IconButton(onClick = { onShowFutureChange(!showFuture) }) {
@@ -3726,7 +3734,7 @@ fun LedgerContent(
                 }
             }
 
-                                    AnimatedContent(
+            AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
@@ -3855,7 +3863,7 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                                                // ★ 移除 if (!filterMode)：chart item 始終存在
+                        // ★ 移除 if (!filterMode)：chart item 始終存在
                         //   收起動畫由 filterChartCollapse 驅動 item 高度，不瞬間消失
                         if (weeklyExpenses.isNotEmpty()) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
@@ -3924,7 +3932,8 @@ fun TopStats(
     income: Double, expense: Double,
     isFilterMode: Boolean = false, filteredCount: Int? = null,
     showCategory: Boolean = false, categoryName: String = "",
-    avgExpense: Double? = null
+    avgExpense: Double? = null,
+    animateValues: Boolean = false   // ★ 新增
 ) {
     val balance = income - expense
     val showIncome = hasIncome || (!hasIncome && !hasExpense)
@@ -3999,7 +4008,7 @@ fun TopStats(
                 geoMap = geoMap, rowH = rowH
             ) {
                 val catStyle = CATEGORY_STYLES[categoryName]
-                AnimatedStatBlock(
+                                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = catStyle?.icon ?: Icons.Default.Category,
                     iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
@@ -4007,6 +4016,7 @@ fun TopStats(
                     valueNormal = categoryName, valueFilter = categoryName,
                     valueColorNormal = TEXT_PRIMARY,
                     showDollarNormal = false, showDollarFilter = false,
+                    animateValues = animateValues,   // ★
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4016,12 +4026,14 @@ fun TopStats(
                 type = StatBlockType.INC, isActive = activeBlocks.contains(StatBlockType.INC),
                 geoMap = geoMap, rowH = rowH
             ) {
-                AnimatedStatBlock(
+                                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME,
                     labelNormal = "收入", labelFilter = "收入",
                     valueNormal = formatAmountNoDecimal(income), valueFilter = formatAmountNoDecimal(income),
-                    valueColorNormal = COLOR_INCOME, modifier = Modifier.fillMaxSize()
+                    valueColorNormal = COLOR_INCOME,
+                    animateValues = animateValues,   // ★
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
@@ -4030,12 +4042,14 @@ fun TopStats(
                 type = StatBlockType.EXP, isActive = activeBlocks.contains(StatBlockType.EXP),
                 geoMap = geoMap, rowH = rowH
             ) {
-                AnimatedStatBlock(
+                                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE,
                     labelNormal = "支出", labelFilter = "支出",
                     valueNormal = formatAmountNoDecimal(expense), valueFilter = formatAmountNoDecimal(expense),
-                    valueColorNormal = COLOR_EXPENSE, modifier = Modifier.fillMaxSize()
+                    valueColorNormal = COLOR_EXPENSE,
+                    animateValues = animateValues,   // ★
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
@@ -4044,12 +4058,14 @@ fun TopStats(
                 type = StatBlockType.AVG, isActive = activeBlocks.contains(StatBlockType.AVG),
                 geoMap = geoMap, rowH = rowH
             ) {
-                AnimatedStatBlock(
+                                                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B),
                     labelNormal = "均支", labelFilter = "均支",
                     valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueFilter = formatAmountNoDecimal(avgExpense ?: 0.0),
-                    valueColorNormal = Color(0xFFF59E0B), modifier = Modifier.fillMaxSize()
+                    valueColorNormal = Color(0xFFF59E0B),
+                    animateValues = animateValues,   // ★
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
@@ -4058,14 +4074,15 @@ fun TopStats(
                 type = StatBlockType.BAL, isActive = activeBlocks.contains(StatBlockType.BAL),
                 geoMap = geoMap, rowH = rowH
             ) {
-                AnimatedStatBlock(
+                                AnimatedStatBlock(
                     isFilterMode = isFilterMode,
                     iconNormal = Icons.Default.AccountBalanceWallet, iconFilter = Icons.Default.FilterList,
                     iconColorNormal = targetBalColor, iconColorFilter = BRAND_PRIMARY,
-                    labelNormal = "餘額", labelFilter = "", 
+                    labelNormal = "餘額", labelFilter = "",
                     valueNormal = formatAmountNoDecimal(balance), valueFilter = "${filteredCount ?: 0} 筆",
                     valueColorNormal = targetBalColor, valueColorFilter = BRAND_PRIMARY,
                     showDollarNormal = true, showDollarFilter = false,
+                    animateValues = animateValues,   // ★
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -4133,6 +4150,7 @@ private fun AnimatedStatBlock(
     valueColorFilter: Color = valueColorNormal,
     showDollarNormal: Boolean = true,
     showDollarFilter: Boolean = true,
+    animateValues: Boolean = false,   // ★ 新增
     modifier: Modifier = Modifier
 ) {
     val progress by animateFloatAsState(
@@ -4175,14 +4193,13 @@ private fun AnimatedStatBlock(
                 softWrap = false
             )
             
-            // [2] 數值
-            Text(
+                        // [2] 數值（★ 逐位獨立滾動，僅變動位動畫）
+            RollingNumber(
                 text = finalValueString,
                 color = currentValueColor,
-                fontSize = (19f - 4f * progress).sp, // 🟢 字體流暢縮小 (19sp -> 15sp)
+                fontSize = (19f - 4f * progress).sp,
                 fontWeight = FontWeight.ExtraBold,
-                maxLines = 1,
-                softWrap = false
+                animateChanges = animateValues
             )
         },
         modifier = modifier.fillMaxHeight()
@@ -8336,6 +8353,98 @@ private fun WeeklyExpenseBarBody(
                         }
                     )
             )
+        }
+    }
+}
+
+// =========================================================
+//  ★ RollingNumber：Top Stats 专用的逐位独立滚动数字
+//  - 每位独立 AnimatedContent，仅变动的位滚动
+//  - 每位独立方向：该位数字变大向上、变小向下
+//  - 新增/消失的位（位数变化）统一向上（视觉上像"整体滚动"）
+//  - animateChanges = false 时无动画直接切换（冷启动）
+//  - 字体大小 / 颜色 / 字重全程由调用方控制，不撑大布局
+// =========================================================
+@Composable
+fun RollingNumber(
+    text: String,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight = FontWeight.Bold,
+    animateChanges: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    // slots 数只增不减：避免长度变短时 Row 宽度突然缩小引起抖动
+    val length = text.length
+    val maxLen = remember { mutableIntStateOf(length.coerceAtLeast(1)) }
+    LaunchedEffect(length) {
+        if (length > maxLen.value) maxLen.value = length
+    }
+
+    val currentAnimate by rememberUpdatedState(animateChanges)
+
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        for (i in 0 until maxLen.value) {
+            val char = text.getOrNull(i)
+            key(i) {
+                AnimatedContent(
+                    targetState = char,
+                    transitionSpec = {
+                        if (!currentAnimate) {
+                            // 冷启动 / 首次载入：无动画
+                            fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                        } else {
+                            // 每位独立方向判断
+                            val initialDigit = initialState?.digitToIntOrNull() ?: -1
+                            val targetDigit = targetState?.digitToIntOrNull() ?: -1
+                            val goingUp = when {
+                                // 两边都是数字：比大小
+                                initialDigit >= 0 && targetDigit >= 0 -> targetDigit >= initialDigit
+                                // 新出现（位数增加）：从下往上
+                                targetState != null && initialState == null -> true
+                                // 消失（位数减少）：往上飞走
+                                targetState == null && initialState != null -> false
+                                // 非数字字符变化（$、-、.、K、M 等）：默认向上
+                                else -> true
+                            }
+
+                            when {
+                                targetState != null && initialState == null ->
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(200))) togetherWith
+                                    fadeOut(tween(0))
+                                targetState == null && initialState != null ->
+                                    fadeIn(tween(0)) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(200)))
+                                goingUp ->
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
+                                else ->
+                                    (slideInVertically(DIGIT_SLIDE_ENTER) { -it } + fadeIn(tween(220))) togetherWith
+                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it } + fadeOut(tween(220)))
+                            }.using(
+                                SizeTransform(
+                                    clip = false,
+                                    sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }
+                                )
+                            )
+                        }
+                    },
+                    label = "roll_$i"
+                ) { c ->
+                    if (c != null) {
+                        Text(
+                            text = c.toString(),
+                            color = color,
+                            fontSize = fontSize,
+                            fontWeight = fontWeight,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    } else {
+                        Spacer(Modifier.width(0.dp))
+                    }
+                }
+            }
         }
     }
 }
