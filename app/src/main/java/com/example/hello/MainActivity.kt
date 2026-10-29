@@ -4748,19 +4748,22 @@ fun CalendarContent(
     val handleDismiss = remember {
     {
         if (selectedDay != null) {
-            scope.launch {
-                // ★ 加 clamp，拖過頭都唔會 snapTo 負值
-                val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
-                    .coerceIn(0f, gridScrollOffsetAnim.value)
-                dragDownAmount = 0f
-                selectedDay = null
-                selectedRowIdx = null
-                selectedColIdx = null
+            val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
+                .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
+            // ★ 關鍵：同步清空，令下一幀再叫 handleDismiss 時 if 立即返回
+            selectedDay = null
+            selectedRowIdx = null
+            selectedColIdx = null
+
+            scope.launch {
+                dragDownAmount = 0f
                 gridScrollOffsetAnim.snapTo(currentActualOffset)
                 gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
             }
-            scope.launch { detailsAlphaAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f)) }
+            scope.launch {
+                detailsAlphaAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
+            }
         }
     }
 }
@@ -4784,22 +4787,15 @@ fun CalendarContent(
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
     if (available.y > 0f) {
         val maxDrag = gridScrollOffsetAnim.value.coerceAtLeast(0f)
+        // ★ 冇可下拉空間（第一行／已回預設位置）→ 唔消費、唔 dismiss
+        if (maxDrag <= 0.5f) return Offset.Zero
 
-        // 第一行／已經喺預設位置：冇任何可下拉空間 → 直接關閉，禁止累積
-        if (maxDrag <= 0.5f) {
-            handleDismiss()
-            return Offset(0f, available.y)
-        }
-
-        // ★ 硬上限，無阻尼：一幀就算滑 500px 都只會 clamp 到 maxDrag
         val newDrag = (dragDownAmount + available.y).coerceAtMost(maxDrag)
         val consumedY = newDrag - dragDownAmount
         dragDownAmount = newDrag
 
-        // 一觸及上限 = 已回到預設月曆位置 → 立即收尾
-        if (dragDownAmount >= maxDrag - 0.5f) {
-            handleDismiss()
-        }
+        // 只有真正到頂（= 已回到預設月曆位置）才收尾，只會觸發一次
+        if (newDrag >= maxDrag - 0.5f) handleDismiss()
         return Offset(0f, consumedY)
     }
     return Offset.Zero
@@ -4894,9 +4890,9 @@ fun CalendarContent(
             }
 
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
-    // ★ 最後防線：clamp 到 [0, gridScrollOffsetAnim.value]
+    // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
     val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
-        .coerceIn(0f, gridScrollOffsetAnim.value)
+        .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
     Column(
         Modifier.fillMaxWidth()
