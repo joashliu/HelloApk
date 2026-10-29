@@ -4657,6 +4657,7 @@ fun CalendarContent(
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
     var isDockedAtTop by remember { mutableStateOf(false) }
     var dockedReleased by remember { mutableStateOf(false) }
+    var isDockingBack by remember { mutableStateOf(false) }
 
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
@@ -4759,6 +4760,7 @@ fun CalendarContent(
             selectedColIdx = null
             isDockedAtTop = false
             dockedReleased = false
+            isDockingBack = false
 
             scope.launch {
                 dragDownAmount = 0f
@@ -4780,10 +4782,32 @@ fun CalendarContent(
 
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             if (available.y < 0f && dragDownAmount > 0f) {
+                // ★ 停靠狀態向上拖 → 立即觸發自動彈返頂（無論拖幾多）
+                if (isDockedAtTop && !isDockingBack) {
+                    isDockedAtTop = false
+                    dockedReleased = false
+                    isDockingBack = true
+                    val start = dragDownAmount
+                    scope.launch {
+                        try {
+                            Animatable(start).animateTo(
+                                0f,
+                                spring(dampingRatio = 0.85f, stiffness = 400f)
+                            ) { dragDownAmount = value }
+                        } finally {
+                            isDockingBack = false
+                        }
+                    }
+                    return Offset(0f, available.y)
+                }
+                // 彈簧回頂進行中：只消費拖動，唔插手 dragDownAmount
+                if (isDockingBack) {
+                    return Offset(0f, available.y)
+                }
+                // 正常跟手拖動
                 val consume = minOf(-available.y, dragDownAmount)
                 dragDownAmount -= consume
-                // 向上滑離開 dock → 取消 dock，恢復可上滑查看 detail
-                if (isDockedAtTop && dragDownAmount < gridScrollOffsetAnim.value - 0.5f) {
+                if (dragDownAmount <= 0.5f) {
                     isDockedAtTop = false
                     dockedReleased = false
                 }
@@ -4796,18 +4820,15 @@ fun CalendarContent(
             if (available.y > 0f) {
                 val maxDrag = gridScrollOffsetAnim.value.coerceAtLeast(0f)
                 if (maxDrag <= 0.5f) return Offset.Zero
-
-                // ★ 已經停靠：同一次手勢內唔消費（保持停靠）；放手後新手勢再下拉 → 先 dismiss
+                // 彈簧回頂進行中：忽略向下拖動（約 300ms）
+                if (isDockingBack) return Offset(0f, available.y)
                 if (isDockedAtTop) {
                     if (dockedReleased) handleDismiss()
                     return Offset(0f, available.y)
                 }
-
                 val newDrag = (dragDownAmount + available.y).coerceAtMost(maxDrag)
                 val consumedY = newDrag - dragDownAmount
                 dragDownAmount = newDrag
-
-                // ★ 到第一行位置 → 只標記停靠，唔 dismiss
                 if (newDrag >= maxDrag - 0.5f) {
                     isDockedAtTop = true
                 }
@@ -4817,29 +4838,31 @@ fun CalendarContent(
         }
 
         override suspend fun onPreFling(available: Velocity): Velocity {
-            // ★ 已停靠：標記放手，等下一次手勢再拉才 dismiss
             if (isDockedAtTop) {
                 dockedReleased = true
                 return available
             }
+            if (isDockingBack) return Velocity.Zero
             val maxDrag = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-            if (dragDownAmount > 5f && maxDrag > 0.5f) {
-                // ★ 拉咗一部分就放手 → 吸附到第一行停靠（唔 dismiss）
-                val start = dragDownAmount
-                scope.launch {
-                    Animatable(start).animateTo(
-                        maxDrag,
-                        spring(dampingRatio = 0.9f, stiffness = 400f)
-                    ) { dragDownAmount = value }
-                    isDockedAtTop = true
-                    dockedReleased = true
-                }
-            } else if (dragDownAmount > 0f) {
-                scope.launch {
-                    Animatable(dragDownAmount).animateTo(
-                        0f, spring(dampingRatio = 0.85f, stiffness = 400f)
-                    ) { dragDownAmount = value }
-                }
+            if (maxDrag <= 0.5f) return Velocity.Zero
+            if (dragDownAmount <= 0.5f) return Velocity.Zero
+
+            // ★ 方向感知吸附（核心修復）
+            val snapTarget = when {
+                available.y < -50f -> 0f            // 向上滑 → 回頂
+                available.y > 50f -> maxDrag        // 向下滑 → 停靠
+                dragDownAmount < maxDrag / 2f -> 0f // 低速：就近頂
+                else -> maxDrag                     // 低速：就近停靠
+            }
+            val start = dragDownAmount
+            val shouldDock = snapTarget >= maxDrag - 0.5f
+            scope.launch {
+                Animatable(start).animateTo(
+                    snapTarget,
+                    spring(dampingRatio = 0.85f, stiffness = 400f)
+                ) { dragDownAmount = value }
+                isDockedAtTop = shouldDock
+                dockedReleased = shouldDock
             }
             return Velocity.Zero
         }
