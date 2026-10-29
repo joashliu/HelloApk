@@ -4745,24 +4745,25 @@ fun CalendarContent(
         offsets
     }
 
-    // ── 關閉明細統一處理函數（無縫過渡並觸發外圍 Chips 展開） ──
     val handleDismiss = remember {
-        {
-            if (selectedDay != null) {
-                scope.launch {
-                    val currentActualOffset = gridScrollOffsetAnim.value - dragDownAmount
-                    dragDownAmount = 0f
-                    selectedDay = null
-                    selectedRowIdx = null
-                    selectedColIdx = null
-                    
-                    gridScrollOffsetAnim.snapTo(currentActualOffset)
-                    gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
-                }
-                scope.launch { detailsAlphaAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f)) }
+    {
+        if (selectedDay != null) {
+            scope.launch {
+                // ★ 加 clamp，拖過頭都唔會 snapTo 負值
+                val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
+                    .coerceIn(0f, gridScrollOffsetAnim.value)
+                dragDownAmount = 0f
+                selectedDay = null
+                selectedRowIdx = null
+                selectedColIdx = null
+
+                gridScrollOffsetAnim.snapTo(currentActualOffset)
+                gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
             }
+            scope.launch { detailsAlphaAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f)) }
         }
     }
+}
 
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
@@ -4781,38 +4782,25 @@ fun CalendarContent(
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-    // 手指向下滑（查閱頂部／下拉收起），detail 內容已到頂時就會入嚟
     if (available.y > 0f) {
-        // ★ 上限：最多拉到 grid 回到預設位置（actualGridOffset = 0）
         val maxDrag = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-        val hasScrollableArea = maxDrag > 0.5f
 
-        if (hasScrollableArea) {
-            // ★ 已經到達上限 → 直接收尾，禁止再往下拖
-            if (dragDownAmount >= maxDrag - 0.5f) {
-                handleDismiss()
-                return Offset(0f, available.y)
-            }
-
-            // ★ 阻尼：越接近上限越難拉（0 → 1 倍，接近上限 → 0.1 倍）
-            val ratio = (dragDownAmount / maxDrag).coerceIn(0f, 1f)
-            val dampFactor = (1f - ratio * 0.85f).coerceAtLeast(0.1f)
-
-            val newDrag = (dragDownAmount + available.y * dampFactor).coerceAtMost(maxDrag)
-            dragDownAmount = newDrag
-
-            // ★ 剛好觸到上限 → 立即收尾（因為已經回到預設月曆樣式）
-            if (dragDownAmount >= maxDrag - 0.5f) {
-                handleDismiss()
-            }
-        } else {
-            // 冇可滾動區域（本身已在預設位置），保留原本 40f 閾值
-            dragDownAmount += available.y
-            if (dragDownAmount > 40f) {
-                handleDismiss()
-            }
+        // 第一行／已經喺預設位置：冇任何可下拉空間 → 直接關閉，禁止累積
+        if (maxDrag <= 0.5f) {
+            handleDismiss()
+            return Offset(0f, available.y)
         }
-        return Offset(0f, available.y)
+
+        // ★ 硬上限，無阻尼：一幀就算滑 500px 都只會 clamp 到 maxDrag
+        val newDrag = (dragDownAmount + available.y).coerceAtMost(maxDrag)
+        val consumedY = newDrag - dragDownAmount
+        dragDownAmount = newDrag
+
+        // 一觸及上限 = 已回到預設月曆位置 → 立即收尾
+        if (dragDownAmount >= maxDrag - 0.5f) {
+            handleDismiss()
+        }
+        return Offset(0f, consumedY)
     }
     return Offset.Zero
 }
@@ -4906,12 +4894,14 @@ fun CalendarContent(
             }
 
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
-                val actualGridOffset = gridScrollOffsetAnim.value - dragDownAmount
+    // ★ 最後防線：clamp 到 [0, gridScrollOffsetAnim.value]
+    val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
+        .coerceIn(0f, gridScrollOffsetAnim.value)
 
-                Column(
-                    Modifier.fillMaxWidth()
-                        .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
-                        .padding(horizontal = 10.dp)
+    Column(
+        Modifier.fillMaxWidth()
+            .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
+            .padding(horizontal = 10.dp)
                 ) {
                     for (rowIdx in 0 until totalRows) {
                         val isRowSelected = selectedRowIdx == rowIdx
