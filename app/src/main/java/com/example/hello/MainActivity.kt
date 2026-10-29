@@ -4655,6 +4655,8 @@ fun CalendarContent(
     var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
     var selectedColIdx by remember { mutableStateOf<Int?>(null) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
+    var isDockedAtTop by remember { mutableStateOf(false) }
+    var dockedReleased by remember { mutableStateOf(false) }
 
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
@@ -4931,44 +4933,50 @@ fun CalendarContent(
             .padding(horizontal = 10.dp)
                 ) {
                     for (rowIdx in 0 until totalRows) {
-                        val isRowSelected = selectedRowIdx == rowIdx
-                        CalendarRow(
-                            rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
-                            today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
-                            displayMode = displayMode, maxAbsNet = maxAbsNet,
-                            selectedDay = if (isRowSelected) selectedDay else null,
-                            selectedCol = if (isRowSelected) selectedColIdx else null,
-                            animateValues = animateValues,
-                            onCellClick = { day, col ->
-    if (selectedDay == day) {
-        handleDismiss()
-    } else {
-        selectedDay = day
-        selectedRowIdx = rowIdx
-        selectedColIdx = col
-        cachedSelectedDay = day
-        cachedSelectedRowIdx = rowIdx
-        cachedSelectedCol = col
-        detailExpandedId = null
-        // ★ 切換新格子 = 全新開始，清 dock 狀態
-        isDockedAtTop = false
-        dockedReleased = false
+    val isRowSelected = selectedRowIdx == rowIdx
+    CalendarRow(
+        rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
+        today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
+        displayMode = displayMode, maxAbsNet = maxAbsNet,
+        selectedDay = if (isRowSelected) selectedDay else null,
+        selectedCol = if (isRowSelected) selectedColIdx else null,
+        animateValues = animateValues,
+        onCellClick = { day, col ->
+            if (selectedDay == day) {
+                handleDismiss()
+            } else {
+                selectedDay = day
+                selectedRowIdx = rowIdx
+                selectedColIdx = col
+                cachedSelectedDay = day
+                cachedSelectedRowIdx = rowIdx
+                cachedSelectedCol = col
+                detailExpandedId = null
 
-        scope.launch {
-            val currentActual = gridScrollOffsetAnim.value - dragDownAmount
-            dragDownAmount = 0f
-            gridScrollOffsetAnim.snapTo(currentActual)
-            gridScrollOffsetAnim.animateTo(rowOffsetsPx[rowIdx],
-                spring(dampingRatio = 0.9f, stiffness = 300f))
+                // ★ 切換新格子 = 全新開始，清 dock 狀態
+                isDockedAtTop = false
+                dockedReleased = false
+
+                scope.launch {
+                    val currentActual = gridScrollOffsetAnim.value - dragDownAmount
+                    dragDownAmount = 0f
+                    gridScrollOffsetAnim.snapTo(currentActual)
+                    gridScrollOffsetAnim.animateTo(
+                        rowOffsetsPx[rowIdx],
+                        spring(dampingRatio = 0.9f, stiffness = 300f)
+                    )
+                }
+                scope.launch {
+                    detailsAlphaAnim.animateTo(
+                        1f,
+                        spring(dampingRatio = 0.9f, stiffness = 300f)
+                    )
+                }
+            }
         }
-        scope.launch {
-            detailsAlphaAnim.animateTo(1f,
-                spring(dampingRatio = 0.9f, stiffness = 300f))
-        }
-    }
+    )
+    if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
 }
-                        if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
-                    }
                 }
 
                 Box(Modifier.fillMaxWidth().height(headerHeightDp).align(Alignment.TopCenter).zIndex(20f).background(SURFACE_BG)) {
