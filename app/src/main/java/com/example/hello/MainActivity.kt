@@ -4634,9 +4634,8 @@ fun TrianglePointer(
         val gridPad = 10.dp
         val rowPad = 3.dp
         val spacing = 6.dp
-        // 精確計算：總寬 - 外框Padding - 行內Padding - 6個間距
+        // 精確計算絕對中心點座標，對齊被點擊格仔
         val cellWidth = (maxWidth - gridPad * 2 - rowPad * 2 - spacing * 6) / 7
-        // 絕對中心點 X 坐標
         val targetX = gridPad + rowPad + (cellWidth + spacing) * colIndex + cellWidth / 2 - triangleWidth / 2
 
         val animatedX by animateDpAsState(
@@ -4646,9 +4645,9 @@ fun TrianglePointer(
         )
         Canvas(Modifier.offset(x = animatedX).size(triangleWidth, triangleHeight)) {
             val path = Path().apply {
-                moveTo(0f, size.height)
-                lineTo(size.width / 2f, 0f)
+                moveTo(size.width / 2f, 0f) // 頂點朝上
                 lineTo(size.width, size.height)
+                lineTo(0f, size.height)
                 close()
             }
             drawPath(path, color)
@@ -4691,21 +4690,23 @@ fun CalendarContent(
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
-    val scrollState = rememberScrollState()
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
-    var autoScrollJob by remember { mutableStateOf<Job?>(null) }
 
-    val detailAlpha = remember { Animatable(0f) }
-    // 手勢跟手用的浮點值（同步更新）
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    val flingAnim = remember { Animatable(0f) }
+    // 自定義彈簧與手勢狀態
+    val gridScrollOffsetAnim = remember { Animatable(0f) }
+    val detailsAlphaAnim = remember { Animatable(0f) }
+    var dragDownAmount by remember { mutableFloatStateOf(0f) }
+    var shrinkAmount by remember { mutableFloatStateOf(0f) }
 
     val density = LocalDensity.current
-    val configuration = LocalConfiguration.current
-    val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val headerHeightDp = 32.dp
+    val headerHeightPx = remember(density) { with(density) { headerHeightDp.toPx() } }
+    val triangleHeightDp = 11.dp
+    val triangleHeightPx = remember(density) { with(density) { triangleHeightDp.toPx() } }
+    // FAB上方預留空間: 導航欄 + Padding + FAB高度 + 安全邊距
+    val fabTopPaddingPx = remember(density) { with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp).toPx() } }
 
-    // ═════════ 月份 / 行高計算 ═════════
     val curCal = remember(currentMonthKey) {
         val parts = currentMonthKey.split("-")
         Calendar.getInstance().apply {
@@ -4732,8 +4733,9 @@ fun CalendarContent(
         (first.get(Calendar.DAY_OF_WEEK) + 5) % 7
     }
     val totalRows = (firstDayOffset + daysInMonth + 6) / 7
+    val gridSpacingPx = remember(density) { with(density) { 6.dp.toPx() } }
 
-    val rowHeightsPx = remember(totalRows, firstDayOffset, daysInMonth, recordsByDay, displayMode) {
+    val rowHeightsPx = remember(totalRows, firstDayOffset, daysInMonth, recordsByDay, displayMode, density) {
         val heights = FloatArray(totalRows)
         for (rowIdx in 0 until totalRows) {
             var maxItems = 0
@@ -4764,214 +4766,138 @@ fun CalendarContent(
         heights
     }
 
-    val calendarGridOffsetsPx = remember(rowHeightsPx, totalRows) {
+    val rowOffsetsPx = remember(rowHeightsPx, totalRows) {
         val offsets = FloatArray(totalRows)
         var cur = 0f
-        val spacingPx = with(density) { 6.dp.toPx() }
         for (i in 0 until totalRows) {
             offsets[i] = cur
-            cur += rowHeightsPx[i] + spacingPx
+            cur += rowHeightsPx[i] + gridSpacingPx
         }
         offsets
     }
-    val gridSpacingPx = remember(density) { with(density) { 6.dp.toPx() } }
 
-    // ═════════ 切換月份重置 ═════════
-    LaunchedEffect(currentMonthKey) {
-        autoScrollJob?.cancel(); autoScrollJob = null
-        selectedDay = null; selectedRowIdx = null; selectedColIdx = null
-        detailExpandedId = null
-        detailAlpha.snapTo(0f)
-        dragOffset = 0f
-        try { scrollState.scrollTo(0) } catch (_: Exception) {}
-    }
-
-    LaunchedEffect(cachedSelectedDay) {
-        try { detailScrollState.scrollTo(0) } catch (_: Exception) {}
-    }
-
-    // ═════════ 選中變更：滾動定位 + 明細淡入/淡出 ═════════
-    LaunchedEffect(selectedDay, selectedRowIdx) {
-        if (selectedDay != null && selectedRowIdx != null) {
-            val rowIdx = selectedRowIdx!!
-            autoScrollJob?.cancel()
-            autoScrollJob = scope.launch {
-                val target = calendarGridOffsetsPx[rowIdx].roundToInt()
-                scrollState.animateScrollTo(
-                    value = target,
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 300f)
-                )
-            }
-            detailAlpha.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 300f))
-        } else if (selectedDay == null) {
-            autoScrollJob?.cancel()
-            autoScrollJob = scope.launch {
-                scrollState.animateScrollTo(0, spring(dampingRatio = 0.9f, stiffness = 300f))
-            }
-            if (dragOffset > 0f) {
-                flingAnim.snapTo(dragOffset)
-                flingAnim.animateTo(2000f, spring(dampingRatio = 0.85f, stiffness = 300f)) {
-                    dragOffset = value
-                }
-            }
-            detailAlpha.animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 300f))
-            dragOffset = 0f
-        }
-    }
-
-    BackHandler(enabled = selectedDay != null) {
-        selectedDay = null; selectedRowIdx = null; selectedColIdx = null
-        detailExpandedId = null
-    }
-
-    // ═════════ 手動滾動 grid 時自動收起明細 ═════════
-    var lastScrollValue by remember { mutableIntStateOf(0) }
-    LaunchedEffect(scrollState.value) {
-        if (selectedRowIdx != null && autoScrollJob?.isActive != true) {
-            val delta = scrollState.value - lastScrollValue
-            if (abs(delta) > 10) {
-                selectedDay = null; selectedRowIdx = null; selectedColIdx = null
-                detailExpandedId = null
-            }
-        }
-        lastScrollValue = scrollState.value
-    }
-
-    // ═════════ FanMenu 狀態（保留原邏輯） ═════════
-    var activeFanRecord by remember { mutableStateOf<Record?>(null) }
-    val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
-    val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
-    val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
-    val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-    val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
-    val fanMenuProgress = animateFloatAsState(
-        targetValue = if (activeFanRecord != null) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
-        label = "fanMenuProgress"
-    )
-    val minFanRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
-    val latestOnCopy by rememberUpdatedState(onCopyClick)
-    val latestOnEdit by rememberUpdatedState(onEditClick)
-    val latestOnFilter by rememberUpdatedState(onFilterClick)
-    val latestOnDelete by rememberUpdatedState(onDeleteClick)
-
-    val handleFanStart = remember {
-        { r: Record, offset: Offset ->
-            activeFanRecord = r
-            fanMenuCenterState.value = offset
-            fanMenuTouchState.value = offset
-        }
-    }
-    val handleFanDrag = remember {
-        { d: Offset -> fanMenuTouchState.value += d }
-    }
-    val handleFanEnd = remember {
+    // ── 關閉明細統一處理函數 ──
+    val handleDismiss = remember {
         {
-            val center = fanMenuCenterState.value
-            val leftSpace = center.x
-            val rightSpace = screenWidthPx - center.x
-            val rotation = when {
-                leftSpace < fanEdgeThreshold -> (1f - leftSpace / fanEdgeThreshold).coerceIn(0f, 1f) * 80f
-                rightSpace < fanEdgeThreshold -> -(1f - rightSpace / fanEdgeThreshold).coerceIn(0f, 1f) * 80f
-                else -> 0f
+            scope.launch {
+                val currentActualOffset = gridScrollOffsetAnim.value - dragDownAmount
+                dragDownAmount = 0f
+                shrinkAmount = 0f
+                selectedDay = null
+                selectedRowIdx = null
+                selectedColIdx = null
+                
+                // 無縫對接當前位置，再平滑彈返頂部（貼合校正）
+                gridScrollOffsetAnim.snapTo(currentActualOffset)
+                gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
             }
-            val arcCenterAngle = -90f + rotation
-            val hovered = getHoveredActionIndexWithCenter(
-                center = center, touch = fanMenuTouchState.value,
-                minRadiusPx = minFanRadiusPx, arcCenterAngle = arcCenterAngle
-            )
-            val target = activeFanRecord
-            activeFanRecord = null
-            if (target != null && hovered != null) {
-                scope.launch {
-                    delay(120)
-                    when (hovered) {
-                        0 -> latestOnCopy(target)
-                        1 -> latestOnEdit(target)
-                        2 -> latestOnFilter(target)
-                        3 -> latestOnDelete(target)
+            scope.launch { detailsAlphaAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f)) }
+        }
+    }
+
+    // 切換月份重置
+    LaunchedEffect(currentMonthKey) {
+        handleDismiss()
+    }
+
+    // 處理返回鍵
+    BackHandler(enabled = selectedDay != null) { handleDismiss() }
+
+    // 手勢處理 (NestedScroll)
+    val dismissConnection = remember(selectedRowIdx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0f) { // 向上滑動 (Shrink)
+                    if (dragDownAmount > 0f) {
+                        val consume = minOf(-available.y, dragDownAmount)
+                        dragDownAmount -= consume
+                        return Offset(0f, -consume)
+                    }
+                    shrinkAmount += -available.y
+                    return Offset(0f, available.y)
+                }
+                if (available.y > 0f) { // 向下滑動 (Drag Down)
+                    if (shrinkAmount > 0f) {
+                        val consume = minOf(available.y, shrinkAmount)
+                        shrinkAmount -= consume
+                        return Offset(0f, consume)
                     }
                 }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (available.y > 0f) { 
+                    // 第一階段到底，進入第二階段：拖動整個Box及Grid平移
+                    val maxDrag = rowOffsetsPx[selectedRowIdx ?: 0]
+                    val allow = maxDrag - dragDownAmount
+                    val consume = minOf(available.y, allow).coerceAtLeast(0f)
+                    dragDownAmount += consume
+                    return Offset(0f, consume)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val threshold = 250f
+                if (dragDownAmount > threshold || shrinkAmount > threshold || available.y > 1000f || available.y < -1000f) {
+                    handleDismiss()
+                } else {
+                    scope.launch { Animatable(dragDownAmount).animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) { dragDownAmount = value } }
+                    scope.launch { Animatable(shrinkAmount).animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) { shrinkAmount = value } }
+                }
+                return available
             }
         }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
-        // FAB 頂邊距：NAV + 底Pad + 12dp + 56dp + 8dp 間距
-        val fabTopFromBottomPx = with(density) {
-            (NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp + 56.dp + 8.dp).toPx()
-        }
+        val containerHeightPx = constraints.maxHeight.toFloat()
+        val bottomLimitPx = containerHeightPx - fabTopPaddingPx
 
         Column(Modifier.fillMaxSize()) {
-            // ── 1. TopStat / 月份選擇器（固定） ──
-            Box(
-                Modifier.fillMaxWidth().background(SURFACE_BG).zIndex(30f)
-                    .padding(horizontal = 10.dp, vertical = 10.dp)
-            ) {
+            // ── 1. TopStat / 月份選擇器 ──
+            Box(Modifier.fillMaxWidth().background(SURFACE_BG).zIndex(30f).padding(horizontal = 10.dp, vertical = 10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         onClick = { monthDirection = -1; onMonthChange(shiftMonthKey(currentMonthKey, -1)) },
-                        modifier = Modifier.size(36.dp),
-                        shape = CircleShape, color = SURFACE_CARD,
-                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ChevronLeft, "上個月", tint = Color.Black,
-                                modifier = Modifier.size(22.dp))
-                        }
-                    }
+                        modifier = Modifier.size(36.dp), shape = CircleShape, color = SURFACE_CARD, border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+                    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChevronLeft, "上個月", tint = Color.Black, modifier = Modifier.size(22.dp)) } }
                     Spacer(Modifier.width(10.dp))
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) {
-                            if (currentMonthKey != todayKey) {
-                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
-                                onMonthChange(todayKey)
-                            }
+                        modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                            if (currentMonthKey != todayKey) { monthDirection = if (todayKey > currentMonthKey) 1 else -1; onMonthChange(todayKey) }
                         }
                     ) {
-                        Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp,
-                            color = Color.Black, fontWeight = FontWeight.Medium)
+                        Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp, color = Color.Black, fontWeight = FontWeight.Medium)
                         AnimatedContent(
                             targetState = currentMonthKey,
                             transitionSpec = {
                                 val forward = monthDirection > 0
                                 if (forward) {
-                                    (slideInHorizontally(tween(280)) { it } + fadeIn(tween(200)))
-                                        .togetherWith(slideOutHorizontally(tween(280)) { -it } + fadeOut(tween(180)))
+                                    (slideInHorizontally(tween(280)) { it } + fadeIn(tween(200))).togetherWith(slideOutHorizontally(tween(280)) { -it } + fadeOut(tween(180)))
                                 } else {
-                                    (slideInHorizontally(tween(280)) { -it } + fadeIn(tween(200)))
-                                        .togetherWith(slideOutHorizontally(tween(280)) { it } + fadeOut(tween(180)))
+                                    (slideInHorizontally(tween(280)) { -it } + fadeIn(tween(200))).togetherWith(slideOutHorizontally(tween(280)) { it } + fadeOut(tween(180)))
                                 }
                             },
                             label = "monthAnim"
                         ) { key ->
                             val m = key.split("-").getOrNull(1)?.toIntOrNull() ?: month
-                            Text("${m}月", fontSize = 28.sp, lineHeight = 30.sp,
-                                fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                            Text("${m}月", fontSize = 28.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
                         }
                     }
                     Spacer(Modifier.width(10.dp))
                     Surface(
                         onClick = { monthDirection = 1; onMonthChange(shiftMonthKey(currentMonthKey, 1)) },
-                        modifier = Modifier.size(36.dp),
-                        shape = CircleShape, color = SURFACE_CARD,
-                        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.ChevronRight, "下個月", tint = Color.Black,
-                                modifier = Modifier.size(22.dp))
-                        }
-                    }
+                        modifier = Modifier.size(36.dp), shape = CircleShape, color = SURFACE_CARD, border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+                    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChevronRight, "下個月", tint = Color.Black, modifier = Modifier.size(22.dp)) } }
                     Spacer(Modifier.weight(1f))
                     SegmentedModeControl(displayMode = displayMode, onModeChange = { displayMode = it })
                 }
             }
 
-            // ── 2. 分類 Chips（展開明細時向上滑出淡出） ──
+            // ── 2. 分類 Chips（展開明細時自動滑出讓位） ──
             AnimatedVisibility(
                 visible = selectedDay == null,
                 enter = expandVertically(spring(dampingRatio = 0.9f, stiffness = 320f)) + fadeIn(tween(180)),
@@ -4979,17 +4905,14 @@ fun CalendarContent(
             ) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
                     Spacer(Modifier.height(4.dp))
-                    val allCategories: List<String?> = remember(visibleCategories) {
-                        listOf(null) + visibleCategories
-                    }
+                    val allCategories: List<String?> = remember(visibleCategories) { listOf(null) + visibleCategories }
                     val rows = remember(allCategories) { allCategories.chunked(4) }
                     rows.forEach { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             row.forEach { cat ->
                                 CalendarFilterChip(
                                     modifier = Modifier.weight(1f),
-                                    selected = filterCategory == cat,
-                                    label = cat ?: "全部",
+                                    selected = filterCategory == cat, label = cat ?: "全部",
                                     onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
                                 )
                             }
@@ -4998,288 +4921,123 @@ fun CalendarContent(
                         Spacer(Modifier.height(6.dp))
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(
-                            label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}",
-                            modifier = Modifier.weight(1f), valueFontSize = 16.sp,
-                            valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
-                        )
-                        AnimatedInfoChip(
-                            label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}",
-                            modifier = Modifier.weight(1f), valueFontSize = 16.sp
-                        )
-                        AnimatedInfoChip(
-                            label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}",
-                            modifier = Modifier.weight(1f), valueFontSize = 16.sp
-                        )
+                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
+                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
                     }
                     Spacer(Modifier.height(8.dp))
                 }
             }
 
-            // ── 3. 星期 Header（永久固定，實心背景遮蓋穿過嘅日期行） ──
-            Box(Modifier.fillMaxWidth().background(SURFACE_BG).zIndex(20f)) {
-                Row(
-                    Modifier.fillMaxWidth()
-                        .padding(horizontal = 13.dp)
-                        .padding(vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // ── 3 & 4. 星期Header 同 Grid/明細 (共享同一 Box 空間處理深度遮擋) ──
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+                val actualGridOffset = gridScrollOffsetAnim.value - dragDownAmount
+
+                // 【底層 Z: 10】月曆格仔 Grid
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
+                        .padding(horizontal = 10.dp)
                 ) {
-                    CALENDAR_WEEKDAY_HEADERS.forEach { w ->
-                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = w, fontSize = 12.sp, color = Color.Black,
-                                fontWeight = FontWeight.SemiBold,
-                                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── 4. 滾動區（純 grid）＋ 明細 Overlay（固定層） ──
-            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val areaHeightPx = constraints.maxHeight.toFloat()
-
-                    // 明細最大可用高度（頂邊到 FAB 上方）
-                    val maxDetailHeightPx = (areaHeightPx - fabTopFromBottomPx).coerceAtLeast(0f)
-
-                    // NestedScroll：明細內滾動到頂後，向下滑 → 收縮；向上滑 → 先恢復
-                    val dismissConnection = remember(maxDetailHeightPx) {
-                        object : NestedScrollConnection {
-                            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                                if (dragOffset > 0f && available.y < 0f) {
-                                    val consumed = maxOf(available.y, -dragOffset)
-                                    dragOffset = (dragOffset + consumed).coerceAtLeast(0f)
-                                    return Offset(0f, consumed)
-                                }
-                                return Offset.Zero
-                            }
-
-                            override fun onPostScroll(
-                                consumed: Offset,
-                                available: Offset,
-                                source: NestedScrollSource
-                            ): Offset {
-                                if (available.y > 0f && detailScrollState.value == 0) {
-                                    val maxOffset = (maxDetailHeightPx - 80f).coerceAtLeast(0f)
-                                    val consume = minOf(available.y, maxOffset - dragOffset).coerceAtLeast(0f)
-                                    if (consume > 0f) {
-                                        dragOffset += consume
-                                        return Offset(0f, consume)
+                    for (rowIdx in 0 until totalRows) {
+                        val isRowSelected = selectedRowIdx == rowIdx
+                        CalendarRow(
+                            rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
+                            today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
+                            displayMode = displayMode, maxAbsNet = maxAbsNet,
+                            selectedDay = if (isRowSelected) selectedDay else null,
+                            selectedCol = if (isRowSelected) selectedColIdx else null,
+                            animateValues = animateValues,
+                            onCellClick = { day, col ->
+                                if (selectedDay == day) {
+                                    handleDismiss()
+                                } else {
+                                    selectedDay = day
+                                    selectedRowIdx = rowIdx
+                                    selectedColIdx = col
+                                    cachedSelectedDay = day
+                                    cachedSelectedRowIdx = rowIdx
+                                    cachedSelectedCol = col
+                                    detailExpandedId = null
+                                    
+                                    scope.launch {
+                                        val currentActual = gridScrollOffsetAnim.value - dragDownAmount
+                                        dragDownAmount = 0f
+                                        shrinkAmount = 0f
+                                        gridScrollOffsetAnim.snapTo(currentActual) // 防閃跳
+                                        gridScrollOffsetAnim.animateTo(rowOffsetsPx[rowIdx], spring(dampingRatio = 0.9f, stiffness = 300f))
                                     }
-                                }
-                                return Offset.Zero
-                            }
-
-                            override suspend fun onPreFling(available: Velocity): Velocity {
-                                if (dragOffset > 0f) {
-                                    val threshold = maxDetailHeightPx * 0.35f
-                                    if (available.y > 600f || dragOffset > threshold) {
-                                        selectedDay = null
-                                        selectedRowIdx = null
-                                        selectedColIdx = null
-                                        detailExpandedId = null
-                                    } else {
-                                        flingAnim.snapTo(dragOffset)
-                                        flingAnim.animateTo(
-                                            0f,
-                                            spring(dampingRatio = 0.8f, stiffness = 400f)
-                                        ) { dragOffset = value }
-                                    }
-                                    return available
-                                }
-                                return Velocity.Zero
-                            }
-                        }
-                    }
-
-                    // 滾動內容：純日期 grid，手勢僅在展開時解鎖
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val e = awaitPointerEvent(
-                                            androidx.compose.ui.input.pointer.PointerEventPass.Initial
-                                        )
-                                        if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) {
-                                            autoScrollJob?.cancel()
-                                            autoScrollJob = null
-                                        }
-                                    }
+                                    scope.launch { detailsAlphaAnim.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 300f)) }
                                 }
                             }
-                            .verticalScroll(scrollState, enabled = selectedDay != null)
-                    ) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
-                            for (rowIdx in 0 until totalRows) {
-                                val isRowSelected = selectedRowIdx == rowIdx
-                                CalendarRow(
-                                    rowIdx = rowIdx,
-                                    firstDayOffset = firstDayOffset,
-                                    daysInMonth = daysInMonth,
-                                    today = today,
-                                    isCurrentMonth = isCurrentMonth,
-                                    recordsByDay = recordsByDay,
-                                    displayMode = displayMode,
-                                    maxAbsNet = maxAbsNet,
-                                    selectedDay = if (isRowSelected) selectedDay else null,
-                                    selectedCol = if (isRowSelected) selectedColIdx else null,
-                                    animateValues = animateValues,
-                                    onCellClick = { day, col ->
-                                        if (selectedDay == day) {
-                                            // 再次點擊同一格 → 收起並滾回頁頂
-                                            selectedDay = null
-                                            selectedRowIdx = null
-                                            selectedColIdx = null
-                                            detailExpandedId = null
-                                        } else {
-                                            // 中止舊動畫，重新定位
-                                            autoScrollJob?.cancel()
-                                            autoScrollJob = null
-                                            selectedDay = day
-                                            selectedRowIdx = rowIdx
-                                            selectedColIdx = col
-                                            cachedSelectedDay = day
-                                            cachedSelectedRowIdx = rowIdx
-                                            cachedSelectedCol = col
-                                            detailExpandedId = null
-                                        }
-                                    }
-                                )
-                                if (rowIdx < totalRows - 1) {
-                                    Spacer(Modifier.height(6.dp))
-                                }
-                            }
-                            // 底部 Spacer：確保最後一行可滾到 Header 下方，頂部邊界自然限制
-                            val extraSpacerPx =
-                                (areaHeightPx - rowHeightsPx.lastOrNull().orZero()).coerceAtLeast(0f)
-                            Spacer(Modifier.height(with(density) { extraSpacerPx.toDp() }))
-                        }
-                    }
-
-                    // ── 明細 Overlay：固定在 FAB 上方，頂部跟隨選中行 ──
-                    val showOverlay = detailAlpha.value > 0.01f && (selectedRowIdx != null || dragOffset > 0f)
-                    if (showOverlay) {
-                        val rowIdxForOverlay = selectedRowIdx ?: cachedSelectedRowIdx
-                        val rowHeight = rowHeightsPx.getOrNull(rowIdxForOverlay) ?: 0f
-                        // 頂部跟隨選中行在螢幕上的位置
-                        val topOnScreen = calendarGridOffsetsPx.getOrNull(rowIdxForOverlay).orZero() -
-                                scrollState.value + rowHeight
-                        val overlayHeight =
-                            (areaHeightPx - topOnScreen - fabTopFromBottomPx - dragOffset)
-                                .coerceAtLeast(0f)
-
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .offset { IntOffset(0, topOnScreen.roundToInt()) }
-                                .height(with(density) { overlayHeight.toDp() })
-                                .graphicsLayer { alpha = detailAlpha.value }
-                                .zIndex(10f)
-                        ) {
-                            Column(
-                                Modifier
-                                    .fillMaxSize()
-                                    .background(SURFACE_BG)
-                            ) {
-                                TrianglePointer(
-                                    colIndex = cachedSelectedCol,
-                                    color = SURFACE_CARD
-                                )
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f)
-                                        .padding(horizontal = 10.dp)
-                                        .padding(bottom = 4.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(SURFACE_CARD)
-                                ) {
-                                    Column(
-                                        Modifier
-                                            .fillMaxSize()
-                                            .nestedScroll(dismissConnection)
-                                            .verticalScroll(detailScrollState)
-                                    ) {
-                                        DayDetailPanel(
-                                            dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
-                                            records = recordsByDay[cachedSelectedDay] ?: emptyList(),
-                                            expandedId = detailExpandedId,
-                                            onExpandChange = { detailExpandedId = it },
-                                            onCopy = { onCopyClick(it) },
-                                            onEdit = { onEditClick(it) },
-                                            onFilter = { onFilterClick(it) },
-                                            onDelete = { onDeleteClick(it) },
-                                            onChangeIcon = { onChangeIconClick(it) },
-                                            onDismiss = {
-                                                selectedDay = null
-                                                selectedRowIdx = null
-                                                selectedColIdx = null
-                                                detailExpandedId = null
-                                            },
-                                            deletingIds = deletingIds,
-                                            justAddedIds = justAddedIds,
-                                            onFanMenuStart = handleFanStart,
-                                            onFanMenuDrag = handleFanDrag,
-                                            onFanMenuEnd = handleFanEnd,
-                                            activeFanRecord = activeFanRecord
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 底部遮罩漸變
-        val showMask = scrollState.value > 0
-        val maskAlpha by animateFloatAsState(
-            targetValue = if (showMask) 1f else 0f,
-            animationSpec = tween(150),
-            label = "maskAlpha"
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(24.dp)
-                .graphicsLayer { alpha = maskAlpha }
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to SURFACE_BG.copy(alpha = 0f),
-                            0.4f to SURFACE_BG.copy(alpha = 0.3f),
-                            0.8f to SURFACE_BG.copy(alpha = 0.8f),
-                            1.0f to SURFACE_BG
                         )
-                    )
-                )
-        )
+                        if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
+                    }
+                }
 
-        // FAB
-        FloatingActionButton(
-            onClick = onAddClick,
-            shape = CircleShape,
-            containerColor = BRAND_PRIMARY,
-            contentColor = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-        ) {
-            Icon(Icons.Default.Add, "新增")
+                // 【中層 Z: 20】星期 Header (實心底色，完美遮蓋滾上來嘅日期行)
+                Box(Modifier.fillMaxWidth().height(headerHeightDp).align(Alignment.TopCenter).zIndex(20f).background(SURFACE_BG)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 13.dp).fillMaxHeight(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(text = w, fontSize = 12.sp, color = Color.Black, fontWeight = FontWeight.SemiBold, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+                            }
+                        }
+                    }
+                }
+
+                // 【頂層 Z: 30】明細 Box
+                if (selectedRowIdx != null || detailsAlphaAnim.value > 0.01f) {
+                    val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
+                    val rowNY = rowOffsetsPx[rowIdx] - actualGridOffset
+                    // 扣除 triangleHeightPx 確保實心背景剛好接駁 Row N 底部，不漏邊角
+                    val detailsTop = headerHeightPx + rowNY + rowHeightsPx[rowIdx] - triangleHeightPx
+                    val detailsHeight = (bottomLimitPx - detailsTop - shrinkAmount).coerceAtLeast(0f)
+
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .offset { IntOffset(0, detailsTop.roundToInt()) }
+                            .height(with(density) { detailsHeight.toDp() })
+                            .zIndex(30f)
+                            .graphicsLayer { alpha = detailsAlphaAnim.value }
+                    ) {
+                        Column(Modifier.fillMaxSize()) {
+                            // 高度為 11dp 嘅指引三角形 (向上凸出疊加喺 Row N 底部)
+                            TrianglePointer(colIndex = cachedSelectedCol, color = SURFACE_CARD, triangleHeight = triangleHeightDp)
+                            // 實心背景本體 (由 Row N 底部向下覆蓋)
+                            Box(
+                                Modifier.fillMaxWidth().weight(1f)
+                                    .padding(horizontal = 10.dp).padding(bottom = 4.dp)
+                                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp, topStart = 12.dp, topEnd = 12.dp)) // 保持圓角設計
+                                    .background(SURFACE_CARD)
+                            ) {
+                                Column(Modifier.fillMaxSize().nestedScroll(dismissConnection).verticalScroll(detailScrollState)) {
+                                    DayDetailPanel(
+                                        dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
+                                        records = recordsByDay[cachedSelectedDay] ?: emptyList(),
+                                        expandedId = detailExpandedId, onExpandChange = { detailExpandedId = it },
+                                        onCopy = onCopyClick, onEdit = onEditClick, onFilter = onFilterClick, onDelete = onDeleteClick, onChangeIcon = onChangeIconClick,
+                                        onDismiss = { handleDismiss() }, deletingIds = deletingIds, justAddedIds = justAddedIds
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        FanMenuOverlay(
-            progressProvider = { fanMenuProgress.value },
-            centerProvider = { fanMenuCenterState.value },
-            touchProvider = { fanMenuTouchState.value }
-        )
+        // FAB按鈕
+        FloatingActionButton(
+            onClick = onAddClick, shape = CircleShape, containerColor = BRAND_PRIMARY, contentColor = Color.White,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) { Icon(Icons.Default.Add, "新增") }
     }
 }
 
