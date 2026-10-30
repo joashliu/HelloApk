@@ -109,6 +109,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -1218,7 +1219,8 @@ private fun computeLedgerUiState(
     var allSameNote = true
 
     for (r in ledgerRecords) {
-        if (r.id !in deletingIds) {
+        // ★ Top Stat 金額排除「還錢」類別
+        if (r.id !in deletingIds && r.category != "還錢") {
             if (r.category == INCOME_CATEGORY) {
                 hasIncome = true; totalIncome += r.amount
             } else {
@@ -8622,6 +8624,9 @@ fun RollingNumber(
         TextStyle(
             fontSize = fontSize,
             fontWeight = fontWeight,
+            // ★ Top Stat 等寬數字（tabular figures）
+            fontFeatureSettings = "tnum",
+            fontFamily = FontFamily.Monospace,
             platformStyle = PlatformTextStyle(includeFontPadding = false),
             lineHeightStyle = LineHeightStyle(
                 alignment = LineHeightStyle.Alignment.Center,
