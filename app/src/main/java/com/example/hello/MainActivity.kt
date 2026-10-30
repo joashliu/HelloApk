@@ -8078,7 +8078,6 @@ private fun WeeklyExpenseBarBody(
     val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
     val hasAmount = day.amount > 0.0
 
-    // ★ 明暗：只喺「有選中且唔係自己」嗰陣變暗
     val dimAlpha by animateFloatAsState(
         targetValue = if (!isAnySelected || isSelected) 1f else 0.45f,
         animationSpec = tween(180, easing = FastOutSlowInEasing),
@@ -8091,7 +8090,9 @@ private fun WeeklyExpenseBarBody(
     )
 
     BoxWithConstraints(
-        modifier = modifier,
+        modifier = modifier
+            // ★ 令被選中柱嘅浮標浮喺其他柱之上（避免被鄰居遮住）
+            .zIndex(if (isSelected) 5f else 0f),
         contentAlignment = Alignment.BottomCenter
     ) {
         val maxBarHeight = maxHeight
@@ -8135,7 +8136,7 @@ private fun WeeklyExpenseBarBody(
             )
         }
 
-        // ★ 浮標：只喺「被選中」時組合，位置永遠喺柱頂上方 6dp
+        // ★ 浮標：解除 parent 寬度限制，超出 cell 都完整顯示
         if (isSelected && hasAmount) {
             val labelAnim = remember { Animatable(0f) }
             LaunchedEffect(Unit) {
@@ -8145,9 +8146,14 @@ private fun WeeklyExpenseBarBody(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .offset(y = -(barHeight + 6.dp))
+                    // ★ 關鍵：unbounded = true 解除 parent 嘅 maxWidth 約束
+                    .wrapContentWidth(
+                        align = Alignment.CenterHorizontally,
+                        unbounded = true
+                    )
+                    .widthIn(min = 40.dp)
                     .graphicsLayer { alpha = labelAnim.value }
                     .height(24.dp)
-                    .wrapContentWidth()
                     .clip(RoundedCornerShape(6.dp))
                     .background(BRAND_PRIMARY_DARK)
                     .padding(horizontal = 8.dp),
@@ -8160,6 +8166,9 @@ private fun WeeklyExpenseBarBody(
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     maxLines = 1,
+                    softWrap = false,
+                    // ★ 收窄字距，幫多字金額（$1,074 / $12,345）省空間
+                    letterSpacing = (-0.3).sp,
                     style = TextStyle(
                         platformStyle = PlatformTextStyle(includeFontPadding = false)
                     )
