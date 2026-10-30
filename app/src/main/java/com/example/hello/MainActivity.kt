@@ -4275,133 +4275,293 @@ private fun AnimatedStatBlock(
 
 @Composable
 fun WeeklyExpenseChart(
-    data: List<WeeklyExpenseDay>,
-    listState: LazyListState,
-    introProgress: Float,
-    filterCollapseProgress: Float = 0f,
-    modifier: Modifier = Modifier,
+    data: List<WeeklyExpenseDay>,
+    listState: LazyListState,
+    introProgress: Float,
+    filterCollapseProgress: Float = 0f,
+    modifier: Modifier = Modifier,
 ) {
-    val chartHeight = 178.dp
-    val horizontalPadding = 16.dp
-    val innerPadding = 12.dp
-    val titleRowHeight = 20.dp
-    val titleGap = 8.dp
-    val labelRowHeight = 20.dp
+    val chartHeight = 178.dp
+    val horizontalPadding = 16.dp
+    val innerPadding = 12.dp
+    val titleRowHeight = 20.dp
+    val titleGap = 8.dp
+    val labelRowHeight = 20.dp
 
-    val density = LocalDensity.current
-    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
+    val density = LocalDensity.current
+    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
-    // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
-    val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
-    val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
-    val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
+    // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
+    val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
+    val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
+    val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
 
-    val maxAmount = remember(data) {
-        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
-    }
-    val totalAmount = remember(data) { data.sumOf { it.amount } }
+    val maxAmount = remember(data) {
+        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
+    }
+    val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    // 滾動偏移：只反映「用戶手動滾動」造成的裁切
-    val scrollOffsetPx by remember(listState, chartHeightPx) {
-        derivedStateOf {
-            val info = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.key == "weekly_chart" }
-            if (info == null) 0f
-            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
-        }
-    }
+    // 滾動偏移：只反映「用戶手動滾動」造成的裁切
+    val scrollOffsetPx by remember(listState, chartHeightPx) {
+        derivedStateOf {
+            val info = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key == "weekly_chart" }
+            if (info == null) 0f
+            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
+        }
+    }
 
-    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移（兩者疊加，效果跟手動滾動一致）
-    val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
-    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
+    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移（兩者疊加，效果跟手動滾動一致）
+    val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
+    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
-    if (maxBoxHeightPx <= 0.5f) {
-        Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
-        return
-    }
+    // ===== 新增：手指拖曳選取狀態 =====
+    var selectedBarIndex by remember { mutableStateOf<Int?>(null) }
+    var barAreaSize by remember { mutableStateOf(IntSize.Zero) }
+    val currentBarAreaSize by rememberUpdatedState(barAreaSize)
+    val touchSlop = LocalViewConfiguration.current.touchSlop
+    val barGapPx = remember(density) { with(density) { 4.dp.toPx() } }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(maxBoxHeightDp)
-            .padding(horizontal = horizontalPadding)
-    ) {
-        if (visibleHeightPx > 0.5f) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(visibleHeightDp)
-                    .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SURFACE_CARD)
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(chartHeight)
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = innerPadding, vertical = innerPadding)
-                ) {
-                    // ── 標題行
-                    Row(
-                        Modifier.fillMaxWidth().height(titleRowHeight),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "近 7 日支出",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TEXT_PRIMARY
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "合計 $${formatAmountNoDecimal(totalAmount)}",
-                            fontSize = 12.sp,
-                            color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Spacer(Modifier.height(titleGap))
-                    // ── 柱體
-                    Row(
-                        Modifier.fillMaxWidth().weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        data.forEach { day ->
-                            WeeklyExpenseBarBody(
-                                day = day,
-                                maxAmount = maxAmount,
-                                introProgress = introProgress,
-                                modifier = Modifier.weight(1f).fillMaxHeight()
-                            )
-                        }
-                    }
-                    // ── 日期行
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        data.forEach { day ->
-                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = day.weekdayChar,
-                                    fontSize = 11.sp,
-                                    lineHeight = 14.sp,
-                                    style = TextStyle(
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    ),
-                                    color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
-                                    fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // 圖表收起或不可見時取消選中
+    LaunchedEffect(maxBoxHeightPx) {
+        if (maxBoxHeightPx <= 0.5f) selectedBarIndex = null
+    }
+    // 數據變化時校驗索引
+    LaunchedEffect(data.size) {
+        val cur = selectedBarIndex
+        if (cur != null && cur >= data.size) selectedBarIndex = null
+    }
+
+    if (maxBoxHeightPx <= 0.5f) {
+        Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(maxBoxHeightDp)
+            .padding(horizontal = horizontalPadding)
+    ) {
+        if (visibleHeightPx > 0.5f) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(visibleHeightDp)
+                    .align(Alignment.BottomCenter)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SURFACE_CARD)
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(chartHeight)
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = innerPadding, vertical = innerPadding)
+                ) {
+                    // ── 標題行
+                    Row(
+                        Modifier.fillMaxWidth().height(titleRowHeight),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "近 7 日支出",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TEXT_PRIMARY
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "合計 $${formatAmountNoDecimal(totalAmount)}",
+                            fontSize = 12.sp,
+                            color = TEXT_SECONDARY,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(Modifier.height(titleGap))
+
+                    // ── 柱體（★ 加入橫向拖曳選取手勢）
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .onSizeChanged { barAreaSize = it }
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val size = currentBarAreaSize
+                                        if (size.width <= 0 || size.height <= 0) continue
+
+                                        val cellWidth = (size.width - barGapPx * 6) / 7f
+                                        if (cellWidth <= 0f) continue
+
+                                        val initialX = down.position.x
+                                        if (initialX < 0f || initialX > size.width ||
+                                            down.position.y < 0f || down.position.y > size.height
+                                        ) continue
+
+                                        fun indexAt(x: Float): Int =
+                                            (x / (cellWidth + barGapPx)).toInt().coerceIn(0, 6)
+
+                                        // 按下即選中，顯示浮標
+                                        selectedBarIndex = indexAt(initialX)
+
+                                        val pointerId = down.id
+                                        val startX = initialX
+                                        val startY = down.position.y
+                                        var isHorizontal: Boolean? = null
+                                        var cancelled = false
+
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes
+                                                .firstOrNull { it.id == pointerId }
+                                            if (change == null || !change.pressed) break
+
+                                            // 若被 LazyColumn 消費（縱向滾動），放棄選取
+                                            if (change.isConsumed) {
+                                                selectedBarIndex = null
+                                                cancelled = true
+                                                break
+                                            }
+
+                                            val pos = change.position
+
+                                            // 方向判斷：縱向留給列表滾動，橫向接管
+                                            if (isHorizontal == null) {
+                                                val dx = pos.x - startX
+                                                val dy = pos.y - startY
+                                                if (abs(dx) > touchSlop || abs(dy) > touchSlop) {
+                                                    isHorizontal = abs(dx) > abs(dy)
+                                                    if (isHorizontal == false) {
+                                                        selectedBarIndex = null
+                                                        cancelled = true
+                                                        break
+                                                    }
+                                                }
+                                            }
+
+                                            if (isHorizontal == true) {
+                                                if (pos.x < 0f || pos.x > size.width ||
+                                                    pos.y < 0f || pos.y > size.height
+                                                ) {
+                                                    selectedBarIndex = null
+                                                } else {
+                                                    val newIdx = indexAt(pos.x)
+                                                    if (newIdx != selectedBarIndex) {
+                                                        selectedBarIndex = newIdx
+                                                    }
+                                                }
+                                                change.consume()
+                                            }
+                                        }
+
+                                        if (!cancelled) selectedBarIndex = null
+                                    }
+                                }
+                            },
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        data.forEachIndexed { idx, day ->
+                            BoxWithConstraints(
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                // 用目標比例近似柱頂位置
+                                val targetRatio =
+                                    (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
+                                val displayRatio =
+                                    (targetRatio * introProgress).coerceIn(0f, 1f)
+                                val minBarH = 3.dp
+                                val barHeight = if (day.amount > 0.0) {
+                                    (maxHeight * displayRatio).coerceAtLeast(minBarH)
+                                } else 0.dp
+
+                                val isSelected = selectedBarIndex == idx
+                                val isDimmed = selectedBarIndex != null && !isSelected
+
+                                WeeklyExpenseBarBody(
+                                    day = day,
+                                    maxAmount = maxAmount,
+                                    introProgress = introProgress,
+                                    isDimmed = isDimmed,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+
+                                // 金額浮標（僅選中柱顯示）
+                                AnimatedVisibility(
+                                    visible = isSelected && day.amount > 0.0,
+                                    enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
+                                            slideInVertically(
+                                                tween(180, easing = FastOutSlowInEasing)
+                                            ) { it / 3 },
+                                    exit = fadeOut(tween(150, easing = FastOutSlowInEasing)) +
+                                           slideOutVertically(
+                                               tween(150, easing = FastOutSlowInEasing)
+                                           ) { it / 3 },
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .offset(y = -(barHeight + 6.dp))
+                                ) {
+                                    AmountBadge(amount = day.amount)
+                                }
+                            }
+                        }
+                    }
+
+                    // ── 日期行
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        data.forEach { day ->
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = day.weekdayChar,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    style = TextStyle(
+                                        platformStyle = PlatformTextStyle(
+                                            includeFontPadding = false
+                                        )
+                                    ),
+                                    color = if (day.isToday) BRAND_PRIMARY_DARK
+                                            else TEXT_SECONDARY,
+                                    fontWeight = if (day.isToday) FontWeight.Bold
+                                                 else FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =========================================================
+//  ★ 浮標小卡片
+// =========================================================
+@Composable
+private fun AmountBadge(amount: Double) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = TEXT_PRIMARY,
+        shadowElevation = 2.dp
+    ) {
+        Text(
+            text = "$${formatAmountNoDecimal(amount)}",
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            maxLines = 1,
+            softWrap = false
+        )
+    }
 }
 
 @Composable
@@ -8001,59 +8161,77 @@ suspend fun enhanceAndTightCrop(src: Bitmap): Bitmap = withContext(Dispatchers.D
 
 @Composable
 private fun WeeklyExpenseBarBody(
-    day: WeeklyExpenseDay,
-    maxAmount: Double,
-    introProgress: Float,
-    modifier: Modifier = Modifier,
+    day: WeeklyExpenseDay,
+    maxAmount: Double,
+    introProgress: Float,
+    isDimmed: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
-    val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
-    val animatedRatio by animateFloatAsState(
-        targetValue = targetRatio,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
-        label = "weeklyBarRatio_${day.dayOfMonth}"
-    )
-    val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
-    val hasAmount = day.amount > 0.0
+    val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
+    val animatedRatio by animateFloatAsState(
+        targetValue = targetRatio,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
+        label = "weeklyBarRatio_${day.dayOfMonth}"
+    )
+    val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
+    val hasAmount = day.amount > 0.0
 
-    val barShape = RoundedCornerShape(
-        topStart = 6.dp, topEnd = 6.dp,
-        bottomStart = 2.dp, bottomEnd = 2.dp
-    )
+    // ★ 未選中柱輕微變暗（柔和過渡，與 App 彈簧曲線統一）
+    val dimAlpha by animateFloatAsState(
+        targetValue = if (isDimmed) 0.35f else 1f,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+        label = "weeklyBarDim_${day.dayOfMonth}"
+    )
 
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        val maxBarHeight = maxHeight
-        val minBarHeight = 3.dp
-        val barHeight = if (hasAmount) {
-            (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
-        } else 0.dp
+    val barShape = RoundedCornerShape(
+        topStart = 6.dp, topEnd = 6.dp,
+        bottomStart = 2.dp, bottomEnd = 2.dp
+    )
 
-        Box(
-            modifier = Modifier
-                .width(22.dp)
-                .fillMaxHeight()
-                .clip(barShape)
-                .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
-        )
+    BoxWithConstraints(
+        modifier = modifier.graphicsLayer { alpha = dimAlpha },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        val maxBarHeight = maxHeight
+        val minBarHeight = 3.dp
+        val barHeight = if (hasAmount) {
+            (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
+        } else 0.dp
 
-        if (barHeight > 0.dp) {
-            Box(
-                modifier = Modifier
-                    .width(22.dp)
-                    .height(barHeight)
-                    .clip(barShape)
-                    .background(
-                        if (day.isToday) {
-                            Brush.verticalGradient(listOf(BRAND_PRIMARY_DARK, BRAND_PRIMARY.copy(alpha = 0.85f)))
-                        } else {
-                            Brush.verticalGradient(listOf(BRAND_PRIMARY.copy(alpha = 0.85f), BRAND_PRIMARY.copy(alpha = 0.55f)))
-                        }
-                    )
-            )
-        }
-    }
+        Box(
+            modifier = Modifier
+                .width(22.dp)
+                .fillMaxHeight()
+                .clip(barShape)
+                .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
+        )
+
+        if (barHeight > 0.dp) {
+            Box(
+                modifier = Modifier
+                    .width(22.dp)
+                    .height(barHeight)
+                    .clip(barShape)
+                    .background(
+                        if (day.isToday) {
+                            Brush.verticalGradient(
+                                listOf(
+                                    BRAND_PRIMARY_DARK,
+                                    BRAND_PRIMARY.copy(alpha = 0.85f)
+                                )
+                            )
+                        } else {
+                            Brush.verticalGradient(
+                                listOf(
+                                    BRAND_PRIMARY.copy(alpha = 0.85f),
+                                    BRAND_PRIMARY.copy(alpha = 0.55f)
+                                )
+                            )
+                        }
+                    )
+            )
+        }
+    }
 }
 
 @Composable
