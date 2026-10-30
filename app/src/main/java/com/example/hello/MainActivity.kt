@@ -4311,7 +4311,7 @@ fun WeeklyExpenseChart(
         }
     }
 
-    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移（兩者疊加，效果跟手動滾動一致）
+    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移
     val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
@@ -4362,21 +4362,129 @@ fun WeeklyExpenseChart(
                         )
                     }
                     Spacer(Modifier.height(titleGap))
-                    // ── 柱體
-                    Row(
-                        Modifier.fillMaxWidth().weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        data.forEach { day ->
-                            WeeklyExpenseBarBody(
-                                day = day,
-                                maxAmount = maxAmount,
-                                introProgress = introProgress,
-                                modifier = Modifier.weight(1f).fillMaxHeight()
-                            )
+                    
+                    // ── 柱體與跟手浮標區域
+                    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+                    var chartAreaWidth by remember { mutableFloatStateOf(0f) }
+                    var chartAreaHeight by remember { mutableFloatStateOf(0f) }
+                    val tooltipGapPx = remember(density) { with(density) { 8.dp.toPx() } }
+                    val gapWidthPx = remember(density) { with(density) { 4.dp.toPx() } }
+
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        Row(
+                            Modifier.fillMaxSize()
+                                .onSizeChanged {
+                                    chartAreaWidth = it.width.toFloat()
+                                    chartAreaHeight = it.height.toFloat()
+                                }
+                                .pointerInput(Unit) {
+                                    androidx.compose.foundation.gestures.awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        if (chartAreaWidth > 0) {
+                                            val itemW = (chartAreaWidth - gapWidthPx * 6) / 7f
+                                            selectedIndex = (down.position.x / (itemW + gapWidthPx)).toInt().coerceIn(0, 6)
+                                        }
+                                        
+                                        do {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull()
+                                            if (change != null) {
+                                                // 如果 LazyColumn 接管了上下滾動，則取消選中狀態
+                                                if (change.isConsumed) {
+                                                    selectedIndex = null
+                                                    break
+                                                }
+                                                val x = change.position.x
+                                                val y = change.position.y
+                                                // 允許 Y 軸稍微出界，提升容錯體驗
+                                                if (x in 0f..chartAreaWidth && y in -100f..(chartAreaHeight + 100f)) {
+                                                    val itemW = (chartAreaWidth - gapWidthPx * 6) / 7f
+                                                    selectedIndex = (x / (itemW + gapWidthPx)).toInt().coerceIn(0, 6)
+                                                } else {
+                                                    selectedIndex = null
+                                                }
+                                            }
+                                        } while (event.changes.any { it.pressed })
+                                        
+                                        selectedIndex = null
+                                    }
+                                },
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            data.forEachIndexed { index, day ->
+                                WeeklyExpenseBarBody(
+                                    day = day,
+                                    maxAmount = maxAmount,
+                                    introProgress = introProgress,
+                                    isSelected = selectedIndex == index,
+                                    hasSelection = selectedIndex != null,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
+                            }
+                        }
+
+                        // ── 互動金額浮標 (Tooltip)
+                        val tooltipAlpha by animateFloatAsState(
+                            targetValue = if (selectedIndex != null) 1f else 0f,
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            label = "ttAlpha"
+                        )
+                        val tooltipScale by animateFloatAsState(
+                            targetValue = if (selectedIndex != null) 1f else 0.8f,
+                            animationSpec = spring(dampingRatio = 0.7f, stiffness = 300f),
+                            label = "ttScale"
+                        )
+                        
+                        // 計算浮標的精準 X 坐標
+                        val targetX = remember(selectedIndex, chartAreaWidth) {
+                            if (selectedIndex != null && chartAreaWidth > 0) {
+                                val itemW = (chartAreaWidth - gapWidthPx * 6) / 7f
+                                (itemW + gapWidthPx) * selectedIndex!! + (itemW / 2f)
+                            } else 0f
+                        }
+                        val animatedX by animateFloatAsState(targetX, spring(0.85f, 350f), label = "ttX")
+
+                        // 計算浮標的 Y 坐標 (貼在當前柱頂)
+                        val targetY = remember(selectedIndex, chartAreaHeight, maxAmount, data) {
+                            if (selectedIndex != null && chartAreaHeight > 0) {
+                                val amt = data.getOrNull(selectedIndex!!)?.amount ?: 0.0
+                                val ratio = (amt / maxAmount).toFloat().coerceIn(0f, 1f)
+                                val barH = ratio * chartAreaHeight
+                                chartAreaHeight - barH - tooltipGapPx
+                            } else 0f
+                        }
+                        val animatedY by animateFloatAsState(targetY, spring(0.85f, 350f), label = "ttY")
+
+                        if (tooltipAlpha > 0.01f) {
+                            val selDay = selectedIndex?.let { data.getOrNull(it) }
+                            val amt = selDay?.amount ?: 0.0
+                            Box(
+                                Modifier
+                                    .offset { IntOffset(animatedX.roundToInt(), animatedY.roundToInt()) }
+                                    .graphicsLayer {
+                                        translationX = -size.width / 2f
+                                        translationY = -size.height
+                                        alpha = tooltipAlpha
+                                        scaleX = tooltipScale
+                                        scaleY = tooltipScale
+                                        transformOrigin = TransformOrigin(0.5f, 1f)
+                                    }
+                                    .shadow(6.dp, RoundedCornerShape(8.dp), ambientColor = Color(0x33000000), spotColor = Color(0x33000000))
+                                    .background(SURFACE_CARD, RoundedCornerShape(8.dp))
+                                    .border(0.5.dp, DIVIDER_COLOR, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "$${formatAmountNoDecimal(amt)}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = TEXT_PRIMARY
+                                )
+                            }
                         }
                     }
+
                     // ── 日期行
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
@@ -8004,6 +8112,8 @@ private fun WeeklyExpenseBarBody(
     day: WeeklyExpenseDay,
     maxAmount: Double,
     introProgress: Float,
+    isSelected: Boolean,
+    hasSelection: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
@@ -8019,9 +8129,16 @@ private fun WeeklyExpenseBarBody(
         topStart = 6.dp, topEnd = 6.dp,
         bottomStart = 2.dp, bottomEnd = 2.dp
     )
+    
+    // ★ 控制非選中狀態下的微弱變暗 (Dimming)
+    val dimAlpha by animateFloatAsState(
+        targetValue = if (hasSelection && !isSelected) 0.35f else 1f,
+        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        label = "dimAlpha_${day.dayOfMonth}"
+    )
 
     BoxWithConstraints(
-        modifier = modifier,
+        modifier = modifier.graphicsLayer { alpha = dimAlpha },
         contentAlignment = Alignment.BottomCenter
     ) {
         val maxBarHeight = maxHeight
