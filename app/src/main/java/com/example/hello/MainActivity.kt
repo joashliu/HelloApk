@@ -823,8 +823,12 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun setCalendarMonthKey(v: String)          { _calendarMonthKey.value = v }
     fun setCalendarFilterCategory(v: String?)   { _calendarFilterCategory.value = v }
 
-    private val noteIndexState: StateFlow<NoteIndex> = _records
-        .map { records -> buildNoteIndex(records) }
+    // 每 10 分鐘一個時間桶，控制首位「時間匹配」刷新頻率，避免頻繁輪轉
+    private val _timeBucket = MutableStateFlow(System.currentTimeMillis() / 600_000L)
+
+    private val noteIndexState: StateFlow<NoteIndex> = combine(_records, _timeBucket) { records, _ ->
+        buildNoteIndex(records)
+    }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NoteIndex())
 
@@ -900,6 +904,17 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     // ★ 比較頁永遠過濾「還錢」分類
                     _compareSnapshotRecords.value = records.filter { it.category != "還錢" }
                     hasInitializedCompareSnapshot = true
+                }
+            }
+        }
+
+        // ★ 每 10 分鐘刷新時間桶，更新首位時間匹配項目（控制頻率，避免 UI 晃動）
+        viewModelScope.launch {
+            while (true) {
+                delay(60_000L) // 每分鐘檢查一次
+                val bucket = System.currentTimeMillis() / 600_000L
+                if (bucket != _timeBucket.value) {
+                    _timeBucket.value = bucket
                 }
             }
         }
@@ -1071,34 +1086,78 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
     val now = System.currentTimeMillis()
     val secNow = getTimestampMeta(now).secOfDay
 
+    // 使用次數、時間距離、最近金額、分類、圖標
+    val usageCountByNote = HashMap<String, Int>()
     val minDistByNote = LinkedHashMap<String, Int>()
     val recentAmountByNote = HashMap<String, Double>()
+    val recentTsByNote = HashMap<String, Long>()
     val noteIconMap = HashMap<String, String>()
     val noteCategoryMap = HashMap<String, String>()
     val allNoteNames = ArrayList<String>()
+    // 穩定排序用：首次出現順序
+    val firstSeenOrder = LinkedHashMap<String, Int>()
+    var seenIdx = 0
 
     for (r in records) {
         val note = r.note
         if (note.isBlank()) continue
+
+        usageCountByNote[note] = (usageCountByNote[note] ?: 0) + 1
+
+        if (!firstSeenOrder.containsKey(note)) {
+            firstSeenOrder[note] = seenIdx++
+            allNoteNames.add(note)
+        }
+
         val sec = getTimestampMeta(r.timestamp).secOfDay
         val d = abs(secNow - sec)
         val dist = if (d < 86400 - d) d else 86400 - d
         val prevMin = minDistByNote[note]
-        if (prevMin == null) {
+        if (prevMin == null || dist < prevMin) {
             minDistByNote[note] = dist
+        }
+
+        // 最近一次使用的金額 / 分類
+        val prevTs = recentTsByNote[note] ?: 0L
+        if (r.timestamp >= prevTs) {
+            recentTsByNote[note] = r.timestamp
             recentAmountByNote[note] = r.amount
             noteCategoryMap[note] = r.category
-            allNoteNames.add(note)
-        } else if (dist < prevMin) {
-            minDistByNote[note] = dist
-            recentAmountByNote[note] = r.amount
         }
+
         if (r.iconUrl.isNotBlank() && !noteIconMap.containsKey(note)) {
             noteIconMap[note] = r.iconUrl
         }
     }
 
-    val topNotes = minDistByNote.entries.sortedBy { it.value }.take(42).map { it.key to 0 }
+    // ★ 首位：時間最貼近嘅項目（特殊固定位，唔參與次數排序）
+    //   只喺有合理時間距離時先選（例如 6 小時內），否則留空由後面補
+    val TIME_MATCH_THRESHOLD_SEC = 6 * 3600 // 6 小時
+    val timeMatchedNote: String? = minDistByNote.entries
+        .filter { it.value <= TIME_MATCH_THRESHOLD_SEC }
+        .minWithOrNull(
+            compareBy<Map.Entry<String, Int>> { it.value }
+                .thenBy { firstSeenOrder[it.key] ?: Int.MAX_VALUE }
+        )?.key
+
+    // ★ 第 2 位起：按使用次數降序；次數相同維持首次出現順序（穩定）
+    val restSorted = usageCountByNote.entries
+        .filter { it.key != timeMatchedNote }
+        .sortedWith(
+            compareByDescending<Map.Entry<String, Int>> { it.value }
+                .thenBy { firstSeenOrder[it.key] ?: Int.MAX_VALUE }
+        )
+        .map { it.key to it.value }
+
+    val topNotes = ArrayList<Pair<String, Int>>(42)
+    if (timeMatchedNote != null) {
+        topNotes.add(timeMatchedNote to (usageCountByNote[timeMatchedNote] ?: 0))
+    }
+    for (pair in restSorted) {
+        if (topNotes.size >= 42) break
+        topNotes.add(pair)
+    }
+
     val quickInfo = topNotes.take(3).mapNotNull { (note, _) ->
         if (note.isBlank()) null
         else QuickNoteInfo(
