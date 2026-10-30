@@ -1,7 +1,5 @@
 package com.example.hello
 
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.isActive
 import androidx.compose.animation.core.MutableTransitionState
@@ -39,6 +37,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -4276,323 +4275,216 @@ private fun AnimatedStatBlock(
 
 @Composable
 fun WeeklyExpenseChart(
-    data: List<WeeklyExpenseDay>,
-    listState: LazyListState,
-    introProgress: Float,
-    filterCollapseProgress: Float = 0f,
-    modifier: Modifier = Modifier,
+    data: List<WeeklyExpenseDay>,
+    listState: LazyListState,
+    introProgress: Float,
+    filterCollapseProgress: Float = 0f,
+    modifier: Modifier = Modifier,
 ) {
-    val chartHeight = 178.dp
-    val horizontalPadding = 16.dp
-    val innerPadding = 12.dp
-    val titleRowHeight = 20.dp
-    val titleGap = 8.dp
-    val labelRowHeight = 20.dp
+    val chartHeight = 178.dp
+    val horizontalPadding = 16.dp
+    val innerPadding = 12.dp
+    val titleRowHeight = 20.dp
+    val titleGap = 8.dp
+    val labelRowHeight = 20.dp
 
-    val density = LocalDensity.current
-    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
+    val density = LocalDensity.current
+    val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
-    val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
-    val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
-    val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
+    // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
+    val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
+    val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
+    val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
 
-    val maxAmount = remember(data) {
-        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
-    }
-    val totalAmount = remember(data) { data.sumOf { it.amount } }
+    val maxAmount = remember(data) {
+        data.maxOfOrNull { it.amount }?.coerceAtLeast(0.0001) ?: 0.0001
+    }
+    val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    val scrollOffsetPx by remember(listState, chartHeightPx) {
-        derivedStateOf {
-            val info = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.key == "weekly_chart" }
-            if (info == null) 0f
-            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
-        }
-    }
+    // 滾動偏移：只反映「用戶手動滾動」造成的裁切
+    val scrollOffsetPx by remember(listState, chartHeightPx) {
+        derivedStateOf {
+            val info = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.key == "weekly_chart" }
+            if (info == null) 0f
+            else (-info.offset).toFloat().coerceIn(0f, chartHeightPx)
+        }
+    }
 
-    val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
-    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
+    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移（兩者疊加，效果跟手動滾動一致）
+    val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
+    val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
-    if (maxBoxHeightPx <= 0.5f) {
-        Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
-        return
-    }
+    if (maxBoxHeightPx <= 0.5f) {
+        Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
+        return
+    }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(maxBoxHeightDp)
-            .padding(horizontal = horizontalPadding)
-    ) {
-        if (visibleHeightPx > 0.5f) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(visibleHeightDp)
-                    .align(Alignment.BottomCenter)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SURFACE_CARD)
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(chartHeight)
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = innerPadding, vertical = innerPadding)
-                ) {
-                    // ── 標題行
-                    Row(
-                        Modifier.fillMaxWidth().height(titleRowHeight),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "近 7 日支出",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TEXT_PRIMARY
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            "合計 $${formatAmountNoDecimal(totalAmount)}",
-                            fontSize = 12.sp,
-                            color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Spacer(Modifier.height(titleGap))
-                    
-                    // ── 柱體與手勢互動區 ──
-                    var dragTouchX by remember { mutableFloatStateOf(-1f) }
-                    var isDragging by remember { mutableStateOf(false) }
-                    var rowSize by remember { mutableStateOf(IntSize.Zero) }
-
-                    // 計算當前選中邊一條柱 (0-6)
-                    val activeIndex = remember(dragTouchX, isDragging, rowSize) {
-                        if (!isDragging || rowSize.width == 0 || dragTouchX < 0f || dragTouchX > rowSize.width.toFloat()) {
-                            null
-                        } else {
-                            val segment = rowSize.width / 7f
-                            (dragTouchX / segment).toInt().coerceIn(0, 6)
-                        }
-                    }
-
-                    var lastKnownIndex by remember { mutableIntStateOf(0) }
-                    LaunchedEffect(activeIndex) {
-                        if (activeIndex != null) lastKnownIndex = activeIndex
-                    }
-
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .onSizeChanged { rowSize = it }
-                            .pointerInput(Unit) {
-                                awaitEachGesture {
-                                    // requireUnconsumed = false 保留往下傳遞，唔會 block 死垂直 Scroll
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    isDragging = true
-                                    dragTouchX = down.position.x
-                                    do {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull()
-                                        if (change != null) {
-                                            if (change.isConsumed) break // 如果被 Scroll 攔截就取消選取
-                                            dragTouchX = change.position.x
-                                        }
-                                    } while (event.changes.any { it.pressed })
-                                    isDragging = false
-                                    dragTouchX = -1f
-                                }
-                            }
-                    ) {
-                        Row(
-                            Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            data.forEachIndexed { index, day ->
-                                WeeklyExpenseBar(
-                                    day = day,
-                                    maxAmount = maxAmount,
-                                    introProgress = introProgress,
-                                    isSelected = activeIndex == index,
-                                    isAnySelected = activeIndex != null,
-                                    modifier = Modifier.weight(1f).fillMaxHeight()
-                                )
-                            }
-                        }
-
-                        // ── 浮動金額標籤 (Tooltip) ──
-                        val tooltipAlpha by animateFloatAsState(
-                            targetValue = if (activeIndex != null) 1f else 0f,
-                            animationSpec = tween(150, easing = FastOutSlowInEasing),
-                            label = "tooltipAlpha"
-                        )
-                        val tooltipScale by animateFloatAsState(
-                            targetValue = if (activeIndex != null) 1f else 0.8f,
-                            animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
-                            label = "tooltipScale"
-                        )
-
-                        val segment = if (rowSize.width > 0) rowSize.width / 7f else 0f
-                        val targetX = (lastKnownIndex + 0.5f) * segment
-
-                        val activeBarRatio = if (maxAmount > 0) {
-                            (data.getOrNull(lastKnownIndex)?.amount?.toFloat() ?: 0f) / maxAmount.toFloat()
-                        } else 0f
-                        val displayedRatio = (activeBarRatio * introProgress).coerceIn(0f, 1f)
-                        
-                        // 計算浮標高度：柱頂之上再減 10dp
-                        val targetY = rowSize.height - (rowSize.height * displayedRatio) - with(density) { 10.dp.toPx() }
-
-                        val animatedX by animateFloatAsState(targetX, spring(dampingRatio = 0.75f, stiffness = 400f), label = "tooltipX")
-                        val animatedY by animateFloatAsState(targetY, spring(dampingRatio = 0.8f, stiffness = 300f), label = "tooltipY")
-
-                        if (tooltipAlpha > 0.01f) {
-                            Box(
-                                Modifier
-                                    .graphicsLayer {
-                                        alpha = tooltipAlpha
-                                        scaleX = tooltipScale
-                                        scaleY = tooltipScale
-                                        translationX = animatedX - size.width / 2f
-                                        translationY = animatedY - size.height
-                                        transformOrigin = TransformOrigin(0.5f, 1f)
-                                    }
-                                    .shadow(6.dp, RoundedCornerShape(8.dp), ambientColor = Color(0x33000000), spotColor = Color(0x33000000))
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF2C2C2E)) // 深色高對比質感卡片
-                                    .padding(horizontal = 8.dp, vertical = 5.dp)
-                            ) {
-                                val amt = data.getOrNull(lastKnownIndex)?.amount ?: 0.0
-                                Text(
-                                    text = "$" + formatAmountNoDecimal(amt),
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // ── 日期行
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        data.forEach { day ->
-                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = day.weekdayChar,
-                                    fontSize = 11.sp,
-                                    lineHeight = 14.sp,
-                                    style = TextStyle(
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    ),
-                                    color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
-                                    fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(maxBoxHeightDp)
+            .padding(horizontal = horizontalPadding)
+    ) {
+        if (visibleHeightPx > 0.5f) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(visibleHeightDp)
+                    .align(Alignment.BottomCenter)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SURFACE_CARD)
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(chartHeight)
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = innerPadding, vertical = innerPadding)
+                ) {
+                    // ── 標題行
+                    Row(
+                        Modifier.fillMaxWidth().height(titleRowHeight),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "近 7 日支出",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TEXT_PRIMARY
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "合計 $${formatAmountNoDecimal(totalAmount)}",
+                            fontSize = 12.sp,
+                            color = TEXT_SECONDARY,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(Modifier.height(titleGap))
+                    // ── 柱體
+                    Row(
+                        Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        data.forEach { day ->
+                            WeeklyExpenseBarBody(
+                                day = day,
+                                maxAmount = maxAmount,
+                                introProgress = introProgress,
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                            )
+                        }
+                    }
+                    // ── 日期行
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        data.forEach { day ->
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = day.weekdayChar,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    style = TextStyle(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    ),
+                                    color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
+                                    fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
 fun WeeklyExpenseBar(
-    day: WeeklyExpenseDay,
-    maxAmount: Double,
-    introProgress: Float,
-    isSelected: Boolean = false,
-    isAnySelected: Boolean = false,
-    modifier: Modifier = Modifier,
+    day: WeeklyExpenseDay,
+    maxAmount: Double,
+    introProgress: Float,
+    modifier: Modifier = Modifier,
 ) {
-    val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
-    val animatedRatio by animateFloatAsState(
-        targetValue = targetRatio,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
-        label = "weeklyBarRatio_${day.dayOfMonth}"
-    )
-    val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
-    val hasAmount = day.amount > 0.0
+    val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
+    val animatedRatio by animateFloatAsState(
+        targetValue = targetRatio,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 260f),
+        label = "weeklyBarRatio_${day.dayOfMonth}"
+    )
+    val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
+    val hasAmount = day.amount > 0.0
 
-    val barShape = RoundedCornerShape(
-        topStart = 6.dp, topEnd = 6.dp,
-        bottomStart = 2.dp, bottomEnd = 2.dp
-    )
+    val barShape = RoundedCornerShape(
+        topStart = 6.dp, topEnd = 6.dp,
+        bottomStart = 2.dp, bottomEnd = 2.dp
+    )
 
-    // 控制明暗對比：有選中其他柱嘅時候，自身變暗
-    val targetAlpha = if (isAnySelected && !isSelected) 0.4f else 1f
-    val animatedAlpha by animateFloatAsState(
-        targetValue = targetAlpha,
-        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
-        label = "barAlpha_${day.dayOfMonth}"
-    )
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Bottom
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            val maxBarHeight = maxHeight
+            val minBarHeight = 3.dp
+            val barHeight = if (hasAmount) {
+                (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
+            } else 0.dp
 
-    Column(
-        modifier = modifier.graphicsLayer { alpha = animatedAlpha },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Bottom
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            val maxBarHeight = maxHeight
-            val minBarHeight = 3.dp
-            val barHeight = if (hasAmount) {
-                (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
-            } else 0.dp
+            Box(
+                modifier = Modifier
+                    .width(22.dp)
+                    .fillMaxHeight()
+                    .clip(barShape)
+                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
+            )
 
-            Box(
-                modifier = Modifier
-                    .width(22.dp)
-                    .fillMaxHeight()
-                    .clip(barShape)
-                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
-            )
+            if (barHeight > 0.dp) {
+                Box(
+                    modifier = Modifier
+                        .width(22.dp)
+                        .height(barHeight)
+                        .clip(barShape)
+                        .background(
+                            if (day.isToday) {
+                                Brush.verticalGradient(
+                                    listOf(
+                                        BRAND_PRIMARY_DARK,
+                                        BRAND_PRIMARY.copy(alpha = 0.85f)
+                                    )
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    listOf(
+                                        BRAND_PRIMARY.copy(alpha = 0.85f),
+                                        BRAND_PRIMARY.copy(alpha = 0.55f)
+                                    )
+                                )
+                            }
+                        )
+                )
+            }
+        }
 
-            if (barHeight > 0.dp) {
-                Box(
-                    modifier = Modifier
-                        .width(22.dp)
-                        .height(barHeight)
-                        .clip(barShape)
-                        .background(
-                            if (day.isToday) {
-                                Brush.verticalGradient(
-                                    listOf(
-                                        BRAND_PRIMARY_DARK,
-                                        BRAND_PRIMARY.copy(alpha = 0.85f)
-                                    )
-                                )
-                            } else {
-                                Brush.verticalGradient(
-                                    listOf(
-                                        BRAND_PRIMARY.copy(alpha = 0.85f),
-                                        BRAND_PRIMARY.copy(alpha = 0.55f)
-                                    )
-                                )
-                            }
-                        )
-                )
-            }
-        }
+        Spacer(Modifier.height(5.dp))
 
-        Spacer(Modifier.height(5.dp))
-
-        Text(
-            text = day.weekdayChar,
-            fontSize = 11.sp,
-            color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
-            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1
-        )
-    }
+        Text(
+            text = day.weekdayChar,
+            fontSize = 11.sp,
+            color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
+            fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1
+        )
+    }
 }
 private val PARTICLE_COLORS = listOf(
     BRAND_PRIMARY, BRAND_PRIMARY_DARK, Color(0xFF818CF8), Color(0xFFFBBF24), Color(0xFF34D399)
