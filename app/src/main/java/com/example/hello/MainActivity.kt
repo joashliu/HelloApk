@@ -4291,7 +4291,6 @@ fun WeeklyExpenseChart(
     val density = LocalDensity.current
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
-    // ★ filter 收起的「外部高度上限」：0→1 對應 178→0
     val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
     val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
     val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
@@ -4301,7 +4300,6 @@ fun WeeklyExpenseChart(
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
-    // 滾動偏移：只反映「用戶手動滾動」造成的裁切
     val scrollOffsetPx by remember(listState, chartHeightPx) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -4311,7 +4309,6 @@ fun WeeklyExpenseChart(
         }
     }
 
-    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移（兩者疊加，效果跟手動滾動一致）
     val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
@@ -4319,6 +4316,11 @@ fun WeeklyExpenseChart(
         Spacer(modifier = modifier.fillMaxWidth().height(0.dp))
         return
     }
+
+    // ★ 新增：當前被手指選中嘅柱 index（null = 無選中）
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+    // 當 data 改變（例如跨日或 reset）就清空選取
+    LaunchedEffect(data) { selectedIndex = null }
 
     Box(
         modifier = modifier
@@ -4362,17 +4364,52 @@ fun WeeklyExpenseChart(
                         )
                     }
                     Spacer(Modifier.height(titleGap))
-                    // ── 柱體
+                    // ── 柱體（加入長按拖曳手勢）
                     Row(
-                        Modifier.fillMaxWidth().weight(1f),
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .pointerInput(data.size) {
+                                if (data.isEmpty()) return@pointerInput
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { offset ->
+                                        val w = size.width.toFloat()
+                                        if (w <= 0f) return@detectDragGesturesAfterLongPress
+                                        val cw = w / data.size
+                                        val idx = (offset.x / cw).toInt()
+                                        if (idx in data.indices) selectedIndex = idx
+                                    },
+                                    onDrag = { change, _ ->
+                                        val w = size.width.toFloat()
+                                        val h = size.height.toFloat()
+                                        if (w <= 0f) return@detectDragGesturesAfterLongPress
+                                        val cw = w / data.size
+                                        val pos = change.position
+                                        // ★ 邊界處理：滑出柱形圖範圍就即時取消
+                                        if (pos.x < 0f || pos.x > w ||
+                                            pos.y < 0f || pos.y > h) {
+                                            selectedIndex = null
+                                        } else {
+                                            selectedIndex = (pos.x / cw)
+                                                .toInt()
+                                                .coerceIn(0, data.size - 1)
+                                        }
+                                    },
+                                    onDragEnd = { selectedIndex = null },
+                                    onDragCancel = { selectedIndex = null }
+                                )
+                            },
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
-                        data.forEach { day ->
+                        val anySelected = selectedIndex != null
+                        data.forEachIndexed { idx, day ->
                             WeeklyExpenseBarBody(
                                 day = day,
                                 maxAmount = maxAmount,
                                 introProgress = introProgress,
+                                isSelected = selectedIndex == idx,
+                                isAnySelected = anySelected,
                                 modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }
@@ -8004,6 +8041,8 @@ private fun WeeklyExpenseBarBody(
     day: WeeklyExpenseDay,
     maxAmount: Double,
     introProgress: Float,
+    isSelected: Boolean = false,
+    isAnySelected: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val targetRatio = (day.amount / maxAmount).toFloat().coerceIn(0f, 1f)
@@ -8014,6 +8053,13 @@ private fun WeeklyExpenseBarBody(
     )
     val displayRatio = (animatedRatio * introProgress).coerceIn(0f, 1f)
     val hasAmount = day.amount > 0.0
+
+    // ★ 明暗：只喺「有選中且唔係自己」嗰陣變暗
+    val dimAlpha by animateFloatAsState(
+        targetValue = if (!isAnySelected || isSelected) 1f else 0.45f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "barDim_${day.dayOfMonth}"
+    )
 
     val barShape = RoundedCornerShape(
         topStart = 6.dp, topEnd = 6.dp,
@@ -8030,28 +8076,71 @@ private fun WeeklyExpenseBarBody(
             (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
         } else 0.dp
 
+        // 背景軌道
         Box(
             modifier = Modifier
                 .width(22.dp)
                 .fillMaxHeight()
+                .graphicsLayer { alpha = dimAlpha }
                 .clip(barShape)
                 .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
         )
 
+        // 柱體
         if (barHeight > 0.dp) {
             Box(
                 modifier = Modifier
                     .width(22.dp)
                     .height(barHeight)
+                    .graphicsLayer { alpha = dimAlpha }
                     .clip(barShape)
                     .background(
                         if (day.isToday) {
-                            Brush.verticalGradient(listOf(BRAND_PRIMARY_DARK, BRAND_PRIMARY.copy(alpha = 0.85f)))
+                            Brush.verticalGradient(
+                                listOf(BRAND_PRIMARY_DARK, BRAND_PRIMARY.copy(alpha = 0.85f))
+                            )
                         } else {
-                            Brush.verticalGradient(listOf(BRAND_PRIMARY.copy(alpha = 0.85f), BRAND_PRIMARY.copy(alpha = 0.55f)))
+                            Brush.verticalGradient(
+                                listOf(
+                                    BRAND_PRIMARY.copy(alpha = 0.85f),
+                                    BRAND_PRIMARY.copy(alpha = 0.55f)
+                                )
+                            )
                         }
                     )
             )
+        }
+
+        // ★ 浮標：只喺「被選中」時組合，位置永遠喺柱頂上方 6dp
+        if (isSelected && hasAmount) {
+            val labelAnim = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                labelAnim.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = -(barHeight + 6.dp))
+                    .graphicsLayer { alpha = labelAnim.value }
+                    .height(24.dp)
+                    .wrapContentWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(BRAND_PRIMARY_DARK)
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "$${formatAmountNoDecimal(day.amount)}",
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    style = TextStyle(
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    )
+                )
+            }
         }
     }
 }
