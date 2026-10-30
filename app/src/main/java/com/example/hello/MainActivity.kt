@@ -8582,22 +8582,28 @@ fun RollingNumber(
     val currentAnimate by rememberUpdatedState(animateChanges)
     var displayedText by remember { mutableStateOf(text) }
 
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            val target = currentText
-            if (displayedText == target) {
-                kotlinx.coroutines.delay(16)
-            } else if (!currentAnimate) {
+    // ★ 保證無論中途被取消，最終一定顯示完整目標數字
+    LaunchedEffect(text, animateChanges) {
+        val target = text
+        try {
+            if (!animateChanges) {
                 displayedText = target
-                kotlinx.coroutines.delay(16)
-            } else {
+                return@LaunchedEffect
+            }
+            if (target.length < displayedText.length || !target.startsWith(displayedText)) {
+                displayedText = target
+                return@LaunchedEffect
+            }
+            while (displayedText != target && isActive) {
                 if (target.length < displayedText.length || !target.startsWith(displayedText)) {
                     displayedText = target
-                } else {
-                    displayedText += target[displayedText.length]
-                    kotlinx.coroutines.delay(60)
+                    break
                 }
+                displayedText += target[displayedText.length]
+                delay(60)
             }
+        } finally {
+            displayedText = currentText
         }
     }
 
@@ -8641,24 +8647,36 @@ fun RollingDigit(
         val continuousValue = remember { Animatable(0f) }
         var baseDigit by remember { mutableIntStateOf(digit) }
 
+        // ★ 保證無論動畫被取消，最終一定顯示完整目標數字，絕不中途停留
         LaunchedEffect(digit, animate) {
-            if (!animate) {
+            try {
+                if (!animate) {
+                    baseDigit = digit
+                    continuousValue.snapTo(0f)
+                    return@LaunchedEffect
+                }
+                if (baseDigit == digit) {
+                    continuousValue.snapTo(0f)
+                    return@LaunchedEffect
+                }
+                val steps = (digit - baseDigit + 10) % 10
+                if (steps == 0) {
+                    baseDigit = digit
+                    continuousValue.snapTo(0f)
+                    return@LaunchedEffect
+                }
+                val durationMs = (180 + steps * 60).coerceIn(180, 700)
+                if (delayMs > 0) delay(delayMs.toLong())
+                continuousValue.snapTo(0f)
+                continuousValue.animateTo(
+                    targetValue = steps.toFloat(),
+                    animationSpec = tween(durationMs, easing = FastOutSlowInEasing)
+                )
+            } finally {
+                // 動畫被取消或正常結束，都強制落地到完整數字
                 baseDigit = digit
                 continuousValue.snapTo(0f)
-                return@LaunchedEffect
             }
-            if (baseDigit == digit) return@LaunchedEffect
-            val steps = (digit - baseDigit + 10) % 10
-            if (steps == 0) return@LaunchedEffect
-            val durationMs = (180 + steps * 60).coerceIn(180, 700)
-            if (delayMs > 0) delay(delayMs.toLong())
-            continuousValue.snapTo(0f)
-            continuousValue.animateTo(
-                targetValue = steps.toFloat(),
-                animationSpec = tween(durationMs, easing = FastOutSlowInEasing)
-            )
-            baseDigit = digit
-            continuousValue.snapTo(0f)
         }
 
         val progress = continuousValue.value
@@ -8668,7 +8686,7 @@ fun RollingDigit(
         val currentDigit = (baseDigit + progressInt) % 10
         val nextDigit = (baseDigit + progressInt + 1) % 10
 
-        val isAnimating = progressFrac > 0f
+        val isAnimating = progressFrac > 0.001f
 
         Box(
             modifier = modifier
@@ -8732,22 +8750,31 @@ fun AnimatedAmount(
     val currentAnimate by rememberUpdatedState(animateChanges)
     var displayedText by remember { mutableStateOf(text) }
 
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            val target = currentText
-            if (displayedText == target) {
-                kotlinx.coroutines.delay(16)
-            } else if (!currentAnimate) {
+    // ★ 保證無論中途被取消（例如篩選切換），最終一定顯示完整目標數字
+    LaunchedEffect(text, animateChanges) {
+        val target = text
+        try {
+            if (!animateChanges) {
                 displayedText = target
-                kotlinx.coroutines.delay(16)
-            } else {
+                return@LaunchedEffect
+            }
+            // 前綴不相容時直接跳到完整目標，避免半截數字
+            if (target.length < displayedText.length || !target.startsWith(displayedText)) {
+                displayedText = target
+                return@LaunchedEffect
+            }
+            // 逐字補完到目標
+            while (displayedText != target && isActive) {
                 if (target.length < displayedText.length || !target.startsWith(displayedText)) {
                     displayedText = target
-                } else {
-                    displayedText += target[displayedText.length]
-                    kotlinx.coroutines.delay(60)
+                    break
                 }
+                displayedText += target[displayedText.length]
+                delay(60)
             }
+        } finally {
+            // 被取消或正常結束都強制落地完整數字
+            displayedText = currentText
         }
     }
 
