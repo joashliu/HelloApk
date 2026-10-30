@@ -585,6 +585,7 @@ data class LedgerUiState(
     val availableMonths: List<String> = emptyList(),
     val visibleCategories: List<String> = emptyList(),
     val topQuickNotesInfo: List<QuickNoteInfo> = emptyList(),
+    val hiddenQuickNotes: Set<String> = emptySet(),
 )
 
 @Immutable
@@ -827,10 +828,33 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NoteIndex())
 
+    private val _hiddenQuickNotes = MutableStateFlow<Set<String>>(emptySet())
+    val hiddenQuickNotes: StateFlow<Set<String>> = _hiddenQuickNotes.asStateFlow()
+
+    fun hideQuickNote(note: String) {
+        if (note.isBlank()) return
+        val currentVisibleCount = noteIndexState.value.topNotes.count { it.first !in _hiddenQuickNotes.value }
+        if (currentVisibleCount <= 1) return // 至少保留一項
+        val newSet = _hiddenQuickNotes.value + note
+        _hiddenQuickNotes.value = newSet
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.edit().putStringSet("hidden_quick_notes", newSet).apply()
+        }
+    }
+
+    fun unhideQuickNote(note: String) {
+        if (note.isBlank()) return
+        val newSet = _hiddenQuickNotes.value - note
+        _hiddenQuickNotes.value = newSet
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.edit().putStringSet("hidden_quick_notes", newSet).apply()
+        }
+    }
+
     val ledgerUiState: StateFlow<LedgerUiState> = combine(
-        _records, noteIndexState, _loading, _filter, _deletingIds
-    ) { records, noteIndex, loading, filter, deletingIds ->
-        computeLedgerUiState(records, noteIndex, loading, filter, deletingIds)
+        _records, noteIndexState, _loading, _filter, _deletingIds, _hiddenQuickNotes
+    ) { records, noteIndex, loading, filter, deletingIds, hidden ->
+        computeLedgerUiState(records, noteIndex, loading, filter, deletingIds, hidden)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
@@ -853,9 +877,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             val savedCategory = prefs.getString("last_category", "飲食") ?: "飲食"
             val savedMonthA = prefs.getString("compare_month_a", _defaultMonthA) ?: _defaultMonthA
             val savedMonthB = prefs.getString("compare_month_b", _defaultMonthB) ?: _defaultMonthB
+            val savedHidden = prefs.getStringSet("hidden_quick_notes", emptySet()) ?: emptySet()
             _lastSavedCategory.value = savedCategory
             _compareMonthA.value = savedMonthA
             _compareMonthB.value = savedMonthB
+            _hiddenQuickNotes.value = savedHidden
             withContext(Dispatchers.Default) { listenToFirestore() }
         }
 
@@ -1090,6 +1116,7 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
 private fun computeLedgerUiState(
     records: List<Record>, noteIndex: NoteIndex,
     loading: Boolean, filter: FilterState, deletingIds: Set<String>,
+    hiddenQuickNotes: Set<String> = emptySet(),
 ): LedgerUiState {
     val now = System.currentTimeMillis()
     val searchFiltered: List<Record> = if (filter.search.isBlank()) records else {
@@ -1187,6 +1214,7 @@ private fun computeLedgerUiState(
         availableMonths = availableMonths,
         visibleCategories = visibleCategories,
         topQuickNotesInfo = noteIndex.topQuickNotesInfo,
+        hiddenQuickNotes = hiddenQuickNotes,
     )
 }
 
@@ -6371,7 +6399,13 @@ fun IconSourceOption(icon: ImageVector, label: String, tint: Color = TEXT_PRIMAR
 }
 
 @Composable
-fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun QuickInputChip(
+    name: String,
+    iconUrl: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
+) {
     val ctx = LocalContext.current
     var extracted by remember(iconUrl) {
         mutableStateOf(if (iconUrl.isBlank()) null else dominantColorCache[iconUrl])
@@ -6413,8 +6447,21 @@ fun QuickInputChip(name: String, iconUrl: String, modifier: Modifier = Modifier,
     val bgColor = extracted ?: SURFACE_ELEVATED
 
     Surface(
-        modifier = modifier.height(36.dp).clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() },
+        modifier = modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (onLongClick != null) {
+                    Modifier.pointerInput(Unit) {
+                        detectTapGestures(
+                            onLongPress = { onLongClick() },
+                            onTap = { onClick() }
+                        )
+                    }
+                } else {
+                    Modifier.clickable { onClick() }
+                }
+            ),
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
         shadowElevation = 0.dp
