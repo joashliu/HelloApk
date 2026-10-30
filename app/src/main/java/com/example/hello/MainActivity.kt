@@ -1245,8 +1245,11 @@ private fun computeCalendarUiState(records: List<Record>, monthKey: String, filt
     val expenseCats = expenseSums.entries.sortedByDescending { it.value }.map { it.key }
     val visibleCategories =
         (if (hasIncome) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
-    val monthRecords = if (filterCategory == null) monthAllRecords
-                       else monthAllRecords.filter { it.category == filterCategory }
+        // ★ 「全部」模式自動排除「還錢」；只有手動揀「還錢」時先計入
+    val monthRecords = when (filterCategory) {
+        null -> monthAllRecords.filter { it.category != "還錢" }
+        else -> monthAllRecords.filter { it.category == filterCategory }
+    }
 
     val recordsByDay = HashMap<Int, ArrayList<Record>>()
     var monthIncome = 0.0
@@ -6566,7 +6569,8 @@ fun CalendarRow(
         maxItems
     }
 
-    val contentHeight: Dp = when (displayMode) {
+        // ★ 高度改為動畫值：篩選切換時行高平滑過渡，避免瞬間跳動
+    val targetContentHeight: Dp = when (displayMode) {
         0 -> 52.dp
         1 -> (34 + maxItemsInRow * 16).dp.coerceAtLeast(56.dp)
         2 -> {
@@ -6575,6 +6579,11 @@ fun CalendarRow(
         }
         else -> 52.dp
     }
+    val contentHeight by animateDpAsState(
+        targetValue = targetContentHeight,
+        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        label = "calendarRowContentHeight"
+    )
 
     val cellMaxScale = 1.06f
     val verticalPad = (contentHeight * (cellMaxScale - 1f) / 2f + 2.dp).coerceAtLeast(4.dp)
