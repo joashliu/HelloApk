@@ -3767,43 +3767,113 @@ fun LedgerContent(
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
             NotificationAccessGuide(context = LocalContext.current)
 
-            Row(
+            // ===== Top Stat Bar：支援左右滑顯示／隱藏「未來項目」按鈕 =====
+            val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
+            val avgExpense = remember(filtered, filterMode) {
+                if (!filterMode) 0.0
+                else {
+                    val exps = filtered.filter { it.category != INCOME_CATEGORY }
+                    if (exps.isNotEmpty()) exps.sumOf { it.amount } / exps.size else 0.0
+                }
+            }
+
+            // 狀態記憶：跨頁面保持；冷啟動預設收起（false）
+            var futureBtnRevealed by rememberSaveable { mutableStateOf(false) }
+            val futureBtnProgress = remember { Animatable(if (futureBtnRevealed) 1f else 0f) }
+            val density = LocalDensity.current
+            val barScope = rememberCoroutineScope()
+            var dragStartProgress by remember { mutableFloatStateOf(0f) }
+            var totalDragPx by remember { mutableFloatStateOf(0f) }
+            val revealDistancePx = with(density) { 56.dp.toPx() }
+
+            LaunchedEffect(futureBtnRevealed) {
+                futureBtnProgress.animateTo(
+                    targetValue = if (futureBtnRevealed) 1f else 0f,
+                    animationSpec = spring(dampingRatio = 0.82f, stiffness = 380f)
+                )
+            }
+
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp, bottom = 4.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
-                    .padding(start = 8.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
-
-                val avgExpense = remember(filtered, filterMode) {
-                    if (!filterMode) 0.0
-                    else {
-                        val exps = filtered.filter { it.category != INCOME_CATEGORY }
-                        if (exps.isNotEmpty()) exps.sumOf { it.amount } / exps.size else 0.0
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                dragStartProgress = futureBtnProgress.value
+                                totalDragPx = 0f
+                            },
+                            onDragEnd = {
+                                val target = futureBtnProgress.value >= 0.45f
+                                futureBtnRevealed = target
+                            },
+                            onDragCancel = {
+                                futureBtnRevealed = futureBtnProgress.value >= 0.45f
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                // 向左拖（dragAmount < 0）→ progress 增加；向右 → 減少
+                                totalDragPx += dragAmount
+                                val delta = -totalDragPx / revealDistancePx
+                                val newP = (dragStartProgress + delta).coerceIn(0f, 1f)
+                                barScope.launch { futureBtnProgress.snapTo(newP) }
+                            }
+                        )
                     }
-                }
+            ) {
+                val p = futureBtnProgress.value
+                // p=0 → 3 等分；p=1 → 4 等分。全程等距。
+                val gap = 6.dp
+                val totalW = maxWidth - 16.dp // 左右內邊距
+                val slotCount = 3f + p
+                val slotW = (totalW - gap * (slotCount - 1f)) / slotCount
+                val statsWidth = slotW * 3f + gap * 2f
+                val btnWidth = slotW * p
 
-                Box(modifier = Modifier.weight(1f)) {
-                    TopStats(
-                        hasIncome = hasIncome, hasExpense = hasExpense,
-                        income = totalIncome, expense = totalExpense,
-                        isFilterMode = filterMode,
-                        filteredCount = if (filterMode) filtered.size else null,
-                        showCategory = showCategoryChip, categoryName = cachedCategory,
-                        avgExpense = avgExpense,
-                        animateValues = animateTopStats
-                    )
-                }
-                IconButton(onClick = { onShowFutureChange(!showFuture) }) {
-                    Icon(
-                        if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        "顯示未來項目",
-                        tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
-                    )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // TopStats 區域：寬度隨 p 平滑收縮（3 槽位）
+                    Box(modifier = Modifier.width(statsWidth)) {
+                        TopStats(
+                            hasIncome = hasIncome, hasExpense = hasExpense,
+                            income = totalIncome, expense = totalExpense,
+                            isFilterMode = filterMode,
+                            filteredCount = if (filterMode) filtered.size else null,
+                            showCategory = showCategoryChip, categoryName = cachedCategory,
+                            avgExpense = avgExpense,
+                            animateValues = animateTopStats
+                        )
+                    }
+
+                    // 按鈕槽位：由右滑入，寬度 = 一個等分槽 × p，全程等距
+                    if (p > 0.001f) {
+                        Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
+                        Box(
+                            modifier = Modifier
+                                .width(btnWidth.coerceAtLeast(0.dp))
+                                .graphicsLayer { alpha = p },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            IconButton(
+                                onClick = { onShowFutureChange(!showFuture) },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (showFuture) Icons.Default.Visibility
+                                                  else Icons.Default.VisibilityOff,
+                                    contentDescription = "顯示未來項目",
+                                    tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
