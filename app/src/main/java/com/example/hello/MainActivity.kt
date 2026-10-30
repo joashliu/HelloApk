@@ -852,8 +852,13 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val ledgerUiState: StateFlow<LedgerUiState> = combine(
-        _records, noteIndexState, _loading, _filter, _deletingIds, _hiddenQuickNotes
-    ) { records, noteIndex, loading, filter, deletingIds, hidden ->
+        _records, noteIndexState, _loading, _filter, _deletingIds
+    ) { records, noteIndex, loading, filter, deletingIds ->
+        // 先算不含 hidden 的中間結果，再與 hidden 合併
+        Triple(records, noteIndex, Triple(loading, filter, deletingIds))
+    }.combine(_hiddenQuickNotes) { triple, hidden ->
+        val (records, noteIndex, rest) = triple
+        val (loading, filter, deletingIds) = rest
         computeLedgerUiState(records, noteIndex, loading, filter, deletingIds, hidden)
     }
         .flowOn(Dispatchers.Default)
@@ -1953,7 +1958,7 @@ fun LightweightEntryApp(
                 }
         ) {
 
-            if (ui.topNotes.isNotEmpty()) {
+            if (ui.topNotes.isNotEmpty() || ui.hiddenQuickNotes.isNotEmpty()) {
                 QuickInputSection(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
@@ -1975,7 +1980,10 @@ fun LightweightEntryApp(
                             selectAmountOnInput = amt != null && amt > 0.0,
                             focusedField = "amount"
                         )
-                    }
+                    },
+                    hiddenQuickNotes = ui.hiddenQuickNotes,
+                    onHideNote = { vm.hideQuickNote(it) },
+                    onUnhideNote = { vm.unhideQuickNote(it) }
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -2437,7 +2445,10 @@ fun MainApp(
                 keyboardProgressProvider = keyboardProgressProvider,
                 weeklyExpenses = weeklyExpenses,
                 shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
-                onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true }
+                onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true },
+                hiddenQuickNotes = ui.hiddenQuickNotes,
+                onHideNote = { vm.hideQuickNote(it) },
+                onUnhideNote = { vm.unhideQuickNote(it) }
             )
             1 -> {
                 val compareMonthA by vm.compareMonthA.collectAsState()
@@ -3422,6 +3433,9 @@ fun LedgerContent(
     weeklyExpenses: List<WeeklyExpenseDay> = emptyList(),
     shouldPlayWeeklyIntro: Boolean = false,
     onWeeklyIntroFinished: () -> Unit = {},
+    hiddenQuickNotes: Set<String> = emptySet(),
+    onHideNote: (String) -> Unit = {},
+    onUnhideNote: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
@@ -3812,7 +3826,7 @@ fun LedgerContent(
             ) { isFilter ->
                 if (!isFilter) {
                     Column(Modifier.fillMaxWidth()) {
-                        if (topNotes.isNotEmpty()) {
+                        if (topNotes.isNotEmpty() || hiddenQuickNotes.isNotEmpty()) {
                             Spacer(Modifier.height(4.dp))
                             QuickInputSection(
                                 topNotes = topNotes,
@@ -3833,7 +3847,10 @@ fun LedgerContent(
                                         }
                                     }
                                 },
-                                onClick = onQuickInputClick
+                                onClick = onQuickInputClick,
+                                hiddenQuickNotes = hiddenQuickNotes,
+                                onHideNote = onHideNote,
+                                onUnhideNote = onUnhideNote
                             )
                         }
                         Spacer(Modifier.height(4.dp))
@@ -6497,12 +6514,28 @@ fun QuickInputSection(
     skipAppearAnimation: Boolean = false,
     collapseProgress: Float = 0f,
     onExpandClick: () -> Unit = {},
-    onClick: (String) -> Unit
+    onClick: (String) -> Unit,
+    hiddenQuickNotes: Set<String> = emptySet(),
+    onHideNote: (String) -> Unit = {},
+    onUnhideNote: (String) -> Unit = {},
 ) {
-    if (topNotes.isEmpty()) return
+    val visibleTopNotes = remember(topNotes, hiddenQuickNotes) {
+        topNotes.filter { it.first !in hiddenQuickNotes }
+    }
+    if (visibleTopNotes.isEmpty() && hiddenQuickNotes.isEmpty()) return
 
-    val topNoteNames = remember(topNotes) { topNotes.map { it.first } }
+    val topNoteNames = remember(visibleTopNotes) { visibleTopNotes.map { it.first } }
     val items = remember(topNoteNames) { topNoteNames.take(42).map { it to 0 } }
+
+    var showManageDialog by remember { mutableStateOf(false) }
+    var longPressTarget by remember { mutableStateOf<String?>(null) }
+    var manageRevealProgress by remember { mutableFloatStateOf(0f) }
+    val manageRevealAnim = remember { Animatable(0f) }
+    val canHideMore = visibleTopNotes.size > 1
+    val hiddenList = remember(topNotes, hiddenQuickNotes) {
+        topNotes.map { it.first }.filter { it in hiddenQuickNotes }
+    }
+    val scope = rememberCoroutineScope()
 
     val density = LocalDensity.current
     val gapDp = 8.dp
@@ -6583,6 +6616,38 @@ fun QuickInputSection(
                 if (pagerState.currentPage > maxPage) pagerState.scrollToPage(maxPage)
             }
 
+            val manageButtonWidthPx = with(density) { 72.dp.toPx() }
+            val nestedScrollConnection = remember {
+                object : NestedScrollConnection {
+                    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                        if (available.x < 0 && manageRevealProgress > 0f) {
+                            val consume = available.x.coerceAtLeast(-manageRevealProgress * manageButtonWidthPx)
+                            manageRevealProgress = ((manageRevealProgress * manageButtonWidthPx + consume) / manageButtonWidthPx).coerceIn(0f, 1f)
+                            return Offset(consume, 0f)
+                        }
+                        return Offset.Zero
+                    }
+                    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                        if (pagerState.currentPage == 0 && available.x > 0f && source == NestedScrollSource.UserInput) {
+                            val consume = available.x.coerceAtMost((1f - manageRevealProgress) * manageButtonWidthPx)
+                            manageRevealProgress = ((manageRevealProgress * manageButtonWidthPx + consume) / manageButtonWidthPx).coerceIn(0f, 1f)
+                            return Offset(consume, 0f)
+                        }
+                        return Offset.Zero
+                    }
+                }
+            }
+
+            LaunchedEffect(pagerState.isScrollInProgress) {
+                if (!pagerState.isScrollInProgress) {
+                    val target = if (manageRevealProgress >= 0.45f) 1f else 0f
+                    manageRevealAnim.snapTo(manageRevealProgress)
+                    manageRevealAnim.animateTo(target, spring(dampingRatio = 0.8f, stiffness = 400f)) {
+                        manageRevealProgress = value
+                    }
+                }
+            }
+
             val hasIndicator = pagesWithChips.size > 1
             val safeCurrentPage = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
 
@@ -6612,17 +6677,55 @@ fun QuickInputSection(
                 Modifier.fillMaxWidth().height(finalHeight)
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
+                    .nestedScroll(nestedScrollConnection)
             ) {
                 val mainAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
                 val mainScale = 1f - (collapseProgress * 0.08f)
+                val revealPx = manageRevealProgress * manageButtonWidthPx
+
+                // 從左側拉出的管理按鈕
+                if (manageRevealProgress > 0.01f) {
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterStart)
+                            .offset { IntOffset((-manageButtonWidthPx + revealPx).roundToInt(), 0) }
+                            .width(with(density) { manageButtonWidthPx.toDp() })
+                            .fillMaxHeight()
+                            .padding(vertical = 8.dp, horizontal = 6.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(BRAND_PRIMARY_LIGHT)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                showManageDialog = true
+                                scope.launch {
+                                    manageRevealAnim.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f)) {
+                                        manageRevealProgress = value
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Settings, "管理", tint = BRAND_PRIMARY_DARK, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.height(2.dp))
+                            Text("管理", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BRAND_PRIMARY_DARK)
+                        }
+                    }
+                }
 
                 if (mainAlpha > 0.01f) {
-                    Box(Modifier.fillMaxSize().graphicsLayer {
-                        alpha = mainAlpha
-                        scaleX = mainScale
-                        scaleY = mainScale
-                        transformOrigin = TransformOrigin(0.5f, 0f)
-                    }) {
+                    Box(Modifier
+                        .fillMaxSize()
+                        .offset { IntOffset(revealPx.roundToInt(), 0) }
+                        .graphicsLayer {
+                            alpha = mainAlpha
+                            scaleX = mainScale
+                            scaleY = mainScale
+                            transformOrigin = TransformOrigin(0.5f, 0f)
+                        }
+                    ) {
                         HorizontalPager(
                             state = pagerState,
                             modifier = Modifier.fillMaxSize(),
@@ -6660,7 +6763,8 @@ fun QuickInputSection(
                                                 name = chip.name,
                                                 iconUrl = noteIconMap[chip.name] ?: "",
                                                 modifier = Modifier.fillMaxSize(),
-                                                onClick = { onClick(chip.name) }
+                                                onClick = { onClick(chip.name) },
+                                                onLongClick = { longPressTarget = chip.name }
                                             )
                                         }
                                     }
@@ -6709,6 +6813,117 @@ fun QuickInputSection(
                 }
             }
         }
+    }
+
+    // ===== 長按隱藏選單 =====
+    if (longPressTarget != null) {
+        val targetName = longPressTarget!!
+        AlertDialog(
+            onDismissRequest = { longPressTarget = null },
+            title = { Text("快速項目", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("「$targetName」", color = TEXT_SECONDARY, fontSize = 14.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Surface(
+                        onClick = {
+                            if (canHideMore) {
+                                onHideNote(targetName)
+                                longPressTarget = null
+                            }
+                        },
+                        enabled = canHideMore,
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (canHideMore) SURFACE_ELEVATED else SURFACE_ELEVATED.copy(alpha = 0.5f)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.VisibilityOff, "隱藏",
+                                tint = if (canHideMore) COLOR_EXPENSE else TEXT_TERTIARY,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                if (canHideMore) "隱藏呢個項目" else "至少保留一項（無法隱藏）",
+                                color = if (canHideMore) TEXT_PRIMARY else TEXT_TERTIARY,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { longPressTarget = null }) { Text("取消") }
+            },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = SURFACE_CARD
+        )
+    }
+
+    // ===== 管理隱藏項目彈窗 =====
+    if (showManageDialog) {
+        AlertDialog(
+            onDismissRequest = { showManageDialog = false },
+            title = { Text("隱藏的常用項目", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = {
+                if (hiddenList.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                        Text("暫時沒有隱藏項目", color = TEXT_SECONDARY, fontSize = 15.sp)
+                    }
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        hiddenList.forEach { name ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = SURFACE_ELEVATED,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    IconView(iconUrl = noteIconMap[name] ?: "", name = name, size = 28.dp)
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        name,
+                                        modifier = Modifier.weight(1f),
+                                        fontSize = 15.sp,
+                                        color = TEXT_PRIMARY,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    TextButton(
+                                        onClick = { onUnhideNote(name) },
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("復原", color = BRAND_PRIMARY, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showManageDialog = false }) {
+                    Text("完成", fontWeight = FontWeight.Bold)
+                }
+            },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = SURFACE_CARD
+        )
     }
 }
 
