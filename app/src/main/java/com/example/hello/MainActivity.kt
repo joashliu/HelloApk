@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.isActive
 import androidx.compose.animation.core.MutableTransitionState
@@ -4366,54 +4367,77 @@ fun WeeklyExpenseChart(
                     Spacer(Modifier.height(titleGap))
                     // ── 柱體（加入長按拖曳手勢）
                     Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .pointerInput(data.size) {
-                                if (data.isEmpty()) return@pointerInput
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { offset ->
-                                        val w = size.width.toFloat()
-                                        if (w <= 0f) return@detectDragGesturesAfterLongPress
-                                        val cw = w / data.size
-                                        val idx = (offset.x / cw).toInt()
-                                        if (idx in data.indices) selectedIndex = idx
-                                    },
-                                    onDrag = { change, _ ->
-                                        val w = size.width.toFloat()
-                                        val h = size.height.toFloat()
-                                        if (w <= 0f) return@detectDragGesturesAfterLongPress
-                                        val cw = w / data.size
-                                        val pos = change.position
-                                        // ★ 邊界處理：滑出柱形圖範圍就即時取消
-                                        if (pos.x < 0f || pos.x > w ||
-                                            pos.y < 0f || pos.y > h) {
-                                            selectedIndex = null
-                                        } else {
-                                            selectedIndex = (pos.x / cw)
-                                                .toInt()
-                                                .coerceIn(0, data.size - 1)
-                                        }
-                                    },
-                                    onDragEnd = { selectedIndex = null },
-                                    onDragCancel = { selectedIndex = null }
-                                )
-                            },
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        val anySelected = selectedIndex != null
-                        data.forEachIndexed { idx, day ->
-                            WeeklyExpenseBarBody(
-                                day = day,
-                                maxAmount = maxAmount,
-                                introProgress = introProgress,
-                                isSelected = selectedIndex == idx,
-                                isAnySelected = anySelected,
-                                modifier = Modifier.weight(1f).fillMaxHeight()
-                            )
-                        }
+    Modifier
+        .fillMaxWidth()
+        .weight(1f)
+        .pointerInput(data.size) {
+            if (data.isEmpty()) return@pointerInput
+            awaitEachGesture {
+                // ★ 唔 requireUnconsumed：即使父層已處理 down 都仍然收到
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val w = size.width.toFloat()
+                val h = size.height.toFloat()
+                if (w <= 0f) return@awaitEachGesture
+                val cw = w / data.size
+
+                // ★ 一撳即選中
+                val downIdx = (down.position.x / cw).toInt()
+                if (downIdx in data.indices) selectedIndex = downIdx
+
+                var dragging = false
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                    // 放手，或者手勢畀父層（LazyColumn 垂直滾動）搶走 → 即刻清空
+                    if (!change.pressed || change.isConsumed) {
+                        selectedIndex = null
+                        break
                     }
+
+                    val pos = change.position
+                    val totalDx = abs(pos.x - down.position.x)
+                    val totalDy = abs(pos.y - down.position.y)
+
+                    // 水平拖動超過 slop 就接管手勢，防止父層搶
+                    if (!dragging &&
+                        totalDx > viewConfiguration.touchSlop &&
+                        totalDx > totalDy
+                    ) {
+                        dragging = true
+                    }
+
+                    if (dragging) {
+                        change.consume()
+                    }
+
+                    // ★ 邊界：滑出柱形圖範圍即取消
+                    if (pos.x < 0f || pos.x > w || pos.y < 0f || pos.y > h) {
+                        selectedIndex = null
+                    } else {
+                        // ★ 跟手連續切換
+                        selectedIndex = (pos.x / cw)
+                            .toInt()
+                            .coerceIn(0, data.size - 1)
+                    }
+                }
+            }
+        },
+    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    verticalAlignment = Alignment.Bottom
+) {
+    val anySelected = selectedIndex != null
+    data.forEachIndexed { idx, day ->
+        WeeklyExpenseBarBody(
+            day = day,
+            maxAmount = maxAmount,
+            introProgress = introProgress,
+            isSelected = selectedIndex == idx,
+            isAnySelected = anySelected,
+            modifier = Modifier.weight(1f).fillMaxHeight()
+        )
+    }
+}
                     // ── 日期行
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
