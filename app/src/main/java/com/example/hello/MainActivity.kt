@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.isActive
@@ -4292,6 +4293,7 @@ fun WeeklyExpenseChart(
     val density = LocalDensity.current
     val chartHeightPx = remember(density) { with(density) { chartHeight.toPx() } }
 
+    // filter 收起的「外部高度上限」：0→1 對應 178→0
     val collapsed = filterCollapseProgress.coerceIn(0f, 1f)
     val maxBoxHeightPx = (chartHeightPx * (1f - collapsed)).coerceAtLeast(0f)
     val maxBoxHeightDp = with(density) { maxBoxHeightPx.toDp() }
@@ -4301,6 +4303,7 @@ fun WeeklyExpenseChart(
     }
     val totalAmount = remember(data) { data.sumOf { it.amount } }
 
+    // 滾動偏移：只反映「用戶手動滾動」造成的裁切
     val scrollOffsetPx by remember(listState, chartHeightPx) {
         derivedStateOf {
             val info = listState.layoutInfo.visibleItemsInfo
@@ -4310,6 +4313,7 @@ fun WeeklyExpenseChart(
         }
     }
 
+    // 卡片最終可見高度 = filter 收起後的最大高度 - 滾動偏移
     val visibleHeightPx = (maxBoxHeightPx - scrollOffsetPx).coerceAtLeast(0f)
     val visibleHeightDp = with(density) { visibleHeightPx.toDp() }
 
@@ -4318,9 +4322,8 @@ fun WeeklyExpenseChart(
         return
     }
 
-    // ★ 新增：當前被手指選中嘅柱 index（null = 無選中）
+    // ★ 當前選中柱 index（null = 無選中）
     var selectedIndex by remember { mutableStateOf<Int?>(null) }
-    // 當 data 改變（例如跨日或 reset）就清空選取
     LaunchedEffect(data) { selectedIndex = null }
 
     Box(
@@ -4365,79 +4368,153 @@ fun WeeklyExpenseChart(
                         )
                     }
                     Spacer(Modifier.height(titleGap))
-                    // ── 柱體（加入長按拖曳手勢）
-                    Row(
-    Modifier
-        .fillMaxWidth()
-        .weight(1f)
-        .pointerInput(data.size) {
-            if (data.isEmpty()) return@pointerInput
-            awaitEachGesture {
-                // ★ 唔 requireUnconsumed：即使父層已處理 down 都仍然收到
-                val down = awaitFirstDown(requireUnconsumed = false)
-                val w = size.width.toFloat()
-                val h = size.height.toFloat()
-                if (w <= 0f) return@awaitEachGesture
-                val cw = w / data.size
 
-                // ★ 一撳即選中
-                val downIdx = (down.position.x / cw).toInt()
-                if (downIdx in data.indices) selectedIndex = downIdx
-
-                var dragging = false
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-
-                    // 放手，或者手勢畀父層（LazyColumn 垂直滾動）搶走 → 即刻清空
-                    if (!change.pressed || change.isConsumed) {
-                        selectedIndex = null
-                        break
-                    }
-
-                    val pos = change.position
-                    val totalDx = abs(pos.x - down.position.x)
-                    val totalDy = abs(pos.y - down.position.y)
-
-                    // 水平拖動超過 slop 就接管手勢，防止父層搶
-                    if (!dragging &&
-                        totalDx > viewConfiguration.touchSlop &&
-                        totalDx > totalDy
+                    // ── 柱體區（含浮標層）
+                    BoxWithConstraints(
+                        Modifier.fillMaxWidth().weight(1f)
                     ) {
-                        dragging = true
+                        val areaWPx = with(density) { maxWidth.toPx() }
+                        val selIdx = selectedIndex
+
+                        // 記住最後選中嘅位置 + 金額，令淡出動畫穩定
+                        var lastCxRatio by remember { mutableFloatStateOf(0.5f) }
+                        var lastAmountText by remember { mutableStateOf("") }
+                        LaunchedEffect(selIdx) {
+                            if (selIdx != null && selIdx in data.indices) {
+                                lastCxRatio = (selIdx + 0.5f) / data.size
+                                lastAmountText = "$${formatAmountNoDecimal(data[selIdx].amount)}"
+                            }
+                        }
+                        // 水平平滑跟隨
+                        val animatedCxRatio by animateFloatAsState(
+                            targetValue = lastCxRatio,
+                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 400f),
+                            label = "weeklyBubbleCx"
+                        )
+                        // 透明度淡入淡出
+                        val bubbleAlpha by animateFloatAsState(
+                            targetValue = if (selIdx != null && selIdx in data.indices) 1f else 0f,
+                            animationSpec = tween(160, easing = FastOutSlowInEasing),
+                            label = "weeklyBubbleAlpha"
+                        )
+
+                        // 柱體 Row
+                        Row(
+                            Modifier
+                                .fillMaxSize()
+                                .pointerInput(data.size) {
+                                    if (data.isEmpty()) return@pointerInput
+                                    awaitEachGesture {
+                                        // 一撳即選中（唔要求 unconsumed，因為 LazyColumn 亦可能想要）
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val w = size.width.toFloat()
+                                        val h = size.height.toFloat()
+                                        if (w <= 0f) return@awaitEachGesture
+                                        val cw = w / data.size
+
+                                        val downIdx = (down.position.x / cw).toInt()
+                                        if (downIdx in data.indices) selectedIndex = downIdx
+
+                                        var dragging = false
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes
+                                                .firstOrNull { it.id == down.id } ?: break
+
+                                            // 放手／父層搶走 → 清空
+                                            if (!change.pressed || change.isConsumed) {
+                                                selectedIndex = null
+                                                break
+                                            }
+
+                                            val pos = change.position
+                                            val totalDx = abs(pos.x - down.position.x)
+                                            val totalDy = abs(pos.y - down.position.y)
+
+                                            // 水平拖動過 slop 就接管，防父層搶
+                                            if (!dragging &&
+                                                totalDx > viewConfiguration.touchSlop &&
+                                                totalDx > totalDy
+                                            ) { dragging = true }
+
+                                            if (dragging) change.consume()
+
+                                            // 邊界：滑出柱形圖範圍即取消
+                                            if (pos.x < 0f || pos.x > w ||
+                                                pos.y < 0f || pos.y > h) {
+                                                selectedIndex = null
+                                            } else {
+                                                selectedIndex = (pos.x / cw)
+                                                    .toInt()
+                                                    .coerceIn(0, data.size - 1)
+                                            }
+                                        }
+                                    }
+                                },
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            val anySelected = selIdx != null
+                            data.forEachIndexed { idx, day ->
+                                WeeklyExpenseBarBody(
+                                    day = day,
+                                    maxAmount = maxAmount,
+                                    introProgress = introProgress,
+                                    isSelected = selIdx == idx,
+                                    isAnySelected = anySelected,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
+                            }
+                        }
+
+                        // ★ 浮標層：固定頂部、水平跟隨選中柱，解除 parent 寬度限制
+                        Box(
+                            modifier = Modifier
+                                .graphicsLayer { alpha = bubbleAlpha }
+                                .layout { measurable, outerConstraints ->
+                                    val placeable = measurable.measure(
+                                        outerConstraints.copy(
+                                            minWidth = 0,
+                                            maxWidth = Constraints.Infinity
+                                        )
+                                    )
+                                    layout(outerConstraints.maxWidth, placeable.height) {
+                                        val cx = areaWPx * animatedCxRatio
+                                        val maxLeft = (outerConstraints.maxWidth -
+                                                       placeable.width).coerceAtLeast(0)
+                                        val x = (cx - placeable.width / 2f)
+                                            .roundToInt()
+                                            .coerceIn(0, maxLeft)
+                                        placeable.placeRelative(x, 0) // y = 0 → 貼頂
+                                    }
+                                }
+                        ) {
+                            Box(
+                                Modifier
+                                    .widthIn(min = 40.dp)
+                                    .height(22.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(BRAND_PRIMARY_DARK)
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = lastAmountText,
+                                    fontSize = 10.sp,
+                                    lineHeight = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    letterSpacing = (-0.3).sp,
+                                    style = TextStyle(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
+                            }
+                        }
                     }
 
-                    if (dragging) {
-                        change.consume()
-                    }
-
-                    // ★ 邊界：滑出柱形圖範圍即取消
-                    if (pos.x < 0f || pos.x > w || pos.y < 0f || pos.y > h) {
-                        selectedIndex = null
-                    } else {
-                        // ★ 跟手連續切換
-                        selectedIndex = (pos.x / cw)
-                            .toInt()
-                            .coerceIn(0, data.size - 1)
-                    }
-                }
-            }
-        },
-    horizontalArrangement = Arrangement.spacedBy(4.dp),
-    verticalAlignment = Alignment.Bottom
-) {
-    val anySelected = selectedIndex != null
-    data.forEachIndexed { idx, day ->
-        WeeklyExpenseBarBody(
-            day = day,
-            maxAmount = maxAmount,
-            introProgress = introProgress,
-            isSelected = selectedIndex == idx,
-            isAnySelected = anySelected,
-            modifier = Modifier.weight(1f).fillMaxHeight()
-        )
-    }
-}
                     // ── 日期行
                     Row(
                         Modifier.fillMaxWidth().heightIn(min = labelRowHeight),
@@ -8090,9 +8167,7 @@ private fun WeeklyExpenseBarBody(
     )
 
     BoxWithConstraints(
-        modifier = modifier
-            // ★ 令被選中柱嘅浮標浮喺其他柱之上（避免被鄰居遮住）
-            .zIndex(if (isSelected) 5f else 0f),
+        modifier = modifier,
         contentAlignment = Alignment.BottomCenter
     ) {
         val maxBarHeight = maxHeight
@@ -8101,7 +8176,6 @@ private fun WeeklyExpenseBarBody(
             (maxBarHeight * displayRatio).coerceAtLeast(minBarHeight)
         } else 0.dp
 
-        // 背景軌道
         Box(
             modifier = Modifier
                 .width(22.dp)
@@ -8111,7 +8185,6 @@ private fun WeeklyExpenseBarBody(
                 .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f))
         )
 
-        // 柱體
         if (barHeight > 0.dp) {
             Box(
                 modifier = Modifier
@@ -8134,46 +8207,6 @@ private fun WeeklyExpenseBarBody(
                         }
                     )
             )
-        }
-
-        // ★ 浮標：解除 parent 寬度限制，超出 cell 都完整顯示
-        if (isSelected && hasAmount) {
-            val labelAnim = remember { Animatable(0f) }
-            LaunchedEffect(Unit) {
-                labelAnim.animateTo(1f, tween(160, easing = FastOutSlowInEasing))
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .offset(y = -(barHeight + 6.dp))
-                    // ★ 關鍵：unbounded = true 解除 parent 嘅 maxWidth 約束
-                    .wrapContentWidth(
-                        align = Alignment.CenterHorizontally,
-                        unbounded = true
-                    )
-                    .widthIn(min = 40.dp)
-                    .graphicsLayer { alpha = labelAnim.value }
-                    .height(24.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(BRAND_PRIMARY_DARK)
-                    .padding(horizontal = 8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "$${formatAmountNoDecimal(day.amount)}",
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 1,
-                    softWrap = false,
-                    // ★ 收窄字距，幫多字金額（$1,074 / $12,345）省空間
-                    letterSpacing = (-0.3).sp,
-                    style = TextStyle(
-                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                    )
-                )
-            }
         }
     }
 }
