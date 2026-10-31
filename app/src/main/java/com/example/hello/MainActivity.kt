@@ -1781,9 +1781,8 @@ class MainActivity : ComponentActivity() {
     splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
     super.onCreate(savedInstanceState)
 
-    // ★ 處理 Status Bar 重疊
-    enableEdgeToEdge()
-    WindowCompat.setDecorFitsSystemWindows(window, false)
+    // ★ 最穩做法：叫系統自動為 Status Bar 留位，唔好自己搞 edge-to-edge
+    WindowCompat.setDecorFitsSystemWindows(window, true)
 
     val isColdStart = !isProcessAlive
     isProcessAlive = true
@@ -1822,9 +1821,7 @@ class MainActivity : ComponentActivity() {
 
         MaterialTheme {
             Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding(),          // ★ 頂部避開通知欄
+                modifier = Modifier.fillMaxSize(),
                 color = SURFACE_BG
             ) {
                 if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
