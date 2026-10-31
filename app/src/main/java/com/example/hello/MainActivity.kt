@@ -2154,6 +2154,7 @@ fun MainApp(
 
     var keyboardState by remember { mutableStateOf(KeyboardState()) }
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
+    var quickInputScrollToFirstTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
@@ -2516,7 +2517,8 @@ fun MainApp(
                 onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true },
                 hiddenQuickNotes = ui.hiddenQuickNotes,
                 onHideNote = { vm.hideQuickNote(it) },
-                onUnhideNote = { vm.unhideQuickNote(it) }
+                onUnhideNote = { vm.unhideQuickNote(it) },
+                quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger
             )
             1 -> {
                 val compareMonthA by vm.compareMonthA.collectAsState()
@@ -2672,6 +2674,8 @@ fun MainApp(
                 }
             },
             onFabTap = {
+                // ★ 點擊 FAB：快速輸入區一定滾回第一頁（帶動畫）
+                quickInputScrollToFirstTrigger++
                 if (showKeyboard) {
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
                 } else {
@@ -3504,6 +3508,8 @@ fun LedgerContent(
     hiddenQuickNotes: Set<String> = emptySet(),
     onHideNote: (String) -> Unit = {},
     onUnhideNote: (String) -> Unit = {},
+    // ★ FAB 點擊時遞增，驅動快速輸入滾回第一頁
+    quickInputScrollToFirstTrigger: Int = 0,
 ) {
     val listState = rememberLazyListState()
 
@@ -3990,7 +3996,8 @@ fun LedgerContent(
                             onClick = onQuickInputClick,
                             hiddenQuickNotes = hiddenQuickNotes,
                             onHideNote = onHideNote,
-                            onUnhideNote = onUnhideNote
+                            onUnhideNote = onUnhideNote,
+                            scrollToFirstTrigger = quickInputScrollToFirstTrigger
                         )
                     }
                 } else {
@@ -6699,6 +6706,8 @@ fun QuickInputSection(
     hiddenQuickNotes: Set<String> = emptySet(),
     onHideNote: (String) -> Unit = {},
     onUnhideNote: (String) -> Unit = {},
+    // ★ 每次遞增會帶動畫滾回第一頁（FAB 點擊觸發）
+    scrollToFirstTrigger: Int = 0,
 ) {
     val visibleTopNotes = remember(topNotes, hiddenQuickNotes) {
         topNotes.filter { it.first !in hiddenQuickNotes }
@@ -6795,6 +6804,23 @@ fun QuickInputSection(
             LaunchedEffect(pagesWithChips.size) {
                 val maxPage = (pagesWithChips.size - 1).coerceAtLeast(0)
                 if (pagerState.currentPage > maxPage) pagerState.scrollToPage(maxPage)
+            }
+
+            // ★ FAB 觸發：帶動畫滾回第一頁，並收起管理按鈕
+            LaunchedEffect(scrollToFirstTrigger) {
+                if (scrollToFirstTrigger <= 0) return@LaunchedEffect
+                if (pagerState.currentPage != 0 || pagerState.currentPageOffsetFraction != 0f) {
+                    pagerState.animateScrollToPage(
+                        page = 0,
+                        animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                    )
+                }
+                if (manageRevealProgress > 0f) {
+                    manageRevealAnim.snapTo(manageRevealProgress)
+                    manageRevealAnim.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f)) {
+                        manageRevealProgress = value
+                    }
+                }
             }
 
             val manageButtonWidthPx = with(density) { 72.dp.toPx() }
