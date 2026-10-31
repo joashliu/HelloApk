@@ -1,5 +1,8 @@
 package com.example.hello
 
+import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.unit.Velocity
@@ -1774,82 +1777,91 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val splash = installSplashScreen()
-        splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
-        super.onCreate(savedInstanceState)
+    val splash = installSplashScreen()
+    splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
+    super.onCreate(savedInstanceState)
 
-        val isColdStart = !isProcessAlive
-        isProcessAlive = true
-        val isFromTile = intent?.getBooleanExtra(EXTRA_FROM_TILE, false) == true
-        val startLightweight = isColdStart && isFromTile
+    // ★ 處理 Status Bar 重疊
+    enableEdgeToEdge()
+    WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        handleLaunchIntent(intent)
+    val isColdStart = !isProcessAlive
+    isProcessAlive = true
+    val isFromTile = intent?.getBooleanExtra(EXTRA_FROM_TILE, false) == true
+    val startLightweight = isColdStart && isFromTile
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            NotificationCaptureBridge.init(applicationContext)
-            ensureNotificationChannels(applicationContext)
-            cleanupStaleConfirmNotifications(applicationContext)
-            createQuickAddChannel()
+    handleLaunchIntent(intent)
+
+    lifecycleScope.launch(Dispatchers.IO) {
+        NotificationCaptureBridge.init(applicationContext)
+        ensureNotificationChannels(applicationContext)
+        cleanupStaleConfirmNotifications(applicationContext)
+        createQuickAddChannel()
+    }
+
+    setContent {
+        val token = keyboardLaunchToken.value
+        val prefillNote = keyboardPrefillNote.value
+        val prefillAmount = keyboardPrefillAmount.value
+        val prefillCategory = keyboardPrefillCategory.value
+        val notesInfo = topQuickNotesInfo.value
+
+        var currentAppMode by rememberSaveable {
+            mutableStateOf(if (startLightweight) AppUiMode.LIGHTWEIGHT else AppUiMode.FULL)
         }
 
-        setContent {
-            val token = keyboardLaunchToken.value
-            val prefillNote = keyboardPrefillNote.value
-            val prefillAmount = keyboardPrefillAmount.value
-            val prefillCategory = keyboardPrefillCategory.value
-            val notesInfo = topQuickNotesInfo.value
+        LaunchedEffect(notesInfo) {
+            persistTopQuickNotes(notesInfo)
+            showQuickAddNotification()
+        }
 
-            var currentAppMode by rememberSaveable {
-                mutableStateOf(if (startLightweight) AppUiMode.LIGHTWEIGHT else AppUiMode.FULL)
-            }
+        LaunchedEffect(Unit) {
+            delay(800)
+            askNotificationPermissionIfNeeded()
+        }
 
-            LaunchedEffect(notesInfo) {
-                persistTopQuickNotes(notesInfo)
-                showQuickAddNotification()
-            }
-
-            LaunchedEffect(Unit) {
-                delay(800)
-                askNotificationPermissionIfNeeded()
-            }
-
-            MaterialTheme {
-                Surface(Modifier.fillMaxSize(), color = SURFACE_BG) {
-                    if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
-                        LightweightEntryApp(
-                            vm = viewModel(),
-                            onTransitionToMain = { stateToTransfer ->
-                                if (stateToTransfer != null) {
-                                    keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
-                                    keyboardPrefillNote.value = stateToTransfer.noteText
-                                    keyboardPrefillCategory.value = stateToTransfer.category
-                                    keyboardLaunchToken.value += 1
-                                } else {
-                                    keyboardLaunchToken.value = 0
-                                    keyboardPrefillAmount.value = null
-                                    keyboardPrefillNote.value = null
-                                    keyboardPrefillCategory.value = null
-                                }
-                                currentAppMode = AppUiMode.FULL
-                            }
-                        )
-                    } else {
-                        MainApp(
-                            keyboardLaunchToken = token,
-                            prefillNoteOnLaunch = prefillNote,
-                            prefillAmountOnLaunch = prefillAmount,
-                            prefillCategoryOnLaunch = prefillCategory,
-                            onKeyboardLaunchConsumed = {
-                                keyboardPrefillNote.value = null
+        MaterialTheme {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding(),          // ★ 頂部避開通知欄
+                color = SURFACE_BG
+            ) {
+                if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
+                    LightweightEntryApp(
+                        vm = viewModel(),
+                        onTransitionToMain = { stateToTransfer ->
+                            if (stateToTransfer != null) {
+                                keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
+                                keyboardPrefillNote.value = stateToTransfer.noteText
+                                keyboardPrefillCategory.value = stateToTransfer.category
+                                keyboardLaunchToken.value += 1
+                            } else {
+                                keyboardLaunchToken.value = 0
                                 keyboardPrefillAmount.value = null
+                                keyboardPrefillNote.value = null
                                 keyboardPrefillCategory.value = null
                             }
-                        )
-                    }
+                            currentAppMode = AppUiMode.FULL
+                        }
+                    )
+                } else {
+                    MainApp(
+                        keyboardLaunchToken = token,
+                        prefillNoteOnLaunch = prefillNote,
+                        prefillAmountOnLaunch = prefillAmount,
+                        prefillCategoryOnLaunch = prefillCategory,
+                        onKeyboardLaunchConsumed = {
+                            keyboardPrefillNote.value = null
+                            keyboardPrefillAmount.value = null
+                            keyboardPrefillCategory.value = null
+                        }
+                    )
                 }
             }
         }
     }
+}
 
     override fun onResume() {
         super.onResume()
@@ -7523,7 +7535,7 @@ fun CalendarDayCell(
                 }
                 1 -> {
                     if (isSelected) {
-                        // ★ 選中時：只顯示一行摘要，明細保持可見
+                        // ★ 選中時只顯示一行摘要
                         val count = records.size
                         val summaryText = when {
                             count == 0 -> ""
@@ -7559,7 +7571,7 @@ fun CalendarDayCell(
                             }
                         }
                     } else {
-                        // 未選中：保持原本多行顯示
+                        // 未選中：原本多行
                         summary.sortedAsc.forEach { r ->
                             Row(Modifier.fillMaxWidth().height(16.dp)) {
                                 FadedText(
