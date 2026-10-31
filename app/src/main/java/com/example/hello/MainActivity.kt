@@ -3938,6 +3938,10 @@ fun LedgerContent(
                 }
             }
 
+            // ★ 統一區塊間距：Top Stat ↔ 中間區 ↔ 棒形圖，兩邊完全相同
+            val sectionGap = 8.dp
+            Spacer(Modifier.height(sectionGap))
+
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
@@ -3956,46 +3960,39 @@ fun LedgerContent(
                 label = "filterContent"
             ) { isFilter ->
                 if (!isFilter) {
-                    Column(Modifier.fillMaxWidth()) {
-                        // ★ 統一區塊間距 8.dp（Top Stat ↔ 快速輸入 ↔ 棒形圖）
-                        Spacer(Modifier.height(8.dp))
-                        if (topNotes.isNotEmpty() || hiddenQuickNotes.isNotEmpty()) {
-                            QuickInputSection(
-                                topNotes = topNotes,
-                                noteIconMap = noteIconMap,
-                                maxRowsPerPage = 4,
-                                skipAppearAnimation = !isFirstShow,
-                                collapseProgress = collapseProgress,
-                                onExpandClick = {
-                                    scope.launch {
-                                        try {
-                                            isAutoAnimating = true
-                                            val a = Animatable(quickInputCollapseOffset)
-                                            a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                                                quickInputCollapseOffset = this.value
-                                            }
-                                        } finally {
-                                            isAutoAnimating = false
+                    if (topNotes.isNotEmpty() || hiddenQuickNotes.isNotEmpty()) {
+                        QuickInputSection(
+                            topNotes = topNotes,
+                            noteIconMap = noteIconMap,
+                            maxRowsPerPage = 4,
+                            skipAppearAnimation = !isFirstShow,
+                            collapseProgress = collapseProgress,
+                            onExpandClick = {
+                                scope.launch {
+                                    try {
+                                        isAutoAnimating = true
+                                        val a = Animatable(quickInputCollapseOffset)
+                                        a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
+                                            quickInputCollapseOffset = this.value
                                         }
+                                    } finally {
+                                        isAutoAnimating = false
                                     }
-                                },
-                                onClick = onQuickInputClick,
-                                hiddenQuickNotes = hiddenQuickNotes,
-                                onHideNote = onHideNote,
-                                onUnhideNote = onUnhideNote
-                            )
-                            Spacer(Modifier.height(8.dp))
-                        }
+                                }
+                            },
+                            onClick = onQuickInputClick,
+                            hiddenQuickNotes = hiddenQuickNotes,
+                            onHideNote = onHideNote,
+                            onUnhideNote = onUnhideNote
+                        )
                     }
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
-                        // ★ 篩選區亦用統一 8.dp 區塊間距
-                        Spacer(Modifier.height(8.dp))
                         val allCategories: List<String?> = remember(visibleCategories) {
                             listOf(null) + visibleCategories
                         }
                         val rows = remember(allCategories) { allCategories.chunked(4) }
-                        rows.forEach { row ->
+                        rows.forEachIndexed { idx, row ->
                             Row(Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 row.forEach { cat ->
@@ -4011,7 +4008,9 @@ fun LedgerContent(
                                 }
                                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                             }
-                            Spacer(Modifier.height(8.dp))
+                            if (idx < rows.lastIndex || availableMonths.isNotEmpty()) {
+                                Spacer(Modifier.height(sectionGap))
+                            }
                         }
 
                         if (availableMonths.isNotEmpty()) {
@@ -4033,11 +4032,13 @@ fun LedgerContent(
                                     )
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
                         }
                     }
                 }
             }
+
+            // ★ 中間區（快速輸入／篩選）↔ 棒形圖：同 Top Stat ↔ 中間區 用同一個 sectionGap
+            Spacer(Modifier.height(sectionGap))
 
             Box(
                 Modifier
