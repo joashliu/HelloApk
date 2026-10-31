@@ -43,6 +43,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
@@ -5002,8 +5003,11 @@ fun CalendarContent(
     // 彈簧與手勢狀態
     val gridScrollOffsetAnim = remember { Animatable(0f) }
     val detailsAlphaAnim = remember { Animatable(0f) }
-    // 只保留向下拖動平移（下拉收起），徹底移除上滑收縮邏輯
+    // 向下拖動：收細明細 Box（有下限，唔會完全消失）
     var dragDownAmount by remember { mutableFloatStateOf(0f) }
+    // ★ 頂部區域（Chips + Stats）顯示進度：1 = 全顯示，0 = 全收起；跟手可中途打斷
+    val topRevealProgress = remember { Animatable(1f) }
+    var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
 
     val density = LocalDensity.current
     val headerHeightDp = 32.dp
@@ -5011,6 +5015,11 @@ fun CalendarContent(
     val triangleHeightDp = 11.dp
     val triangleHeightPx = remember(density) { with(density) { triangleHeightDp.toPx() } }
     val fabTopPaddingPx = remember(density) { with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp).toPx() } }
+    // 明細最小高度：抓手 + 第一條項目
+    val minDetailHeightPx = remember(density) { with(density) { 112.dp.toPx() } }
+    val handleBarHeightDp = 20.dp
+    // 由 BoxWithConstraints 寫入，畀 nested scroll 計算 maxDrag
+    var calendarBottomLimitPx by remember { mutableFloatStateOf(0f) }
 
     val curCal = remember(currentMonthKey) {
         val parts = currentMonthKey.split("-")
@@ -5087,7 +5096,6 @@ fun CalendarContent(
             val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
                 .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
-            // ★ 同步清空（重入保護）+ 重置 dock 狀態
             selectedDay = null
             selectedRowIdx = null
             selectedColIdx = null
@@ -5101,7 +5109,11 @@ fun CalendarContent(
                 gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
             }
             scope.launch {
-                detailsAlphaAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
+                detailsAlphaAnim.snapTo(0f)
+            }
+            // ★ 還原頂部 Chips + Stats
+            scope.launch {
+                topRevealProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 320f))
             }
         }
     }
@@ -5110,13 +5122,66 @@ fun CalendarContent(
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
 
+    // ★ 明細 Box 嵌套滾動：內部列表優先；到頂後先拖動 Box 高度（跟手、有下限）
     val dismissConnection = remember(selectedRowIdx) {
-    object : NestedScrollConnection {
+        object : NestedScrollConnection {
+            fun currentMaxDrag(): Float {
+                val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
+                if (rowIdx !in rowOffsetsPx.indices) return 0f
+                val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
+                val bottomLimit = calendarBottomLimitPx
+                if (bottomLimit <= 0f) return gridScroll * 0.85f
+                // H0 = 完全展開時明細高度；maxDrag 令高度唔低過 minDetailHeight
+                val h0 = (bottomLimit - headerHeightPx -
+                    rowOffsetsPx[rowIdx] + gridScroll - rowHeightsPx[rowIdx])
+                    .coerceAtLeast(0f)
+                return (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
+            }
 
-        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-            if (available.y < 0f && dragDownAmount > 0f) {
-                // ★ 停靠狀態向上拖 → 立即觸發自動彈返頂（無論拖幾多）
-                if (isDockedAtTop && !isDockingBack) {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // 向上：若 Box 已收細，先跟手展開（減少 dragDown）
+                if (available.y < 0f && dragDownAmount > 0f) {
+                    if (isDockingBack) return Offset(0f, available.y)
+                    val consume = minOf(-available.y, dragDownAmount)
+                    dragDownAmount -= consume
+                    if (dragDownAmount <= 0.5f) {
+                        isDockedAtTop = false
+                        dockedReleased = false
+                    } else {
+                        isDockedAtTop = false
+                    }
+                    return Offset(0f, -consume)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                // 向下：只喺內部列表已到頂時，先拖動收細 Box
+                if (available.y > 0f && detailScrollState.value <= 0) {
+                    if (isDockingBack) return Offset(0f, available.y)
+                    val maxDrag = currentMaxDrag()
+                    if (maxDrag <= 0.5f) return Offset.Zero
+                    // 已在最小 peek：唔再收、亦唔 dismiss
+                    if (isDockedAtTop || dragDownAmount >= maxDrag - 0.5f) {
+                        isDockedAtTop = true
+                        return Offset(0f, available.y)
+                    }
+                    val newDrag = (dragDownAmount + available.y).coerceAtMost(maxDrag)
+                    val consumedY = newDrag - dragDownAmount
+                    dragDownAmount = newDrag
+                    if (newDrag >= maxDrag - 0.5f) isDockedAtTop = true
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (isDockingBack) return Velocity.Zero
+                val maxDrag = currentMaxDrag()
+                if (maxDrag <= 0.5f) return Velocity.Zero
+
+                // ★ peek 狀態向上 fling → 完整展開 + 日期行保持置頂
+                if ((isDockedAtTop || dragDownAmount > maxDrag * 0.5f) && available.y < -80f) {
                     isDockedAtTop = false
                     dockedReleased = false
                     isDockingBack = true
@@ -5124,87 +5189,88 @@ fun CalendarContent(
                     scope.launch {
                         try {
                             Animatable(start).animateTo(
-                                0f,
-                                spring(dampingRatio = 0.85f, stiffness = 400f)
+                                0f, spring(dampingRatio = 0.85f, stiffness = 400f)
                             ) { dragDownAmount = value }
                         } finally {
                             isDockingBack = false
                         }
                     }
-                    return Offset(0f, available.y)
+                    return available
                 }
-                // 彈簧回頂進行中：只消費拖動，唔插手 dragDownAmount
-                if (isDockingBack) {
-                    return Offset(0f, available.y)
-                }
-                // 正常跟手拖動
-                val consume = minOf(-available.y, dragDownAmount)
-                dragDownAmount -= consume
-                if (dragDownAmount <= 0.5f) {
-                    isDockedAtTop = false
-                    dockedReleased = false
-                }
-                return Offset(0f, -consume)
-            }
-            return Offset.Zero
-        }
 
-        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-            if (available.y > 0f) {
-                val maxDrag = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-                if (maxDrag <= 0.5f) return Offset.Zero
-                // 彈簧回頂進行中：忽略向下拖動（約 300ms）
-                if (isDockingBack) return Offset(0f, available.y)
-                if (isDockedAtTop) {
-                    if (dockedReleased) handleDismiss()
-                    return Offset(0f, available.y)
-                }
-                val newDrag = (dragDownAmount + available.y).coerceAtMost(maxDrag)
-                val consumedY = newDrag - dragDownAmount
-                dragDownAmount = newDrag
-                if (newDrag >= maxDrag - 0.5f) {
-                    isDockedAtTop = true
-                }
-                return Offset(0f, consumedY)
-            }
-            return Offset.Zero
-        }
+                if (dragDownAmount <= 0.5f) return Velocity.Zero
 
-        override suspend fun onPreFling(available: Velocity): Velocity {
-            if (isDockedAtTop) {
-                dockedReleased = true
-                return available
+                val snapTarget = when {
+                    available.y < -50f -> 0f
+                    available.y > 50f -> maxDrag
+                    dragDownAmount < maxDrag / 2f -> 0f
+                    else -> maxDrag
+                }
+                val start = dragDownAmount
+                val shouldDock = snapTarget >= maxDrag - 0.5f
+                scope.launch {
+                    Animatable(start).animateTo(
+                        snapTarget, spring(dampingRatio = 0.85f, stiffness = 400f)
+                    ) { dragDownAmount = value }
+                    isDockedAtTop = shouldDock
+                    dockedReleased = false // ★ 唔再二次下拉 dismiss
+                }
+                return Velocity.Zero
             }
-            if (isDockingBack) return Velocity.Zero
-            val maxDrag = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-            if (maxDrag <= 0.5f) return Velocity.Zero
-            if (dragDownAmount <= 0.5f) return Velocity.Zero
-
-            // ★ 方向感知吸附（核心修復）
-            val snapTarget = when {
-                available.y < -50f -> 0f            // 向上滑 → 回頂
-                available.y > 50f -> maxDrag        // 向下滑 → 停靠
-                dragDownAmount < maxDrag / 2f -> 0f // 低速：就近頂
-                else -> maxDrag                     // 低速：就近停靠
-            }
-            val start = dragDownAmount
-            val shouldDock = snapTarget >= maxDrag - 0.5f
-            scope.launch {
-                Animatable(start).animateTo(
-                    snapTarget,
-                    spring(dampingRatio = 0.85f, stiffness = 400f)
-                ) { dragDownAmount = value }
-                isDockedAtTop = shouldDock
-                dockedReleased = shouldDock
-            }
-            return Velocity.Zero
         }
     }
-}
+
+    // ★ 頂部下拉跟手：收起模式向下拉顯示 Chips/Stats，可中途反向
+    val topPullConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (selectedDay == null) return Offset.Zero
+                val h = topSectionHeightPx.coerceAtLeast(1f)
+                // 向上收起頂部
+                if (available.y < 0f && topRevealProgress.value > 0.001f) {
+                    val delta = available.y / h
+                    val newP = (topRevealProgress.value + delta).coerceIn(0f, 1f)
+                    val consumed = (newP - topRevealProgress.value) * h
+                    scope.launch { topRevealProgress.snapTo(newP) }
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (selectedDay == null) return Offset.Zero
+                val h = topSectionHeightPx.coerceAtLeast(1f)
+                // 向下拉出頂部
+                if (available.y > 0f && topRevealProgress.value < 0.999f) {
+                    val delta = available.y / h
+                    val newP = (topRevealProgress.value + delta).coerceIn(0f, 1f)
+                    val consumedY = (newP - topRevealProgress.value) * h
+                    scope.launch { topRevealProgress.snapTo(newP) }
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (selectedDay == null) return Velocity.Zero
+                if (topRevealProgress.value <= 0.001f || topRevealProgress.value >= 0.999f) {
+                    // 已喺端點：若全開且繼續下拉可選擇 dismiss——保留現狀
+                    return Velocity.Zero
+                }
+                val target = when {
+                    available.y > 50f -> 1f
+                    available.y < -50f -> 0f
+                    topRevealProgress.value >= 0.45f -> 1f
+                    else -> 0f
+                }
+                topRevealProgress.animateTo(target, spring(dampingRatio = 0.85f, stiffness = 400f))
+                return Velocity.Zero
+            }
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
         val containerHeightPx = constraints.maxHeight.toFloat()
         val bottomLimitPx = containerHeightPx - fabTopPaddingPx
+        SideEffect { calendarBottomLimitPx = bottomLimitPx }
 
         Column(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxWidth().background(SURFACE_BG).zIndex(30f).padding(horizontal = 10.dp, vertical = 10.dp)) {
@@ -5247,12 +5313,28 @@ fun CalendarContent(
                 }
             }
 
-            AnimatedVisibility(
-                visible = selectedDay == null,
-                enter = expandVertically(spring(dampingRatio = 0.9f, stiffness = 320f)) + fadeIn(tween(180)),
-                exit = shrinkVertically(spring(dampingRatio = 0.9f, stiffness = 320f)) + fadeOut(tween(150))
+            // ★ 頂部 Chips + Stats：高度跟手進度（可中途打斷、反向）
+            val topP = topRevealProgress.value
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(with(density) {
+                        val h = if (topSectionHeightPx > 0f) topSectionHeightPx else 120.dp.toPx()
+                        (h * topP).toDp()
+                    })
+                    .clipToBounds()
+                    .graphicsLayer { alpha = topP.coerceIn(0f, 1f) }
             ) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp)
+                        .onSizeChanged { size ->
+                            if (size.height > 0 && topRevealProgress.value > 0.95f) {
+                                topSectionHeightPx = size.height.toFloat()
+                            }
+                        }
+                ) {
                     Spacer(Modifier.height(4.dp))
                     val allCategories: List<String?> = remember(visibleCategories) { listOf(null) + visibleCategories }
                     val rows = remember(allCategories) { allCategories.chunked(4) }
@@ -5278,7 +5360,7 @@ fun CalendarContent(
                 }
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().nestedScroll(topPullConnection)) {
     // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
     val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
         .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
@@ -5309,7 +5391,6 @@ fun CalendarContent(
                 cachedSelectedCol = col
                 detailExpandedId = null
 
-                // ★ 切換新格子 = 全新開始，清 dock 狀態
                 isDockedAtTop = false
                 dockedReleased = false
 
@@ -5322,11 +5403,10 @@ fun CalendarContent(
                         spring(dampingRatio = 0.9f, stiffness = 300f)
                     )
                 }
+                // ★ 即時顯示明細（取消漸變消失），收起頂部
+                scope.launch { detailsAlphaAnim.snapTo(1f) }
                 scope.launch {
-                    detailsAlphaAnim.animateTo(
-                        1f,
-                        spring(dampingRatio = 0.9f, stiffness = 300f)
-                    )
+                    topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
                 }
             }
         }
@@ -5352,9 +5432,9 @@ fun CalendarContent(
                 if (selectedRowIdx != null || detailsAlphaAnim.value > 0.01f) {
                     val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
                     val rowNY = rowOffsetsPx[rowIdx] - actualGridOffset
-                    // ★ 放低三角：令明細 Box 頂點剛好掂住 Row N 底部，唔再減去 triangleHeightPx
                     val detailsTop = headerHeightPx + rowNY + rowHeightsPx[rowIdx]
-                    val detailsHeight = (bottomLimitPx - detailsTop).coerceAtLeast(0f)
+                    // ★ 下限：永遠至少露出第一條項目（唔會完全消失）
+                    val detailsHeight = (bottomLimitPx - detailsTop).coerceAtLeast(minDetailHeightPx)
 
                     Box(
                         Modifier.fillMaxWidth()
@@ -5368,17 +5448,85 @@ fun CalendarContent(
                             Box(
                                 Modifier.fillMaxWidth().weight(1f)
                                     .padding(horizontal = 10.dp).padding(bottom = 4.dp)
-                                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp, topStart = 12.dp, topEnd = 12.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(SURFACE_CARD)
                             ) {
-                                Column(Modifier.fillMaxSize().nestedScroll(dismissConnection).verticalScroll(detailScrollState)) {
-                                    DayDetailPanel(
-                                        dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
-                                        records = recordsByDay[cachedSelectedDay] ?: emptyList(),
-                                        expandedId = detailExpandedId, onExpandChange = { detailExpandedId = it },
-                                        onCopy = onCopyClick, onEdit = onEditClick, onFilter = onFilterClick, onDelete = onDeleteClick, onChangeIcon = onChangeIconClick,
-                                        onDismiss = { handleDismiss() }, deletingIds = deletingIds, justAddedIds = justAddedIds
-                                    )
+                                Column(Modifier.fillMaxSize()) {
+                                    // ★ 常設抓手 bar：上下跟手拖曳調整高度
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .height(handleBarHeightDp)
+                                            .pointerInput(selectedRowIdx, isDockingBack) {
+                                                detectVerticalDragGestures(
+                                                    onDragEnd = {
+                                                        val maxDrag = run {
+                                                            val r = selectedRowIdx ?: cachedSelectedRowIdx
+                                                            if (r !in rowOffsetsPx.indices) return@run 0f
+                                                            val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
+                                                            val h0 = (bottomLimitPx - headerHeightPx -
+                                                                rowOffsetsPx[r] + gridScroll - rowHeightsPx[r])
+                                                                .coerceAtLeast(0f)
+                                                            (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
+                                                        }
+                                                        if (maxDrag <= 0.5f) return@detectVerticalDragGestures
+                                                        val snapTarget = when {
+                                                            dragDownAmount < maxDrag / 2f -> 0f
+                                                            else -> maxDrag
+                                                        }
+                                                        val shouldDock = snapTarget >= maxDrag - 0.5f
+                                                        scope.launch {
+                                                            Animatable(dragDownAmount).animateTo(
+                                                                snapTarget,
+                                                                spring(dampingRatio = 0.85f, stiffness = 400f)
+                                                            ) { dragDownAmount = value }
+                                                            isDockedAtTop = shouldDock
+                                                            dockedReleased = false
+                                                        }
+                                                    },
+                                                    onVerticalDrag = { change, dragAmount ->
+                                                        change.consume()
+                                                        if (isDockingBack) return@detectVerticalDragGestures
+                                                        val maxDrag = run {
+                                                            val r = selectedRowIdx ?: cachedSelectedRowIdx
+                                                            if (r !in rowOffsetsPx.indices) return@run 0f
+                                                            val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
+                                                            val h0 = (bottomLimitPx - headerHeightPx -
+                                                                rowOffsetsPx[r] + gridScroll - rowHeightsPx[r])
+                                                                .coerceAtLeast(0f)
+                                                            (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
+                                                        }
+                                                        // dragAmount > 0 = 向下 = 收細
+                                                        val newDrag = (dragDownAmount + dragAmount).coerceIn(0f, maxDrag)
+                                                        dragDownAmount = newDrag
+                                                        isDockedAtTop = newDrag >= maxDrag - 0.5f
+                                                    }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            Modifier
+                                                .width(36.dp)
+                                                .height(4.dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(TEXT_TERTIARY.copy(alpha = 0.45f))
+                                        )
+                                    }
+                                    Column(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .nestedScroll(dismissConnection)
+                                            .verticalScroll(detailScrollState)
+                                    ) {
+                                        DayDetailPanel(
+                                            dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
+                                            records = recordsByDay[cachedSelectedDay] ?: emptyList(),
+                                            expandedId = detailExpandedId, onExpandChange = { detailExpandedId = it },
+                                            onCopy = onCopyClick, onEdit = onEditClick, onFilter = onFilterClick, onDelete = onDeleteClick, onChangeIcon = onChangeIconClick,
+                                            onDismiss = { handleDismiss() }, deletingIds = deletingIds, justAddedIds = justAddedIds
+                                        )
+                                    }
                                 }
                             }
                         }
