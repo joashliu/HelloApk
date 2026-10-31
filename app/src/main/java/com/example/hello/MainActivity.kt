@@ -5314,24 +5314,35 @@ fun CalendarContent(
             }
 
             // ★ 頂部 Chips + Stats：高度跟手進度（可中途打斷、反向）
+            // 關鍵：用 wrapContentHeight(unbounded=true) 量完整內容高度，
+            // 避免被外層裁切高度反向寫入，導致每次展開越縮越細
             val topP = topRevealProgress.value
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(with(density) {
-                        val h = if (topSectionHeightPx > 0f) topSectionHeightPx else 120.dp.toPx()
-                        (h * topP).toDp()
-                    })
+                    .then(
+                        if (topSectionHeightPx > 0f) {
+                            Modifier.height(with(density) { (topSectionHeightPx * topP).toDp() })
+                        } else {
+                            // 首次尚未量度：自然高度
+                            Modifier.wrapContentHeight()
+                        }
+                    )
                     .clipToBounds()
-                    .graphicsLayer { alpha = topP.coerceIn(0f, 1f) }
+                    .graphicsLayer { alpha = if (topSectionHeightPx > 0f) topP.coerceIn(0f, 1f) else 1f }
             ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 10.dp)
+                        // ★ 不受父層 maxHeight 約束，永遠量到完整內容高度
+                        .wrapContentHeight(unbounded = true, align = Alignment.Top)
                         .onSizeChanged { size ->
-                            if (size.height > 0 && topRevealProgress.value > 0.95f) {
-                                topSectionHeightPx = size.height.toFloat()
+                            if (size.height > 0) {
+                                // 只升唔降，杜絕收起過程中被裁切高度污染
+                                if (size.height.toFloat() > topSectionHeightPx) {
+                                    topSectionHeightPx = size.height.toFloat()
+                                }
                             }
                         }
                 ) {
