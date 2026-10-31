@@ -2302,7 +2302,10 @@ fun MainApp(
             keyboardState = KeyboardState(
                 noteText = note, amountText = amtText,
                 category = defaultCategory, currency = defaultCurrency,
-                selectAmountOnInput = amount != null && !keepManualAmount
+                selectAmountOnInput = amount != null && !keepManualAmount,
+                // ★ 點 Chips：金額輸入模式，唔進入文字編輯、唔彈候選列表
+                editingNote = false,
+                focusedField = "amount"
             )
             showKeyboard = true
         } else {
@@ -2310,7 +2313,9 @@ fun MainApp(
                 noteText = note,
                 amountText = amtText.ifBlank { keyboardState.amountText },
                 category = defaultCategory, currency = defaultCurrency,
-                selectAmountOnInput = if (keepManualAmount) false else (amount != null)
+                selectAmountOnInput = if (keepManualAmount) false else (amount != null),
+                editingNote = false,
+                focusedField = "amount"
             )
         }
         if (note.isNotBlank()) nameFlashTrigger++
@@ -2319,7 +2324,8 @@ fun MainApp(
     fun openKeyboardForCopy(r: Record) {
         keyboardState = KeyboardState(
             amountText = r.amount.toString(), noteText = r.note,
-            category = r.category, selectAmountOnInput = true)
+            category = r.category, selectAmountOnInput = true,
+            editingNote = false, focusedField = "amount")
         showKeyboard = true
     }
 
@@ -2327,6 +2333,7 @@ fun MainApp(
         val amt = if (r.amount % 1.0 == 0.0) r.amount.toInt().toString() else r.amount.toString()
         keyboardState = KeyboardState(
             amountText = amt, noteText = r.note, category = r.category,
+            editingNote = false, focusedField = "amount",
             editingRecordId = r.id, timestamp = r.timestamp, selectAmountOnInput = true)
         showKeyboard = true
     }
@@ -5783,6 +5790,7 @@ fun LedgerKeyboardPanel(
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     LaunchedEffect(state.noteText) {
         if (state.noteText.isNotBlank()) {
@@ -5790,6 +5798,13 @@ fun LedgerKeyboardPanel(
             if (lastCat != null && lastCat != state.category) {
                 onStateChange(state.copy(category = lastCat))
             }
+        }
+    }
+
+    // 金額／匯率輸入模式：清走系統鍵盤同文字框焦點，確保候選列表收起
+    LaunchedEffect(state.focusedField) {
+        if (state.focusedField == "amount" || state.focusedField == "rate") {
+            focusManager.clearFocus(force = true)
         }
     }
 
@@ -6000,13 +6015,20 @@ fun LedgerKeyboardPanel(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { key ->
                             KeyboardKey(key, {
+                                // ★ 數字鍵一律回到金額輸入模式（除非正在編輯匯率）
+                                val editingRate = state.focusedField == "rate"
+                                if (!editingRate && state.focusedField != "amount") {
+                                    onStateChange(state.copy(focusedField = "amount", editingNote = false))
+                                }
                                 when (key) {
                                     "backspace" -> {
-                                        if (state.focusedField == "amount") {
+                                        if (!editingRate) {
                                             val t = state.amountText
                                             onStateChange(state.copy(
                                                 amountText = if (t.isEmpty()) t else t.dropLast(1),
-                                                selectAmountOnInput = false))
+                                                selectAmountOnInput = false,
+                                                focusedField = "amount",
+                                                editingNote = false))
                                         } else {
                                             val t = state.exchangeRateText
                                             onStateChange(state.copy(
@@ -6014,12 +6036,14 @@ fun LedgerKeyboardPanel(
                                         }
                                     }
                                     "." -> {
-                                        if (state.focusedField == "amount") {
+                                        if (!editingRate) {
                                             val t = state.amountText
                                             if (!t.contains("."))
                                                 onStateChange(state.copy(
                                                     amountText = if (t.isEmpty()) "0." else "$t.",
-                                                    selectAmountOnInput = false))
+                                                    selectAmountOnInput = false,
+                                                    focusedField = "amount",
+                                                    editingNote = false))
                                         } else {
                                             val t = state.exchangeRateText
                                             if (!t.contains("."))
@@ -6028,7 +6052,7 @@ fun LedgerKeyboardPanel(
                                         }
                                     }
                                     else -> {
-                                        if (state.focusedField == "amount") {
+                                        if (!editingRate) {
                                             val base = if (state.selectAmountOnInput) "" else state.amountText
                                             val dotIdx = base.indexOf(".")
                                             val newT = if (dotIdx >= 0) {
@@ -6038,7 +6062,10 @@ fun LedgerKeyboardPanel(
                                                 if (base.length >= 9) base else "$base$key"
                                             }
                                             onStateChange(state.copy(
-                                                amountText = newT, selectAmountOnInput = false))
+                                                amountText = newT,
+                                                selectAmountOnInput = false,
+                                                focusedField = "amount",
+                                                editingNote = false))
                                         } else {
                                             val t = state.exchangeRateText
                                             onStateChange(state.copy(exchangeRateText = "$t$key"))
@@ -6092,8 +6119,20 @@ fun LedgerKeyboardPanel(
                         }
                         val focusReq = remember { FocusRequester() }
                         val keyboardController = LocalSoftwareKeyboardController.current
+                        // ★ 只有文字框真正獲得焦點時先顯示項目候選列表
+                        var noteFieldFocused by remember { mutableStateOf(false) }
 
-                        LaunchedEffect(state.editingNote) { if (state.editingNote) focusReq.requestFocus() }
+                        LaunchedEffect(state.editingNote) {
+                            if (state.editingNote) {
+                                focusReq.requestFocus()
+                            }
+                        }
+                        // 金額輸入模式：強制清走文字框焦點，收起候選列表
+                        LaunchedEffect(state.focusedField) {
+                            if (state.focusedField == "amount" || state.focusedField == "rate") {
+                                noteFieldFocused = false
+                            }
+                        }
                         LaunchedEffect(state.noteText) {
                             if (state.noteText != tfValue.text) {
                                 tfValue = TextFieldValue(
@@ -6107,7 +6146,7 @@ fun LedgerKeyboardPanel(
                             value = tfValue,
                             onValueChange = { nv ->
                                 tfValue = nv
-                                onStateChange(state.copy(noteText = nv.text))
+                                onStateChange(state.copy(noteText = nv.text, editingNote = true))
                             },
                             placeholder = { Text("名稱") },
                             singleLine = true,
@@ -6141,13 +6180,22 @@ fun LedgerKeyboardPanel(
                             },
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                            modifier = Modifier.fillMaxSize().focusRequester(focusReq)
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .focusRequester(focusReq)
+                                .onFocusChanged { fi ->
+                                    noteFieldFocused = fi.isFocused
+                                    if (fi.isFocused) {
+                                        onStateChange(state.copy(editingNote = true, focusedField = "note"))
+                                    }
+                                }
                         )
 
+                        // ★ 候選列表：僅喺文字框有焦點時顯示；點 Chips／金額模式永遠唔顯示
                         val suggestions = remember(state.noteText, allNoteNames) {
                             filterNoteSuggestions(state.noteText, allNoteNames)
                         }
-                        if (suggestions.isNotEmpty()) {
+                        if (noteFieldFocused && suggestions.isNotEmpty()) {
                             androidx.compose.ui.window.Popup(
                                 popupPositionProvider = AboveAnchorPositionProvider,
                                 onDismissRequest = { },
