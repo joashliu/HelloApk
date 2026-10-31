@@ -1,5 +1,9 @@
 package com.example.hello
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -1781,8 +1785,9 @@ class MainActivity : ComponentActivity() {
     splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
     super.onCreate(savedInstanceState)
 
-    // ★ 最穩做法：叫系統自動為 Status Bar 留位，唔好自己搞 edge-to-edge
-    WindowCompat.setDecorFitsSystemWindows(window, true)
+    // ★ 強制 edge-to-edge + 自己控制 Insets
+    enableEdgeToEdge()
+    WindowCompat.setDecorFitsSystemWindows(window, false)
 
     val isColdStart = !isProcessAlive
     isProcessAlive = true
@@ -1821,7 +1826,9 @@ class MainActivity : ComponentActivity() {
 
         MaterialTheme {
             Surface(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.systemBars),   // ★ 最關鍵
                 color = SURFACE_BG
             ) {
                 if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
