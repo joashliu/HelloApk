@@ -1150,12 +1150,12 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
         )
         .map { it.key to it.value }
 
-    val topNotes = ArrayList<Pair<String, Int>>(42)
+    val topNotes = ArrayList<Pair<String, Int>>(30)
     if (timeMatchedNote != null) {
         topNotes.add(timeMatchedNote to (usageCountByNote[timeMatchedNote] ?: 0))
     }
     for (pair in restSorted) {
-        if (topNotes.size >= 42) break
+        if (topNotes.size >= 30) break
         topNotes.add(pair)
     }
 
@@ -3858,7 +3858,7 @@ fun LedgerContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .padding(top = 8.dp, bottom = 4.dp)
+                    .padding(top = 8.dp, bottom = 0.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
                     .pointerInput(Unit) {
@@ -3957,8 +3957,9 @@ fun LedgerContent(
             ) { isFilter ->
                 if (!isFilter) {
                     Column(Modifier.fillMaxWidth()) {
+                        // ★ 統一區塊間距 8.dp（Top Stat ↔ 快速輸入 ↔ 棒形圖）
+                        Spacer(Modifier.height(8.dp))
                         if (topNotes.isNotEmpty() || hiddenQuickNotes.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
                             QuickInputSection(
                                 topNotes = topNotes,
                                 noteIconMap = noteIconMap,
@@ -3983,12 +3984,13 @@ fun LedgerContent(
                                 onHideNote = onHideNote,
                                 onUnhideNote = onUnhideNote
                             )
+                            Spacer(Modifier.height(8.dp))
                         }
-                        Spacer(Modifier.height(4.dp))
                     }
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
-                        Spacer(Modifier.height(4.dp))
+                        // ★ 篩選區亦用統一 8.dp 區塊間距
+                        Spacer(Modifier.height(8.dp))
                         val allCategories: List<String?> = remember(visibleCategories) {
                             listOf(null) + visibleCategories
                         }
@@ -4009,10 +4011,9 @@ fun LedgerContent(
                                 }
                                 repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                             }
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(8.dp))
                         }
 
-                        Spacer(Modifier.height(4.dp))
                         if (availableMonths.isNotEmpty()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -4032,8 +4033,8 @@ fun LedgerContent(
                                     )
                                 }
                             }
+                            Spacer(Modifier.height(8.dp))
                         }
-                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
@@ -6656,7 +6657,7 @@ fun QuickInputSection(
     if (visibleTopNotes.isEmpty() && hiddenQuickNotes.isEmpty()) return
 
     val topNoteNames = remember(visibleTopNotes) { visibleTopNotes.map { it.first } }
-    val items = remember(topNoteNames) { topNoteNames.take(42).map { it to 0 } }
+    val items = remember(topNoteNames) { topNoteNames.take(30).map { it to 0 } }
 
     var showManageDialog by remember { mutableStateOf(false) }
     var longPressTarget by remember { mutableStateOf<String?>(null) }
@@ -6683,7 +6684,7 @@ fun QuickInputSection(
     val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val textStyle = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium)
 
-    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 0.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val contentWidthPx = with(density) { (maxWidth - 28.dp).toPx() }
 
