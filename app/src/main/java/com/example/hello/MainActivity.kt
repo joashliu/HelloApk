@@ -7440,8 +7440,10 @@ fun CalendarDayCell(
 
     val selectionScale by animateFloatAsState(
         targetValue = if (isSelected) 1.06f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
         label = "selScale"
     )
 
@@ -7455,32 +7457,50 @@ fun CalendarDayCell(
     val barColor = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG
 
     Box(
-        Modifier.fillMaxSize()
+        Modifier
+            .fillMaxSize()
             .graphicsLayer {
                 scaleX = selectionScale
                 scaleY = selectionScale
             }
-            .shadow(elevation, shape, clip = false,
-                ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000))
+            .shadow(
+                elevation, shape, clip = false,
+                ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000)
+            )
             .clip(shape)
             .background(bgColor)
             .border(width = borderWidth, color = borderColor, shape = shape)
-            .clickable(interactionSource = remember { MutableInteractionSource() },
-                indication = null) { onClick() }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onClick() }
     ) {
         if (displayMode == 0 && barRatio > 0.001f) {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .fillMaxHeight(barRatio).background(barColor.copy(alpha = 0.75f)))
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .fillMaxHeight(barRatio)
+                    .background(barColor.copy(alpha = 0.75f))
+            )
         }
 
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 2.dp, vertical = 3.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 2.dp, vertical = 3.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Top
         ) {
-            Text("$day", fontSize = 13.sp, lineHeight = 14.sp, fontWeight = FontWeight.Black,
+            Text(
+                "$day",
+                fontSize = 13.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Black,
                 color = if (isToday || isSelected) BRAND_PRIMARY_DARK else Color.Black,
-                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
 
             Spacer(Modifier.height(5.dp))
 
@@ -7502,33 +7522,89 @@ fun CalendarDayCell(
                     }
                 }
                 1 -> {
-                    summary.sortedAsc.forEach { r ->
-                        Row(Modifier.fillMaxWidth().height(16.dp)) {
-                            FadedText(text = r.note.ifBlank { "(無)" }, color = TEXT_PRIMARY,
-                                fontSize = 9.sp, fontWeight = FontWeight.Medium,
-                                fadeWidth = 6.dp,
-                                modifier = Modifier.weight(1f).alignByBaseline())
-                            Spacer(Modifier.width(4.dp))
-                            val compactRecAmt = remember(r.amount, r.category) {
-                                if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
-                                else compactAmount(-r.amount)
-                            }
-                            Text(text = compactRecAmt,
-                                fontSize = 9.sp, lineHeight = 11.sp,
-                                color = amountColor(r.category), fontWeight = FontWeight.Bold,
-                                maxLines = 1, softWrap = false,
-                                modifier = Modifier.alignByBaseline())
+                    if (isSelected) {
+                        // ★ 選中時：只顯示一行摘要，明細保持可見
+                        val count = records.size
+                        val summaryText = when {
+                            count == 0 -> ""
+                            count == 1 -> records.first().note.ifBlank { "(無)" }
+                            else -> "${count} 筆"
                         }
+                        if (summaryText.isNotEmpty()) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(16.dp)
+                                    .padding(horizontal = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FadedText(
+                                    text = summaryText,
+                                    color = TEXT_PRIMARY,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fadeWidth = 6.dp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (absNet > 0) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        text = summary.compactNet,
+                                        fontSize = 9.sp,
+                                        color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // 未選中：保持原本多行顯示
+                        summary.sortedAsc.forEach { r ->
+                            Row(Modifier.fillMaxWidth().height(16.dp)) {
+                                FadedText(
+                                    text = r.note.ifBlank { "(無)" },
+                                    color = TEXT_PRIMARY,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    fadeWidth = 6.dp,
+                                    modifier = Modifier.weight(1f).alignByBaseline()
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                val compactRecAmt = remember(r.amount, r.category) {
+                                    if (r.category == INCOME_CATEGORY) compactAmount(r.amount)
+                                    else compactAmount(-r.amount)
+                                }
+                                Text(
+                                    text = compactRecAmt,
+                                    fontSize = 9.sp,
+                                    lineHeight = 11.sp,
+                                    color = amountColor(r.category),
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
                     }
-                    Spacer(Modifier.height(4.dp))
                 }
                 2 -> {
                     summary.chunked3.forEach { row ->
-                        Row(Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 1.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(18.dp)
+                                .padding(horizontal = 1.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
                             row.forEach { r ->
-                                IconViewAdaptive(iconUrl = r.iconUrl, name = r.note,
-                                    modifier = Modifier.weight(1f).fillMaxHeight())
+                                IconViewAdaptive(
+                                    iconUrl = r.iconUrl,
+                                    name = r.note,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
                             }
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
