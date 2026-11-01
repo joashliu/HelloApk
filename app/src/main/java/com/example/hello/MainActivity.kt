@@ -1646,23 +1646,33 @@ fun getDominantMutedColor(bitmap: Bitmap): Color {
 }
 
 fun getHoveredActionIndexWithCenter(
-    center: Offset, touch: Offset, minRadiusPx: Float, arcCenterAngle: Float
+    center: Offset,
+    touch: Offset,
+    minRadiusPx: Float,
+    arcCenterAngle: Float,
+    radiusPx: Float,          // ★ 新增：實際扇形半徑
+    hitRadiusPx: Float        // ★ 新增：按鈕可點擊半徑
 ): Int? {
-    val dx = touch.x - center.x
-    val dy = touch.y - center.y
-    val dist = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-    if (dist < minRadiusPx) return null
-    val angle = kotlin.math.atan2(dy.toDouble(), dx.toDouble()) * 180 / Math.PI
-    var relative = (angle - arcCenterAngle) % 360.0
-    if (relative > 180) relative -= 360
-    if (relative < -180) relative += 360
-    return when {
-        relative in -80.0..-40.0 -> 0
-        relative in -40.0..0.0 -> 1
-        relative in 0.0..40.0 -> 2
-        relative in 40.0..80.0 -> 3
-        else -> null
+    // 計算四個按鈕實際中心位置（同繪製邏輯完全一致）
+    val buttonCenters = Array(4) { i ->
+        val angle = arcCenterAngle - 60f + i * 40f
+        val angleRad = Math.toRadians(angle.toDouble())
+        val cx = center.x + radiusPx * kotlin.math.cos(angleRad).toFloat()
+        val cy = center.y + radiusPx * kotlin.math.sin(angleRad).toFloat()
+        Offset(cx, cy)
     }
+
+    var bestIndex: Int? = null
+    var bestDist = Float.MAX_VALUE
+
+    for (i in 0 until 4) {
+        val dist = (touch - buttonCenters[i]).getDistance()
+        if (dist <= hitRadiusPx && dist < bestDist) {
+            bestDist = dist
+            bestIndex = i
+        }
+    }
+    return bestIndex
 }
 
 private val FAN_MENU_ACTIONS = listOf(
@@ -1680,15 +1690,20 @@ fun FanMenuOverlay(
 ) {
     val progress = progressProvider()
     if (progress <= 0.001f) return
+
     val center = centerProvider()
     val currentTouch = touchProvider()
 
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+
     val minRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
     val radiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+    // ★ 按鈕實際可點擊範圍（比視覺大少少，較易撳中）
+    val hitRadiusPx = remember(density) { with(density) { 30.dp.toPx() } }
+
     val edgeThreshold = radiusPx + halfBtnPx
     val leftSpace = center.x
     val rightSpace = screenWidthPx - center.x
@@ -1698,7 +1713,16 @@ fun FanMenuOverlay(
         else -> 0f
     }
     val arcCenterAngle = -90f + rotation
-    val hoveredIndex = getHoveredActionIndexWithCenter(center, currentTouch, minRadiusPx, arcCenterAngle)
+
+    // ★ 用實際按鈕位置做 hit test（唔再用角度範圍）
+    val hoveredIndex = getHoveredActionIndexWithCenter(
+        center = center,
+        touch = currentTouch,
+        minRadiusPx = minRadiusPx,
+        arcCenterAngle = arcCenterAngle,
+        radiusPx = radiusPx * progress,   // 跟住動畫進度
+        hitRadiusPx = hitRadiusPx
+    )
 
     val haptic = LocalHapticFeedback.current
     var previousHovered by remember { mutableStateOf<Int?>(null) }
@@ -1743,7 +1767,9 @@ fun FanMenuOverlay(
                     modifier = Modifier.offset(y = (-38).dp)
                 ) {
                     Text(
-                        text = action.second, color = Color.White, fontSize = 12.sp,
+                        text = action.second,
+                        color = Color.White,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .background(Color(0x99000000), RoundedCornerShape(6.dp))
@@ -3652,9 +3678,13 @@ fun LedgerContent(
             }
             val arcCenterAngle = -90f + rotation
             val hovered = getHoveredActionIndexWithCenter(
-                center = center, touch = fanMenuTouchState.value,
-                minRadiusPx = minFanRadiusPx, arcCenterAngle = arcCenterAngle
-            )
+    center = center,
+    touch = fanMenuTouchState.value,
+    minRadiusPx = minFanRadiusPx,
+    arcCenterAngle = arcCenterAngle,
+    radiusPx = fanRadiusPx,          // 已經有 fanRadiusPx
+    hitRadiusPx = with(density) { 30.dp.toPx() }
+)
             val targetRecord = activeFanRecord
             activeFanRecord = null
             if (targetRecord != null && hovered != null) {
