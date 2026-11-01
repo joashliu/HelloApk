@@ -5060,8 +5060,14 @@ fun CalendarContent(
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
+    // ★ 新增：記住每個月的 Chips 與統計數據，避免動畫過程中數據突變
     val topStatsCache = remember { mutableMapOf<String, CalendarTopStatsCache>() }
-    topStatsCache[currentMonthKey] = CalendarTopStatsCache(visibleCategories, totalNet, avgPerItem, avgPerDay)
+    topStatsCache[currentMonthKey] = CalendarTopStatsCache(
+        calendarUi.visibleCategories,
+        calendarUi.totalNet,
+        calendarUi.avgPerItem,
+        calendarUi.avgPerDay
+    )
 
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -5157,33 +5163,33 @@ fun CalendarContent(
     }
 
     val handleDismiss = remember {
-    {
-        if (selectedDay != null) {
-            val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
-                .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
+        {
+            if (selectedDay != null) {
+                val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
+                    .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
-            selectedDay = null
-            selectedRowIdx = null
-            selectedColIdx = null
-            isDockedAtTop = false
-            dockedReleased = false
-            isDockingBack = false
+                selectedDay = null
+                selectedRowIdx = null
+                selectedColIdx = null
+                isDockedAtTop = false
+                dockedReleased = false
+                isDockingBack = false
 
-            scope.launch {
-                dragDownAmount = 0f
-                gridScrollOffsetAnim.snapTo(currentActualOffset)
-                gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
-            }
-            scope.launch {
-                detailsAlphaAnim.snapTo(0f)
-            }
-            // ★ 還原頂部 Chips + Stats
-            scope.launch {
-                topRevealProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 320f))
+                scope.launch {
+                    dragDownAmount = 0f
+                    gridScrollOffsetAnim.snapTo(currentActualOffset)
+                    gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
+                }
+                scope.launch {
+                    detailsAlphaAnim.snapTo(0f)
+                }
+                // ★ 還原頂部 Chips + Stats
+                scope.launch {
+                    topRevealProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 320f))
+                }
             }
         }
     }
-}
 
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
@@ -5422,13 +5428,18 @@ fun CalendarContent(
                                 (slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(250)))
                                     .togetherWith(slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(250)))
                             }
-                            .using(SizeTransform(clip = false)) // 防止滑動時邊緣被裁切
+                            .using(SizeTransform(clip = false))
                         },
                         label = "calendarTopStatsAnim"
                     ) { targetMonth ->
-                        // 提取對應月份的狀態，退場的舊月份會讀取 Cache，進場的新月份會自動更新為最新數據
+                        // ★ 修正：進場的新月份同樣直接從 calendarUi 讀取最新數據
                         val stats = if (targetMonth == currentMonthKey) {
-                            CalendarTopStatsCache(visibleCategories, totalNet, avgPerItem, avgPerDay)
+                            CalendarTopStatsCache(
+                                calendarUi.visibleCategories,
+                                calendarUi.totalNet,
+                                calendarUi.avgPerItem,
+                                calendarUi.avgPerDay
+                            )
                         } else {
                             topStatsCache[targetMonth] ?: CalendarTopStatsCache(emptyList(), 0.0, 0.0, 0.0)
                         }
@@ -5453,58 +5464,58 @@ fun CalendarContent(
             }
 
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().nestedScroll(topPullConnection)) {
-    // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
-    val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
-        .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
+                // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
+                val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
+                    .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
-    Column(
-        Modifier.fillMaxWidth()
-            .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
-            .padding(horizontal = 10.dp)
+                Column(
+                    Modifier.fillMaxWidth()
+                        .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
+                        .padding(horizontal = 10.dp)
                 ) {
                     for (rowIdx in 0 until totalRows) {
-    val isRowSelected = selectedRowIdx == rowIdx
-    CalendarRow(
-        rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
-        today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
-        displayMode = displayMode, maxAbsNet = maxAbsNet,
-        selectedDay = if (isRowSelected) selectedDay else null,
-        selectedCol = if (isRowSelected) selectedColIdx else null,
-        animateValues = animateValues,
-        onCellClick = { day, col ->
-            if (selectedDay == day) {
-                handleDismiss()
-            } else {
-                selectedDay = day
-                selectedRowIdx = rowIdx
-                selectedColIdx = col
-                cachedSelectedDay = day
-                cachedSelectedRowIdx = rowIdx
-                cachedSelectedCol = col
-                detailExpandedId = null
+                        val isRowSelected = selectedRowIdx == rowIdx
+                        CalendarRow(
+                            rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
+                            today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
+                            displayMode = displayMode, maxAbsNet = maxAbsNet,
+                            selectedDay = if (isRowSelected) selectedDay else null,
+                            selectedCol = if (isRowSelected) selectedColIdx else null,
+                            animateValues = animateValues,
+                            onCellClick = { day, col ->
+                                if (selectedDay == day) {
+                                    handleDismiss()
+                                } else {
+                                    selectedDay = day
+                                    selectedRowIdx = rowIdx
+                                    selectedColIdx = col
+                                    cachedSelectedDay = day
+                                    cachedSelectedRowIdx = rowIdx
+                                    cachedSelectedCol = col
+                                    detailExpandedId = null
 
-                isDockedAtTop = false
-                dockedReleased = false
+                                    isDockedAtTop = false
+                                    dockedReleased = false
 
-                scope.launch {
-                    val currentActual = gridScrollOffsetAnim.value - dragDownAmount
-                    dragDownAmount = 0f
-                    gridScrollOffsetAnim.snapTo(currentActual)
-                    gridScrollOffsetAnim.animateTo(
-                        rowOffsetsPx[rowIdx],
-                        spring(dampingRatio = 0.9f, stiffness = 300f)
-                    )
-                }
-                // ★ 即時顯示明細（取消漸變消失），收起頂部
-                scope.launch { detailsAlphaAnim.snapTo(1f) }
-                scope.launch {
-                    topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
-                }
-            }
-        }
-    )
-    if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
-}
+                                    scope.launch {
+                                        val currentActual = gridScrollOffsetAnim.value - dragDownAmount
+                                        dragDownAmount = 0f
+                                        gridScrollOffsetAnim.snapTo(currentActual)
+                                        gridScrollOffsetAnim.animateTo(
+                                            rowOffsetsPx[rowIdx],
+                                            spring(dampingRatio = 0.9f, stiffness = 300f)
+                                        )
+                                    }
+                                    // ★ 即時顯示明細（取消漸變消失），收起頂部
+                                    scope.launch { detailsAlphaAnim.snapTo(1f) }
+                                    scope.launch {
+                                        topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
+                                    }
+                                }
+                            }
+                        )
+                        if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
+                    }
                 }
 
                 Box(Modifier.fillMaxWidth().height(headerHeightDp).align(Alignment.TopCenter).zIndex(20f).background(SURFACE_BG)) {
