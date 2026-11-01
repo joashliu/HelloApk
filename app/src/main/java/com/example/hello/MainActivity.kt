@@ -1,4 +1,4 @@
-
+package com.example.hello
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
@@ -9532,4 +9532,36 @@ private fun DollarAmount(
             }
         }
     }
+}
+
+
+// =========================================================
+//  Stub / bridge types referenced by MainActivity
+//  (real implementations may live in other source files;
+//   these keep the module compiling when those are absent)
+// =========================================================
+
+class NotificationActionReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+        if (context == null || intent == null) return
+        when (intent.action) {
+            "com.example.hello.ACTION_IGNORE_CAPTURE" -> {
+                val notifId = intent.getIntExtra("notif_id", -1)
+                if (notifId != -1) {
+                    val nm = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+                        as? android.app.NotificationManager
+                    nm?.cancel(notifId)
+                }
+                try { NotificationCaptureBridge.clear() } catch (_: Exception) {}
+            }
+        }
+    }
+}
+
+object OppoFluidCloudBridge {
+    fun dismissCard(context: android.content.Context, cardId: String) {
+        // no-op stub; real Pantanal / fluid-cloud integration lives elsewhere
+    }
+    fun isPantanalSupported(context: android.content.Context): Boolean = false
+    fun hasPantanalPermission(context: android.content.Context): Boolean = false
 }
