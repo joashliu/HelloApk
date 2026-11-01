@@ -7830,7 +7830,7 @@ fun CompareContent(
     onMonthBChange: (String) -> Unit,
     onAddClick: () -> Unit,
 ) {
-    // ★ 數字滾動開關（冷啟動 / 首次載入不播，800ms 後才開）
+    // 首次進入唔播動畫
     var animateValues by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(800)
@@ -7849,13 +7849,59 @@ fun CompareContent(
     val histogramData = compareUi.histogramData
     val monthlyKeysThisYear = compareUi.monthlyKeysThisYear
 
+    // ★ 高亮 + 延遲滾動控制
+    var previousSums by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
+    var highlightedCategories by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var allowNumberAnimate by remember { mutableStateOf(true) }
+
+    LaunchedEffect(displayCategories, selectedMonthA, selectedMonthB, categoryMonthSum) {
+        val newSums = displayCategories.associateWith { cat ->
+            sumLocal(cat, selectedMonthA) to sumLocal(cat, selectedMonthB)
+        }
+
+        // 第一次進入唔做高亮
+        if (previousSums.isEmpty()) {
+            previousSums = newSums
+            return@LaunchedEffect
+        }
+
+        val changed = newSums.filter { (cat, pair) ->
+            previousSums[cat] != pair
+        }.keys
+
+        if (changed.isNotEmpty()) {
+            // 1. 先高亮
+            highlightedCategories = changed
+            allowNumberAnimate = false          // 暫時鎖住數字動畫
+
+            delay(500)                         // 2. 等半秒
+
+            // 3. 開始數字滾動 + 行位置移動
+            allowNumberAnimate = true
+            previousSums = newSums
+
+            // 高亮保持多一點時間，等滾動完先消失
+            delay(900)
+            highlightedCategories = emptySet()
+        } else {
+            previousSums = newSums
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 16.dp)
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            Text("月份比較", fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                color = TEXT_PRIMARY, modifier = Modifier.padding(vertical = 8.dp))
+            Text(
+                "月份比較",
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                color = TEXT_PRIMARY,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
 
             Surface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -7864,18 +7910,28 @@ fun CompareContent(
                 border = BorderStroke(0.5.dp, DIVIDER_COLOR)
             ) {
                 Column(Modifier.fillMaxSize()) {
+                    // ===== Header =====
                     Row(
-                        Modifier.fillMaxWidth().background(SURFACE_CARD)
+                        Modifier
+                            .fillMaxWidth()
+                            .background(SURFACE_CARD)
                             .padding(horizontal = 10.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("類別", Modifier.weight(1.0f),
-                            fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TEXT_SECONDARY)
+                        Text(
+                            "類別",
+                            Modifier.weight(1.0f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TEXT_SECONDARY
+                        )
                         Spacer(Modifier.weight(0.65f))
 
-                        Row(Modifier.weight(1.55f),
+                        Row(
+                            Modifier.weight(1.55f),
                             horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically) {
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             MonthDropdown(
                                 value = selectedMonthA,
                                 months = monthlyKeysThisYear,
@@ -7883,9 +7939,11 @@ fun CompareContent(
                             )
                         }
                         Spacer(Modifier.width(6.dp))
-                        Row(Modifier.weight(1.55f),
+                        Row(
+                            Modifier.weight(1.55f),
                             horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically) {
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             MonthDropdown(
                                 value = selectedMonthB,
                                 months = monthlyKeysThisYear,
@@ -7896,6 +7954,7 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
+                    // ===== 內容 =====
                     Box(Modifier.weight(1f).fillMaxWidth()) {
                         if (displayCategories.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -7911,8 +7970,14 @@ fun CompareContent(
                                     (maxHeight - totalDividerHeight) / rowCount
                                 val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
 
-                                LazyColumn(Modifier.fillMaxSize(), userScrollEnabled = false) {
-                                    itemsIndexed(items = displayCategories, key = { _, cat -> cat }) { idx, cat ->
+                                LazyColumn(
+                                    Modifier.fillMaxSize(),
+                                    userScrollEnabled = false
+                                ) {
+                                    itemsIndexed(
+                                        items = displayCategories,
+                                        key = { _, cat -> cat }
+                                    ) { idx, cat ->
                                         val amtA = sumLocal(cat, selectedMonthA)
                                         val amtB = sumLocal(cat, selectedMonthB)
                                         val style = CATEGORY_STYLES[cat]
@@ -7923,42 +7988,67 @@ fun CompareContent(
                                         val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0)
                                             (amtB / incomeB * 100.0) else null
 
+                                        val isHighlighted = cat in highlightedCategories
+
                                         Column(
-                                            Modifier.fillMaxWidth().animateItem(
-                                                fadeInSpec = tween(220, easing = FastOutSlowInEasing),
-                                                fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
-                                                placementSpec = spring(
-                                                    stiffness = Spring.StiffnessMediumLow,
-                                                    dampingRatio = Spring.DampingRatioLowBouncy
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .animateItem(
+                                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
+                                                    fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
+                                                    placementSpec = spring(
+                                                        stiffness = Spring.StiffnessMediumLow,
+                                                        dampingRatio = Spring.DampingRatioLowBouncy
+                                                    )
                                                 )
-                                            )
                                         ) {
                                             Row(
-                                                Modifier.fillMaxWidth().height(rowHeight)
-                                                    .background(SURFACE_CARD)
-                                                    .padding(horizontal = 10.dp),
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .height(rowHeight)
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(
+                                                        if (isHighlighted) Color(0xFFDBEAFE) // 淺藍色
+                                                        else SURFACE_CARD
+                                                    )
+                                                    .padding(horizontal = 4.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Row(Modifier.weight(1.0f),
-                                                    verticalAlignment = Alignment.CenterVertically) {
+                                                // 類別名稱
+                                                Row(
+                                                    Modifier.weight(1.0f),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
                                                     if (style != null) {
                                                         Box(
-                                                            Modifier.size(26.dp)
+                                                            Modifier
+                                                                .size(26.dp)
                                                                 .clip(RoundedCornerShape(7.dp))
                                                                 .background(style.bgColor),
                                                             contentAlignment = Alignment.Center
                                                         ) {
-                                                            Icon(style.icon, null, tint = style.fgColor,
-                                                                modifier = Modifier.size(15.dp))
+                                                            Icon(
+                                                                style.icon, null,
+                                                                tint = style.fgColor,
+                                                                modifier = Modifier.size(15.dp)
+                                                            )
                                                         }
                                                         Spacer(Modifier.width(7.dp))
                                                     }
-                                                    Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY,
-                                                        fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
+                                                    Text(
+                                                        cat,
+                                                        fontSize = 15.sp,
+                                                        color = TEXT_PRIMARY,
+                                                        fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
+                                                    )
                                                 }
 
+                                                // 迷你直方圖
                                                 Box(
-                                                    Modifier.weight(0.65f).fillMaxHeight()
+                                                    Modifier
+                                                        .weight(0.65f)
+                                                        .fillMaxHeight()
                                                         .padding(start = 12.dp, end = 16.dp),
                                                     contentAlignment = Alignment.Center
                                                 ) {
@@ -7969,20 +8059,28 @@ fun CompareContent(
                                                         MiniHistogram(
                                                             values = values,
                                                             color = style?.fgColor ?: TEXT_TERTIARY,
-                                                            modifier = Modifier.fillMaxWidth().height(histHeight)
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(histHeight)
                                                         )
                                                     }
                                                 }
 
+                                                // 金額 A
                                                 CompareValueCell(
-                                                    amount = amtA, isIncome = isIncome, pct = pctA,
-                                                    animateValues = animateValues,
+                                                    amount = amtA,
+                                                    isIncome = isIncome,
+                                                    pct = pctA,
+                                                    animateValues = animateValues && allowNumberAnimate,
                                                     modifier = Modifier.weight(1.55f)
                                                 )
                                                 Spacer(Modifier.width(6.dp))
+                                                // 金額 B
                                                 CompareValueCell(
-                                                    amount = amtB, isIncome = isIncome, pct = pctB,
-                                                    animateValues = animateValues,
+                                                    amount = amtB,
+                                                    isIncome = isIncome,
+                                                    pct = pctB,
+                                                    animateValues = animateValues && allowNumberAnimate,
                                                     modifier = Modifier.weight(1.55f)
                                                 )
                                             }
@@ -8003,24 +8101,36 @@ fun CompareContent(
 
                     HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
+                    // ===== 餘額 =====
                     Row(
-                        Modifier.fillMaxWidth().background(SURFACE_CARD)
+                        Modifier
+                            .fillMaxWidth()
+                            .background(SURFACE_CARD)
                             .padding(horizontal = 10.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("餘額", Modifier.weight(1.0f),
-                            fontWeight = FontWeight.Bold, fontSize = 16.sp, color = BRAND_PRIMARY_DARK)
+                        Text(
+                            "餘額",
+                            Modifier.weight(1.0f),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = BRAND_PRIMARY_DARK
+                        )
                         Spacer(Modifier.weight(0.65f))
 
                         CompareValueCell(
-                            amount = balanceA, isIncome = balanceA >= 0, pct = null,
-                            animateValues = animateValues,
+                            amount = balanceA,
+                            isIncome = balanceA >= 0,
+                            pct = null,
+                            animateValues = animateValues && allowNumberAnimate,
                             modifier = Modifier.weight(1.55f)
                         )
                         Spacer(Modifier.width(6.dp))
                         CompareValueCell(
-                            amount = balanceB, isIncome = balanceB >= 0, pct = null,
-                            animateValues = animateValues,
+                            amount = balanceB,
+                            isIncome = balanceB >= 0,
+                            pct = null,
+                            animateValues = animateValues && allowNumberAnimate,
                             modifier = Modifier.weight(1.55f)
                         )
                     }
