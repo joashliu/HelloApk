@@ -1847,11 +1847,10 @@ class MainActivity : ComponentActivity() {
         }
 
         MaterialTheme {
-            Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                color = SURFACE_BG
-            ) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = SURFACE_BG
+    ) {
                 if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
                     LightweightEntryApp(
                         vm = viewModel(),
