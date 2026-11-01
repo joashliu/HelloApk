@@ -1688,11 +1688,16 @@ fun FanMenuOverlay(
     centerProvider: () -> Offset,
     touchProvider: () -> Offset
 ) {
+    // ★ 先記住本 overlay 喺 root 嘅位置（放喺 early return 前面，
+    //   避免 return 前後 composable 結構改變而丟失 state）
+    val boxPositionInRoot = remember { mutableStateOf(Offset.Zero) }
+
     val progress = progressProvider()
     if (progress <= 0.001f) return
 
-    val center = centerProvider()
-    val currentTouch = touchProvider()
+    // ★ 將傳入嘅全局座標轉成本 Box 局部座標
+    val center = centerProvider() - boxPositionInRoot.value
+    val currentTouch = touchProvider() - boxPositionInRoot.value
 
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
@@ -1701,7 +1706,6 @@ fun FanMenuOverlay(
     val minRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
     val radiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-    // ★ 按鈕實際可點擊範圍（比視覺大少少，較易撳中）
     val hitRadiusPx = remember(density) { with(density) { 30.dp.toPx() } }
 
     val edgeThreshold = radiusPx + halfBtnPx
@@ -1714,13 +1718,12 @@ fun FanMenuOverlay(
     }
     val arcCenterAngle = -90f + rotation
 
-    // ★ 用實際按鈕位置做 hit test（唔再用角度範圍）
     val hoveredIndex = getHoveredActionIndexWithCenter(
         center = center,
         touch = currentTouch,
         minRadiusPx = minRadiusPx,
         arcCenterAngle = arcCenterAngle,
-        radiusPx = radiusPx * progress,   // 跟住動畫進度
+        radiusPx = radiusPx * progress,
         hitRadiusPx = hitRadiusPx
     )
 
@@ -1733,7 +1736,13 @@ fun FanMenuOverlay(
         previousHovered = hoveredIndex
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { coords ->
+                boxPositionInRoot.value = coords.positionInRoot()
+            }
+    ) {
         FAN_MENU_ACTIONS.forEachIndexed { i, action ->
             val angle = arcCenterAngle - 60f + i * 40f
             val angleRad = Math.toRadians(angle.toDouble())
