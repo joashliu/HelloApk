@@ -6732,7 +6732,7 @@ fun CalendarFilterChip(
     }
 }
 
-/** 月曆頁類別 chips：逐個進場／退場，高度同步平滑 */
+/** 月曆頁類別 chips：MutableTransitionState 控制進場／退場 + 交錯延遲 */
 @Composable
 fun AnimatedCalendarCategoryChips(
     visibleCategories: List<String>,
@@ -6741,79 +6741,72 @@ fun AnimatedCalendarCategoryChips(
 ) {
     val targetKeys = remember(visibleCategories) { listOf<String?>(null) + visibleCategories }
 
-    // 畫面上仍然存在嘅 keys（包含正在播退場動畫）
-    val displayedKeys = remember { mutableStateListOf<String?>() }
-    val isVisibleMap = remember { mutableStateMapOf<String?, Boolean>() }
+    // 顯示順序（含退場中）
+    val order = remember { mutableStateListOf<String?>() }
+    // 每個 chip 自己嘅 transition（false→true = enter，true→false = exit）
+    val transitions = remember { mutableStateMapOf<String?, MutableTransitionState<Boolean>>() }
 
-    // 首次：直接顯示，唔播進場（避免入頁閃一下）
+    // 首次：直接 targetState=true、currentState=true，唔播動畫
     LaunchedEffect(Unit) {
-        if (displayedKeys.isEmpty()) {
-            displayedKeys.addAll(targetKeys)
-            targetKeys.forEach { isVisibleMap[it] = true }
+        if (order.isEmpty()) {
+            targetKeys.forEach { key ->
+                order.add(key)
+                transitions[key] = MutableTransitionState(true)
+            }
         }
     }
 
     LaunchedEffect(targetKeys) {
-        if (displayedKeys.isEmpty()) return@LaunchedEffect
-
+        if (order.isEmpty()) return@LaunchedEffect
         val targetSet = targetKeys.toSet()
 
-        // ① 舊有但已唔再需要 → 退場
-        displayedKeys.toList().forEach { key ->
-            if (key !in targetSet) isVisibleMap[key] = false
+        // ── 退場：唔再存在嘅 key ──
+        order.toList().forEach { key ->
+            if (key !in targetSet) {
+                transitions[key]?.targetState = false
+            }
         }
 
-        // ② 新 key：插入到合理位置，先 invisible 再 visible 觸發 enter
+        // ── 進場：新 key 用 MutableTransitionState(false) 再 targetState=true ──
         targetKeys.forEach { key ->
-            if (key !in displayedKeys) {
+            val existing = transitions[key]
+            if (existing == null) {
+                // 插入到對應位置
                 val idxInTarget = targetKeys.indexOf(key)
-                var insertAt = displayedKeys.size
-                for (i in displayedKeys.indices) {
-                    val existingIdx = targetKeys.indexOf(displayedKeys[i])
-                    if (existingIdx == -1 || existingIdx > idxInTarget) {
+                var insertAt = order.size
+                for (i in order.indices) {
+                    val ei = targetKeys.indexOf(order[i])
+                    if (ei == -1 || ei > idxInTarget) {
                         insertAt = i
                         break
                     }
                 }
-                displayedKeys.add(insertAt, key)
-                isVisibleMap[key] = false
+                order.add(insertAt, key)
+                // current=false → target=true 確保會跑 enter
+                transitions[key] = MutableTransitionState(false).apply { targetState = true }
+            } else if (!existing.targetState) {
+                // 之前退場緊但又返嚟
+                existing.targetState = true
             }
         }
 
-        kotlinx.coroutines.yield()
-        targetKeys.forEach { key -> isVisibleMap[key] = true }
-
-        // ③ 等退場完再移除
-        delay(300)
-        displayedKeys.toList().forEach { key ->
-            if (isVisibleMap[key] != true && key !in targetSet) {
-                displayedKeys.remove(key)
-                isVisibleMap.remove(key)
+        // ── 等退場完清走 ──
+        delay(380)
+        order.toList().forEach { key ->
+            val t = transitions[key] ?: return@forEach
+            if (!t.targetState && !t.currentState && key !in targetSet) {
+                order.remove(key)
+                transitions.remove(key)
             }
         }
 
-        // ④ 按 target 順序重排（退場中嘅暫留尾部）
-        val exiting = displayedKeys.filter { it !in targetSet }
-        val ordered = targetKeys.filter { it in displayedKeys } + exiting
-        if (ordered != displayedKeys.toList()) {
-            displayedKeys.clear()
-            displayedKeys.addAll(ordered)
+        // ── 重排：可見項跟 target 順序，退場中留尾 ──
+        val exiting = order.filter { it !in targetSet }
+        val ordered = targetKeys.filter { it in order } + exiting
+        if (ordered != order.toList()) {
+            order.clear()
+            order.addAll(ordered)
         }
-    }
-
-    val enterAnim = remember {
-        fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)) +
-            scaleIn(
-                initialScale = 0.78f,
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 380f)
-            )
-    }
-    val exitAnim = remember {
-        fadeOut(animationSpec = tween(250, easing = FastOutSlowInEasing)) +
-            scaleOut(
-                targetScale = 0.78f,
-                animationSpec = tween(250, easing = FastOutSlowInEasing)
-            )
     }
 
     Column(
@@ -6826,23 +6819,19 @@ fun AnimatedCalendarCategoryChips(
                 )
             )
     ) {
-        val rows = displayedKeys.chunked(4)
-        rows.forEach { rowKeys ->
-            // 呢一行係咪仲有可見／退場中嘅 chip
-            val rowAlive = rowKeys.any { isVisibleMap.containsKey(it) }
-            if (!rowAlive) return@forEach
-
+        val rows = order.chunked(4)
+        rows.forEachIndexed { rowIdx, rowKeys ->
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .height(34.dp),
+                    .height(40.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                rowKeys.forEach { cat ->
-                    val visible = isVisibleMap[cat] == true
-                    // Box 必須係 Row 直接 child 先可以用 weight；
-                    // 入面用 animation 包嘅 AnimatedVisibility（唔係 RowScope 版本）
+                rowKeys.forEachIndexed { colIdx, cat ->
+                    val tState = transitions[cat] ?: MutableTransitionState(true)
+                    val staggerMs = (rowIdx * 4 + colIdx) * 35
+
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -6850,9 +6839,25 @@ fun AnimatedCalendarCategoryChips(
                         contentAlignment = Alignment.Center
                     ) {
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = visible,
-                            enter = enterAnim,
-                            exit = exitAnim,
+                            visibleState = tState,
+                            enter = fadeIn(
+                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing)
+                            ) + scaleIn(
+                                initialScale = 0.55f,
+                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing)
+                            ) + slideInVertically(
+                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing),
+                                initialOffsetY = { full -> full / 2 }
+                            ),
+                            exit = fadeOut(
+                                animationSpec = tween(260, easing = FastOutSlowInEasing)
+                            ) + scaleOut(
+                                targetScale = 0.55f,
+                                animationSpec = tween(260, easing = FastOutSlowInEasing)
+                            ) + slideOutVertically(
+                                animationSpec = tween(260, easing = FastOutSlowInEasing),
+                                targetOffsetY = { full -> full / 3 }
+                            ),
                             label = "calChip_${cat ?: "all"}"
                         ) {
                             CalendarFilterChip(
