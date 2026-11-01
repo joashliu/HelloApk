@@ -7363,7 +7363,7 @@ fun AnimatedInfoChip(
             Text(label, fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Box(contentAlignment = Alignment.Center) {
-                RollingNumber(
+                AnimatedAmount(         // ← 由 RollingNumber 改回
                     text = valueText,
                     color = valueColor,
                     fontSize = valueFontSize,
@@ -7513,10 +7513,21 @@ fun CalendarDayCell(
     val borderColor = if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR
     val elevation = if (hasRecords || isToday || isSelected) 1.dp else 0.dp
 
-    val barRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
-        (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
-    else 0f
-    val barColor = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG
+    val targetBarRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
+    (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
+else 0f
+
+val animatedBarRatio by animateFloatAsState(
+    targetValue = targetBarRatio,
+    animationSpec = tween(400, easing = FastOutSlowInEasing),
+    label = "calendarBarRatio_$day"
+)
+
+val animatedBarColor by animateColorAsState(
+    targetValue = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG,
+    animationSpec = tween(400, easing = FastOutSlowInEasing),
+    label = "calendarBarColor_$day"
+)
 
     Box(
         Modifier
@@ -7537,15 +7548,15 @@ fun CalendarDayCell(
                 indication = null
             ) { onClick() }
     ) {
-        if (displayMode == 0 && barRatio > 0.001f) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(barRatio)
-                    .background(barColor.copy(alpha = 0.75f))
-            )
-        }
+        if (displayMode == 0 && animatedBarRatio > 0.001f) {
+    Box(
+        Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .fillMaxHeight(animatedBarRatio)
+            .background(animatedBarColor.copy(alpha = 0.75f))
+    )
+}
 
         Column(
             Modifier
@@ -7573,7 +7584,7 @@ fun CalendarDayCell(
         Modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
-        RollingNumber(                      // ← 原本 AnimatedAmount
+        AnimatedAmount(                 // ← 由 RollingNumber 改回
             text = summary.compactNet,
             color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
             fontSize = 11.sp,
