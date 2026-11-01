@@ -1,4 +1,4 @@
-package com.example.hello
+
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
@@ -6732,152 +6732,71 @@ fun CalendarFilterChip(
     }
 }
 
-/** 月曆頁類別 chips：MutableTransitionState 控制進場／退場 + 交錯延遲 */
+/** 月曆頁類別 chips：LazyVerticalGrid + animateItem
+ *  - 消失：快速 fade out
+ *  - 其餘 chips：同步 placement 動畫移位補位
+ *  - 出現：fade + 輕微位移
+ */
 @Composable
 fun AnimatedCalendarCategoryChips(
     visibleCategories: List<String>,
     filterCategory: String?,
     onFilterCategoryChange: (String?) -> Unit,
 ) {
-    val targetKeys = remember(visibleCategories) { listOf<String?>(null) + visibleCategories }
-
-    // 顯示順序（含退場中）
-    val order = remember { mutableStateListOf<String?>() }
-    // 每個 chip 自己嘅 transition（false→true = enter，true→false = exit）
-    val transitions = remember { mutableStateMapOf<String?, MutableTransitionState<Boolean>>() }
-
-    // 首次：直接 targetState=true、currentState=true，唔播動畫
-    LaunchedEffect(Unit) {
-        if (order.isEmpty()) {
-            targetKeys.forEach { key ->
-                order.add(key)
-                transitions[key] = MutableTransitionState(true)
-            }
-        }
+    val allCategories = remember(visibleCategories) {
+        listOf<String?>(null) + visibleCategories
     }
 
-    LaunchedEffect(targetKeys) {
-        if (order.isEmpty()) return@LaunchedEffect
-        val targetSet = targetKeys.toSet()
+    val rowCount = ((allCategories.size + 3) / 4).coerceAtLeast(1)
+    val chipH = 34.dp
+    val rowGap = 6.dp
+    val targetHeight = chipH * rowCount + rowGap * (rowCount - 1).coerceAtLeast(0)
 
-        // ── 退場：唔再存在嘅 key ──
-        order.toList().forEach { key ->
-            if (key !in targetSet) {
-                transitions[key]?.targetState = false
-            }
-        }
+    val animatedHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "calChipsGridHeight"
+    )
 
-        // ── 進場：新 key 用 MutableTransitionState(false) 再 targetState=true ──
-        targetKeys.forEach { key ->
-            val existing = transitions[key]
-            if (existing == null) {
-                // 插入到對應位置
-                val idxInTarget = targetKeys.indexOf(key)
-                var insertAt = order.size
-                for (i in order.indices) {
-                    val ei = targetKeys.indexOf(order[i])
-                    if (ei == -1 || ei > idxInTarget) {
-                        insertAt = i
-                        break
-                    }
-                }
-                order.add(insertAt, key)
-                // current=false → target=true 確保會跑 enter
-                transitions[key] = MutableTransitionState(false).apply { targetState = true }
-            } else if (!existing.targetState) {
-                // 之前退場緊但又返嚟
-                existing.targetState = true
-            }
-        }
-
-        // ── 等退場完清走 ──
-        delay(380)
-        order.toList().forEach { key ->
-            val t = transitions[key] ?: return@forEach
-            if (!t.targetState && !t.currentState && key !in targetSet) {
-                order.remove(key)
-                transitions.remove(key)
-            }
-        }
-
-        // ── 重排：可見項跟 target 順序，退場中留尾 ──
-        val exiting = order.filter { it !in targetSet }
-        val ordered = targetKeys.filter { it in order } + exiting
-        if (ordered != order.toList()) {
-            order.clear()
-            order.addAll(ordered)
-        }
-    }
-
-    Column(
-        Modifier
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(4),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        userScrollEnabled = false,
+        modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
+            .height(animatedHeight)
     ) {
-        val rows = order.chunked(4)
-        rows.forEachIndexed { rowIdx, rowKeys ->
-            Row(
-                Modifier
+        items(
+            items = allCategories,
+            key = { cat -> cat ?: "__all__" }
+        ) { cat ->
+            CalendarFilterChip(
+                modifier = Modifier
+                    .animateItem(
+                        // ★ 出現：稍快 fade
+                        fadeInSpec = tween(200, easing = FastOutSlowInEasing),
+                        // ★ 消失：要快
+                        fadeOutSpec = tween(120, easing = FastOutSlowInEasing),
+                        // ★ 其他 chips 移位補位：彈簧跟手
+                        placementSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = 0.85f
+                        )
+                    )
                     .fillMaxWidth()
-                    .height(40.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                rowKeys.forEachIndexed { colIdx, cat ->
-                    val tState = transitions[cat] ?: MutableTransitionState(true)
-                    val staggerMs = (rowIdx * 4 + colIdx) * 35
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        androidx.compose.animation.AnimatedVisibility(
-                            visibleState = tState,
-                            enter = fadeIn(
-                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing)
-                            ) + scaleIn(
-                                initialScale = 0.55f,
-                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing)
-                            ) + slideInVertically(
-                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing),
-                                initialOffsetY = { full -> full / 2 }
-                            ),
-                            exit = fadeOut(
-                                animationSpec = tween(260, easing = FastOutSlowInEasing)
-                            ) + scaleOut(
-                                targetScale = 0.55f,
-                                animationSpec = tween(260, easing = FastOutSlowInEasing)
-                            ) + slideOutVertically(
-                                animationSpec = tween(260, easing = FastOutSlowInEasing),
-                                targetOffsetY = { full -> full / 3 }
-                            ),
-                            label = "calChip_${cat ?: "all"}"
-                        ) {
-                            CalendarFilterChip(
-                                modifier = Modifier.fillMaxSize(),
-                                selected = filterCategory == cat,
-                                label = cat ?: "全部",
-                                onClick = {
-                                    onFilterCategoryChange(
-                                        if (filterCategory == cat) null else cat
-                                    )
-                                }
-                            )
-                        }
-                    }
+                    .height(chipH),
+                selected = filterCategory == cat,
+                label = cat ?: "全部",
+                onClick = {
+                    onFilterCategoryChange(
+                        if (filterCategory == cat) null else cat
+                    )
                 }
-                repeat((4 - rowKeys.size).coerceAtLeast(0)) {
-                    Spacer(Modifier.weight(1f))
-                }
-            }
-            Spacer(Modifier.height(6.dp))
+            )
         }
     }
 }
