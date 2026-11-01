@@ -7356,13 +7356,20 @@ fun AnimatedInfoChip(
     valueColor: Color = TEXT_PRIMARY,
 ) {
     Surface(modifier = modifier, shape = RoundedCornerShape(12.dp), color = SURFACE_ELEVATED) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             Text(label, fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Box(contentAlignment = Alignment.Center) {
-                AnimatedAmount(text = valueText, color = valueColor,
-                    fontSize = valueFontSize, fontWeight = FontWeight.Bold)
+                RollingNumber(
+                    text = valueText,
+                    color = valueColor,
+                    fontSize = valueFontSize,
+                    fontWeight = FontWeight.Bold,
+                    animateChanges = true
+                )
             }
         }
     }
@@ -7562,19 +7569,19 @@ fun CalendarDayCell(
             when (displayMode) {
                 0 -> {
                     if (absNet > 0) {
-                        Box(
-                            Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AnimatedAmount(
-                                text = summary.compactNet,
-                                color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black,
-                                animateChanges = animateValues
-                            )
-                        }
-                    }
+    Box(
+        Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        RollingNumber(                      // ← 原本 AnimatedAmount
+            text = summary.compactNet,
+            color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            animateChanges = animateValues
+        )
+    }
+}
                 }
                 1 -> {
                     if (isSelected) {
@@ -7840,14 +7847,14 @@ fun CompareValueCell(
     }
 
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            AnimatedAmount(
-                text = amtDisplay,
-                color = amtColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.ExtraBold,
-                animateChanges = animateValues
-            )
+    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+        RollingNumber(                      // ← 原本 AnimatedAmount
+            text = amtDisplay,
+            color = amtColor,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.ExtraBold,
+            animateChanges = animateValues
+        )
         }
         Spacer(Modifier.width(4.dp))
         Box(Modifier.width(38.dp), contentAlignment = Alignment.CenterEnd) {
