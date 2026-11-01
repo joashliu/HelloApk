@@ -1740,8 +1740,8 @@ fun FanMenuOverlay(
         Modifier
             .fillMaxSize()
             .onGloballyPositioned { coords ->
-                boxPositionInRoot.value = coords.positionInRoot()
-            }
+    boxPositionInRoot.value = coords.boundsInRoot().topLeft
+}
     ) {
         FAN_MENU_ACTIONS.forEachIndexed { i, action ->
             val angle = arcCenterAngle - 60f + i * 40f
