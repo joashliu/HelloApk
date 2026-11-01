@@ -5014,14 +5014,6 @@ fun CategoryTotalHint(hint: AfterSaveHint, visible: Boolean) {
     }
 }
 
-@Immutable
-private data class CalendarTopStatsCache(
-    val categories: List<String>,
-    val totalNet: Double,
-    val avgPerItem: Double,
-    val avgPerDay: Double
-)
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CalendarContent(
@@ -5059,15 +5051,6 @@ fun CalendarContent(
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
-
-    // ★ 新增：記住每個月的 Chips 與統計數據，避免動畫過程中數據突變
-    val topStatsCache = remember { mutableMapOf<String, CalendarTopStatsCache>() }
-    topStatsCache[currentMonthKey] = CalendarTopStatsCache(
-        calendarUi.visibleCategories,
-        calendarUi.totalNet,
-        calendarUi.avgPerItem,
-        calendarUi.avgPerDay
-    )
 
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -5416,47 +5399,18 @@ fun CalendarContent(
                 ) {
                     Spacer(Modifier.height(4.dp))
                     
-                    // ★ 新增：配合月份切換方向的平滑過渡動畫
-                    AnimatedContent(
-                        targetState = currentMonthKey,
-                        transitionSpec = {
-                            val forward = monthDirection > 0
-                            if (forward) {
-                                (slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(250)))
-                                    .togetherWith(slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(250)))
-                            } else {
-                                (slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(250)))
-                                    .togetherWith(slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(250)))
-                            }
-                            .using(SizeTransform(clip = false))
-                        },
-                        label = "calendarTopStatsAnim"
-                    ) { targetMonth ->
-                        // ★ 修正：進場的新月份同樣直接從 calendarUi 讀取最新數據
-                        val stats = if (targetMonth == currentMonthKey) {
-                            CalendarTopStatsCache(
-                                calendarUi.visibleCategories,
-                                calendarUi.totalNet,
-                                calendarUi.avgPerItem,
-                                calendarUi.avgPerDay
-                            )
-                        } else {
-                            topStatsCache[targetMonth] ?: CalendarTopStatsCache(emptyList(), 0.0, 0.0, 0.0)
-                        }
-
-                        Column(Modifier.fillMaxWidth()) {
-                            // ★ 類別 chips：逐個進場／退場動畫
-                            AnimatedCalendarCategoryChips(
-                                visibleCategories = stats.categories,
-                                filterCategory = filterCategory,
-                                onFilterCategoryChange = onFilterCategoryChange
-                            )
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(stats.totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (stats.totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
-                                AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(stats.avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                                AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(stats.avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                            }
-                        }
+                    // ★ 移除整區重畫的 AnimatedContent，完全交由內部自己做 diff 同平滑動畫
+                    AnimatedCalendarCategoryChips(
+                        visibleCategories = calendarUi.visibleCategories,
+                        filterCategory = filterCategory,
+                        onFilterCategoryChange = onFilterCategoryChange
+                    )
+                    
+                    // ★ 數字區域本身已使用 AnimatedAmount (RollingNumber)，數值改變時會自動平滑滾動
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(calendarUi.totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (calendarUi.totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
+                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(calendarUi.avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(calendarUi.avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
                     }
                     
                     Spacer(Modifier.height(8.dp))
