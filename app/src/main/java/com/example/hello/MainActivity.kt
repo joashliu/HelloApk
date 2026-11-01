@@ -5402,63 +5402,12 @@ fun CalendarContent(
                         }
                 ) {
                     Spacer(Modifier.height(4.dp))
-                    // ★ 類別 chips：出現／消失用 AnimatedContent + SizeTransform 流暢過渡
-                    val allCategories: List<String?> = remember(visibleCategories) { listOf(null) + visibleCategories }
-                    AnimatedContent(
-                        targetState = allCategories,
-                        transitionSpec = {
-                            (fadeIn(tween(280, easing = FastOutSlowInEasing)) +
-                                scaleIn(initialScale = 0.96f, animationSpec = tween(280, easing = FastOutSlowInEasing))) togetherWith
-                            (fadeOut(tween(200, easing = FastOutSlowInEasing)) +
-                                scaleOut(targetScale = 0.96f, animationSpec = tween(200, easing = FastOutSlowInEasing))) using
-                            SizeTransform(
-                                clip = false,
-                                sizeAnimationSpec = { _, _ ->
-                                    spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                }
-                            )
-                        },
-                        label = "calendarCategoryChips"
-                    ) { categories ->
-                        val rows = categories.chunked(4)
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .animateContentSize(
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                )
-                        ) {
-                            rows.forEach { row ->
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    row.forEach { cat ->
-                                        key(cat ?: "__all__") {
-                                            CalendarFilterChip(
-                                                modifier = Modifier.weight(1f),
-                                                selected = filterCategory == cat,
-                                                label = cat ?: "全部",
-                                                onClick = {
-                                                    onFilterCategoryChange(
-                                                        if (filterCategory == cat) null else cat
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    }
-                                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
-                                }
-                                Spacer(Modifier.height(6.dp))
-                            }
-                        }
-                    }
+                    // ★ 類別 chips：逐個進場／退場動畫
+                    AnimatedCalendarCategoryChips(
+                        visibleCategories = visibleCategories,
+                        filterCategory = filterCategory,
+                        onFilterCategoryChange = onFilterCategoryChange
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
                         AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
@@ -6745,7 +6694,6 @@ fun CalendarFilterChip(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "calendarChipPress"
     )
-    // ★ 選中狀態背景／文字色平滑過渡
     val bgColor by animateColorAsState(
         targetValue = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
         animationSpec = tween(220, easing = FastOutSlowInEasing),
@@ -6758,25 +6706,13 @@ fun CalendarFilterChip(
     )
     val fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
 
-    // ★ 首次出現：輕微 scale + fade
-    val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        appear.animateTo(
-            1f,
-            spring(dampingRatio = 0.78f, stiffness = 420f)
-        )
-    }
-    val appearProgress = appear.value
-
     Surface(
         onClick = onClick,
         modifier = modifier
             .height(34.dp)
             .graphicsLayer {
-                val s = pressScale * (0.88f + 0.12f * appearProgress)
-                scaleX = s
-                scaleY = s
-                alpha = appearProgress
+                scaleX = pressScale
+                scaleY = pressScale
             },
         shape = RoundedCornerShape(12.dp),
         color = bgColor,
@@ -6792,6 +6728,151 @@ fun CalendarFilterChip(
                 fontWeight = fontWeight,
                 style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
+        }
+    }
+}
+
+/** 月曆頁類別 chips：逐個進場／退場，高度同步平滑 */
+@Composable
+fun AnimatedCalendarCategoryChips(
+    visibleCategories: List<String>,
+    filterCategory: String?,
+    onFilterCategoryChange: (String?) -> Unit,
+) {
+    val targetKeys = remember(visibleCategories) { listOf<String?>(null) + visibleCategories }
+
+    // 畫面上仍然存在嘅 keys（包含正在播退場動畫）
+    val displayedKeys = remember { mutableStateListOf<String?>() }
+    val isVisibleMap = remember { mutableStateMapOf<String?, Boolean>() }
+
+    // 首次：直接顯示，唔播進場（避免入頁閃一下）
+    LaunchedEffect(Unit) {
+        if (displayedKeys.isEmpty()) {
+            displayedKeys.addAll(targetKeys)
+            targetKeys.forEach { isVisibleMap[it] = true }
+        }
+    }
+
+    LaunchedEffect(targetKeys) {
+        if (displayedKeys.isEmpty()) return@LaunchedEffect
+
+        val targetSet = targetKeys.toSet()
+
+        // ① 舊有但已唔再需要 → 退場
+        displayedKeys.toList().forEach { key ->
+            if (key !in targetSet) isVisibleMap[key] = false
+        }
+
+        // ② 新 key：插入到合理位置，先 invisible 再 visible 觸發 enter
+        targetKeys.forEach { key ->
+            if (key !in displayedKeys) {
+                val idxInTarget = targetKeys.indexOf(key)
+                var insertAt = displayedKeys.size
+                for (i in displayedKeys.indices) {
+                    val existingIdx = targetKeys.indexOf(displayedKeys[i])
+                    if (existingIdx == -1 || existingIdx > idxInTarget) {
+                        insertAt = i
+                        break
+                    }
+                }
+                displayedKeys.add(insertAt, key)
+                isVisibleMap[key] = false
+            }
+        }
+
+        kotlinx.coroutines.yield()
+        targetKeys.forEach { key -> isVisibleMap[key] = true }
+
+        // ③ 等退場完再移除
+        delay(300)
+        displayedKeys.toList().forEach { key ->
+            if (isVisibleMap[key] != true && key !in targetSet) {
+                displayedKeys.remove(key)
+                isVisibleMap.remove(key)
+            }
+        }
+
+        // ④ 按 target 順序重排（退場中嘅暫留尾部）
+        val exiting = displayedKeys.filter { it !in targetSet }
+        val ordered = targetKeys.filter { it in displayedKeys } + exiting
+        if (ordered != displayedKeys.toList()) {
+            displayedKeys.clear()
+            displayedKeys.addAll(ordered)
+        }
+    }
+
+    val enterAnim = remember {
+        fadeIn(animationSpec = tween(280, easing = FastOutSlowInEasing)) +
+            scaleIn(
+                initialScale = 0.78f,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 380f)
+            )
+    }
+    val exitAnim = remember {
+        fadeOut(animationSpec = tween(250, easing = FastOutSlowInEasing)) +
+            scaleOut(
+                targetScale = 0.78f,
+                animationSpec = tween(250, easing = FastOutSlowInEasing)
+            )
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+    ) {
+        val rows = displayedKeys.chunked(4)
+        rows.forEach { rowKeys ->
+            // 呢一行係咪仲有可見／退場中嘅 chip
+            val rowAlive = rowKeys.any { isVisibleMap.containsKey(it) }
+            if (!rowAlive) return@forEach
+
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(34.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                rowKeys.forEach { cat ->
+                    key(cat ?: "__all__") {
+                        val visible = isVisibleMap[cat] == true
+                        // 用 Box + weight 佔位，AnimatedVisibility 只負責內容顯隱／縮放
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AnimatedVisibility(
+                                visible = visible,
+                                enter = enterAnim,
+                                exit = exitAnim
+                            ) {
+                                CalendarFilterChip(
+                                    modifier = Modifier.fillMaxSize(),
+                                    selected = filterCategory == cat,
+                                    label = cat ?: "全部",
+                                    onClick = {
+                                        onFilterCategoryChange(
+                                            if (filterCategory == cat) null else cat
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                repeat((4 - rowKeys.size).coerceAtLeast(0)) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
