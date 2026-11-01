@@ -1,12 +1,8 @@
 package com.example.hello
 
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.WindowCompat
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.unit.Velocity
@@ -1854,7 +1850,6 @@ class MainActivity : ComponentActivity() {
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.systemBars),   // ★ 最關鍵
                 color = SURFACE_BG
             ) {
                 if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
