@@ -6840,31 +6840,31 @@ fun AnimatedCalendarCategoryChips(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 rowKeys.forEach { cat ->
-                    key(cat ?: "__all__") {
-                        val visible = isVisibleMap[cat] == true
-                        // 用 Box + weight 佔位，AnimatedVisibility 只負責內容顯隱／縮放
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentAlignment = Alignment.Center
+                    val visible = isVisibleMap[cat] == true
+                    // Box 必須係 Row 直接 child 先可以用 weight；
+                    // 入面用 animation 包嘅 AnimatedVisibility（唔係 RowScope 版本）
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = visible,
+                            enter = enterAnim,
+                            exit = exitAnim,
+                            label = "calChip_${cat ?: "all"}"
                         ) {
-                            AnimatedVisibility(
-                                visible = visible,
-                                enter = enterAnim,
-                                exit = exitAnim
-                            ) {
-                                CalendarFilterChip(
-                                    modifier = Modifier.fillMaxSize(),
-                                    selected = filterCategory == cat,
-                                    label = cat ?: "全部",
-                                    onClick = {
-                                        onFilterCategoryChange(
-                                            if (filterCategory == cat) null else cat
-                                        )
-                                    }
-                                )
-                            }
+                            CalendarFilterChip(
+                                modifier = Modifier.fillMaxSize(),
+                                selected = filterCategory == cat,
+                                label = cat ?: "全部",
+                                onClick = {
+                                    onFilterCategoryChange(
+                                        if (filterCategory == cat) null else cat
+                                    )
+                                }
+                            )
                         }
                     }
                 }
