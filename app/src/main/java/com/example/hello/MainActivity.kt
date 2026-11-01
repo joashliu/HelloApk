@@ -5014,6 +5014,14 @@ fun CategoryTotalHint(hint: AfterSaveHint, visible: Boolean) {
     }
 }
 
+@Immutable
+private data class CalendarTopStatsCache(
+    val categories: List<String>,
+    val totalNet: Double,
+    val avgPerItem: Double,
+    val avgPerDay: Double
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CalendarContent(
@@ -5051,6 +5059,9 @@ fun CalendarContent(
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
+
+    val topStatsCache = remember { mutableMapOf<String, CalendarTopStatsCache>() }
+    topStatsCache[currentMonthKey] = CalendarTopStatsCache(visibleCategories, totalNet, avgPerItem, avgPerDay)
 
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -5369,8 +5380,6 @@ fun CalendarContent(
             }
 
             // ★ 頂部 Chips + Stats：高度跟手進度（可中途打斷、反向）
-            // 關鍵：用 wrapContentHeight(unbounded=true) 量完整內容高度，
-            // 避免被外層裁切高度反向寫入，導致每次展開越縮越細
             val topP = topRevealProgress.value
             Box(
                 Modifier
@@ -5379,7 +5388,6 @@ fun CalendarContent(
                         if (topSectionHeightPx > 0f) {
                             Modifier.height(with(density) { (topSectionHeightPx * topP).toDp() })
                         } else {
-                            // 首次尚未量度：自然高度
                             Modifier.wrapContentHeight()
                         }
                     )
@@ -5394,7 +5402,6 @@ fun CalendarContent(
                         .wrapContentHeight(unbounded = true, align = Alignment.Top)
                         .onSizeChanged { size ->
                             if (size.height > 0) {
-                                // 只升唔降，杜絕收起過程中被裁切高度污染
                                 if (size.height.toFloat() > topSectionHeightPx) {
                                     topSectionHeightPx = size.height.toFloat()
                                 }
@@ -5402,17 +5409,45 @@ fun CalendarContent(
                         }
                 ) {
                     Spacer(Modifier.height(4.dp))
-                    // ★ 類別 chips：逐個進場／退場動畫
-                    AnimatedCalendarCategoryChips(
-                        visibleCategories = visibleCategories,
-                        filterCategory = filterCategory,
-                        onFilterCategoryChange = onFilterCategoryChange
-                    )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
-                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                    
+                    // ★ 新增：配合月份切換方向的平滑過渡動畫
+                    AnimatedContent(
+                        targetState = currentMonthKey,
+                        transitionSpec = {
+                            val forward = monthDirection > 0
+                            if (forward) {
+                                (slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(250)))
+                                    .togetherWith(slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(250)))
+                            } else {
+                                (slideInHorizontally(tween(320, easing = FastOutSlowInEasing)) { -it / 2 } + fadeIn(tween(250)))
+                                    .togetherWith(slideOutHorizontally(tween(320, easing = FastOutSlowInEasing)) { it / 2 } + fadeOut(tween(250)))
+                            }
+                            .using(SizeTransform(clip = false)) // 防止滑動時邊緣被裁切
+                        },
+                        label = "calendarTopStatsAnim"
+                    ) { targetMonth ->
+                        // 提取對應月份的狀態，退場的舊月份會讀取 Cache，進場的新月份會自動更新為最新數據
+                        val stats = if (targetMonth == currentMonthKey) {
+                            CalendarTopStatsCache(visibleCategories, totalNet, avgPerItem, avgPerDay)
+                        } else {
+                            topStatsCache[targetMonth] ?: CalendarTopStatsCache(emptyList(), 0.0, 0.0, 0.0)
+                        }
+
+                        Column(Modifier.fillMaxWidth()) {
+                            // ★ 類別 chips：逐個進場／退場動畫
+                            AnimatedCalendarCategoryChips(
+                                visibleCategories = stats.categories,
+                                filterCategory = filterCategory,
+                                onFilterCategoryChange = onFilterCategoryChange
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(stats.totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (stats.totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
+                                AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(stats.avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                                AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(stats.avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                            }
+                        }
                     }
+                    
                     Spacer(Modifier.height(8.dp))
                 }
             }
