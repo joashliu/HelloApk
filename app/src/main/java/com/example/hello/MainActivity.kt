@@ -6732,7 +6732,6 @@ fun CalendarFilterChip(
     }
 }
 
-/** 月曆頁類別 chips：MutableTransitionState 控制進場／退場 + 交錯延遲 */
 @Composable
 fun AnimatedCalendarCategoryChips(
     visibleCategories: List<String>,
@@ -6740,144 +6739,72 @@ fun AnimatedCalendarCategoryChips(
     onFilterCategoryChange: (String?) -> Unit,
 ) {
     val targetKeys = remember(visibleCategories) { listOf<String?>(null) + visibleCategories }
+    
+    // 1. 計算 Grid 需要的動態總高度 (每行 4 個)
+    val rowCount = (targetKeys.size + 3) / 4
+    val targetHeight = if (rowCount == 0) 0.dp else (40.dp * rowCount) + (6.dp * (rowCount - 1))
+    
+    val animatedHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+        label = "calChipsGridHeight"
+    )
 
-    // 顯示順序（含退場中）
-    val order = remember { mutableStateListOf<String?>() }
-    // 每個 chip 自己嘅 transition（false→true = enter，true→false = exit）
-    val transitions = remember { mutableStateMapOf<String?, MutableTransitionState<Boolean>>() }
-
-    // 首次：直接 targetState=true、currentState=true，唔播動畫
-    LaunchedEffect(Unit) {
-        if (order.isEmpty()) {
-            targetKeys.forEach { key ->
-                order.add(key)
-                transitions[key] = MutableTransitionState(true)
-            }
-        }
-    }
-
-    LaunchedEffect(targetKeys) {
-        if (order.isEmpty()) return@LaunchedEffect
-        val targetSet = targetKeys.toSet()
-
-        // ── 退場：唔再存在嘅 key ──
-        order.toList().forEach { key ->
-            if (key !in targetSet) {
-                transitions[key]?.targetState = false
-            }
-        }
-
-        // ── 進場：新 key 用 MutableTransitionState(false) 再 targetState=true ──
-        targetKeys.forEach { key ->
-            val existing = transitions[key]
-            if (existing == null) {
-                // 插入到對應位置
-                val idxInTarget = targetKeys.indexOf(key)
-                var insertAt = order.size
-                for (i in order.indices) {
-                    val ei = targetKeys.indexOf(order[i])
-                    if (ei == -1 || ei > idxInTarget) {
-                        insertAt = i
-                        break
-                    }
-                }
-                order.add(insertAt, key)
-                // current=false → target=true 確保會跑 enter
-                transitions[key] = MutableTransitionState(false).apply { targetState = true }
-            } else if (!existing.targetState) {
-                // 之前退場緊但又返嚟
-                existing.targetState = true
-            }
-        }
-
-        // ── 等退場完清走 ──
-        delay(380)
-        order.toList().forEach { key ->
-            val t = transitions[key] ?: return@forEach
-            if (!t.targetState && !t.currentState && key !in targetSet) {
-                order.remove(key)
-                transitions.remove(key)
-            }
-        }
-
-        // ── 重排：可見項跟 target 順序，退場中留尾 ──
-        val exiting = order.filter { it !in targetSet }
-        val ordered = targetKeys.filter { it in order } + exiting
-        if (ordered != order.toList()) {
-            order.clear()
-            order.addAll(ordered)
-        }
-    }
-
-    Column(
-        Modifier
+    // 2. 使用 LazyVerticalGrid，佢天生就識得處理行列佈局同等分寬度
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(4),
+        modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
+            .height(animatedHeight),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        userScrollEnabled = false
     ) {
-        val rows = order.chunked(4)
-        rows.forEachIndexed { rowIdx, rowKeys ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(40.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                rowKeys.forEachIndexed { colIdx, cat ->
-                    val tState = transitions[cat] ?: MutableTransitionState(true)
-                    val staggerMs = (rowIdx * 4 + colIdx) * 35
+        items(
+            items = targetKeys,
+            key = { it ?: "all_categories_key" }
+        ) { cat ->
+            
+            // 3. 處理新加入 Chip 的縮放與向上滑動進場
+            var appear by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { appear = true }
+            
+            val scale by animateFloatAsState(
+                targetValue = if (appear) 1f else 0.55f,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
+                label = "chipScale"
+            )
+            val offsetY by animateFloatAsState(
+                targetValue = if (appear) 0f else 30f,
+                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
+                label = "chipOffset"
+            )
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        androidx.compose.animation.AnimatedVisibility(
-                            visibleState = tState,
-                            enter = fadeIn(
-                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing)
-                            ) + scaleIn(
-                                initialScale = 0.55f,
-                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing)
-                            ) + slideInVertically(
-                                animationSpec = tween(320, delayMillis = staggerMs, easing = FastOutSlowInEasing),
-                                initialOffsetY = { full -> full / 2 }
-                            ),
-                            exit = fadeOut(
-                                animationSpec = tween(260, easing = FastOutSlowInEasing)
-                            ) + scaleOut(
-                                targetScale = 0.55f,
-                                animationSpec = tween(260, easing = FastOutSlowInEasing)
-                            ) + slideOutVertically(
-                                animationSpec = tween(260, easing = FastOutSlowInEasing),
-                                targetOffsetY = { full -> full / 3 }
-                            ),
-                            label = "calChip_${cat ?: "all"}"
-                        ) {
-                            CalendarFilterChip(
-                                modifier = Modifier.fillMaxSize(),
-                                selected = filterCategory == cat,
-                                label = cat ?: "全部",
-                                onClick = {
-                                    onFilterCategoryChange(
-                                        if (filterCategory == cat) null else cat
-                                    )
-                                }
-                            )
-                        }
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    // ★ 靈魂所在：呢一句就會令「留低嘅 chips」自動平滑移動補位，並令「消失嘅 chips」優雅淡出
+                    .animateItem(
+                        fadeInSpec = tween(300, easing = FastOutSlowInEasing),
+                        fadeOutSpec = tween(250, easing = FastOutSlowInEasing),
+                        placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
+                    )
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationY = offsetY
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                CalendarFilterChip(
+                    modifier = Modifier.fillMaxSize(),
+                    selected = filterCategory == cat,
+                    label = cat ?: "全部",
+                    onClick = {
+                        onFilterCategoryChange(if (filterCategory == cat) null else cat)
                     }
-                }
-                repeat((4 - rowKeys.size).coerceAtLeast(0)) {
-                    Spacer(Modifier.weight(1f))
-                }
+                )
             }
-            Spacer(Modifier.height(6.dp))
         }
     }
 }
