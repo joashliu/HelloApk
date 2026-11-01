@@ -5402,20 +5402,62 @@ fun CalendarContent(
                         }
                 ) {
                     Spacer(Modifier.height(4.dp))
+                    // ★ 類別 chips：出現／消失用 AnimatedContent + SizeTransform 流暢過渡
                     val allCategories: List<String?> = remember(visibleCategories) { listOf(null) + visibleCategories }
-                    val rows = remember(allCategories) { allCategories.chunked(4) }
-                    rows.forEach { row ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            row.forEach { cat ->
-                                CalendarFilterChip(
-                                    modifier = Modifier.weight(1f),
-                                    selected = filterCategory == cat, label = cat ?: "全部",
-                                    onClick = { onFilterCategoryChange(if (filterCategory == cat) null else cat) }
+                    AnimatedContent(
+                        targetState = allCategories,
+                        transitionSpec = {
+                            (fadeIn(tween(280, easing = FastOutSlowInEasing)) +
+                                scaleIn(initialScale = 0.96f, animationSpec = tween(280, easing = FastOutSlowInEasing))) togetherWith
+                            (fadeOut(tween(200, easing = FastOutSlowInEasing)) +
+                                scaleOut(targetScale = 0.96f, animationSpec = tween(200, easing = FastOutSlowInEasing))) using
+                            SizeTransform(
+                                clip = false,
+                                sizeAnimationSpec = { _, _ ->
+                                    spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                }
+                            )
+                        },
+                        label = "calendarCategoryChips"
+                    ) { categories ->
+                        val rows = categories.chunked(4)
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .animateContentSize(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
                                 )
+                        ) {
+                            rows.forEach { row ->
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    row.forEach { cat ->
+                                        key(cat ?: "__all__") {
+                                            CalendarFilterChip(
+                                                modifier = Modifier.weight(1f),
+                                                selected = filterCategory == cat,
+                                                label = cat ?: "全部",
+                                                onClick = {
+                                                    onFilterCategoryChange(
+                                                        if (filterCategory == cat) null else cat
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
+                                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                                Spacer(Modifier.height(6.dp))
                             }
-                            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
-                        Spacer(Modifier.height(6.dp))
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
@@ -6698,25 +6740,58 @@ fun CalendarFilterChip(
 ) {
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.9f else 1f,
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.92f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "cs"
+        label = "calendarChipPress"
     )
-    val bgColor = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED
-    val textColor = if (selected) Color.White else Color.Black
+    // ★ 選中狀態背景／文字色平滑過渡
+    val bgColor by animateColorAsState(
+        targetValue = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "calendarChipBg"
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) Color.White else Color.Black,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "calendarChipText"
+    )
     val fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+
+    // ★ 首次出現：輕微 scale + fade
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        appear.animateTo(
+            1f,
+            spring(dampingRatio = 0.78f, stiffness = 420f)
+        )
+    }
+    val appearProgress = appear.value
 
     Surface(
         onClick = onClick,
-        modifier = modifier.height(34.dp).graphicsLayer { scaleX = scale; scaleY = scale },
-        shape = RoundedCornerShape(12.dp), color = bgColor,
+        modifier = modifier
+            .height(34.dp)
+            .graphicsLayer {
+                val s = pressScale * (0.88f + 0.12f * appearProgress)
+                scaleX = s
+                scaleY = s
+                alpha = appearProgress
+            },
+        shape = RoundedCornerShape(12.dp),
+        color = bgColor,
         interactionSource = src
     ) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-            Text(label, textAlign = TextAlign.Center, fontSize = 13.sp, maxLines = 1,
-                color = textColor, fontWeight = fontWeight,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+            Text(
+                label,
+                textAlign = TextAlign.Center,
+                fontSize = 13.sp,
+                maxLines = 1,
+                color = textColor,
+                fontWeight = fontWeight,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+            )
         }
     }
 }
