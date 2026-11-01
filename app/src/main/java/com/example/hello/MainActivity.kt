@@ -7885,38 +7885,46 @@ fun CompareContent(
     var allowNumberAnimate by remember { mutableStateOf(true) }
 
     LaunchedEffect(displayCategories, selectedMonthA, selectedMonthB, categoryMonthSum) {
-        val newSums = displayCategories.associateWith { cat ->
-            sumLocal(cat, selectedMonthA) to sumLocal(cat, selectedMonthB)
-        }
-
-        // 第一次進入唔做高亮
-        if (previousSums.isEmpty()) {
-            previousSums = newSums
-            return@LaunchedEffect
-        }
-
-        val changed = newSums.filter { (cat, pair) ->
-            previousSums[cat] != pair
-        }.keys
-
-        if (changed.isNotEmpty()) {
-            // 1. 先高亮
-            highlightedCategories = changed
-            allowNumberAnimate = false          // 暫時鎖住數字動畫
-
-            delay(500)                         // 2. 等半秒
-
-            // 3. 開始數字滾動 + 行位置移動
-            allowNumberAnimate = true
-            previousSums = newSums
-
-            // 高亮保持多一點時間，等滾動完先消失
-            delay(900)
-            highlightedCategories = emptySet()
-        } else {
-            previousSums = newSums
-        }
+    val newSums = displayCategories.associateWith { cat ->
+        sumLocal(cat, selectedMonthA) to sumLocal(cat, selectedMonthB)
     }
+
+    // 第一次進入：只記錄 baseline，唔做高亮
+    if (previousSums.isEmpty()) {
+        previousSums = newSums
+        return@LaunchedEffect
+    }
+
+    val changed = newSums.filter { (cat, pair) ->
+        previousSums[cat] != pair
+    }.keys
+
+    if (changed.isEmpty()) {
+        previousSums = newSums
+        // 保險：快速切換時清走殘留動畫
+        highlightedCategories = emptySet()
+        allowNumberAnimate = true
+        return@LaunchedEffect
+    }
+
+    // ★ 有新改動：先清空舊 highlight（避免快速切換殘留）
+    highlightedCategories = emptySet()
+    allowNumberAnimate = true
+
+    // ① 進入/改動後等 1 秒先 highlight
+    delay(1000)
+    highlightedCategories = changed
+    allowNumberAnimate = false
+
+    // ② highlight 後等 0.5 秒，數字滾動 + 行位置移動同時開始
+    delay(500)
+    allowNumberAnimate = true
+    previousSums = newSums
+
+    // ③ 等滾動 + 移動完成（約 1 秒），再等 0.5 秒先開始漸退
+    delay(1500)
+    highlightedCategories = emptySet()
+}
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         Column(
@@ -8020,6 +8028,12 @@ fun CompareContent(
 
                                         val isHighlighted = cat in highlightedCategories
 
+                                        val highlightBg by animateColorAsState(
+    targetValue = if (isHighlighted) Color(0xFFDBEAFE) else SURFACE_CARD,
+    animationSpec = tween(600, easing = FastOutSlowInEasing),
+    label = "highlightBg_$cat"
+)
+
                                         Column(
                                             Modifier
                                                 .fillMaxWidth()
@@ -8038,10 +8052,7 @@ fun CompareContent(
                                                     .height(rowHeight)
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                                     .clip(RoundedCornerShape(10.dp))
-                                                    .background(
-                                                        if (isHighlighted) Color(0xFFDBEAFE) // 淺藍色
-                                                        else SURFACE_CARD
-                                                    )
+                                                    .background(highlightBg)
                                                     .padding(horizontal = 4.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
