@@ -7905,9 +7905,11 @@ fun CompareContent(
         sumLocal(cat, selectedMonthA) to sumLocal(cat, selectedMonthB)
     }
 
-    // 第一次進入：只記錄 baseline，唔做高亮
+    // ① 第一次入比較頁：記錄 baseline，唔 highlight、唔動畫
     if (previousSums.isEmpty()) {
         previousSums = newSums
+        highlightedCategories = emptySet()
+        allowNumberAnimate = true
         return@LaunchedEffect
     }
 
@@ -7917,27 +7919,21 @@ fun CompareContent(
 
     if (changed.isEmpty()) {
         previousSums = newSums
-        // 保險：快速切換時清走殘留動畫
         highlightedCategories = emptySet()
         allowNumberAnimate = true
         return@LaunchedEffect
     }
 
-    // ★ 有新改動：先清空舊 highlight（避免快速切換殘留）
-    highlightedCategories = emptySet()
-    allowNumberAnimate = true
-
-    // ① 進入/改動後等 1 秒先 highlight
-    delay(1000)
+    // ② 即刻顯示藍色 highlight（唔延遲）
     highlightedCategories = changed
     allowNumberAnimate = false
 
-    // ② highlight 後等 0.5 秒，數字滾動 + 行位置移動同時開始
-    delay(500)
+    // ③ highlight 停留 1 秒，數字先至開始滾動
+    delay(1000)
     allowNumberAnimate = true
     previousSums = newSums
 
-    // ③ 等滾動 + 移動完成（約 1 秒），再等 0.5 秒先開始漸退
+    // ④ 等滾動 + 行移動完成（約 1.5 秒），之後才開始漸退
     delay(1500)
     highlightedCategories = emptySet()
 }
