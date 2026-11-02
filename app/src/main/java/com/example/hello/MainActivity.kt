@@ -2485,16 +2485,26 @@ fun MainApp(
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
+            
+            // 1. 重置篩選和頁面
             if (filter.modeOn) vm.setFilterModeOn(false)
             if (currentPage != 0) currentPage = 0
+            
             val note = prefillNoteOnLaunch
             val amt = prefillAmountOnLaunch
             val cat = prefillCategoryOnLaunch
+            
+            // 2. 打開鍵盤邏輯
             when {
                 note.isNullOrBlank() && amt == null -> openKeyboardForce(null)
                 amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat)
                 else -> openKeyboardForce(note, cat)
             }
+            
+            // 3. 【新增】觸發快速輸入區滾動回第一頁
+            // 這行代碼會讓 QuickInputSection 監聽到的 scrollToFirstTrigger 變化，從而執行 animateScrollToPage(0)
+            quickInputScrollToFirstTrigger++
+            
             onKeyboardLaunchConsumed()
             keyboardPrefillCategory.value = null
         }
