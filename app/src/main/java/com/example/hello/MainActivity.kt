@@ -1344,7 +1344,7 @@ private fun computeCompareUiState(records: List<Record>, monthA: String, monthB:
     )
 }
 
-fun computeCalendarUiState(records: List<Record>, monthKey: String, filterCategory: String?): CalendarUiState {
+private fun computeCalendarUiState(records: List<Record>, monthKey: String, filterCategory: String?): CalendarUiState {
     val monthAllRecords = ArrayList<Record>()
     var hasIncome = false
     val expenseSums = HashMap<String, Double>()
@@ -2623,10 +2623,7 @@ fun MainApp(
             2 -> {
                 val calendarMonthKey by vm.calendarMonthKey.collectAsState()
                 val calendarFilterCategory by vm.calendarFilterCategory.collectAsState()
-                val records by vm.records.collectAsState()
-                val calendarUi = remember(calendarMonthKey, calendarFilterCategory, records) {
-                    computeCalendarUiState(records, calendarMonthKey, calendarFilterCategory)
-                }
+                val calendarUi by vm.calendarUiState.collectAsState()
                 CalendarContent(
                     calendarUi = calendarUi,
                     currentMonthKey = calendarMonthKey,
@@ -5077,32 +5074,6 @@ fun CategoryTotalHint(hint: AfterSaveHint, visible: Boolean) {
     }
 }
 
-
-/** 由 yyyy-MM 計出當月格仔佈局（星期日開頭） */
-private data class MonthGridLayout(
-    val monthKey: String,
-    val year: Int,
-    val month: Int,
-    val daysInMonth: Int,
-    val firstDayOffset: Int,
-    val totalRows: Int,
-)
-
-private fun monthGridLayout(monthKey: String): MonthGridLayout {
-    val parts = monthKey.split("-")
-    val y = parts.getOrNull(0)?.toIntOrNull() ?: 2026
-    val m = parts.getOrNull(1)?.toIntOrNull() ?: 1
-    val cal = Calendar.getInstance().apply {
-        set(y, m - 1, 1)
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-    }
-    val days = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val offset = cal.get(Calendar.DAY_OF_WEEK) - 1 // Sunday-start
-    val rows = (offset + days + 6) / 7
-    return MonthGridLayout(monthKey, y, m, days, offset, rows)
-}
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CalendarContent(
@@ -5123,8 +5094,8 @@ fun CalendarContent(
     var animateValues by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(800); animateValues = true }
 
-    val todayKey = monthKeyFromTimestamp(System.currentTimeMillis())
-    val today = Calendar.getInstance()
+    val today = remember { Calendar.getInstance() }
+    val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
 
     var monthDirection by remember { mutableIntStateOf(1) }
     var displayMode by remember { mutableIntStateOf(0) }
@@ -5147,12 +5118,6 @@ fun CalendarContent(
     // 彈簧與手勢狀態
     val gridScrollOffsetAnim = remember { Animatable(0f) }
     val detailsAlphaAnim = remember { Animatable(0f) }
-    // ★ 月份左右滑動：完全跟手，過半／夠速先換月，否則回彈
-    // drag 用普通 state（pointer 受限 scope 唔可以 call Animatable.snapTo）
-    // settle 動畫先用 Animatable
-    var monthSwipeDragOffset by remember { mutableFloatStateOf(0f) }
-    val monthSwipeAnim = remember { Animatable(0f) }
-    var monthSwipeSettling by remember { mutableStateOf(false) }
     // 向下拖動：收細明細 Box（有下限，唔會完全消失）
     var dragDownAmount by remember { mutableFloatStateOf(0f) }
     // ★ 頂部區域（Chips + Stats）顯示進度：1 = 全顯示，0 = 全收起；跟手可中途打斷
@@ -5270,13 +5235,7 @@ fun CalendarContent(
         }
     }
 
-    LaunchedEffect(currentMonthKey) {
-        handleDismiss()
-        // 換月後重置跟手位移（避免殘留）
-        monthSwipeDragOffset = 0f
-        monthSwipeAnim.snapTo(0f)
-        monthSwipeSettling = false
-    }
+    LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
 
     // ★ 明細 Box 嵌套滾動：內部列表優先；到頂後先拖動 Box 高度（跟手、有下限）
@@ -5426,7 +5385,6 @@ fun CalendarContent(
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
         val containerHeightPx = constraints.maxHeight.toFloat()
-        val calendarPageWidthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val bottomLimitPx = containerHeightPx - fabTopPaddingPx
         SideEffect { calendarBottomLimitPx = bottomLimitPx }
 
@@ -5522,246 +5480,62 @@ fun CalendarContent(
                 }
             }
 
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .clipToBounds()
-                    .nestedScroll(topPullConnection)
-            ) {
-                val prevMonthKey = remember(currentMonthKey) { shiftMonthKey(currentMonthKey, -1) }
-                val nextMonthKey = remember(currentMonthKey) { shiftMonthKey(currentMonthKey, 1) }
-                val prevLayout = remember(prevMonthKey) { monthGridLayout(prevMonthKey) }
-                val nextLayout = remember(nextMonthKey) { monthGridLayout(nextMonthKey) }
-
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().nestedScroll(topPullConnection)) {
+                // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
                 val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
                     .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
-                // ★ 只平移三頁格仔帶；標題／明細留喺外層固定
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .pointerInput(currentMonthKey, selectedDay) {
-                            if (selectedDay != null) return@pointerInput
+                Column(
+                    Modifier.fillMaxWidth()
+                        .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
+                        .padding(horizontal = 10.dp)
+                ) {
+                    for (rowIdx in 0 until totalRows) {
+                        val isRowSelected = selectedRowIdx == rowIdx
+                        CalendarRow(
+                            rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
+                            today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
+                            displayMode = displayMode, maxAbsNet = maxAbsNet,
+                            selectedDay = if (isRowSelected) selectedDay else null,
+                            selectedCol = if (isRowSelected) selectedColIdx else null,
+                            animateValues = animateValues,
+                            onCellClick = { day, col ->
+                                if (selectedDay == day) {
+                                    handleDismiss()
+                                } else {
+                                    selectedDay = day
+                                    selectedRowIdx = rowIdx
+                                    selectedColIdx = col
+                                    cachedSelectedDay = day
+                                    cachedSelectedRowIdx = rowIdx
+                                    cachedSelectedCol = col
+                                    detailExpandedId = null
 
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                var totalX = 0f
-                                var totalY = 0f
-                                var draggingHorizontal = false
-                                var pointerId = down.id
-                                val velocityTracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
-                                velocityTracker.addPosition(down.uptimeMillis, down.position)
+                                    isDockedAtTop = false
+                                    dockedReleased = false
 
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == pointerId }
-                                        ?: event.changes.firstOrNull()
-                                        ?: break
-
-                                    if (!change.pressed) {
-                                        val offset = monthSwipeDragOffset
-                                        val vx = try {
-                                            velocityTracker.calculateVelocity().x
-                                        } catch (_: Exception) { 0f }
-                                        val threshold = calendarPageWidthPx * 0.5f
-                                        val flingThreshold = 900f
-                                        val goNext = offset < -threshold || (offset < -threshold * 0.25f && vx < -flingThreshold)
-                                        val goPrev = offset > threshold || (offset > threshold * 0.25f && vx > flingThreshold)
-
-                                        if (goNext || goPrev) {
-                                            val target = if (goNext) -calendarPageWidthPx else calendarPageWidthPx
-                                            val dir = if (goNext) 1 else -1
-                                            val nextKey = shiftMonthKey(currentMonthKey, dir)
-                                            scope.launch {
-                                                monthSwipeSettling = true
-                                                monthSwipeAnim.snapTo(offset)
-                                                monthSwipeAnim.animateTo(
-                                                    target,
-                                                    spring(dampingRatio = 0.9f, stiffness = 400f)
-                                                )
-                                                monthDirection = dir
-                                                onMonthChange(nextKey)
-                                                monthSwipeDragOffset = 0f
-                                                monthSwipeAnim.snapTo(0f)
-                                                monthSwipeSettling = false
-                                            }
-                                        } else {
-                                            scope.launch {
-                                                monthSwipeSettling = true
-                                                monthSwipeAnim.snapTo(offset)
-                                                monthSwipeAnim.animateTo(
-                                                    0f,
-                                                    spring(dampingRatio = 0.85f, stiffness = 450f)
-                                                )
-                                                monthSwipeDragOffset = 0f
-                                                monthSwipeSettling = false
-                                            }
-                                        }
-                                        break
+                                    scope.launch {
+                                        val currentActual = gridScrollOffsetAnim.value - dragDownAmount
+                                        dragDownAmount = 0f
+                                        gridScrollOffsetAnim.snapTo(currentActual)
+                                        gridScrollOffsetAnim.animateTo(
+                                            rowOffsetsPx[rowIdx],
+                                            spring(dampingRatio = 0.9f, stiffness = 300f)
+                                        )
                                     }
-
-                                    val dx = change.positionChange().x
-                                    val dy = change.positionChange().y
-                                    totalX += dx
-                                    totalY += dy
-                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
-
-                                    if (!draggingHorizontal) {
-                                        val slop = viewConfiguration.touchSlop
-                                        if (kotlin.math.abs(totalX) > slop || kotlin.math.abs(totalY) > slop) {
-                                            if (kotlin.math.abs(totalX) > kotlin.math.abs(totalY)) {
-                                                draggingHorizontal = true
-                                                change.consume()
-                                            } else {
-                                                break
-                                            }
-                                        }
-                                    } else {
-                                        change.consume()
-                                        val newOffset = monthSwipeDragOffset + dx
-                                        val resisted = when {
-                                            newOffset > calendarPageWidthPx ->
-                                                calendarPageWidthPx + (newOffset - calendarPageWidthPx) * 0.35f
-                                            newOffset < -calendarPageWidthPx ->
-                                                -calendarPageWidthPx + (newOffset + calendarPageWidthPx) * 0.35f
-                                            else -> newOffset
-                                        }
-                                        monthSwipeDragOffset = resisted
+                                    // ★ 即時顯示明細（取消漸變消失），收起頂部
+                                    scope.launch { detailsAlphaAnim.snapTo(1f) }
+                                    scope.launch {
+                                        topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
                                     }
                                 }
                             }
-                        }
-                        .graphicsLayer {
-                            val ox = if (monthSwipeSettling) monthSwipeAnim.value else monthSwipeDragOffset
-                            translationX = -calendarPageWidthPx + ox
-                        }
-                ) {
-                Row(
-                    Modifier
-                        // ★ requiredWidth：唔受父層 maxWidth 壓扁，三頁先可以並排
-                        .requiredWidth(with(density) { (calendarPageWidthPx * 3f).toDp() })
-                        .fillMaxHeight()
-                ) {
-                    // —— 上一個月（預覽）——
-                    Box(Modifier.requiredWidth(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .offset { IntOffset(0, headerHeightPx.roundToInt()) }
-                                .padding(horizontal = 10.dp)
-                        ) {
-                            for (rowIdx in 0 until prevLayout.totalRows) {
-                                CalendarRow(
-                                    rowIdx = rowIdx,
-                                    firstDayOffset = prevLayout.firstDayOffset,
-                                    daysInMonth = prevLayout.daysInMonth,
-                                    today = today,
-                                    isCurrentMonth = prevMonthKey == todayKey,
-                                    recordsByDay = emptyMap(),
-                                    displayMode = displayMode,
-                                    maxAbsNet = 0.0,
-                                    selectedDay = null,
-                                    selectedCol = null,
-                                    animateValues = false,
-                                    onCellClick = { _, _ -> }
-                                )
-                                if (rowIdx < prevLayout.totalRows - 1) Spacer(Modifier.height(6.dp))
-                            }
-                        }
-                    }
-                    // —— 本月 ——
-                    Box(Modifier.requiredWidth(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
-                                .padding(horizontal = 10.dp)
-                        ) {
-                            for (rowIdx in 0 until totalRows) {
-                                val isRowSelected = selectedRowIdx == rowIdx
-                                CalendarRow(
-                                    rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
-                                    today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
-                                    displayMode = displayMode, maxAbsNet = maxAbsNet,
-                                    selectedDay = if (isRowSelected) selectedDay else null,
-                                    selectedCol = if (isRowSelected) selectedColIdx else null,
-                                    animateValues = animateValues,
-                                    onCellClick = { day, col ->
-                                        if (selectedDay == day) {
-                                            handleDismiss()
-                                        } else {
-                                            selectedDay = day
-                                            selectedRowIdx = rowIdx
-                                            selectedColIdx = col
-                                            cachedSelectedDay = day
-                                            cachedSelectedRowIdx = rowIdx
-                                            cachedSelectedCol = col
-                                            detailExpandedId = null
-
-                                            isDockedAtTop = false
-                                            dockedReleased = false
-
-                                            scope.launch {
-                                                val currentActual = gridScrollOffsetAnim.value - dragDownAmount
-                                                dragDownAmount = 0f
-                                                gridScrollOffsetAnim.snapTo(currentActual)
-                                                gridScrollOffsetAnim.animateTo(
-                                                    rowOffsetsPx[rowIdx],
-                                                    spring(dampingRatio = 0.9f, stiffness = 300f)
-                                                )
-                                            }
-                                            scope.launch { detailsAlphaAnim.snapTo(1f) }
-                                            scope.launch {
-                                                topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
-                                            }
-                                        }
-                                    }
-                                )
-                                if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
-                            }
-                        }
-                    }
-                    // —— 下一個月（預覽）——
-                    Box(Modifier.requiredWidth(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .offset { IntOffset(0, headerHeightPx.roundToInt()) }
-                                .padding(horizontal = 10.dp)
-                        ) {
-                            for (rowIdx in 0 until nextLayout.totalRows) {
-                                CalendarRow(
-                                    rowIdx = rowIdx,
-                                    firstDayOffset = nextLayout.firstDayOffset,
-                                    daysInMonth = nextLayout.daysInMonth,
-                                    today = today,
-                                    isCurrentMonth = nextMonthKey == todayKey,
-                                    recordsByDay = emptyMap(),
-                                    displayMode = displayMode,
-                                    maxAbsNet = 0.0,
-                                    selectedDay = null,
-                                    selectedCol = null,
-                                    animateValues = false,
-                                    onCellClick = { _, _ -> }
-                                )
-                                if (rowIdx < nextLayout.totalRows - 1) Spacer(Modifier.height(6.dp))
-                            }
-                        }
+                        )
+                        if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
                     }
                 }
 
-                } // end inner translating Box (三頁帶)
-
-                // 星期標題固定喺視口頂部
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(headerHeightDp)
-                        .align(Alignment.TopCenter)
-                        .zIndex(20f)
-                        .background(SURFACE_BG)
-                ) {
+                Box(Modifier.fillMaxWidth().height(headerHeightDp).align(Alignment.TopCenter).zIndex(20f).background(SURFACE_BG)) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 13.dp).fillMaxHeight(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -7805,7 +7579,7 @@ fun CalendarRow(
     // ★ 高度永遠固定，唔再乘 expansionFraction
     val rowHeight = contentHeight + verticalPad * 2
 
-    val todayDayOfMonth = today.get(Calendar.DAY_OF_MONTH)
+    val todayDayOfMonth = remember(today) { today.get(Calendar.DAY_OF_MONTH) }
 
     Row(
         Modifier.fillMaxWidth().height(rowHeight).clipToBounds().padding(horizontal = horizontalPad),
