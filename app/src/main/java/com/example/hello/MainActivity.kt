@@ -5118,6 +5118,9 @@ fun CalendarContent(
     // 彈簧與手勢狀態
     val gridScrollOffsetAnim = remember { Animatable(0f) }
     val detailsAlphaAnim = remember { Animatable(0f) }
+    // ★ 月份左右滑動：完全跟手，過半／夠速先換月，否則回彈
+    val monthSwipeOffset = remember { Animatable(0f) }
+    var isMonthSwiping by remember { mutableStateOf(false) }
     // 向下拖動：收細明細 Box（有下限，唔會完全消失）
     var dragDownAmount by remember { mutableFloatStateOf(0f) }
     // ★ 頂部區域（Chips + Stats）顯示進度：1 = 全顯示，0 = 全收起；跟手可中途打斷
@@ -5235,7 +5238,12 @@ fun CalendarContent(
         }
     }
 
-    LaunchedEffect(currentMonthKey) { handleDismiss() }
+    LaunchedEffect(currentMonthKey) {
+        handleDismiss()
+        // 換月後重置跟手位移（避免殘留）
+        monthSwipeOffset.snapTo(0f)
+        isMonthSwiping = false
+    }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
 
     // ★ 明細 Box 嵌套滾動：內部列表優先；到頂後先拖動 Box 高度（跟手、有下限）
@@ -5480,7 +5488,117 @@ fun CalendarContent(
                 }
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().nestedScroll(topPullConnection)) {
+            val calendarPageWidthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clipToBounds()
+                    .nestedScroll(topPullConnection)
+                    .pointerInput(currentMonthKey, selectedDay) {
+                        // 有選中日明細時唔搶左右滑（避免同垂直手勢衝突）
+                        if (selectedDay != null) return@pointerInput
+
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var totalX = 0f
+                            var totalY = 0f
+                            var draggingHorizontal = false
+                            var pointerId = down.id
+                            val velocityTracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
+                            velocityTracker.addPosition(down.uptimeMillis, down.position)
+
+                            // 跟住同一指，直到抬起／取消
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == pointerId }
+                                    ?: event.changes.firstOrNull()
+                                    ?: break
+
+                                if (!change.pressed) {
+                                    // 手指放開：決定換月定回彈
+                                    val offset = monthSwipeOffset.value
+                                    val vx = try {
+                                        velocityTracker.calculateVelocity().x
+                                    } catch (_: Exception) { 0f }
+                                    val threshold = calendarPageWidthPx * 0.5f
+                                    val flingThreshold = 900f
+                                    val goNext = offset < -threshold || (offset < -threshold * 0.25f && vx < -flingThreshold)
+                                    val goPrev = offset > threshold || (offset > threshold * 0.25f && vx > flingThreshold)
+
+                                    if (goNext || goPrev) {
+                                        val target = if (goNext) -calendarPageWidthPx else calendarPageWidthPx
+                                        val dir = if (goNext) 1 else -1
+                                        val nextKey = shiftMonthKey(currentMonthKey, dir)
+                                        scope.launch {
+                                            isMonthSwiping = true
+                                            monthSwipeOffset.animateTo(
+                                                target,
+                                                spring(dampingRatio = 0.9f, stiffness = 400f)
+                                            )
+                                            monthDirection = dir
+                                            onMonthChange(nextKey)
+                                            // 新月份喺中央出現
+                                            monthSwipeOffset.snapTo(0f)
+                                            isMonthSwiping = false
+                                        }
+                                    } else {
+                                        scope.launch {
+                                            isMonthSwiping = true
+                                            monthSwipeOffset.animateTo(
+                                                0f,
+                                                spring(dampingRatio = 0.85f, stiffness = 450f)
+                                            )
+                                            isMonthSwiping = false
+                                        }
+                                    }
+                                    break
+                                }
+
+                                val dx = change.positionChange().x
+                                val dy = change.positionChange().y
+                                totalX += dx
+                                totalY += dy
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
+
+                                if (!draggingHorizontal) {
+                                    // 超過 touch slop 先決定方向：水平優先先開始月份滑動
+                                    val slop = viewConfiguration.touchSlop
+                                    if (kotlin.math.abs(totalX) > slop || kotlin.math.abs(totalY) > slop) {
+                                        if (kotlin.math.abs(totalX) > kotlin.math.abs(totalY)) {
+                                            draggingHorizontal = true
+                                            isMonthSwiping = true
+                                            change.consume()
+                                        } else {
+                                            // 垂直手勢：交俾 nestedScroll / 其他處理
+                                            break
+                                        }
+                                    }
+                                } else {
+                                    change.consume()
+                                    val newOffset = (monthSwipeOffset.value + dx)
+                                    // 輕微橡皮筋：超出一頁時阻力加大
+                                    val resisted = when {
+                                        newOffset > calendarPageWidthPx ->
+                                            calendarPageWidthPx + (newOffset - calendarPageWidthPx) * 0.35f
+                                        newOffset < -calendarPageWidthPx ->
+                                            -calendarPageWidthPx + (newOffset + calendarPageWidthPx) * 0.35f
+                                        else -> newOffset
+                                    }
+                                    // 同步跟手，唔經 extra coroutine 避免掉幀
+                                    monthSwipeOffset.snapTo(resisted)
+                                }
+                            }
+                        }
+                    }
+                    .graphicsLayer {
+                        translationX = monthSwipeOffset.value
+                        // 輕微淡出增加跟手感
+                        val p = (kotlin.math.abs(monthSwipeOffset.value) / calendarPageWidthPx).coerceIn(0f, 1f)
+                        alpha = 1f - p * 0.15f
+                    }
+            ) {
                 // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
                 val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
                     .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
