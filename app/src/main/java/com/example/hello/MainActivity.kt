@@ -4603,7 +4603,6 @@ fun WeeklyExpenseChart(
     val chartHeight = 178.dp
     val horizontalPadding = 16.dp
     val innerPadding = 12.dp
-    // ★ 縮小標題同下方圖表嘅間距，彌補 wrapContentHeight 帶來嘅高度變化
     val titleGap = 4.dp
     val labelRowHeight = 20.dp
 
@@ -4667,32 +4666,28 @@ fun WeeklyExpenseChart(
                 ) {
                     // ── 標題行
                     Row(
-                        // ★ 完全移除 height 限制，等佢自然包裹字體
                         Modifier.fillMaxWidth().wrapContentHeight(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "近 7 日支出",
                             fontSize = 13.sp,
+                            // ★ 明確加大 lineHeight，俾中文字有足夠高度
+                            lineHeight = 20.sp, 
                             fontWeight = FontWeight.Bold,
                             color = TEXT_PRIMARY,
-                            // ★ 關閉系統自帶嘅字體 Padding，令文字排版同邊界更精準
-                            style = TextStyle(
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            // ★ 額外預留少少底邊距，確保中文字腳完全唔會貼邊被裁
-                            modifier = Modifier.padding(bottom = 2.dp)
+                            // ★ 移除 includeFontPadding，用返系統預設，避免內部裁切
+                            modifier = Modifier.padding(vertical = 4.dp)
                         )
                         Spacer(Modifier.weight(1f))
                         Text(
                             text = "合計 $${formatAmountNoDecimal(totalAmount)}",
                             fontSize = 12.sp,
+                            // ★ 同樣加大 lineHeight
+                            lineHeight = 18.sp,
                             color = TEXT_SECONDARY,
                             fontWeight = FontWeight.Medium,
-                            style = TextStyle(
-                                platformStyle = PlatformTextStyle(includeFontPadding = false)
-                            ),
-                            modifier = Modifier.padding(bottom = 2.dp)
+                            modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
                     Spacer(Modifier.height(titleGap))
@@ -4733,7 +4728,6 @@ fun WeeklyExpenseChart(
                                 .pointerInput(data.size) {
                                     if (data.isEmpty()) return@pointerInput
                                     awaitEachGesture {
-                                        // 一撳即選中（唔要求 unconsumed，因為 LazyColumn 亦可能想要）
                                         val down = awaitFirstDown(requireUnconsumed = false)
                                         val w = size.width.toFloat()
                                         val h = size.height.toFloat()
@@ -4749,7 +4743,6 @@ fun WeeklyExpenseChart(
                                             val change = event.changes
                                                 .firstOrNull { it.id == down.id } ?: break
 
-                                            // 放手／父層搶走 → 清空
                                             if (!change.pressed || change.isConsumed) {
                                                 selectedIndex = null
                                                 break
@@ -4759,22 +4752,16 @@ fun WeeklyExpenseChart(
                                             val totalDx = abs(pos.x - down.position.x)
                                             val totalDy = abs(pos.y - down.position.y)
 
-                                            // 水平拖動過 slop 就接管，防父層搶
-                                            if (!dragging &&
-                                                totalDx > viewConfiguration.touchSlop &&
-                                                totalDx > totalDy
-                                            ) { dragging = true }
+                                            if (!dragging && totalDx > viewConfiguration.touchSlop && totalDx > totalDy) { 
+                                                dragging = true 
+                                            }
 
                                             if (dragging) change.consume()
 
-                                            // 邊界：滑出柱形圖範圍即取消
-                                            if (pos.x < 0f || pos.x > w ||
-                                                pos.y < 0f || pos.y > h) {
+                                            if (pos.x < 0f || pos.x > w || pos.y < 0f || pos.y > h) {
                                                 selectedIndex = null
                                             } else {
-                                                selectedIndex = (pos.x / cw)
-                                                    .toInt()
-                                                    .coerceIn(0, data.size - 1)
+                                                selectedIndex = (pos.x / cw).toInt().coerceIn(0, data.size - 1)
                                             }
                                         }
                                     }
@@ -4795,7 +4782,7 @@ fun WeeklyExpenseChart(
                             }
                         }
 
-                        // ★ 浮標層：固定頂部、水平跟隨選中柱，解除 parent 寬度限制
+                        // ★ 浮標層
                         Box(
                             modifier = Modifier
                                 .graphicsLayer { alpha = bubbleAlpha }
@@ -4808,12 +4795,9 @@ fun WeeklyExpenseChart(
                                     )
                                     layout(outerConstraints.maxWidth, placeable.height) {
                                         val cx = areaWPx * animatedCxRatio
-                                        val maxLeft = (outerConstraints.maxWidth -
-                                                       placeable.width).coerceAtLeast(0)
-                                        val x = (cx - placeable.width / 2f)
-                                            .roundToInt()
-                                            .coerceIn(0, maxLeft)
-                                        placeable.placeRelative(x, 0) // y = 0 → 貼頂
+                                        val maxLeft = (outerConstraints.maxWidth - placeable.width).coerceAtLeast(0)
+                                        val x = (cx - placeable.width / 2f).roundToInt().coerceIn(0, maxLeft)
+                                        placeable.placeRelative(x, 0)
                                     }
                                 }
                         ) {
@@ -4834,10 +4818,7 @@ fun WeeklyExpenseChart(
                                     color = Color.White,
                                     maxLines = 1,
                                     softWrap = false,
-                                    letterSpacing = (-0.3).sp,
-                                    style = TextStyle(
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    )
+                                    letterSpacing = (-0.3).sp
                                 )
                             }
                         }
@@ -4853,13 +4834,12 @@ fun WeeklyExpenseChart(
                                 Text(
                                     text = day.weekdayChar,
                                     fontSize = 11.sp,
-                                    lineHeight = 14.sp,
-                                    style = TextStyle(
-                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                    ),
+                                    // ★ 設定充足嘅行高，移除 includeFontPadding
+                                    lineHeight = 16.sp,
                                     color = if (day.isToday) BRAND_PRIMARY_DARK else TEXT_SECONDARY,
                                     fontWeight = if (day.isToday) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(vertical = 2.dp)
                                 )
                             }
                         }
