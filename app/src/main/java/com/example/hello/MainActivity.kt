@@ -5636,11 +5636,12 @@ fun CalendarContent(
                 ) {
                 Row(
                     Modifier
-                        .width(with(density) { (calendarPageWidthPx * 3f).toDp() })
+                        // ★ requiredWidth：唔受父層 maxWidth 壓扁，三頁先可以並排
+                        .requiredWidth(with(density) { (calendarPageWidthPx * 3f).toDp() })
                         .fillMaxHeight()
                 ) {
                     // —— 上一個月（預覽）——
-                    Box(Modifier.width(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
+                    Box(Modifier.requiredWidth(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
@@ -5667,7 +5668,7 @@ fun CalendarContent(
                         }
                     }
                     // —— 本月 ——
-                    Box(Modifier.width(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
+                    Box(Modifier.requiredWidth(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
@@ -5719,7 +5720,7 @@ fun CalendarContent(
                         }
                     }
                     // —— 下一個月（預覽）——
-                    Box(Modifier.width(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
+                    Box(Modifier.requiredWidth(with(density) { calendarPageWidthPx.toDp() }).fillMaxHeight()) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
