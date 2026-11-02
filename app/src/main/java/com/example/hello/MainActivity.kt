@@ -4207,9 +4207,9 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // ★ 加入 filterChartCollapse < 0.99f 判斷
-                        // 當收起進度接近 100% 時直接移除項目，避免 0 高度導致嘅無限向下滾動 Bug
-                        if (weeklyExpenses.isNotEmpty() && filterChartCollapse < 0.99f) {
+                        // ★ 加入 !filterMode 判斷，確保退出時即刻加返入列表
+                        val showWeeklyChart = weeklyExpenses.isNotEmpty() && (!filterMode || filterChartCollapse < 0.99f)
+                        if (showWeeklyChart) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
                                 WeeklyExpenseChart(
                                     data = weeklyExpenses,
