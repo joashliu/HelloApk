@@ -3816,13 +3816,12 @@ fun LedgerContent(
     LaunchedEffect(filterMode) {
         try {
             if (!filterMode) {
-                // 退出篩選模式時，強制滾動回頂部，令 7 日棒型圖重新露出
+                // ★ 俾 Compose 50 毫秒將棒型圖重新加返入渲染樹，然後先至滾動
+                delay(50)
                 listState.animateScrollToItem(0)
             } else {
-                // ★ 補回重置狀態，確保快速輸入區數值正確
                 quickInputCollapseOffset = 0f 
                 if (listState.firstVisibleItemIndex > 20) {
-                    // 進入篩選模式時，如果已經滾動得太深，亦回到頂部
                     listState.animateScrollToItem(0)
                 }
             }
