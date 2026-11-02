@@ -1226,7 +1226,13 @@ private fun computeLedgerUiState(
     var firstNote: String? = null
     var allSameNote = true
 
-    for (r in ledgerRecords) {
+    // ★ Top Stat 只統計「今個月」金額（篩選模式下仍跟住篩選結果）
+    val currentMonthKey = getTimestampMeta(now).monthKey
+    val topStatRecords = if (filter.modeOn) ledgerRecords else {
+        ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == currentMonthKey }
+    }
+
+    for (r in topStatRecords) {
         // ★ Top Stat 金額排除「還錢」類別
         if (r.id !in deletingIds && r.category != "還錢") {
             if (r.category == INCOME_CATEGORY) {
@@ -1235,6 +1241,9 @@ private fun computeLedgerUiState(
                 hasExpense = true; totalExpense += r.amount
             }
         }
+    }
+
+    for (r in ledgerRecords) {
         val dKey = getTimestampMeta(r.timestamp).dateKey
         groupedMap.getOrPut(dKey) { ArrayList() }.add(r)
         if (filter.modeOn && allSameNote) {
@@ -5150,7 +5159,8 @@ fun CalendarContent(
     val firstDayOffset = remember(curCal) {
         val first = curCal.clone() as Calendar
         first.set(Calendar.DAY_OF_MONTH, 1)
-        (first.get(Calendar.DAY_OF_WEEK) + 5) % 7
+        // ★ 星期日為一週開始：Calendar.SUNDAY=1 → offset 0
+        first.get(Calendar.DAY_OF_WEEK) - 1
     }
     val totalRows = (firstDayOffset + daysInMonth + 6) / 7
     val gridSpacingPx = remember(density) { with(density) { 6.dp.toPx() } }
@@ -7838,7 +7848,7 @@ val animatedBarColor by animateColorAsState(
     }
 }
 
-private val CALENDAR_WEEKDAY_HEADERS = listOf("一", "二", "三", "四", "五", "六", "日")
+private val CALENDAR_WEEKDAY_HEADERS = listOf("日", "一", "二", "三", "四", "五", "六")
 
 private val SEGMENTED_MODES = listOf(
     Triple("金額", Icons.Default.AttachMoney, 0),
