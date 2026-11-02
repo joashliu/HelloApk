@@ -1192,14 +1192,13 @@ private fun computeLedgerUiState(
     hiddenQuickNotes: Set<String> = emptySet(),
 ): LedgerUiState {
     val now = System.currentTimeMillis()
+    
+    // ★ 已修復嘅搜尋邏輯
     val searchFiltered: List<Record> = if (filter.search.isBlank()) records else {
         val q = filter.search
-        // ★ 移除咗 hasExactNote 嘅強制精準匹配，統一用 contains 做模糊搜尋，
-        // 咁樣打 "e" 就一定會出哂 "e", "ee", "eat" 等等
         records.filter { r ->
             r.note.contains(q, ignoreCase = true) || r.category.contains(q, ignoreCase = true)
         }
-    }
     }
 
     val filterCat = filter.category
@@ -1223,14 +1222,12 @@ private fun computeLedgerUiState(
     var firstNote: String? = null
     var allSameNote = true
 
-    // ★ Top Stat 只統計「今個月」金額（篩選模式下仍跟住篩選結果）
     val currentMonthKey = getTimestampMeta(now).monthKey
     val topStatRecords = if (filter.modeOn) ledgerRecords else {
         ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == currentMonthKey }
     }
 
     for (r in topStatRecords) {
-        // ★ Top Stat 金額排除「還錢」類別
         if (r.id !in deletingIds && r.category != "還錢") {
             if (r.category == INCOME_CATEGORY) {
                 hasIncome = true; totalIncome += r.amount
