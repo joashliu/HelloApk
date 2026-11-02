@@ -3287,7 +3287,7 @@ private fun AnimatedFabLayer(
         modifier = modifier
             .graphicsLayer {
                 val currentP = progressProvider()
-                val fabX = 86.dp.toPx()
+                val fabX = lerp(20.dp, 86.dp, currentP).toPx()
                 val fabY = lerp(92.dp, 388.dp, currentP).toPx()
                 translationX = -fabX
                 translationY = -fabY
