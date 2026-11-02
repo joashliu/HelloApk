@@ -6070,7 +6070,6 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    // 金額／匯率輸入模式：清走系統鍵盤同文字框焦點，確保候選列表收起
     LaunchedEffect(state.focusedField) {
         if (state.focusedField == "amount" || state.focusedField == "rate") {
             focusManager.clearFocus(force = true)
@@ -6079,13 +6078,13 @@ fun LedgerKeyboardPanel(
 
     val panelShape = RoundedCornerShape(16.dp)
     val panelScrollState = rememberScrollState()
-    // ★ 進入名稱輸入時自動滾去底部，確保輸入框喺可視區（配合 IME 避讓）
     LaunchedEffect(state.editingNote) {
         if (state.editingNote) {
             kotlinx.coroutines.delay(80)
             panelScrollState.animateScrollTo(panelScrollState.maxValue)
         }
     }
+    
     Box(
         modifier = modifier
             .clip(panelShape)
@@ -6292,7 +6291,6 @@ fun LedgerKeyboardPanel(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { key ->
                             KeyboardKey(key, {
-                                // ★ 數字鍵一律回到金額輸入模式（除非正在編輯匯率）
                                 val editingRate = state.focusedField == "rate"
                                 if (!editingRate && state.focusedField != "amount") {
                                     onStateChange(state.copy(focusedField = "amount", editingNote = false))
@@ -6396,7 +6394,6 @@ fun LedgerKeyboardPanel(
                         }
                         val focusReq = remember { FocusRequester() }
                         val keyboardController = LocalSoftwareKeyboardController.current
-                        // ★ 只有文字框真正獲得焦點時先顯示項目候選列表
                         var noteFieldFocused by remember { mutableStateOf(false) }
 
                         LaunchedEffect(state.editingNote) {
@@ -6404,7 +6401,6 @@ fun LedgerKeyboardPanel(
                                 focusReq.requestFocus()
                             }
                         }
-                        // 金額輸入模式：強制清走文字框焦點，收起候選列表
                         LaunchedEffect(state.focusedField) {
                             if (state.focusedField == "amount" || state.focusedField == "rate") {
                                 noteFieldFocused = false
@@ -6468,7 +6464,6 @@ fun LedgerKeyboardPanel(
                                 }
                         )
 
-                        // ★ 候選列表：僅喺文字框有焦點時顯示；點 Chips／金額模式永遠唔顯示
                         val suggestions = remember(state.noteText, allNoteNames) {
                             filterNoteSuggestions(state.noteText, allNoteNames)
                         }
@@ -6482,7 +6477,11 @@ fun LedgerKeyboardPanel(
                                     shape = RoundedCornerShape(12.dp),
                                     color = SURFACE_CARD,
                                     border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                                    modifier = Modifier.width(280.dp).heightIn(max = 220.dp)
+                                    modifier = Modifier
+                                        .width(280.dp)
+                                        .heightIn(max = 220.dp)
+                                        // ★ 加入 animateContentSize 順滑伸縮
+                                        .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f))
                                 ) {
                                     Column(Modifier.verticalScroll(rememberScrollState())) {
                                         suggestions.forEach { s ->
@@ -6522,7 +6521,6 @@ fun LedgerKeyboardPanel(
                     }
                 }
 
-                // ================= 类别按钮 + 菜单 =================
                 val currentStyle = CATEGORY_STYLES[state.category]
                 val menuVisibleState = remember { MutableTransitionState(false) }
                 Box {
@@ -6657,7 +6655,6 @@ fun LedgerKeyboardPanel(
                         }
                     }
                 }
-                // =================================================
             }
 
             Spacer(Modifier.height(10.dp))
