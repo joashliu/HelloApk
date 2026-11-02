@@ -2062,9 +2062,15 @@ fun LightweightEntryApp(
             }
         }
 
+        // ★ 輕量模式同樣避讓系統輸入法
+        val densityLw = LocalDensity.current
+        val imeBottomLw = WindowInsets.ime.getBottom(densityLw)
+        val navBottomLw = WindowInsets.navigationBars.getBottom(densityLw)
+        val imeLiftLw = with(densityLw) { (imeBottomLw - navBottomLw).coerceAtLeast(0).toDp() }
+
         Column(
             Modifier.align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp)
+                .padding(bottom = 20.dp + imeLiftLw)
                 .graphicsLayer {
                     alpha = appearProgress.value
                     translationY = (1f - appearProgress.value) * 150f
@@ -3093,12 +3099,28 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
+    // ★ 系統輸入法避讓：
+    //   Root Surface 已 windowInsetsPadding(systemBars)，所以只再抬「IME 超出 navigationBar」嘅高度，
+    //   避免雙重 padding。系統鍵盤彈出時，篩選搜尋框 + 自訂鍵盤 + FAB 一齊升到 IME 正上方。
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val navBottomPx = WindowInsets.navigationBars.getBottom(density)
+    val imeLiftDp = with(density) { (imeBottomPx - navBottomPx).coerceAtLeast(0).toDp() }
+    val imeOpen = imeLiftDp > 0.dp
+    // IME 開時 nav 已被遮住，唔使再留 NAV_HEIGHT；關時坐喺底部導航上面
+    val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
+
+    Box(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(bottom = imeLiftDp)
+    ) {
     Row(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp,
-                bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+            .padding(start = 16.dp, end = 16.dp, bottom = bottomChromePad)
             .height(56.dp)
             .graphicsLayer {
                 val p = progressProvider()
@@ -3240,8 +3262,10 @@ private fun BoxScope.KeyboardAndFabLayer(
         allNoteNames = allNoteNames,
         noteCategoryMap = noteCategoryMap,
         nameFlashTrigger = nameFlashTrigger,
+        imeOpen = imeOpen,
         modifier = Modifier.align(Alignment.BottomCenter)
     )
+    } // end IME-lift Box
 }
 
 @Composable
@@ -3308,6 +3332,7 @@ private fun AnimatedKeyboardLayer(
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
+    imeOpen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val currentP = progressProvider()
@@ -3315,10 +3340,26 @@ private fun AnimatedKeyboardLayer(
 
     if (!isActive) return
 
+    // ★ 系統鍵盤開住時限制高度，面板可垂直捲動，確保名稱輸入框永遠睇到
+    val config = LocalConfiguration.current
+    val maxPanelHeight = if (imeOpen) {
+        (config.screenHeightDp * 0.42f).dp.coerceAtLeast(220.dp)
+    } else {
+        Dp.Unspecified
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 20.dp, end = 16.dp, start = 16.dp)
+            .padding(
+                bottom = if (imeOpen) 8.dp else 20.dp,
+                end = 16.dp,
+                start = 16.dp
+            )
+            .then(
+                if (maxPanelHeight != Dp.Unspecified) Modifier.heightIn(max = maxPanelHeight)
+                else Modifier
+            )
             .graphicsLayer {
                 alpha = currentP
                 val w = size.width
@@ -6033,6 +6074,14 @@ fun LedgerKeyboardPanel(
     }
 
     val panelShape = RoundedCornerShape(16.dp)
+    val panelScrollState = rememberScrollState()
+    // ★ 進入名稱輸入時自動滾去底部，確保輸入框喺可視區（配合 IME 避讓）
+    LaunchedEffect(state.editingNote) {
+        if (state.editingNote) {
+            kotlinx.coroutines.delay(80)
+            panelScrollState.animateScrollTo(panelScrollState.maxValue)
+        }
+    }
     Box(
         modifier = modifier
             .clip(panelShape)
@@ -6041,7 +6090,7 @@ fun LedgerKeyboardPanel(
     ) {
         Column(
             Modifier.fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(panelScrollState)
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
             val dateText = remember(state.timestamp) { formatDatePart(state.timestamp) }
@@ -6820,6 +6869,12 @@ fun AnimatedCalendarCategoryChips(
         }
     }
 }
+
+private val DIGIT_SLIDE_ENTER = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
+private val DIGIT_SLIDE_EXIT = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
+private val DIGIT_FLOAT_ENTER = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
+private val DIGIT_FLOAT_EXIT = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
+private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
 
 @Composable
 fun SmartElement(
@@ -9199,12 +9254,6 @@ private fun WeeklyExpenseBarBody(
     }
 }
 
-private val DIGIT_SLIDE_ENTER = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
-private val DIGIT_SLIDE_EXIT = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
-private val DIGIT_FLOAT_ENTER = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
-private val DIGIT_FLOAT_EXIT = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
-private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
-
 @Composable
 fun RollingNumber(
     text: String,
@@ -9490,13 +9539,11 @@ fun AnimatedAmount(
                                 else -> true
                             }
                             when {
-                                // 出字：由空位出現
                                 targetState != null && initialState == null -> {
                                     (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
                                      fadeIn(tween(200)) +
                                      scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith fadeOut(tween(0))
                                 }
-                                // 消字：位變空
                                 targetState == null && initialState != null -> {
                                     fadeIn(tween(0)) togetherWith
                                     (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
