@@ -6821,12 +6821,6 @@ fun AnimatedCalendarCategoryChips(
     }
 }
 
-private val DIGIT_SLIDE_ENTER = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
-private val DIGIT_SLIDE_EXIT = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
-private val DIGIT_FLOAT_ENTER = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
-private val DIGIT_FLOAT_EXIT = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
-private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
-
 @Composable
 fun SmartElement(
     listState: LazyListState?, dateKey: String,
@@ -9205,6 +9199,12 @@ private fun WeeklyExpenseBarBody(
     }
 }
 
+private val DIGIT_SLIDE_ENTER = spring<IntOffset>(dampingRatio = 0.65f, stiffness = 450f)
+private val DIGIT_SLIDE_EXIT = spring<IntOffset>(dampingRatio = 0.7f, stiffness = 400f)
+private val DIGIT_FLOAT_ENTER = spring<Float>(dampingRatio = 0.65f, stiffness = 450f)
+private val DIGIT_FLOAT_EXIT = spring<Float>(dampingRatio = 0.7f, stiffness = 400f)
+private val DIGIT_SIZE_SPRING = spring<IntSize>(dampingRatio = 0.75f, stiffness = 350f)
+
 @Composable
 fun RollingNumber(
     text: String,
@@ -9243,33 +9243,35 @@ fun RollingNumber(
         with(density) { layout.size.height.toDp() }
     }
 
-    val currentText by rememberUpdatedState(text)
     val currentAnimate by rememberUpdatedState(animateChanges)
     var displayedText by remember { mutableStateOf(text) }
 
-    // ★ 保證無論中途被取消，最終一定顯示完整目標數字
+    // ★ 唔再 finally 強制跳字：取消時保留已顯示進度，新 effect 由當前 displayedText 繼續
     LaunchedEffect(text, animateChanges) {
-        val target = text
-        try {
-            if (!animateChanges) {
-                displayedText = target
-                return@LaunchedEffect
-            }
-            if (target.length < displayedText.length || !target.startsWith(displayedText)) {
-                displayedText = target
-                return@LaunchedEffect
-            }
-            while (displayedText != target && isActive) {
-                if (target.length < displayedText.length || !target.startsWith(displayedText)) {
-                    displayedText = target
-                    break
-                }
-                displayedText += target[displayedText.length]
-                delay(60)
-            }
-        } finally {
-            displayedText = currentText
+        if (!animateChanges) {
+            displayedText = text
+            return@LaunchedEffect
         }
+        val target = text
+        val current = displayedText
+        if (target == current) return@LaunchedEffect
+        // 刪字 / 非前綴：即刻對齊，由每位動畫負責出入場
+        if (target.length <= current.length || !target.startsWith(current)) {
+            displayedText = target
+            return@LaunchedEffect
+        }
+        // 一次補多個字先做輕量打字機；中途被取消唔強制跳字
+        var shown = current
+        while (shown.length < target.length && isActive) {
+            if (!target.startsWith(shown)) {
+                displayedText = target
+                return@LaunchedEffect
+            }
+            shown = target.substring(0, shown.length + 1)
+            displayedText = shown
+            if (shown.length < target.length) delay(40)
+        }
+        if (isActive && displayedText != target) displayedText = target
     }
 
     Row(
@@ -9406,40 +9408,52 @@ fun AnimatedAmount(
     animateChanges: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
+    // ★ 預先保留足夠 slot，確保新數字永遠走 null→char 過渡（有入場動畫）
+    //   而唔係臨時加 slot 導致 AnimatedContent 首次組合時冇 transition
+    val maxSlots = remember { mutableIntStateOf(maxOf(text.length + 4, 12)) }
     LaunchedEffect(text.length) {
-        if (text.length > maxSlots.value) maxSlots.value = text.length
+        if (text.length + 2 > maxSlots.value) maxSlots.value = text.length + 4
     }
 
-    val currentText by rememberUpdatedState(text)
     val currentAnimate by rememberUpdatedState(animateChanges)
+
+    // ★ 用 displayedText 做「可見字串」，但唔再用會被取消嘅 finally 強制跳字。
+    //   打字（+1）／刪字（-1）即刻同步，讓每位 AnimatedContent 穩定播出入場動畫；
+    //   只有一次跳多位且係前綴延長時，先做輕量打字機效果。
     var displayedText by remember { mutableStateOf(text) }
 
-    // ★ 保證無論中途被取消（例如篩選切換），最終一定顯示完整目標數字
     LaunchedEffect(text, animateChanges) {
+        if (!animateChanges) {
+            displayedText = text
+            return@LaunchedEffect
+        }
         val target = text
-        try {
-            if (!animateChanges) {
+        val current = displayedText
+        if (target == current) return@LaunchedEffect
+
+        // 刪字、改中間、非前綴：即刻對齊，由每位 AnimatedContent 負責出入場
+        if (target.length <= current.length || !target.startsWith(current)) {
+            displayedText = target
+            return@LaunchedEffect
+        }
+
+        // 一次補多個字（例如外部一次 set 成完整金額）：逐字補，間隔短啲保持跟手
+        // 注意：唔可以 finally 強制落地，否則快速連按會取消 effect 並跳過動畫
+        var shown = current
+        while (shown.length < target.length && isActive) {
+            // 若期間 target 又變（例如用戶繼續打），以最新 prefix 安全延長
+            if (!target.startsWith(shown)) {
                 displayedText = target
                 return@LaunchedEffect
             }
-            // 前綴不相容時直接跳到完整目標，避免半截數字
-            if (target.length < displayedText.length || !target.startsWith(displayedText)) {
-                displayedText = target
-                return@LaunchedEffect
+            shown = target.substring(0, shown.length + 1)
+            displayedText = shown
+            if (shown.length < target.length) {
+                delay(40)
             }
-            // 逐字補完到目標
-            while (displayedText != target && isActive) {
-                if (target.length < displayedText.length || !target.startsWith(displayedText)) {
-                    displayedText = target
-                    break
-                }
-                displayedText += target[displayedText.length]
-                delay(60)
-            }
-        } finally {
-            // 被取消或正常結束都強制落地完整數字
-            displayedText = currentText
+        }
+        if (isActive && displayedText != target) {
+            displayedText = target
         }
     }
 
@@ -9476,11 +9490,13 @@ fun AnimatedAmount(
                                 else -> true
                             }
                             when {
+                                // 出字：由空位出現
                                 targetState != null && initialState == null -> {
                                     (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
                                      fadeIn(tween(200)) +
                                      scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith fadeOut(tween(0))
                                 }
+                                // 消字：位變空
                                 targetState == null && initialState != null -> {
                                     fadeIn(tween(0)) togetherWith
                                     (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
