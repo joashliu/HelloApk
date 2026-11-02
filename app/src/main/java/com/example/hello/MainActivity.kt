@@ -3185,49 +3185,8 @@ private fun BoxScope.KeyboardAndFabLayer(
                             }
                         }
                     }
-
-                    if (filterModeOn && filterSearchHasFocus) {
-                        val filterSuggestions = remember(filterSearch.text, allNoteNames) {
-                            filterNoteSuggestions(filterSearch.text, allNoteNames)
-                        }
-                        if (filterSuggestions.isNotEmpty()) {
-                            androidx.compose.ui.window.Popup(
-                                popupPositionProvider = AboveAnchorPositionProvider,
-                                onDismissRequest = { },
-                                properties = PopupProperties(focusable = false)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = SURFACE_CARD,
-                                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                                    modifier = Modifier
-                                        .width(260.dp)
-                                        .heightIn(max = 260.dp)
-                                        // ★ 加上 alignment = Alignment.BottomCenter
-                                        // 確保清單縮短時，內容會黐實個搜尋框底，由頂部慢慢降落嚟
-                                        .animateContentSize(
-                                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
-                                            alignment = Alignment.BottomCenter
-                                        )
-                                ) {
-                                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                                        filterSuggestions.forEach { s ->
-                                            Row(
-                                                Modifier.fillMaxWidth()
-                                                    .clickable { onFilterSearchChange(TextFieldValue(s)) }
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                            HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    
+                    // ★ 呢度原本嘅 Popup 已經被移除！移咗去最下面
                 }
             }
 
@@ -3274,7 +3233,57 @@ private fun BoxScope.KeyboardAndFabLayer(
             imeOpen = imeOpen,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
-    } 
+        
+        // =======================================================
+        // ★ 全新嘅搜尋結果覆蓋層 (In-hierarchy Overlay)
+        // 棄用 Popup，改為同層渲染，徹底解決高度改變時嘅懸空抖動同延遲
+        // =======================================================
+        if (currentPage == 0 && filterModeOn && filterSearchHasFocus) {
+            val filterSuggestions = remember(filterSearch.text, allNoteNames) {
+                filterNoteSuggestions(filterSearch.text, allNoteNames)
+            }
+            if (filterSuggestions.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        // 精準定位：底欄 padding + 底欄高度 (56.dp) + 少少間距 4.dp
+                        .padding(start = 16.dp, bottom = bottomChromePad + 56.dp + 4.dp)
+                        .zIndex(20f)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = SURFACE_CARD,
+                        border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                        modifier = Modifier
+                            .width(260.dp)
+                            .heightIn(max = 260.dp)
+                            // ★ 喺同層渲染下，Alignment.BottomCenter 會完美黐實底部
+                            // 內容減少時，頂部會好似橡筋咁順滑拉落嚟，零抖動！
+                            .animateContentSize(
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
+                                alignment = Alignment.BottomCenter
+                            )
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            filterSuggestions.forEach { s ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clickable { onFilterSearchChange(TextFieldValue(s)) }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+    } // end IME-lift Box
 }
 
 @Composable
