@@ -9312,7 +9312,6 @@ fun RollingDigit(
         val continuousValue = remember { Animatable(0f) }
         var baseDigit by remember { mutableIntStateOf(digit) }
 
-        // ★ 保證無論動畫被取消，最終一定顯示完整目標數字，絕不中途停留
         LaunchedEffect(digit, animate) {
             try {
                 if (!animate) {
@@ -9338,7 +9337,6 @@ fun RollingDigit(
                     animationSpec = tween(durationMs, easing = FastOutSlowInEasing)
                 )
             } finally {
-                // 動畫被取消或正常結束，都強制落地到完整數字
                 baseDigit = digit
                 continuousValue.snapTo(0f)
             }
@@ -9384,28 +9382,56 @@ fun RollingDigit(
             }
         }
     } else {
-        if (targetChar != null) {
-            Text(
-                text = targetChar.toString(),
-                color = color,
-                style = style,
-                maxLines = 1,
-                softWrap = false,
-                modifier = modifier.height(cellHeight).wrapContentWidth(),
-            )
-        } else {
-            Spacer(Modifier.width(0.dp))
+        // 處理非數字字符（如 -, .）
+        // 使用 AnimatedContent 確保它們也有進出動畫
+        AnimatedContent(
+            targetState = targetChar,
+            transitionSpec = {
+                if (!animate) fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                else {
+                    if (targetState != null && initialState == null) {
+                        (slideInVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { it / 2 } +
+                         fadeIn(tween(200)) +
+                         scaleIn(initialScale = 0.5f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f))) togetherWith fadeOut(tween(0))
+                    } else if (targetState == null && initialState != null) {
+                        fadeIn(tween(0)) togetherWith
+                        (slideOutVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { -it / 2 } +
+                         fadeOut(tween(180)) +
+                         scaleOut(targetScale = 0.5f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)))
+                    } else {
+                        (slideInVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { it } + fadeIn(tween(220))) togetherWith
+                        (slideOutVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { -it } + fadeOut(tween(220)))
+                    }
+                }
+            },
+            label = "non_digit_char"
+        ) { c ->
+            if (c != null) {
+                Text(
+                    text = c.toString(),
+                    color = color,
+                    style = style,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = modifier.height(cellHeight).wrapContentWidth(),
+                )
+            } else {
+                Spacer(Modifier.width(0.dp))
+            }
         }
     }
 }
 
 @Composable
 fun AnimatedAmount(
-    text: String, color: Color, fontSize: TextUnit,
+    text: String, 
+    color: Color, 
+    fontSize: TextUnit,
     fontWeight: FontWeight = FontWeight.Bold,
     animateChanges: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    // 計算最大槽位數，確保佈局穩定，避免寬度跳動
     val maxSlots = remember { mutableIntStateOf((text.length + 2).coerceAtLeast(3)) }
     LaunchedEffect(text.length) {
         if (text.length > maxSlots.value) maxSlots.value = text.length
@@ -9413,9 +9439,11 @@ fun AnimatedAmount(
 
     val currentText by rememberUpdatedState(text)
     val currentAnimate by rememberUpdatedState(animateChanges)
+    
+    // 使用 displayedText 來控制逐字顯示的邏輯
     var displayedText by remember { mutableStateOf(text) }
 
-    // ★ 保證無論中途被取消（例如篩選切換），最終一定顯示完整目標數字
+    // 核心邏輯：確保無論如何變化，最終都顯示完整文本，且過程有動畫
     LaunchedEffect(text, animateChanges) {
         val target = text
         try {
@@ -9423,22 +9451,24 @@ fun AnimatedAmount(
                 displayedText = target
                 return@LaunchedEffect
             }
-            // 前綴不相容時直接跳到完整目標，避免半截數字
+            
+            // 如果目標比當前短，或者前綴不匹配（例如從 "12" 變成 "-1"），直接切換以觸發 AnimatedContent 的整體過渡
             if (target.length < displayedText.length || !target.startsWith(displayedText)) {
                 displayedText = target
                 return@LaunchedEffect
             }
-            // 逐字補完到目標
+            
+            // 逐字補完：這保證了輸入時的流暢感
             while (displayedText != target && isActive) {
                 if (target.length < displayedText.length || !target.startsWith(displayedText)) {
                     displayedText = target
                     break
                 }
                 displayedText += target[displayedText.length]
-                delay(60)
+                delay(60) // 每個字符間隔
             }
         } finally {
-            // 被取消或正常結束都強制落地完整數字
+            // 確保最終狀態正確
             displayedText = currentText
         }
     }
@@ -9463,50 +9493,53 @@ fun AnimatedAmount(
         for (i in 0 until maxSlots.value) {
             val char = displayedText.getOrNull(i)
             key(i) {
+                // 每個字符獨立動畫
                 AnimatedContent(
                     targetState = char,
                     transitionSpec = {
                         if (!currentAnimate) {
                             fadeIn(tween(0)) togetherWith fadeOut(tween(0))
                         } else {
-                            val initialDigit = initialState?.digitToIntOrNull() ?: -1
-                            val targetDigit = targetState?.digitToIntOrNull() ?: -1
-                            val goingUp = when {
-                                initialDigit >= 0 && targetDigit >= 0 -> targetDigit >= initialDigit
-                                else -> true
+                            // 判斷是進入還是退出，或者是替換
+                            val isEntering = initialState == null
+                            val isLeaving = targetState == null
+                            
+                            if (isEntering) {
+                                // 新字符進入：從下方滑入 + 淡入 + 稍微放大
+                                (slideInVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { it / 2 } +
+                                 fadeIn(tween(200)) +
+                                 scaleIn(initialScale = 0.5f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f))) togetherWith 
+                                fadeOut(tween(0))
+                            } else if (isLeaving) {
+                                // 字符消失：向上滑出 + 淡出 + 稍微縮小
+                                fadeIn(tween(0)) togetherWith
+                                (slideOutVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { -it / 2 } +
+                                 fadeOut(tween(180)) +
+                                 scaleOut(targetScale = 0.5f, animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f)))
+                            } else {
+                                // 字符替換（例如從 1 變 2，或從 . 變 -）：平滑上下滑動
+                                // 這裡我們簡單處理為向上滑出舊的，向下滑入新的，或者根據數值大小決定方向
+                                // 為了通用性，我們使用統一的滑動效果
+                                (slideInVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { it } + 
+                                 fadeIn(tween(220))) togetherWith
+                                (slideOutVertically(spring(dampingRatio = 0.7f, stiffness = 400f)) { -it } + 
+                                 fadeOut(tween(220)))
                             }
-                            when {
-                                targetState != null && initialState == null -> {
-                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it / 2 } +
-                                     fadeIn(tween(200)) +
-                                     scaleIn(initialScale = 0.4f, animationSpec = DIGIT_FLOAT_ENTER)) togetherWith fadeOut(tween(0))
-                                }
-                                targetState == null && initialState != null -> {
-                                    fadeIn(tween(0)) togetherWith
-                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it / 2 } +
-                                     fadeOut(tween(180)) +
-                                     scaleOut(targetScale = 0.4f, animationSpec = DIGIT_FLOAT_EXIT))
-                                }
-                                goingUp -> {
-                                    (slideInVertically(DIGIT_SLIDE_ENTER) { it } + fadeIn(tween(220))) togetherWith
-                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { -it } + fadeOut(tween(220)))
-                                }
-                                else -> {
-                                    (slideInVertically(DIGIT_SLIDE_ENTER) { -it } + fadeIn(tween(220))) togetherWith
-                                    (slideOutVertically(DIGIT_SLIDE_EXIT) { it } + fadeOut(tween(220)))
-                                }
-                            }.using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> DIGIT_SIZE_SPRING }))
                         }
                     },
-                    label = "digit_$i"
+                    label = "char_anim_$i"
                 ) { c ->
                     if (c != null) {
                         Text(
-                            text = c.toString(), color = color, style = style,
-                            maxLines = 1, softWrap = false,
+                            text = c.toString(), 
+                            color = color, 
+                            style = style,
+                            maxLines = 1, 
+                            softWrap = false,
                             modifier = Modifier.wrapContentWidth()
                         )
                     } else {
+                        // 佔位符，保持寬度穩定
                         Spacer(Modifier.width(0.dp))
                     }
                 }
