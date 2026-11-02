@@ -3103,15 +3103,12 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    // ★ 系統輸入法避讓：
-    //   Root Surface 已 windowInsetsPadding(systemBars)，所以只再抬「IME 超出 navigationBar」嘅高度，
-    //   避免雙重 padding。系統鍵盤彈出時，篩選搜尋框 + 自訂鍵盤 + FAB 一齊升到 IME 正上方。
+    // ★ 系統輸入法避讓
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val navBottomPx = WindowInsets.navigationBars.getBottom(density)
     val imeLiftDp = with(density) { (imeBottomPx - navBottomPx).coerceAtLeast(0).toDp() }
     val imeOpen = imeLiftDp > 0.dp
-    // IME 開時 nav 已被遮住，唔使再留 NAV_HEIGHT；關時坐喺底部導航上面
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
 
     Box(
@@ -3206,8 +3203,12 @@ private fun BoxScope.KeyboardAndFabLayer(
                                     modifier = Modifier
                                         .width(260.dp)
                                         .heightIn(max = 260.dp)
-                                        // ★ 加入 animateContentSize，令高度隨項目增減順滑過渡
-                                        .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f))
+                                        // ★ 加上 alignment = Alignment.BottomCenter
+                                        // 確保清單縮短時，內容會黐實個搜尋框底，由頂部慢慢降落嚟
+                                        .animateContentSize(
+                                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
+                                            alignment = Alignment.BottomCenter
+                                        )
                                 ) {
                                     Column(Modifier.verticalScroll(rememberScrollState())) {
                                         filterSuggestions.forEach { s ->
@@ -3273,7 +3274,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             imeOpen = imeOpen,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
-    } // end IME-lift Box
+    } 
 }
 
 @Composable
