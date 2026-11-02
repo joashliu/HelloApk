@@ -3289,6 +3289,7 @@ private fun BoxScope.KeyboardAndFabLayer(
 @Composable
 private fun AnimatedFabLayer(
     progressProvider: () -> Float,
+    bottomPadding: Dp, // ★ 新增參數：接收動態嘅底部邊距
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3306,7 +3307,8 @@ private fun AnimatedFabLayer(
             .graphicsLayer {
                 val currentP = progressProvider()
                 val fabX = lerp(20.dp, 86.dp, currentP).toPx()
-                val fabY = lerp(92.dp, 388.dp, currentP).toPx()
+                // ★ 將原本寫死嘅 92.dp 改為動態嘅 bottomPadding
+                val fabY = lerp(bottomPadding, 388.dp, currentP).toPx()
                 translationX = -fabX
                 translationY = -fabY
                 transformOrigin = TransformOrigin(1f, 1f)
