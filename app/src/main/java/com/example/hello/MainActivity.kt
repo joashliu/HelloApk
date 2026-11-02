@@ -3103,12 +3103,12 @@ private fun BoxScope.KeyboardAndFabLayer(
     noteCategoryMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
-    // ★ 系統輸入法避讓
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val navBottomPx = WindowInsets.navigationBars.getBottom(density)
     val imeLiftDp = with(density) { (imeBottomPx - navBottomPx).coerceAtLeast(0).toDp() }
     val imeOpen = imeLiftDp > 0.dp
+    // ★ 呢個高度會隨住系統鍵盤彈出而由 92.dp 縮細到 8.dp
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
 
     Box(
@@ -3185,8 +3185,6 @@ private fun BoxScope.KeyboardAndFabLayer(
                             }
                         }
                     }
-                    
-                    // ★ 呢度原本嘅 Popup 已經被移除！移咗去最下面
                 }
             }
 
@@ -3213,8 +3211,10 @@ private fun BoxScope.KeyboardAndFabLayer(
             Spacer(modifier = Modifier.width(60.dp))
         }
 
+        // ★ 呢度！將 bottomChromePad 傳遞俾 FAB
         AnimatedFabLayer(
             progressProvider = progressProvider,
+            bottomPadding = bottomChromePad, 
             onFabTap = onFabTap,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
@@ -3234,10 +3234,6 @@ private fun BoxScope.KeyboardAndFabLayer(
             modifier = Modifier.align(Alignment.BottomCenter)
         )
         
-        // =======================================================
-        // ★ 全新嘅搜尋結果覆蓋層 (In-hierarchy Overlay)
-        // 棄用 Popup，改為同層渲染，徹底解決高度改變時嘅懸空抖動同延遲
-        // =======================================================
         if (currentPage == 0 && filterModeOn && filterSearchHasFocus) {
             val filterSuggestions = remember(filterSearch.text, allNoteNames) {
                 filterNoteSuggestions(filterSearch.text, allNoteNames)
@@ -3246,7 +3242,6 @@ private fun BoxScope.KeyboardAndFabLayer(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        // 精準定位：底欄 padding + 底欄高度 (56.dp) + 少少間距 4.dp
                         .padding(start = 16.dp, bottom = bottomChromePad + 56.dp + 4.dp)
                         .zIndex(20f)
                 ) {
@@ -3257,8 +3252,6 @@ private fun BoxScope.KeyboardAndFabLayer(
                         modifier = Modifier
                             .width(260.dp)
                             .heightIn(max = 260.dp)
-                            // ★ 喺同層渲染下，Alignment.BottomCenter 會完美黐實底部
-                            // 內容減少時，頂部會好似橡筋咁順滑拉落嚟，零抖動！
                             .animateContentSize(
                                 animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
                                 alignment = Alignment.BottomCenter
@@ -3283,7 +3276,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             }
         }
         
-    } // end IME-lift Box
+    }
 }
 
 @Composable
