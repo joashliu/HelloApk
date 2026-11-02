@@ -5391,22 +5391,24 @@ fun CalendarContent(
                         .wrapContentHeight(unbounded = true, align = Alignment.Top)
                         .onSizeChanged { size ->
                             if (size.height > 0) {
-                                if (size.height.toFloat() > topSectionHeightPx) {
-                                    topSectionHeightPx = size.height.toFloat()
-                                }
+                                // ★ 修正 2：取消「只升唔降」限制！
+                                // 由於內部 Grid 已經有 animateDpAsState 平滑改變高度，
+                                // 直接跟隨真實 size.height，下方嘅月曆就會自動平滑升降補位。
+                                topSectionHeightPx = size.height.toFloat()
                             }
                         }
                 ) {
                     Spacer(Modifier.height(4.dp))
                     
-                    // ★ 移除整區重畫的 AnimatedContent，完全交由內部自己做 diff 同平滑動畫
                     AnimatedCalendarCategoryChips(
                         visibleCategories = calendarUi.visibleCategories,
                         filterCategory = filterCategory,
                         onFilterCategoryChange = onFilterCategoryChange
                     )
                     
-                    // ★ 數字區域本身已使用 AnimatedAmount (RollingNumber)，數值改變時會自動平滑滾動
+                    // ★ 修正 1：加入 Spacer，拉開 Chips 同底部三個 Stat Box 嘅距離
+                    Spacer(Modifier.height(14.dp))
+                    
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(calendarUi.totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (calendarUi.totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
                         AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(calendarUi.avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
