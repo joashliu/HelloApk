@@ -4603,8 +4603,8 @@ fun WeeklyExpenseChart(
     val chartHeight = 178.dp
     val horizontalPadding = 16.dp
     val innerPadding = 12.dp
-    val titleRowHeight = 20.dp
-    val titleGap = 8.dp
+    // ★ 縮小標題同下方圖表嘅間距，彌補 wrapContentHeight 帶來嘅高度變化
+    val titleGap = 4.dp
     val labelRowHeight = 20.dp
 
     val density = LocalDensity.current
@@ -4667,21 +4667,32 @@ fun WeeklyExpenseChart(
                 ) {
                     // ── 標題行
                     Row(
-                        Modifier.fillMaxWidth().height(titleRowHeight),
+                        // ★ 完全移除 height 限制，等佢自然包裹字體
+                        Modifier.fillMaxWidth().wrapContentHeight(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "近 7 日支出",
+                            text = "近 7 日支出",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TEXT_PRIMARY
+                            color = TEXT_PRIMARY,
+                            // ★ 關閉系統自帶嘅字體 Padding，令文字排版同邊界更精準
+                            style = TextStyle(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            ),
+                            // ★ 額外預留少少底邊距，確保中文字腳完全唔會貼邊被裁
+                            modifier = Modifier.padding(bottom = 2.dp)
                         )
                         Spacer(Modifier.weight(1f))
                         Text(
-                            "合計 $${formatAmountNoDecimal(totalAmount)}",
+                            text = "合計 $${formatAmountNoDecimal(totalAmount)}",
                             fontSize = 12.sp,
                             color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            style = TextStyle(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            ),
+                            modifier = Modifier.padding(bottom = 2.dp)
                         )
                     }
                     Spacer(Modifier.height(titleGap))
