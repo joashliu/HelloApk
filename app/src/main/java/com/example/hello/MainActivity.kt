@@ -3751,7 +3751,7 @@ fun LedgerContent(
                 touch = fanMenuTouchState.value,
                 minRadiusPx = minFanRadiusPx,
                 arcCenterAngle = arcCenterAngle,
-                radiusPx = fanRadiusPx,          // 已經有 fanRadiusPx
+                radiusPx = fanRadiusPx,
                 hitRadiusPx = with(density) { 30.dp.toPx() }
             )
             val targetRecord = activeFanRecord
@@ -3816,7 +3816,7 @@ fun LedgerContent(
     LaunchedEffect(filterMode) {
         try {
             if (!filterMode) {
-                // ★ 俾 Compose 50 毫秒將棒型圖重新加返入渲染樹，然後先至滾動
+                // 退出篩選模式時，俾 Compose 50ms 重新載入棒型圖，再強制滾動回頂部
                 delay(50)
                 listState.animateScrollToItem(0)
             } else {
@@ -3964,7 +3964,7 @@ fun LedgerContent(
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
             NotificationAccessGuide(context = LocalContext.current)
 
-            // ===== Top Stat Bar：支援左右滑顯示／隱藏「未來項目」按鈕 =====
+            // ===== Top Stat Bar =====
             val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
             val avgExpense = remember(filtered, filterMode) {
                 if (!filterMode) 0.0
@@ -3974,7 +3974,6 @@ fun LedgerContent(
                 }
             }
 
-            // 狀態記憶：跨頁面保持；冷啟動預設收起（false）
             var futureBtnRevealed by rememberSaveable { mutableStateOf(false) }
             val futureBtnProgress = remember { Animatable(if (futureBtnRevealed) 1f else 0f) }
             val density = LocalDensity.current
@@ -4012,7 +4011,6 @@ fun LedgerContent(
                             },
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
-                                // 向左拖（dragAmount < 0）→ progress 增加；向右 → 減少
                                 totalDragPx += dragAmount
                                 val delta = -totalDragPx / revealDistancePx
                                 val newP = (dragStartProgress + delta).coerceIn(0f, 1f)
@@ -4022,9 +4020,8 @@ fun LedgerContent(
                     }
             ) {
                 val p = futureBtnProgress.value
-                // p=0 → 3 等分；p=1 → 4 等分。全程等距。
                 val gap = 6.dp
-                val totalW = maxWidth - 16.dp // 左右內邊距
+                val totalW = maxWidth - 16.dp 
                 val slotCount = 3f + p
                 val slotW = (totalW - gap * (slotCount - 1f)) / slotCount
                 val statsWidth = slotW * 3f + gap * 2f
@@ -4036,7 +4033,6 @@ fun LedgerContent(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // TopStats 區域：寬度隨 p 平滑收縮（3 槽位）
                     Box(modifier = Modifier.width(statsWidth)) {
                         TopStats(
                             hasIncome = hasIncome, hasExpense = hasExpense,
@@ -4049,7 +4045,6 @@ fun LedgerContent(
                         )
                     }
 
-                    // 按鈕槽位：由右滑入，寬度 = 一個等分槽 × p，全程等距
                     if (p > 0.001f) {
                         Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
                         Box(
@@ -4074,22 +4069,27 @@ fun LedgerContent(
                 }
             }
 
-            // ★ 統一區塊間距：Top Stat ↔ 中間區 ↔ 棒形圖，兩邊完全相同
             val sectionGap = 8.dp
             Spacer(Modifier.height(sectionGap))
 
+            // ★ 中間區塊：切換時改為垂直 Expand/Shrink (模擬拉抽屜、唔重疊)
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
-                    if (targetState) {
-                        (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeIn(tween(300))) togetherWith
-                        (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeOut(tween(250)))
-                    } else {
-                        (slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 6 } + fadeIn(tween(300))) togetherWith
-                        (slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 6 } + fadeOut(tween(250)))
-                    }
-                    .using(SizeTransform(clip = true) { _, _ ->
+                    (
+                        fadeIn(tween(220, delayMillis = 90)) + 
+                        expandVertically(
+                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+                            expandFrom = Alignment.Top
+                        )
+                    ) togetherWith (
+                        fadeOut(tween(150)) + 
+                        shrinkVertically(
+                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
+                            shrinkTowards = Alignment.Top
+                        )
+                    ).using(SizeTransform(clip = true) { _, _ ->
                         spring(dampingRatio = 0.85f, stiffness = 300f)
                     })
                 },
@@ -4174,7 +4174,6 @@ fun LedgerContent(
                 }
             }
 
-            // ★ 中間區（快速輸入／篩選）↔ 棒形圖：同 Top Stat ↔ 中間區 用同一個 sectionGap
             Spacer(Modifier.height(sectionGap))
 
             Box(
@@ -4207,7 +4206,7 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // ★ 加入 !filterMode 判斷，確保退出時即刻加返入列表
+                        // ★ 加入 !filterMode，確保退出篩選時棒型圖可即刻加回列表
                         val showWeeklyChart = weeklyExpenses.isNotEmpty() && (!filterMode || filterChartCollapse < 0.99f)
                         if (showWeeklyChart) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
