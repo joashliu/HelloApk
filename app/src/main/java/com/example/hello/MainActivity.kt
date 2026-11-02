@@ -3620,12 +3620,10 @@ fun LedgerContent(
     hiddenQuickNotes: Set<String> = emptySet(),
     onHideNote: (String) -> Unit = {},
     onUnhideNote: (String) -> Unit = {},
-    // ★ FAB 點擊時遞增，驅動快速輸入滾回第一頁
     quickInputScrollToFirstTrigger: Int = 0,
 ) {
     val listState = rememberLazyListState()
 
-    // ★ Top Stats 數字滾動開關：冷啟動 / 首次載入不播，800ms 後才開啟
     var animateTopStats by remember { mutableStateOf(false) }
     LaunchedEffect(loading) {
         if (!loading) {
@@ -3681,7 +3679,6 @@ fun LedgerContent(
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
 
-    // ★ filter 切換的圖表收起進度（0 = 展開, 1 = 收起），統一 spring 曲線
     val filterChartCollapse by animateFloatAsState(
         targetValue = if (filterMode) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
@@ -3816,7 +3813,6 @@ fun LedgerContent(
     LaunchedEffect(filterMode) {
         try {
             if (!filterMode) {
-                // 退出篩選模式時，俾 Compose 50ms 重新載入棒型圖，再強制滾動回頂部
                 delay(50)
                 listState.animateScrollToItem(0)
             } else {
@@ -3964,7 +3960,6 @@ fun LedgerContent(
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
             NotificationAccessGuide(context = LocalContext.current)
 
-            // ===== Top Stat Bar =====
             val showCategoryChip = filterMode && isSingleCategoryFilter && singleCategory != null
             val avgExpense = remember(filtered, filterMode) {
                 if (!filterMode) 0.0
@@ -3976,7 +3971,6 @@ fun LedgerContent(
 
             var futureBtnRevealed by rememberSaveable { mutableStateOf(false) }
             val futureBtnProgress = remember { Animatable(if (futureBtnRevealed) 1f else 0f) }
-            val density = LocalDensity.current
             val barScope = rememberCoroutineScope()
             var dragStartProgress by remember { mutableFloatStateOf(0f) }
             var totalDragPx by remember { mutableFloatStateOf(0f) }
@@ -4072,12 +4066,12 @@ fun LedgerContent(
             val sectionGap = 8.dp
             Spacer(Modifier.height(sectionGap))
 
-            // ★ 中間區塊：切換時改為垂直 Expand/Shrink (模擬拉抽屜、唔重疊)
+            // ★ 加入括號修正：((enter) togetherWith (exit)).using(SizeTransform)
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
-                    (
+                    ((
                         fadeIn(tween(220, delayMillis = 90)) + 
                         expandVertically(
                             animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
@@ -4089,7 +4083,7 @@ fun LedgerContent(
                             animationSpec = spring(dampingRatio = 0.85f, stiffness = 300f),
                             shrinkTowards = Alignment.Top
                         )
-                    ).using(SizeTransform(clip = true) { _, _ ->
+                    )).using(SizeTransform(clip = true) { _, _ ->
                         spring(dampingRatio = 0.85f, stiffness = 300f)
                     })
                 },
@@ -4206,7 +4200,6 @@ fun LedgerContent(
                             bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp
                         )
                     ) {
-                        // ★ 加入 !filterMode，確保退出篩選時棒型圖可即刻加回列表
                         val showWeeklyChart = weeklyExpenses.isNotEmpty() && (!filterMode || filterChartCollapse < 0.99f)
                         if (showWeeklyChart) {
                             item(key = "weekly_chart", contentType = "weekly_chart") {
