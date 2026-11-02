@@ -1194,15 +1194,12 @@ private fun computeLedgerUiState(
     val now = System.currentTimeMillis()
     val searchFiltered: List<Record> = if (filter.search.isBlank()) records else {
         val q = filter.search
-        val hasExactNote = records.any { it.note == q }
-        val hasExactCategory = CATEGORIES.any { it == q }
+        // ★ 移除咗 hasExactNote 嘅強制精準匹配，統一用 contains 做模糊搜尋，
+        // 咁樣打 "e" 就一定會出哂 "e", "ee", "eat" 等等
         records.filter { r ->
-            when {
-                hasExactNote -> r.note == q
-                hasExactCategory -> r.category == q
-                else -> r.note.contains(q, true) || r.category.contains(q, true)
-            }
+            r.note.contains(q, ignoreCase = true) || r.category.contains(q, ignoreCase = true)
         }
+    }
     }
 
     val filterCat = filter.category
@@ -1590,7 +1587,8 @@ fun filterNoteSuggestions(query: String, all: List<String>): List<String> {
     if (q.isEmpty()) return emptyList()
     val result = ArrayList<String>(8)
     for (s in all) {
-        if (s != q && s.startsWith(q, ignoreCase = true)) {
+        // ★ 移除咗 s != q，就算項目名完全等於搜尋字，都會正常彈出嚟俾你撳
+        if (s.startsWith(q, ignoreCase = true)) {
             result.add(s)
             if (result.size >= 8) return result
         }
@@ -3125,103 +3123,108 @@ private fun BoxScope.KeyboardAndFabLayer(
             .fillMaxWidth()
             .padding(bottom = imeLiftDp)
     ) {
-    Row(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, bottom = bottomChromePad)
-            .height(56.dp)
-            .graphicsLayer {
-                val p = progressProvider()
-                alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
-                val s = 1f - (0.15f * p)
-                scaleX = s
-                scaleY = s
-                translationY = p * 60.dp.toPx()
-                transformOrigin = TransformOrigin(0.5f, 1f)
-            },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            if (currentPage == 0) {
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = filterModeOn,
-                    enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
-                    exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
-                ) {
-                    Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = SURFACE_CARD,
-                            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                        ) {
-                            Row(Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.weight(1f)) {
-                                    BasicTextField(
-                                        value = filterSearch,
-                                        onValueChange = onFilterSearchChange,
-                                        singleLine = true,
-                                        textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
-                                        cursorBrush = SolidColor(BRAND_PRIMARY),
-                                        decorationBox = { inner ->
-                                            Box(Modifier.fillMaxWidth(),
-                                                contentAlignment = Alignment.CenterStart) {
-                                                if (filterSearch.text.isEmpty())
-                                                    Text("搜尋名稱或類別…", fontSize = 15.sp,
-                                                        color = TEXT_TERTIARY)
-                                                inner()
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .focusRequester(filterSearchFocusRequester)
-                                            .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
-                                    )
-                                }
-                                if (filterSearch.text.isNotBlank()) {
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
-                                        modifier = Modifier.size(20.dp)
-                                            .clickable { onFilterSearchChange(TextFieldValue("")) }
-                                    )
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = bottomChromePad)
+                .height(56.dp)
+                .graphicsLayer {
+                    val p = progressProvider()
+                    alpha = (1f - p * 2.5f).coerceIn(0f, 1f)
+                    val s = 1f - (0.15f * p)
+                    scaleX = s
+                    scaleY = s
+                    translationY = p * 60.dp.toPx()
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                if (currentPage == 0) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = filterModeOn,
+                        enter = slideInHorizontally(animationSpec = tween(300, easing = FastOutSlowInEasing)) { -it } + fadeIn(tween(200)),
+                        exit = slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180))
+                    ) {
+                        Box(Modifier.padding(vertical = 8.dp).padding(end = 8.dp)) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = SURFACE_CARD,
+                                border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+                            ) {
+                                Row(Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.weight(1f)) {
+                                        BasicTextField(
+                                            value = filterSearch,
+                                            onValueChange = onFilterSearchChange,
+                                            singleLine = true,
+                                            textStyle = TextStyle(fontSize = 15.sp, color = TEXT_PRIMARY),
+                                            cursorBrush = SolidColor(BRAND_PRIMARY),
+                                            decorationBox = { inner ->
+                                                Box(Modifier.fillMaxWidth(),
+                                                    contentAlignment = Alignment.CenterStart) {
+                                                    if (filterSearch.text.isEmpty())
+                                                        Text("搜尋名稱或類別…", fontSize = 15.sp,
+                                                            color = TEXT_TERTIARY)
+                                                    inner()
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .focusRequester(filterSearchFocusRequester)
+                                                .onFocusChanged { onFilterSearchFocusChange(it.isFocused) }
+                                        )
+                                    }
+                                    if (filterSearch.text.isNotBlank()) {
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(
+                                            Icons.Default.Close, "清除", tint = TEXT_SECONDARY,
+                                            modifier = Modifier.size(20.dp)
+                                                .clickable { onFilterSearchChange(TextFieldValue("")) }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                if (filterModeOn && filterSearchHasFocus) {
-                    val filterSuggestions = remember(filterSearch.text, allNoteNames) {
-                        filterNoteSuggestions(filterSearch.text, allNoteNames)
-                    }
-                    if (filterSuggestions.isNotEmpty()) {
-                        androidx.compose.ui.window.Popup(
-                            popupPositionProvider = AboveAnchorPositionProvider,
-                            onDismissRequest = { },
-                            properties = PopupProperties(focusable = false)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = SURFACE_CARD,
-                                border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                                modifier = Modifier.width(260.dp).heightIn(max = 260.dp)
+                    if (filterModeOn && filterSearchHasFocus) {
+                        val filterSuggestions = remember(filterSearch.text, allNoteNames) {
+                            filterNoteSuggestions(filterSearch.text, allNoteNames)
+                        }
+                        if (filterSuggestions.isNotEmpty()) {
+                            androidx.compose.ui.window.Popup(
+                                popupPositionProvider = AboveAnchorPositionProvider,
+                                onDismissRequest = { },
+                                properties = PopupProperties(focusable = false)
                             ) {
-                                Column(Modifier.verticalScroll(rememberScrollState())) {
-                                    filterSuggestions.forEach { s ->
-                                        Row(
-                                            Modifier.fillMaxWidth()
-                                                .clickable { onFilterSearchChange(TextFieldValue(s)) }
-                                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = SURFACE_CARD,
+                                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                                    modifier = Modifier
+                                        .width(260.dp)
+                                        .heightIn(max = 260.dp)
+                                        // ★ 加入 animateContentSize，令高度隨項目增減順滑過渡
+                                        .animateContentSize(animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f))
+                                ) {
+                                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                                        filterSuggestions.forEach { s ->
+                                            Row(
+                                                Modifier.fillMaxWidth()
+                                                    .clickable { onFilterSearchChange(TextFieldValue(s)) }
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
+                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                                         }
-                                        HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                                     }
                                 }
                             }
@@ -3229,51 +3232,50 @@ private fun BoxScope.KeyboardAndFabLayer(
                     }
                 }
             }
-        }
 
-        Surface(
-            modifier = Modifier
-                .size(44.dp)
-                .pointerInput(filterModeOn, currentPage) {
-                    detectTapGestures(onTap = { onFilterButtonTap() })
-                },
-            shape = CircleShape,
-            color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else SURFACE_CARD,
-            border = if (filterModeOn && currentPage == 0) null
-                     else BorderStroke(0.5.dp, DIVIDER_COLOR)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.FilterAlt, "篩選",
-                    tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
-                    modifier = Modifier.size(22.dp)
-                )
+            Surface(
+                modifier = Modifier
+                    .size(44.dp)
+                    .pointerInput(filterModeOn, currentPage) {
+                        detectTapGestures(onTap = { onFilterButtonTap() })
+                    },
+                shape = CircleShape,
+                color = if (filterModeOn && currentPage == 0) BRAND_PRIMARY else SURFACE_CARD,
+                border = if (filterModeOn && currentPage == 0) null
+                         else BorderStroke(0.5.dp, DIVIDER_COLOR)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.FilterAlt, "篩選",
+                        tint = if (filterModeOn && currentPage == 0) Color.White else BRAND_PRIMARY,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
+
+            Spacer(modifier = Modifier.width(60.dp))
         }
 
-        Spacer(modifier = Modifier.width(60.dp))
-    }
+        AnimatedFabLayer(
+            progressProvider = progressProvider,
+            onFabTap = onFabTap,
+            modifier = Modifier.align(Alignment.BottomEnd)
+        )
 
-    AnimatedFabLayer(
-        progressProvider = progressProvider,
-        onFabTap = onFabTap,
-        modifier = Modifier.align(Alignment.BottomEnd)
-    )
-
-    AnimatedKeyboardLayer(
-        showKeyboard = showKeyboard,
-        progressProvider = progressProvider,
-        keyboardState = keyboardState,
-        onKeyboardStateChange = onKeyboardStateChange,
-        onKeyboardDismiss = onKeyboardDismiss,
-        onKeyboardConfirm = onKeyboardConfirm,
-        onKeyboardNext = onKeyboardNext,
-        allNoteNames = allNoteNames,
-        noteCategoryMap = noteCategoryMap,
-        nameFlashTrigger = nameFlashTrigger,
-        imeOpen = imeOpen,
-        modifier = Modifier.align(Alignment.BottomCenter)
-    )
+        AnimatedKeyboardLayer(
+            showKeyboard = showKeyboard,
+            progressProvider = progressProvider,
+            keyboardState = keyboardState,
+            onKeyboardStateChange = onKeyboardStateChange,
+            onKeyboardDismiss = onKeyboardDismiss,
+            onKeyboardConfirm = onKeyboardConfirm,
+            onKeyboardNext = onKeyboardNext,
+            allNoteNames = allNoteNames,
+            noteCategoryMap = noteCategoryMap,
+            nameFlashTrigger = nameFlashTrigger,
+            imeOpen = imeOpen,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     } // end IME-lift Box
 }
 
