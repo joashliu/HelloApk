@@ -1344,7 +1344,7 @@ private fun computeCompareUiState(records: List<Record>, monthA: String, monthB:
     )
 }
 
-private fun computeCalendarUiState(records: List<Record>, monthKey: String, filterCategory: String?): CalendarUiState {
+fun computeCalendarUiState(records: List<Record>, monthKey: String, filterCategory: String?): CalendarUiState {
     val monthAllRecords = ArrayList<Record>()
     var hasIncome = false
     val expenseSums = HashMap<String, Double>()
@@ -2623,7 +2623,10 @@ fun MainApp(
             2 -> {
                 val calendarMonthKey by vm.calendarMonthKey.collectAsState()
                 val calendarFilterCategory by vm.calendarFilterCategory.collectAsState()
-                val calendarUi by vm.calendarUiState.collectAsState()
+                val records by vm.records.collectAsState()
+                val calendarUi = remember(calendarMonthKey, calendarFilterCategory, records) {
+                    computeCalendarUiState(records, calendarMonthKey, calendarFilterCategory)
+                }
                 CalendarContent(
                     calendarUi = calendarUi,
                     currentMonthKey = calendarMonthKey,
@@ -5120,8 +5123,8 @@ fun CalendarContent(
     var animateValues by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(800); animateValues = true }
 
-    val today = remember { Calendar.getInstance() }
-    val todayKey = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+    val todayKey = monthKeyFromTimestamp(System.currentTimeMillis())
+    val today = Calendar.getInstance()
 
     var monthDirection by remember { mutableIntStateOf(1) }
     var displayMode by remember { mutableIntStateOf(0) }
@@ -7802,7 +7805,7 @@ fun CalendarRow(
     // ★ 高度永遠固定，唔再乘 expansionFraction
     val rowHeight = contentHeight + verticalPad * 2
 
-    val todayDayOfMonth = remember(today) { today.get(Calendar.DAY_OF_MONTH) }
+    val todayDayOfMonth = today.get(Calendar.DAY_OF_MONTH)
 
     Row(
         Modifier.fillMaxWidth().height(rowHeight).clipToBounds().padding(horizontal = horizontalPad),
