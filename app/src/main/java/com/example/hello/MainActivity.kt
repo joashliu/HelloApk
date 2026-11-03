@@ -2068,7 +2068,6 @@ fun LightweightEntryApp(
             }
         }
 
-        // ★ 輕量模式同樣避讓系統輸入法
         val densityLw = LocalDensity.current
         val imeBottomLw = WindowInsets.ime.getBottom(densityLw)
         val navBottomLw = WindowInsets.navigationBars.getBottom(densityLw)
@@ -2087,7 +2086,6 @@ fun LightweightEntryApp(
                 QuickInputSection(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
-                    // ★ 新增呢行，傳入類別資料
                     noteCategoryMap = ui.noteCategoryMap, 
                     maxRowsPerPage = 3,
                     skipAppearAnimation = false,
@@ -2116,22 +2114,22 @@ fun LightweightEntryApp(
             }
 
             LedgerKeyboardPanel(
-    state = keyboardState,
-    onStateChange = { keyboardState = it },
-    onDismiss = {
-        focusManager.clearFocus()
-        onTransitionToMain(null)
-    },
-    onConfirm = { performSave() },
-    onNext = { keyboardState = keyboardState.copy(editingNote = true) },
-    onPickCategory = { },
-    allNoteNames = ui.allNoteNames,
-    noteCategoryMap = ui.noteCategoryMap,
-    noteIconMap = ui.noteIconMap, // 👈 補返呢行
-    nameFlashTrigger = 0,
-    showKeyboard = true,
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-)
+                state = keyboardState,
+                onStateChange = { keyboardState = it },
+                onDismiss = {
+                    focusManager.clearFocus()
+                    onTransitionToMain(null)
+                },
+                onConfirm = { performSave() },
+                onNext = { keyboardState = keyboardState.copy(editingNote = true) },
+                onPickCategory = { },
+                allNoteNames = ui.allNoteNames,
+                noteCategoryMap = ui.noteCategoryMap,
+                noteIconMap = ui.noteIconMap, // ★ 補返呢行傳入去
+                nameFlashTrigger = 0,
+                showKeyboard = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            )
         }
     }
 }
