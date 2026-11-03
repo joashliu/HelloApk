@@ -624,6 +624,7 @@ data class CompareUiState(
 
 @Immutable
 data class CalendarUiState(
+    val monthKey: String = "",
     val monthAllRecords: List<Record> = emptyList(),
     val visibleCategories: List<String> = emptyList(),
     val monthRecords: List<Record> = emptyList(),
@@ -1394,6 +1395,7 @@ private fun computeCalendarUiState(records: List<Record>, monthKey: String, filt
     val avgPerDay = if (daysElapsed > 0) monthExpense / daysElapsed else 0.0
 
     return CalendarUiState(
+        monthKey = monthKey,
         monthAllRecords = monthAllRecords,
         visibleCategories = visibleCategories,
         monthRecords = monthRecords,
@@ -5093,6 +5095,18 @@ fun CalendarContent(
     deletingIds: Set<String> = emptySet(),
     justAddedIds: Set<String> = emptySet()
 ) {
+    // ★ 核心修復：狀態鎖 (State Lock)
+    // 攔截唔匹配嘅過期數據，只有月份一致時先至放行更新網格
+    var safeUiState by remember { mutableStateOf(calendarUi) }
+    var safeMonthKey by remember { mutableStateOf(currentMonthKey) }
+
+    LaunchedEffect(currentMonthKey, calendarUi) {
+        if (calendarUi.monthKey == currentMonthKey || calendarUi.monthKey.isEmpty()) {
+            safeUiState = calendarUi
+            safeMonthKey = currentMonthKey
+        }
+    }
+
     var animateValues by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(800); animateValues = true }
 
@@ -5117,12 +5131,9 @@ fun CalendarContent(
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
 
-    // 彈簧與手勢狀態
     val gridScrollOffsetAnim = remember { Animatable(0f) }
     val detailsAlphaAnim = remember { Animatable(0f) }
-    // 向下拖動：收細明細 Box（有下限，唔會完全消失）
     var dragDownAmount by remember { mutableFloatStateOf(0f) }
-    // ★ 頂部區域（Chips + Stats）顯示進度：1 = 全顯示，0 = 全收起；跟手可中途打斷
     val topRevealProgress = remember { Animatable(1f) }
     var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
 
@@ -5132,14 +5143,13 @@ fun CalendarContent(
     val triangleHeightDp = 11.dp
     val triangleHeightPx = remember(density) { with(density) { triangleHeightDp.toPx() } }
     val fabTopPaddingPx = remember(density) { with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp).toPx() } }
-    // 明細最小高度：抓手 + 第一條項目
     val minDetailHeightPx = remember(density) { with(density) { 112.dp.toPx() } }
     val handleBarHeightDp = 20.dp
-    // 由 BoxWithConstraints 寫入，畀 nested scroll 計算 maxDrag
     var calendarBottomLimitPx by remember { mutableFloatStateOf(0f) }
 
-    val curCal = remember(currentMonthKey) {
-        val parts = currentMonthKey.split("-")
+    // ★ 網格日期計算依賴 safeMonthKey
+    val curCal = remember(safeMonthKey) {
+        val parts = safeMonthKey.split("-")
         Calendar.getInstance().apply {
             set(parts[0].toInt(), parts[1].toInt() - 1, 1)
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
@@ -5149,19 +5159,19 @@ fun CalendarContent(
     val year = curCal.get(Calendar.YEAR)
     val month = curCal.get(Calendar.MONTH) + 1
     val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val isCurrentMonth = currentMonthKey == todayKey
+    val isCurrentMonth = safeMonthKey == todayKey
 
-    val recordsByDay = calendarUi.recordsByDay
-    val maxAbsNet = calendarUi.maxAbsNet
-    val totalNet = calendarUi.totalNet
-    val avgPerItem = calendarUi.avgPerItem
-    val avgPerDay = calendarUi.avgPerDay
-    val visibleCategories = calendarUi.visibleCategories
+    // ★ 數據依賴 safeUiState
+    val recordsByDay = safeUiState.recordsByDay
+    val maxAbsNet = safeUiState.maxAbsNet
+    val totalNet = safeUiState.totalNet
+    val avgPerItem = safeUiState.avgPerItem
+    val avgPerDay = safeUiState.avgPerDay
+    val visibleCategories = safeUiState.visibleCategories
 
     val firstDayOffset = remember(curCal) {
         val first = curCal.clone() as Calendar
         first.set(Calendar.DAY_OF_MONTH, 1)
-        // ★ 星期日為一週開始：Calendar.SUNDAY=1 → offset 0
         first.get(Calendar.DAY_OF_WEEK) - 1
     }
     val totalRows = (firstDayOffset + daysInMonth + 6) / 7
@@ -5229,7 +5239,6 @@ fun CalendarContent(
                 scope.launch {
                     detailsAlphaAnim.snapTo(0f)
                 }
-                // ★ 還原頂部 Chips + Stats
                 scope.launch {
                     topRevealProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 320f))
                 }
@@ -5237,10 +5246,10 @@ fun CalendarContent(
         }
     }
 
+    // 依然保留 currentMonthKey 以便即時響應按鈕
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
 
-    // ★ 明細 Box 嵌套滾動：內部列表優先；到頂後先拖動 Box 高度（跟手、有下限）
     val dismissConnection = remember(selectedRowIdx) {
         object : NestedScrollConnection {
             fun currentMaxDrag(): Float {
@@ -5249,7 +5258,6 @@ fun CalendarContent(
                 val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
                 val bottomLimit = calendarBottomLimitPx
                 if (bottomLimit <= 0f) return gridScroll * 0.85f
-                // H0 = 完全展開時明細高度；maxDrag 令高度唔低過 minDetailHeight
                 val h0 = (bottomLimit - headerHeightPx -
                     rowOffsetsPx[rowIdx] + gridScroll - rowHeightsPx[rowIdx])
                     .coerceAtLeast(0f)
@@ -5257,7 +5265,6 @@ fun CalendarContent(
             }
 
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // 向上：若 Box 已收細，先跟手展開（減少 dragDown）
                 if (available.y < 0f && dragDownAmount > 0f) {
                     if (isDockingBack) return Offset(0f, available.y)
                     val consume = minOf(-available.y, dragDownAmount)
@@ -5274,12 +5281,10 @@ fun CalendarContent(
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                // 向下：只喺內部列表已到頂時，先拖動收細 Box
                 if (available.y > 0f && detailScrollState.value <= 0) {
                     if (isDockingBack) return Offset(0f, available.y)
                     val maxDrag = currentMaxDrag()
                     if (maxDrag <= 0.5f) return Offset.Zero
-                    // 已在最小 peek：唔再收、亦唔 dismiss
                     if (isDockedAtTop || dragDownAmount >= maxDrag - 0.5f) {
                         isDockedAtTop = true
                         return Offset(0f, available.y)
@@ -5298,7 +5303,6 @@ fun CalendarContent(
                 val maxDrag = currentMaxDrag()
                 if (maxDrag <= 0.5f) return Velocity.Zero
 
-                // ★ peek 狀態向上 fling → 完整展開 + 日期行保持置頂
                 if ((isDockedAtTop || dragDownAmount > maxDrag * 0.5f) && available.y < -80f) {
                     isDockedAtTop = false
                     dockedReleased = false
@@ -5331,20 +5335,18 @@ fun CalendarContent(
                         snapTarget, spring(dampingRatio = 0.85f, stiffness = 400f)
                     ) { dragDownAmount = value }
                     isDockedAtTop = shouldDock
-                    dockedReleased = false // ★ 唔再二次下拉 dismiss
+                    dockedReleased = false
                 }
                 return Velocity.Zero
             }
         }
     }
 
-    // ★ 頂部下拉跟手：收起模式向下拉顯示 Chips/Stats，可中途反向
     val topPullConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (selectedDay == null) return Offset.Zero
                 val h = topSectionHeightPx.coerceAtLeast(1f)
-                // 向上收起頂部
                 if (available.y < 0f && topRevealProgress.value > 0.001f) {
                     val delta = available.y / h
                     val newP = (topRevealProgress.value + delta).coerceIn(0f, 1f)
@@ -5357,7 +5359,6 @@ fun CalendarContent(
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                 if (selectedDay == null) return Offset.Zero
                 val h = topSectionHeightPx.coerceAtLeast(1f)
-                // 向下拉出頂部
                 if (available.y > 0f && topRevealProgress.value < 0.999f) {
                     val delta = available.y / h
                     val newP = (topRevealProgress.value + delta).coerceIn(0f, 1f)
@@ -5370,7 +5371,6 @@ fun CalendarContent(
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (selectedDay == null) return Velocity.Zero
                 if (topRevealProgress.value <= 0.001f || topRevealProgress.value >= 0.999f) {
-                    // 已喺端點：若全開且繼續下拉可選擇 dismiss——保留現狀
                     return Velocity.Zero
                 }
                 val target = when {
@@ -5405,6 +5405,8 @@ fun CalendarContent(
                         }
                     ) {
                         Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp, color = Color.Black, fontWeight = FontWeight.Medium)
+                        
+                        // ★ 標題動畫依然依賴 currentMonthKey，確保禁掣即時反應
                         AnimatedContent(
                             targetState = currentMonthKey,
                             transitionSpec = {
@@ -5431,7 +5433,6 @@ fun CalendarContent(
                 }
             }
 
-            // ★ 頂部 Chips + Stats：高度跟手進度（可中途打斷、反向）
             val topP = topRevealProgress.value
             Box(
                 Modifier
@@ -5450,13 +5451,9 @@ fun CalendarContent(
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 10.dp)
-                        // ★ 不受父層 maxHeight 約束，永遠量到完整內容高度
                         .wrapContentHeight(unbounded = true, align = Alignment.Top)
                         .onSizeChanged { size ->
                             if (size.height > 0) {
-                                // ★ 修正 2：取消「只升唔降」限制！
-                                // 由於內部 Grid 已經有 animateDpAsState 平滑改變高度，
-                                // 直接跟隨真實 size.height，下方嘅月曆就會自動平滑升降補位。
                                 topSectionHeightPx = size.height.toFloat()
                             }
                         }
@@ -5464,18 +5461,17 @@ fun CalendarContent(
                     Spacer(Modifier.height(4.dp))
                     
                     AnimatedCalendarCategoryChips(
-                        visibleCategories = calendarUi.visibleCategories,
+                        visibleCategories = visibleCategories,
                         filterCategory = filterCategory,
                         onFilterCategoryChange = onFilterCategoryChange
                     )
                     
-                    // ★ 修正 1：加入 Spacer，拉開 Chips 同底部三個 Stat Box 嘅距離
                     Spacer(Modifier.height(14.dp))
                     
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(calendarUi.totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (calendarUi.totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
-                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(calendarUi.avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(calendarUi.avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
+                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
                     }
                     
                     Spacer(Modifier.height(8.dp))
@@ -5483,7 +5479,6 @@ fun CalendarContent(
             }
 
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().nestedScroll(topPullConnection)) {
-                // ★ 兜底：即使有殘留競態，都唔會令 Column 向下超出
                 val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
                     .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
 
@@ -5525,7 +5520,6 @@ fun CalendarContent(
                                             spring(dampingRatio = 0.9f, stiffness = 300f)
                                         )
                                     }
-                                    // ★ 即時顯示明細（取消漸變消失），收起頂部
                                     scope.launch { detailsAlphaAnim.snapTo(1f) }
                                     scope.launch {
                                         topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
@@ -5555,7 +5549,6 @@ fun CalendarContent(
                     val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
                     val rowNY = rowOffsetsPx[rowIdx] - actualGridOffset
                     val detailsTop = headerHeightPx + rowNY + rowHeightsPx[rowIdx]
-                    // ★ 下限：永遠至少露出第一條項目（唔會完全消失）
                     val detailsHeight = (bottomLimitPx - detailsTop).coerceAtLeast(minDetailHeightPx)
 
                     Box(
@@ -5574,7 +5567,6 @@ fun CalendarContent(
                                     .background(SURFACE_CARD)
                             ) {
                                 Column(Modifier.fillMaxSize()) {
-                                    // ★ 常設抓手 bar：上下跟手拖曳調整高度
                                     Box(
                                         Modifier
                                             .fillMaxWidth()
@@ -5618,7 +5610,6 @@ fun CalendarContent(
                                                                 .coerceAtLeast(0f)
                                                             (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
                                                         }
-                                                        // dragAmount > 0 = 向下 = 收細
                                                         val newDrag = (dragDownAmount + dragAmount).coerceIn(0f, maxDrag)
                                                         dragDownAmount = newDrag
                                                         isDockedAtTop = newDrag >= maxDrag - 0.5f
