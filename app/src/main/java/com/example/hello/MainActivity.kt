@@ -3591,6 +3591,7 @@ fun LedgerContent(
     groupedByDate: List<Pair<String, List<Record>>>,
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
+    noteCategoryMap: Map<String, String>, // ★ 補返呢行：接收由上層傳落嚟嘅分類資料
     hasIncome: Boolean,
     hasExpense: Boolean,
     totalIncome: Double,
