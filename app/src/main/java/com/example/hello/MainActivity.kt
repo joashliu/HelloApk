@@ -3350,7 +3350,7 @@ private fun AnimatedKeyboardLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>, // ★ 補返呢行
+    noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
     modifier: Modifier = Modifier
@@ -3361,8 +3361,9 @@ private fun AnimatedKeyboardLayer(
     if (!isActive) return
 
     val config = LocalConfiguration.current
+    // ★ 解決問題 1：大幅放寬 IME 打開時嘅高度限制，等佢有足夠高度可以向上頂，遮住 Top Stat Bar
     val maxPanelHeight = if (imeOpen) {
-        (config.screenHeightDp * 0.42f).dp.coerceAtLeast(220.dp)
+        (config.screenHeightDp * 0.75f).dp.coerceAtLeast(320.dp)
     } else {
         Dp.Unspecified
     }
@@ -3404,7 +3405,7 @@ private fun AnimatedKeyboardLayer(
             onPickCategory = { },
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
-            noteIconMap = noteIconMap, // ★ 補返呢行傳入去
+            noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
             modifier = Modifier.fillMaxWidth()
@@ -6056,7 +6057,7 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
     onPickCategory: () -> Unit,
     allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>, // ★ 新增圖標 Map
+    noteIconMap: Map<String, String>, // ★ 接收圖標 Map
     nameFlashTrigger: Int, showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -6299,12 +6300,15 @@ fun LedgerKeyboardPanel(
             AnimatedContent(
                 targetState = noteFieldFocused,
                 transitionSpec = {
-                    fadeIn(tween(220)) togetherWith fadeOut(tween(220))
+                    (fadeIn(tween(220)) togetherWith fadeOut(tween(220)))
+                        .using(SizeTransform(clip = true) { _, _ ->
+                            spring(dampingRatio = 0.85f, stiffness = 300f)
+                        })
                 },
                 label = "keyboard_area_swap"
             ) { isTypingText ->
                 if (!isTypingText) {
-                    // 狀態 1：原本嘅數字鍵盤
+                    // 狀態 1：原本嘅數字鍵盤 (固定高度 190.dp)
                     Column(
                         Modifier.fillMaxWidth().height(190.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -6380,17 +6384,18 @@ fun LedgerKeyboardPanel(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .height(190.dp)
+                            .heightIn(min = 60.dp, max = 220.dp)
+                            .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 300f))
                             .clip(RoundedCornerShape(14.dp))
                             .background(SURFACE_ELEVATED.copy(alpha = 0.5f))
                             .padding(12.dp)
                     ) {
                         if (noteSuggestions.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
                                 Text("無相關建議", color = TEXT_TERTIARY, fontSize = 14.sp)
                             }
                         } else {
-                            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
