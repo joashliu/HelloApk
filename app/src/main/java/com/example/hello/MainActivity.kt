@@ -7070,7 +7070,7 @@ private data class PlacedChip(
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    noteCategoryMap: Map<String, String>, // ★ 新增參數
+    noteCategoryMap: Map<String, String>,
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
     collapseProgress: Float = 0f,
@@ -7092,7 +7092,6 @@ fun QuickInputSection(
         }
     }
     
-    // 如果乜都冇，又唔係開住旅遊模式，先至隱藏成個區塊
     if (visibleTopNotes.isEmpty() && hiddenQuickNotes.isEmpty() && !travelModeOn) return
 
     val topNoteNames = remember(visibleTopNotes) { visibleTopNotes.map { it.first } }
@@ -7201,7 +7200,6 @@ fun QuickInputSection(
                 }
             }
 
-            // ★ 將原本 72.dp 加闊到 136.dp 嚟容納兩個掣
             val manageButtonWidthDp = 136.dp 
             val manageButtonWidthPx = with(density) { manageButtonWidthDp.toPx() }
             
@@ -7280,15 +7278,15 @@ fun QuickInputSection(
                             .offset { IntOffset((-manageButtonWidthPx + revealPx).roundToInt(), 0) }
                             .width(manageButtonWidthDp)
                             .fillMaxHeight()
-                            // 縮小 vertical padding 令文字有足夠空間
-                            .padding(vertical = 4.dp, horizontal = 6.dp) 
+                            // 稍微加大 vertical padding
+                            .padding(vertical = 6.dp, horizontal = 6.dp) 
                             .clip(RoundedCornerShape(12.dp))
                             .background(BRAND_PRIMARY_LIGHT),
                         contentAlignment = Alignment.Center
                     ) {
-                        // ★ 動態文字高度同透明度，解決靠上對齊問題
                         val actionTextAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
-                        val textHeightDp = 14.dp * actionTextAlpha
+                        // ★ 加大文字高度到 18.dp，確保字腳唔會被裁切
+                        val textHeightDp = 18.dp * actionTextAlpha 
                         val spacingDp = 2.dp * actionTextAlpha
                         
                         Row(
@@ -7315,6 +7313,8 @@ fun QuickInputSection(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (travelModeOn) Color(0xFF10B981) else BRAND_PRIMARY_DARK,
+                                    // ★ 移除字體默認 Padding，防止內部裁切
+                                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
                                     modifier = Modifier
                                         .height(textHeightDp)
                                         .graphicsLayer { alpha = actionTextAlpha }
@@ -7345,6 +7345,8 @@ fun QuickInputSection(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = BRAND_PRIMARY_DARK,
+                                    // ★ 移除字體默認 Padding
+                                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
                                     modifier = Modifier
                                         .height(textHeightDp)
                                         .graphicsLayer { alpha = actionTextAlpha }
@@ -7371,9 +7373,9 @@ fun QuickInputSection(
                             verticalAlignment = Alignment.Top
                         ) { page ->
                             if (pagesWithChips.isEmpty()) {
-                                // 當開啟咗旅遊模式，但無旅遊項目時嘅提示
+                                // 旅遊模式無項目提示
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Text("暫時冇相關項目", color = TEXT_SECONDARY, fontSize = 13.sp)
+                                    Text("暫時冇旅遊相關項目", color = TEXT_SECONDARY, fontSize = 13.sp)
                                 }
                             } else {
                                 val chips = pagesWithChips.getOrNull(page) ?: emptyList()
@@ -7433,10 +7435,17 @@ fun QuickInputSection(
                     }
                 }
 
-                val pillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
+                // ★ 解決重疊問題：當 manageRevealProgress 大過 0 時，按鈕會向右退縮，並淡出消失
+                val basePillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
+                val pillAlpha = basePillAlpha * (1f - manageRevealProgress)
+                
                 if (pillAlpha > 0.01f) {
                     Box(
-                        Modifier.fillMaxSize().graphicsLayer { alpha = pillAlpha },
+                        Modifier
+                            .fillMaxSize()
+                            // 向右退讓動效
+                            .offset { IntOffset((manageRevealProgress * 60f).roundToInt(), 0) }
+                            .graphicsLayer { alpha = pillAlpha },
                         contentAlignment = Alignment.Center
                     ) {
                         Surface(
