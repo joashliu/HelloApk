@@ -2116,21 +2116,22 @@ fun LightweightEntryApp(
             }
 
             LedgerKeyboardPanel(
-                state = keyboardState,
-                onStateChange = { keyboardState = it },
-                onDismiss = {
-                    focusManager.clearFocus()
-                    onTransitionToMain(null)
-                },
-                onConfirm = { performSave() },
-                onNext = { keyboardState = keyboardState.copy(editingNote = true) },
-                onPickCategory = { },
-                allNoteNames = ui.allNoteNames,
-                noteCategoryMap = ui.noteCategoryMap,
-                nameFlashTrigger = 0,
-                showKeyboard = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-            )
+    state = keyboardState,
+    onStateChange = { keyboardState = it },
+    onDismiss = {
+        focusManager.clearFocus()
+        onTransitionToMain(null)
+    },
+    onConfirm = { performSave() },
+    onNext = { keyboardState = keyboardState.copy(editingNote = true) },
+    onPickCategory = { },
+    allNoteNames = ui.allNoteNames,
+    noteCategoryMap = ui.noteCategoryMap,
+    noteIconMap = ui.noteIconMap, // 👈 補返呢行
+    nameFlashTrigger = 0,
+    showKeyboard = true,
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+)
         }
     }
 }
@@ -3106,6 +3107,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
+    noteIconMap: Map<String, String>, // ★ 補返呢行接收圖標 Map
     nameFlashTrigger: Int,
 ) {
     val density = LocalDensity.current
@@ -3234,6 +3236,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             onKeyboardNext = onKeyboardNext,
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
+            noteIconMap = noteIconMap, // ★ 補返呢行傳入去
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -3349,6 +3352,7 @@ private fun AnimatedKeyboardLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
+    noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
     modifier: Modifier = Modifier
