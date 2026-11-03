@@ -3352,7 +3352,7 @@ private fun AnimatedKeyboardLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>,
+    noteIconMap: Map<String, String>, // ★ 補返呢行
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
     modifier: Modifier = Modifier
@@ -3362,7 +3362,6 @@ private fun AnimatedKeyboardLayer(
 
     if (!isActive) return
 
-    // ★ 系統鍵盤開住時限制高度，面板可垂直捲動，確保名稱輸入框永遠睇到
     val config = LocalConfiguration.current
     val maxPanelHeight = if (imeOpen) {
         (config.screenHeightDp * 0.42f).dp.coerceAtLeast(220.dp)
@@ -3407,6 +3406,7 @@ private fun AnimatedKeyboardLayer(
             onPickCategory = { },
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
+            noteIconMap = noteIconMap, // ★ 補返呢行傳入去
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
             modifier = Modifier.fillMaxWidth()
