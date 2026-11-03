@@ -2068,6 +2068,7 @@ fun LightweightEntryApp(
             }
         }
 
+        // ★ 輕量模式同樣避讓系統輸入法
         val densityLw = LocalDensity.current
         val imeBottomLw = WindowInsets.ime.getBottom(densityLw)
         val navBottomLw = WindowInsets.navigationBars.getBottom(densityLw)
@@ -2086,6 +2087,7 @@ fun LightweightEntryApp(
                 QuickInputSection(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
+                    // ★ 新增呢行，傳入類別資料
                     noteCategoryMap = ui.noteCategoryMap, 
                     maxRowsPerPage = 3,
                     skipAppearAnimation = false,
@@ -2125,7 +2127,6 @@ fun LightweightEntryApp(
                 onPickCategory = { },
                 allNoteNames = ui.allNoteNames,
                 noteCategoryMap = ui.noteCategoryMap,
-                noteIconMap = ui.noteIconMap, // ★ 補返呢行傳入去
                 nameFlashTrigger = 0,
                 showKeyboard = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
@@ -2750,6 +2751,7 @@ fun MainApp(
                 }
             },
             onFabTap = {
+                // ★ 點擊 FAB：快速輸入區一定滾回第一頁（帶動畫）
                 quickInputScrollToFirstTrigger++
                 if (showKeyboard) {
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
@@ -2771,7 +2773,6 @@ fun MainApp(
             onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
             allNoteNames = ui.allNoteNames,
             noteCategoryMap = ui.noteCategoryMap,
-            noteIconMap = ui.noteIconMap, // ★ 就係爭呢行！
             nameFlashTrigger = nameFlashTrigger
         )
 
@@ -3105,7 +3106,6 @@ private fun BoxScope.KeyboardAndFabLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>, // ★ 補返呢行接收圖標 Map
     nameFlashTrigger: Int,
 ) {
     val density = LocalDensity.current
@@ -3234,7 +3234,6 @@ private fun BoxScope.KeyboardAndFabLayer(
             onKeyboardNext = onKeyboardNext,
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
-            noteIconMap = noteIconMap, // ★ 補返呢行傳入去
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -3350,7 +3349,6 @@ private fun AnimatedKeyboardLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
     modifier: Modifier = Modifier
@@ -3360,10 +3358,10 @@ private fun AnimatedKeyboardLayer(
 
     if (!isActive) return
 
+    // ★ 系統鍵盤開住時限制高度，面板可垂直捲動，確保名稱輸入框永遠睇到
     val config = LocalConfiguration.current
-    // ★ 解決問題 1：大幅放寬 IME 打開時嘅高度限制，等佢有足夠高度可以向上頂，遮住 Top Stat Bar
     val maxPanelHeight = if (imeOpen) {
-        (config.screenHeightDp * 0.75f).dp.coerceAtLeast(320.dp)
+        (config.screenHeightDp * 0.42f).dp.coerceAtLeast(220.dp)
     } else {
         Dp.Unspecified
     }
@@ -3405,7 +3403,6 @@ private fun AnimatedKeyboardLayer(
             onPickCategory = { },
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
-            noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
             modifier = Modifier.fillMaxWidth()
@@ -6057,12 +6054,12 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
     onPickCategory: () -> Unit,
     allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>, // ★ 接收圖標 Map
     nameFlashTrigger: Int, showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // ★ 提升到 panel 層，方便喺 note 輸入框「上方」渲染建議列表（唔再用 Popup）
     var noteFieldFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.noteText) {
@@ -6104,7 +6101,6 @@ fun LedgerKeyboardPanel(
             val dateText = remember(state.timestamp) { formatDatePart(state.timestamp) }
             val timeText = remember(state.timestamp) { formatTimePart(state.timestamp) }
 
-            // ===== 日期時間列 =====
             Row(
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -6169,7 +6165,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 旅遊匯率列 =====
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -6249,7 +6244,6 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            // ===== 金額顯示區 =====
             Surface(Modifier.fillMaxWidth().height(76.dp),
                 shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(
@@ -6292,131 +6286,134 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 動態切換：數字鍵盤區 vs 候選字 Chips 區 =====
+            Column(Modifier.fillMaxWidth().height(190.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                KEYBOARD_ROWS.forEach { row ->
+                    Row(Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { key ->
+                            KeyboardKey(key, {
+                                val editingRate = state.focusedField == "rate"
+                                if (!editingRate && state.focusedField != "amount") {
+                                    onStateChange(state.copy(focusedField = "amount", editingNote = false))
+                                }
+                                when (key) {
+                                    "backspace" -> {
+                                        if (!editingRate) {
+                                            val t = state.amountText
+                                            onStateChange(state.copy(
+                                                amountText = if (t.isEmpty()) t else t.dropLast(1),
+                                                selectAmountOnInput = false,
+                                                focusedField = "amount",
+                                                editingNote = false))
+                                        } else {
+                                            val t = state.exchangeRateText
+                                            onStateChange(state.copy(
+                                                exchangeRateText = if (t.isEmpty()) t else t.dropLast(1)))
+                                        }
+                                    }
+                                    "." -> {
+                                        if (!editingRate) {
+                                            val t = state.amountText
+                                            if (!t.contains("."))
+                                                onStateChange(state.copy(
+                                                    amountText = if (t.isEmpty()) "0." else "$t.",
+                                                    selectAmountOnInput = false,
+                                                    focusedField = "amount",
+                                                    editingNote = false))
+                                        } else {
+                                            val t = state.exchangeRateText
+                                            if (!t.contains("."))
+                                                onStateChange(state.copy(
+                                                    exchangeRateText = if (t.isEmpty()) "0." else "$t."))
+                                        }
+                                    }
+                                    else -> {
+                                        if (!editingRate) {
+                                            val base = if (state.selectAmountOnInput) "" else state.amountText
+                                            val dotIdx = base.indexOf(".")
+                                            val newT = if (dotIdx >= 0) {
+                                                if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base
+                                                else "$base$key"
+                                            } else {
+                                                if (base.length >= 9) base else "$base$key"
+                                            }
+                                            onStateChange(state.copy(
+                                                amountText = newT,
+                                                selectAmountOnInput = false,
+                                                focusedField = "amount",
+                                                editingNote = false))
+                                        } else {
+                                            val t = state.exchangeRateText
+                                            onStateChange(state.copy(exchangeRateText = "$t$key"))
+                                        }
+                                    }
+                                }
+                            }, Modifier.weight(1f).fillMaxHeight())
+                        }
+                    }
+                }
+            }
+
+            // ★ 名稱建議列表：inline 顯示喺輸入框「上方」
+            //   系統輸入法打開時，列表仍喺輸入框上面，唔會被鍵盤遮住
             val noteSuggestions = remember(state.noteText, allNoteNames) {
                 filterNoteSuggestions(state.noteText, allNoteNames)
             }
-
-            AnimatedContent(
-                targetState = noteFieldFocused,
-                transitionSpec = {
-                    (fadeIn(tween(220)) togetherWith fadeOut(tween(220)))
-                        .using(SizeTransform(clip = true) { _, _ ->
-                            spring(dampingRatio = 0.85f, stiffness = 300f)
-                        })
-                },
-                label = "keyboard_area_swap"
-            ) { isTypingText ->
-                if (!isTypingText) {
-                    // 狀態 1：原本嘅數字鍵盤 (固定高度 190.dp)
-                    Column(
-                        Modifier.fillMaxWidth().height(190.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        KEYBOARD_ROWS.forEach { row ->
-                            Row(Modifier.fillMaxWidth().weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                row.forEach { key ->
-                                    KeyboardKey(key, {
-                                        val editingRate = state.focusedField == "rate"
-                                        if (!editingRate && state.focusedField != "amount") {
-                                            onStateChange(state.copy(focusedField = "amount", editingNote = false))
-                                        }
-                                        when (key) {
-                                            "backspace" -> {
-                                                if (!editingRate) {
-                                                    val t = state.amountText
-                                                    onStateChange(state.copy(
-                                                        amountText = if (t.isEmpty()) t else t.dropLast(1),
-                                                        selectAmountOnInput = false,
-                                                        focusedField = "amount",
-                                                        editingNote = false))
-                                                } else {
-                                                    val t = state.exchangeRateText
-                                                    onStateChange(state.copy(
-                                                        exchangeRateText = if (t.isEmpty()) t else t.dropLast(1)))
-                                                }
-                                            }
-                                            "." -> {
-                                                if (!editingRate) {
-                                                    val t = state.amountText
-                                                    if (!t.contains("."))
-                                                        onStateChange(state.copy(
-                                                            amountText = if (t.isEmpty()) "0." else "$t.",
-                                                            selectAmountOnInput = false,
-                                                            focusedField = "amount",
-                                                            editingNote = false))
-                                                } else {
-                                                    val t = state.exchangeRateText
-                                                    if (!t.contains("."))
-                                                        onStateChange(state.copy(
-                                                            exchangeRateText = if (t.isEmpty()) "0." else "$t."))
-                                                }
-                                            }
-                                            else -> {
-                                                if (!editingRate) {
-                                                    val base = if (state.selectAmountOnInput) "" else state.amountText
-                                                    val dotIdx = base.indexOf(".")
-                                                    val newT = if (dotIdx >= 0) {
-                                                        if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base
-                                                        else "$base$key"
-                                                    } else {
-                                                        if (base.length >= 9) base else "$base$key"
-                                                    }
-                                                    onStateChange(state.copy(
-                                                        amountText = newT,
-                                                        selectAmountOnInput = false,
-                                                        focusedField = "amount",
-                                                        editingNote = false))
-                                                } else {
-                                                    val t = state.exchangeRateText
-                                                    onStateChange(state.copy(exchangeRateText = "$t$key"))
-                                                }
-                                            }
-                                        }
-                                    }, Modifier.weight(1f).fillMaxHeight())
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // 狀態 2：系統輸入法彈出時，變成左至右嘅候選字 Chips 區
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 60.dp, max = 220.dp)
-                            .animateContentSize(spring(dampingRatio = 0.85f, stiffness = 300f))
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(SURFACE_ELEVATED.copy(alpha = 0.5f))
-                            .padding(12.dp)
-                    ) {
-                        if (noteSuggestions.isEmpty()) {
-                            Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
-                                Text("無相關建議", color = TEXT_TERTIARY, fontSize = 14.sp)
-                            }
-                        } else {
-                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                                FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    noteSuggestions.forEach { s ->
-                                        QuickInputChip(
-                                            name = s,
-                                            iconUrl = noteIconMap[s] ?: "", 
-                                            onClick = {
-                                                onStateChange(
-                                                    state.copy(
-                                                        noteText = s,
-                                                        editingNote = true,
-                                                        focusedField = "note"
-                                                    )
-                                                )
-                                            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = noteFieldFocused && noteSuggestions.isNotEmpty(),
+                enter = expandVertically(
+                    expandFrom = Alignment.Bottom,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
+                ) + fadeIn(tween(150)),
+                exit = shrinkVertically(
+                    shrinkTowards = Alignment.Bottom,
+                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
+                ) + fadeOut(tween(120))
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SURFACE_CARD,
+                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .heightIn(max = 160.dp)
+                        .animateContentSize(
+                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
+                        )
+                ) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        noteSuggestions.forEach { s ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        onStateChange(
+                                            state.copy(
+                                                noteText = s,
+                                                editingNote = true,
+                                                focusedField = "note"
+                                            )
                                         )
                                     }
-                                }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    s,
+                                    fontSize = 14.sp,
+                                    color = TEXT_PRIMARY,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (s != noteSuggestions.last()) {
+                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                             }
                         }
                     }
@@ -6425,7 +6422,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 名稱及分類列 =====
             Row(Modifier.fillMaxWidth().height(64.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -6684,7 +6680,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ===== 底部按鈕列 =====
             Row(Modifier.fillMaxWidth().height(58.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
