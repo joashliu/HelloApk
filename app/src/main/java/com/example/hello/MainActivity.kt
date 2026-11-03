@@ -2548,6 +2548,7 @@ fun MainApp(
                 groupedByDate = ui.groupedByDate,
                 topNotes = ui.topNotes,
                 noteIconMap = ui.noteIconMap,
+                noteCategoryMap = ui.noteCategoryMap, // ★ 補返呢行：將 ui 嘅資料傳俾 LedgerContent
                 hasIncome = ui.hasIncome,
                 hasExpense = ui.hasExpense,
                 totalIncome = ui.totalIncome,
