@@ -2085,6 +2085,8 @@ fun LightweightEntryApp(
                 QuickInputSection(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
+                    // ★ 新增呢行，傳入類別資料
+                    noteCategoryMap = ui.noteCategoryMap, 
                     maxRowsPerPage = 3,
                     skipAppearAnimation = false,
                     collapseProgress = 0f,
@@ -4098,6 +4100,8 @@ fun LedgerContent(
                         QuickInputSection(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
+                            // ★ 新增呢行，傳入類別資料
+                            noteCategoryMap = noteCategoryMap,
                             maxRowsPerPage = 4,
                             skipAppearAnimation = !isFirstShow,
                             collapseProgress = collapseProgress,
@@ -7064,6 +7068,7 @@ private data class PlacedChip(
 fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
+    noteCategoryMap: Map<String, String>, // ★ 新增參數
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
     collapseProgress: Float = 0f,
@@ -7072,13 +7077,21 @@ fun QuickInputSection(
     hiddenQuickNotes: Set<String> = emptySet(),
     onHideNote: (String) -> Unit = {},
     onUnhideNote: (String) -> Unit = {},
-    // ★ 每次遞增會帶動畫滾回第一頁（FAB 點擊觸發）
     scrollToFirstTrigger: Int = 0,
 ) {
-    val visibleTopNotes = remember(topNotes, hiddenQuickNotes) {
-        topNotes.filter { it.first !in hiddenQuickNotes }
+    // ★ 旅遊模式狀態
+    var travelModeOn by remember { mutableStateOf(false) }
+
+    // ★ 過濾邏輯：如果開咗旅遊模式，就只顯示「旅遊」類別嘅項目
+    val visibleTopNotes = remember(topNotes, hiddenQuickNotes, travelModeOn, noteCategoryMap) {
+        topNotes.filter {
+            val isTravel = noteCategoryMap[it.first] == "旅遊"
+            it.first !in hiddenQuickNotes && (!travelModeOn || isTravel)
+        }
     }
-    if (visibleTopNotes.isEmpty() && hiddenQuickNotes.isEmpty()) return
+    
+    // 如果乜都冇，又唔係開住旅遊模式，先至隱藏成個區塊
+    if (visibleTopNotes.isEmpty() && hiddenQuickNotes.isEmpty() && !travelModeOn) return
 
     val topNoteNames = remember(visibleTopNotes) { visibleTopNotes.map { it.first } }
     val items = remember(topNoteNames) { topNoteNames.take(30).map { it to 0 } }
@@ -7163,16 +7176,13 @@ fun QuickInputSection(
                 }
             }
 
-            if (pagesWithChips.isEmpty()) return@BoxWithConstraints
-
-            val pagerState = rememberPagerState(pageCount = { pagesWithChips.size })
+            val pagerState = rememberPagerState(pageCount = { pagesWithChips.size.coerceAtLeast(1) })
 
             LaunchedEffect(pagesWithChips.size) {
                 val maxPage = (pagesWithChips.size - 1).coerceAtLeast(0)
                 if (pagerState.currentPage > maxPage) pagerState.scrollToPage(maxPage)
             }
 
-            // ★ FAB 觸發：帶動畫滾回第一頁，並收起管理按鈕
             LaunchedEffect(scrollToFirstTrigger) {
                 if (scrollToFirstTrigger <= 0) return@LaunchedEffect
                 if (pagerState.currentPage != 0 || pagerState.currentPageOffsetFraction != 0f) {
@@ -7189,7 +7199,10 @@ fun QuickInputSection(
                 }
             }
 
-            val manageButtonWidthPx = with(density) { 72.dp.toPx() }
+            // ★ 將原本 72.dp 加闊到 136.dp 嚟容納兩個掣
+            val manageButtonWidthDp = 136.dp 
+            val manageButtonWidthPx = with(density) { manageButtonWidthDp.toPx() }
+            
             val nestedScrollConnection = remember {
                 object : NestedScrollConnection {
                     override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -7222,15 +7235,16 @@ fun QuickInputSection(
             }
 
             val hasIndicator = pagesWithChips.size > 1
-            val safeCurrentPage = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
+            val safeCurrentPage = pagerState.currentPage.coerceIn(0, (pagesWithChips.size - 1).coerceAtLeast(0))
 
             val targetHeightDp = remember(pagesWithChips, safeCurrentPage, hasIndicator) {
-                val currentRowCount = pagesWithChips[safeCurrentPage].let { chips ->
+                val currentRowCount = pagesWithChips.getOrNull(safeCurrentPage)?.let { chips ->
                     if (chips.isEmpty()) 1 else {
                         val maxY = chips.maxOf { it.targetY }
                         ((maxY / (chipHeightPx + verticalGapPx)).roundToInt() + 1)
                     }
-                }
+                } ?: 1
+                
                 chipHeightDp * currentRowCount +
                 verticalGapDp * (currentRowCount - 1).coerceAtLeast(0) +
                 panelVPaddingDp * 2 +
@@ -7256,34 +7270,84 @@ fun QuickInputSection(
                 val mainScale = 1f - (collapseProgress * 0.08f)
                 val revealPx = manageRevealProgress * manageButtonWidthPx
 
-                // 從左側拉出的管理按鈕
+                // ★ 從左側拉出嘅選單（包含旅遊與管理）
                 if (manageRevealProgress > 0.01f) {
                     Box(
                         Modifier
                             .align(Alignment.CenterStart)
                             .offset { IntOffset((-manageButtonWidthPx + revealPx).roundToInt(), 0) }
-                            .width(with(density) { manageButtonWidthPx.toDp() })
+                            .width(manageButtonWidthDp)
                             .fillMaxHeight()
-                            .padding(vertical = 8.dp, horizontal = 6.dp)
+                            // 縮小 vertical padding 令文字有足夠空間
+                            .padding(vertical = 4.dp, horizontal = 6.dp) 
                             .clip(RoundedCornerShape(12.dp))
-                            .background(BRAND_PRIMARY_LIGHT)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                showManageDialog = true
-                                scope.launch {
-                                    manageRevealAnim.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f)) {
-                                        manageRevealProgress = value
-                                    }
-                                }
-                            },
+                            .background(BRAND_PRIMARY_LIGHT),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Settings, "管理", tint = BRAND_PRIMARY_DARK, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.height(2.dp))
-                            Text("管理", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BRAND_PRIMARY_DARK)
+                        // ★ 動態文字高度同透明度，解決靠上對齊問題
+                        val actionTextAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
+                        val textHeightDp = 14.dp * actionTextAlpha
+                        val spacingDp = 2.dp * actionTextAlpha
+                        
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // --- 旅遊掣 ---
+                            Column(
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                                    .clickable { travelModeOn = !travelModeOn },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    if (travelModeOn) Icons.Default.Flight else Icons.Default.FlightTakeoff,
+                                    "旅遊",
+                                    tint = if (travelModeOn) Color(0xFF10B981) else BRAND_PRIMARY_DARK,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.height(spacingDp))
+                                Text(
+                                    "旅遊",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (travelModeOn) Color(0xFF10B981) else BRAND_PRIMARY_DARK,
+                                    modifier = Modifier
+                                        .height(textHeightDp)
+                                        .graphicsLayer { alpha = actionTextAlpha }
+                                )
+                            }
+                            
+                            // --- 分隔線 ---
+                            Box(Modifier.width(1.dp).height(24.dp).background(BRAND_PRIMARY_DARK.copy(alpha = 0.2f)))
+                            
+                            // --- 管理掣 ---
+                            Column(
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                                    .clickable {
+                                        showManageDialog = true
+                                        scope.launch {
+                                            manageRevealAnim.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = 400f)) {
+                                                manageRevealProgress = value
+                                            }
+                                        }
+                                    },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Settings, "管理", tint = BRAND_PRIMARY_DARK, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.height(spacingDp))
+                                Text(
+                                    "管理",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BRAND_PRIMARY_DARK,
+                                    modifier = Modifier
+                                        .height(textHeightDp)
+                                        .graphicsLayer { alpha = actionTextAlpha }
+                                )
+                            }
                         }
                     }
                 }
@@ -7304,41 +7368,47 @@ fun QuickInputSection(
                             modifier = Modifier.fillMaxSize(),
                             verticalAlignment = Alignment.Top
                         ) { page ->
-                            val chips = pagesWithChips.getOrNull(page) ?: emptyList()
+                            if (pagesWithChips.isEmpty()) {
+                                // 當開啟咗旅遊模式，但無旅遊項目時嘅提示
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("暫時冇相關項目", color = TEXT_SECONDARY, fontSize = 13.sp)
+                                }
+                            } else {
+                                val chips = pagesWithChips.getOrNull(page) ?: emptyList()
+                                Box(Modifier.fillMaxWidth()
+                                    .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
+                                    chips.forEach { chip ->
+                                        key(chip.name) {
+                                            val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="x")
+                                            val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="y")
+                                            val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="w")
 
-                            Box(Modifier.fillMaxWidth()
-                                .padding(start = 14.dp, end = 14.dp, top = panelVPaddingDp)) {
-                                chips.forEach { chip ->
-                                    key(chip.name) {
-                                        val animX = animateFloatAsState(chip.targetX, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="x")
-                                        val animY = animateFloatAsState(chip.targetY, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="y")
-                                        val animW = animateFloatAsState(chip.targetW, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 320f), label="w")
+                                            var appear by remember { mutableStateOf(skipAppearAnimation) }
+                                            LaunchedEffect(Unit) {
+                                                if (!skipAppearAnimation) appear = true
+                                            }
+                                            val scale by animateFloatAsState(if (appear) 1f else 0.6f, spring(0.65f, 400f), label="s")
+                                            val alpha by animateFloatAsState(if (appear) 1f else 0f, tween(250), label="a")
 
-                                        var appear by remember { mutableStateOf(skipAppearAnimation) }
-                                        LaunchedEffect(Unit) {
-                                            if (!skipAppearAnimation) appear = true
-                                        }
-                                        val scale by animateFloatAsState(if (appear) 1f else 0.6f, spring(0.65f, 400f), label="s")
-                                        val alpha by animateFloatAsState(if (appear) 1f else 0f, tween(250), label="a")
-
-                                        Box(
-                                            Modifier
-                                                .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
-                                                .layout { measurable, constraints ->
-                                                    val w = animW.value.roundToInt()
-                                                    val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
-                                                    layout(w, placeable.height) { placeable.placeRelative(0, 0) }
-                                                }
-                                                .height(chipHeightDp)
-                                                .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
-                                        ) {
-                                            QuickInputChip(
-                                                name = chip.name,
-                                                iconUrl = noteIconMap[chip.name] ?: "",
-                                                modifier = Modifier.fillMaxSize(),
-                                                onClick = { onClick(chip.name) },
-                                                onLongClick = { longPressTarget = chip.name }
-                                            )
+                                            Box(
+                                                Modifier
+                                                    .offset { IntOffset(animX.value.roundToInt(), animY.value.roundToInt()) }
+                                                    .layout { measurable, constraints ->
+                                                        val w = animW.value.roundToInt()
+                                                        val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
+                                                        layout(w, placeable.height) { placeable.placeRelative(0, 0) }
+                                                    }
+                                                    .height(chipHeightDp)
+                                                    .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha }
+                                            ) {
+                                                QuickInputChip(
+                                                    name = chip.name,
+                                                    iconUrl = noteIconMap[chip.name] ?: "",
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    onClick = { onClick(chip.name) },
+                                                    onLongClick = { longPressTarget = chip.name }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -7348,7 +7418,7 @@ fun QuickInputSection(
                         if (hasIndicator) {
                             Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                val safeCurrent = pagerState.currentPage.coerceIn(0, pagesWithChips.lastIndex)
+                                val safeCurrent = pagerState.currentPage.coerceIn(0, (pagesWithChips.size - 1).coerceAtLeast(0))
                                 repeat(pagesWithChips.size) { i ->
                                     val isSelected = safeCurrent == i
                                     Box(Modifier
