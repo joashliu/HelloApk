@@ -2750,7 +2750,6 @@ fun MainApp(
                 }
             },
             onFabTap = {
-                // ★ 點擊 FAB：快速輸入區一定滾回第一頁（帶動畫）
                 quickInputScrollToFirstTrigger++
                 if (showKeyboard) {
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
@@ -2772,6 +2771,7 @@ fun MainApp(
             onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
             allNoteNames = ui.allNoteNames,
             noteCategoryMap = ui.noteCategoryMap,
+            noteIconMap = ui.noteIconMap, // ★ 就係爭呢行！
             nameFlashTrigger = nameFlashTrigger
         )
 
