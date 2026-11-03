@@ -6059,7 +6059,7 @@ fun LedgerKeyboardPanel(
 ) {
     val ctx = LocalContext.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    // ★ 提升到 panel 層，方便喺 note 行下面渲染建議列表（唔再用 Popup）
+    // ★ 提升到 panel 層，方便喺 note 輸入框「上方」渲染建議列表（唔再用 Popup）
     var noteFieldFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.noteText) {
@@ -6080,8 +6080,8 @@ fun LedgerKeyboardPanel(
 
     val panelShape = RoundedCornerShape(16.dp)
     val panelScrollState = rememberScrollState()
-    LaunchedEffect(state.editingNote) {
-        if (state.editingNote) {
+    LaunchedEffect(state.editingNote, state.noteText, noteFieldFocused) {
+        if (state.editingNote || noteFieldFocused) {
             kotlinx.coroutines.delay(80)
             panelScrollState.animateScrollTo(panelScrollState.maxValue)
         }
@@ -6355,6 +6355,71 @@ fun LedgerKeyboardPanel(
                 }
             }
 
+            // ★ 名稱建議列表：inline 顯示喺輸入框「上方」
+            //   系統輸入法打開時，列表仍喺輸入框上面，唔會被鍵盤遮住
+            val noteSuggestions = remember(state.noteText, allNoteNames) {
+                filterNoteSuggestions(state.noteText, allNoteNames)
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = noteFieldFocused && noteSuggestions.isNotEmpty(),
+                enter = expandVertically(
+                    expandFrom = Alignment.Bottom,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
+                ) + fadeIn(tween(150)),
+                exit = shrinkVertically(
+                    shrinkTowards = Alignment.Bottom,
+                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
+                ) + fadeOut(tween(120))
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SURFACE_CARD,
+                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .heightIn(max = 160.dp)
+                        .animateContentSize(
+                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
+                        )
+                ) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        noteSuggestions.forEach { s ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        onStateChange(
+                                            state.copy(
+                                                noteText = s,
+                                                editingNote = true,
+                                                focusedField = "note"
+                                            )
+                                        )
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    s,
+                                    fontSize = 14.sp,
+                                    color = TEXT_PRIMARY,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (s != noteSuggestions.last()) {
+                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(10.dp))
 
             Row(Modifier.fillMaxWidth().height(64.dp),
@@ -6607,67 +6672,6 @@ fun LedgerKeyboardPanel(
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ★ 名稱建議列表：改為 inline 渲染（唔再用 Popup），避免被 graphicsLayer / IME / clip 搞到唔見
-            val noteSuggestions = remember(state.noteText, allNoteNames) {
-                filterNoteSuggestions(state.noteText, allNoteNames)
-            }
-            androidx.compose.animation.AnimatedVisibility(
-                visible = noteFieldFocused && noteSuggestions.isNotEmpty(),
-                enter = expandVertically(
-                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
-                ) + fadeIn(tween(150)),
-                exit = shrinkVertically(
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                ) + fadeOut(tween(120))
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = SURFACE_CARD,
-                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .heightIn(max = 180.dp)
-                        .animateContentSize(
-                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
-                        )
-                ) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                        noteSuggestions.forEach { s ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        onStateChange(
-                                            state.copy(
-                                                noteText = s,
-                                                editingNote = true,
-                                                focusedField = "note"
-                                            )
-                                        )
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    s,
-                                    fontSize = 14.sp,
-                                    color = TEXT_PRIMARY,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (s != noteSuggestions.last()) {
-                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                             }
                         }
                     }
