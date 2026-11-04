@@ -2068,11 +2068,11 @@ fun LightweightEntryApp(
             }
         }
 
-        // ★ 輕量模式同樣避讓系統輸入法
         val densityLw = LocalDensity.current
         val imeBottomLw = WindowInsets.ime.getBottom(densityLw)
         val navBottomLw = WindowInsets.navigationBars.getBottom(densityLw)
         val imeLiftLw = with(densityLw) { (imeBottomLw - navBottomLw).coerceAtLeast(0).toDp() }
+        val isImeOpenLw = imeLiftLw > 0.dp // ★ 加入呢行：偵測系統鍵盤是否打開
 
         Column(
             Modifier.align(Alignment.BottomCenter)
@@ -2126,9 +2126,10 @@ fun LightweightEntryApp(
                 onPickCategory = { },
                 allNoteNames = ui.allNoteNames,
                 noteCategoryMap = ui.noteCategoryMap,
-                noteIconMap = ui.noteIconMap, // ★ 加入呢行
+                noteIconMap = ui.noteIconMap,
                 nameFlashTrigger = 0,
                 showKeyboard = true,
+                imeOpen = isImeOpenLw, // ★ 加入呢行：將系統鍵盤狀態傳入
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             )
         }
@@ -3337,7 +3338,7 @@ private fun AnimatedKeyboardLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>, // ★ 加入呢行
+    noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
     modifier: Modifier = Modifier
@@ -3347,7 +3348,6 @@ private fun AnimatedKeyboardLayer(
 
     if (!isActive) return
 
-    // ★ 系統鍵盤開住時限制高度，面板可垂直捲動，確保名稱輸入框永遠睇到
     val config = LocalConfiguration.current
     val maxPanelHeight = if (imeOpen) {
         (config.screenHeightDp * 0.42f).dp.coerceAtLeast(220.dp)
@@ -3392,9 +3392,10 @@ private fun AnimatedKeyboardLayer(
             onPickCategory = { },
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
-            noteIconMap = noteIconMap, // ★ 加入呢行
+            noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
+            imeOpen = imeOpen, // ★ 加入呢行：將系統鍵盤狀態傳遞落去
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -6044,8 +6045,9 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
     onPickCategory: () -> Unit,
     allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String> = emptyMap(), // ★ 帶預設值防錯
+    noteIconMap: Map<String, String> = emptyMap(),
     nameFlashTrigger: Int, showKeyboard: Boolean = true,
+    imeOpen: Boolean = false, // ★ 加入呢行：接收系統鍵盤狀態
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -6065,6 +6067,18 @@ fun LedgerKeyboardPanel(
         if (state.focusedField == "amount" || state.focusedField == "rate") {
             noteFieldFocused = false
             focusManager.clearFocus(force = true)
+        }
+    }
+
+    // ★ 核心邏輯：當系統鍵盤收起時，自動退回數字鍵盤
+    LaunchedEffect(imeOpen) {
+        if (!imeOpen) {
+            noteFieldFocused = false
+            focusManager.clearFocus(force = true)
+            // 同步更新 KeyboardState 狀態，避免卡喺編輯模式
+            if (state.editingNote || state.focusedField == "note") {
+                onStateChange(state.copy(focusedField = "amount", editingNote = false))
+            }
         }
     }
 
