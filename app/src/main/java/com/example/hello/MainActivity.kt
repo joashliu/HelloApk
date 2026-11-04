@@ -6059,7 +6059,7 @@ fun LedgerKeyboardPanel(
 ) {
     val ctx = LocalContext.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    // ★ 提升到 panel 層，方便喺 note 輸入框「上方」渲染建議列表（唔再用 Popup）
+    // ★ 提升到 panel 層，方便控制數字鍵盤與候選列表切換
     var noteFieldFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.noteText) {
@@ -6286,134 +6286,130 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            Column(Modifier.fillMaxWidth().height(190.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                KEYBOARD_ROWS.forEach { row ->
-                    Row(Modifier.fillMaxWidth().weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { key ->
-                            KeyboardKey(key, {
-                                val editingRate = state.focusedField == "rate"
-                                if (!editingRate && state.focusedField != "amount") {
-                                    onStateChange(state.copy(focusedField = "amount", editingNote = false))
-                                }
-                                when (key) {
-                                    "backspace" -> {
-                                        if (!editingRate) {
-                                            val t = state.amountText
-                                            onStateChange(state.copy(
-                                                amountText = if (t.isEmpty()) t else t.dropLast(1),
-                                                selectAmountOnInput = false,
-                                                focusedField = "amount",
-                                                editingNote = false))
-                                        } else {
-                                            val t = state.exchangeRateText
-                                            onStateChange(state.copy(
-                                                exchangeRateText = if (t.isEmpty()) t else t.dropLast(1)))
-                                        }
-                                    }
-                                    "." -> {
-                                        if (!editingRate) {
-                                            val t = state.amountText
-                                            if (!t.contains("."))
-                                                onStateChange(state.copy(
-                                                    amountText = if (t.isEmpty()) "0." else "$t.",
-                                                    selectAmountOnInput = false,
-                                                    focusedField = "amount",
-                                                    editingNote = false))
-                                        } else {
-                                            val t = state.exchangeRateText
-                                            if (!t.contains("."))
-                                                onStateChange(state.copy(
-                                                    exchangeRateText = if (t.isEmpty()) "0." else "$t."))
-                                        }
-                                    }
-                                    else -> {
-                                        if (!editingRate) {
-                                            val base = if (state.selectAmountOnInput) "" else state.amountText
-                                            val dotIdx = base.indexOf(".")
-                                            val newT = if (dotIdx >= 0) {
-                                                if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base
-                                                else "$base$key"
-                                            } else {
-                                                if (base.length >= 9) base else "$base$key"
-                                            }
-                                            onStateChange(state.copy(
-                                                amountText = newT,
-                                                selectAmountOnInput = false,
-                                                focusedField = "amount",
-                                                editingNote = false))
-                                        } else {
-                                            val t = state.exchangeRateText
-                                            onStateChange(state.copy(exchangeRateText = "$t$key"))
-                                        }
-                                    }
-                                }
-                            }, Modifier.weight(1f).fillMaxHeight())
-                        }
-                    }
-                }
-            }
-
-            // ★ 名稱建議列表：inline 顯示喺輸入框「上方」
-            //   系統輸入法打開時，列表仍喺輸入框上面，唔會被鍵盤遮住
+            // ★ 取得過濾後嘅建議項目
             val noteSuggestions = remember(state.noteText, allNoteNames) {
                 filterNoteSuggestions(state.noteText, allNoteNames)
             }
-            androidx.compose.animation.AnimatedVisibility(
-                visible = noteFieldFocused && noteSuggestions.isNotEmpty(),
-                enter = expandVertically(
-                    expandFrom = Alignment.Bottom,
-                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
-                ) + fadeIn(tween(150)),
-                exit = shrinkVertically(
-                    shrinkTowards = Alignment.Bottom,
-                    animationSpec = spring(dampingRatio = 0.9f, stiffness = 400f)
-                ) + fadeOut(tween(120))
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = SURFACE_CARD,
-                    border = BorderStroke(0.5.dp, DIVIDER_COLOR),
-                    shadowElevation = 4.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                        .heightIn(max = 160.dp)
-                        .animateContentSize(
-                            animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f)
-                        )
-                ) {
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                        noteSuggestions.forEach { s ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        onStateChange(
-                                            state.copy(
-                                                noteText = s,
-                                                editingNote = true,
-                                                focusedField = "note"
-                                            )
-                                        )
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+
+            // ★ 整合數字鍵盤與建議項目嘅動態切換區
+            Box(Modifier.fillMaxWidth().height(190.dp)) {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = noteFieldFocused,
+                    transitionSpec = {
+                        (fadeIn(tween(220, delayMillis = 90)) + scaleIn(initialScale = 0.92f, animationSpec = tween(220)))
+                            .togetherWith(fadeOut(tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150)))
+                    },
+                    label = "keyboard_or_suggestions"
+                ) { isNoteFocused ->
+                    if (isNoteFocused) {
+                        // 狀態：焦點喺名稱輸入框 -> 顯示候選項目
+                        if (noteSuggestions.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
-                                    s,
-                                    fontSize = 14.sp,
-                                    color = TEXT_PRIMARY,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = if (state.noteText.isBlank()) "輸入名稱以搜尋項目" else "搵唔到相關項目",
+                                    color = TEXT_SECONDARY,
+                                    fontSize = 14.sp
                                 )
                             }
-                            if (s != noteSuggestions.last()) {
-                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(3),
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                contentPadding = PaddingValues(bottom = 8.dp)
+                            ) {
+                                items(noteSuggestions, key = { it }) { s ->
+                                    QuickInputChip(
+                                        name = s,
+                                        iconUrl = noteIconMap[s] ?: "",
+                                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                                        onClick = {
+                                            onStateChange(
+                                                state.copy(
+                                                    noteText = s,
+                                                    editingNote = false,
+                                                    focusedField = "amount"
+                                                )
+                                            )
+                                            focusManager.clearFocus()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // 狀態：焦點喺其他地方 -> 顯示數字鍵盤
+                        Column(
+                            Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            KEYBOARD_ROWS.forEach { row ->
+                                Row(
+                                    Modifier.fillMaxWidth().weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    row.forEach { key ->
+                                        KeyboardKey(key, {
+                                            val editingRate = state.focusedField == "rate"
+                                            if (!editingRate && state.focusedField != "amount") {
+                                                onStateChange(state.copy(focusedField = "amount", editingNote = false))
+                                            }
+                                            when (key) {
+                                                "backspace" -> {
+                                                    if (!editingRate) {
+                                                        val t = state.amountText
+                                                        onStateChange(state.copy(
+                                                            amountText = if (t.isEmpty()) t else t.dropLast(1),
+                                                            selectAmountOnInput = false,
+                                                            focusedField = "amount",
+                                                            editingNote = false))
+                                                    } else {
+                                                        val t = state.exchangeRateText
+                                                        onStateChange(state.copy(
+                                                            exchangeRateText = if (t.isEmpty()) t else t.dropLast(1)))
+                                                    }
+                                                }
+                                                "." -> {
+                                                    if (!editingRate) {
+                                                        val t = state.amountText
+                                                        if (!t.contains("."))
+                                                            onStateChange(state.copy(
+                                                                amountText = if (t.isEmpty()) "0." else "$t.",
+                                                                selectAmountOnInput = false,
+                                                                focusedField = "amount",
+                                                                editingNote = false))
+                                                    } else {
+                                                        val t = state.exchangeRateText
+                                                        if (!t.contains("."))
+                                                            onStateChange(state.copy(
+                                                                exchangeRateText = if (t.isEmpty()) "0." else "$t."))
+                                                    }
+                                                }
+                                                else -> {
+                                                    if (!editingRate) {
+                                                        val base = if (state.selectAmountOnInput) "" else state.amountText
+                                                        val dotIdx = base.indexOf(".")
+                                                        val newT = if (dotIdx >= 0) {
+                                                            if (base.length - dotIdx - 1 >= 2 && state.currency != "JPY") base
+                                                            else "$base$key"
+                                                        } else {
+                                                            if (base.length >= 9) base else "$base$key"
+                                                        }
+                                                        onStateChange(state.copy(
+                                                            amountText = newT,
+                                                            selectAmountOnInput = false,
+                                                            focusedField = "amount",
+                                                            editingNote = false))
+                                                    } else {
+                                                        val t = state.exchangeRateText
+                                                        onStateChange(state.copy(exchangeRateText = "$t$key"))
+                                                    }
+                                                }
+                                            }
+                                        }, Modifier.weight(1f).fillMaxHeight())
+                                    }
+                                }
                             }
                         }
                     }
