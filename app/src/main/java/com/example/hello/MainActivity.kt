@@ -3348,12 +3348,9 @@ private fun AnimatedKeyboardLayer(
 
     if (!isActive) return
 
-    val config = LocalConfiguration.current
-    val maxPanelHeight = if (imeOpen) {
-        (config.screenHeightDp * 0.42f).dp.coerceAtLeast(220.dp)
-    } else {
-        Dp.Unspecified
-    }
+    // ★ 已完全移除 maxPanelHeight 嘅強制高度限制
+    // 咁樣當系統鍵盤推上嚟時，自訂鍵盤會保持完整高度並自然遮蓋上方嘅 Top Stat，
+    // 跌落嚟嘅時候亦會完整平滑過渡，唔會再出現被裁切嘅情況。
 
     Box(
         modifier = modifier
@@ -3362,10 +3359,6 @@ private fun AnimatedKeyboardLayer(
                 bottom = if (imeOpen) 8.dp else 20.dp,
                 end = 16.dp,
                 start = 16.dp
-            )
-            .then(
-                if (maxPanelHeight != Dp.Unspecified) Modifier.heightIn(max = maxPanelHeight)
-                else Modifier
             )
             .graphicsLayer {
                 alpha = currentP
@@ -3395,7 +3388,7 @@ private fun AnimatedKeyboardLayer(
             noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
-            imeOpen = imeOpen, // ★ 加入呢行：將系統鍵盤狀態傳遞落去
+            imeOpen = imeOpen,
             modifier = Modifier.fillMaxWidth()
         )
     }
