@@ -2087,7 +2087,6 @@ fun LightweightEntryApp(
                 QuickInputSection(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
-                    // ★ 新增呢行，傳入類別資料
                     noteCategoryMap = ui.noteCategoryMap, 
                     maxRowsPerPage = 3,
                     skipAppearAnimation = false,
@@ -2127,6 +2126,7 @@ fun LightweightEntryApp(
                 onPickCategory = { },
                 allNoteNames = ui.allNoteNames,
                 noteCategoryMap = ui.noteCategoryMap,
+                noteIconMap = ui.noteIconMap, // ★ 加入呢行
                 nameFlashTrigger = 0,
                 showKeyboard = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
@@ -2239,9 +2239,6 @@ fun MainApp(
     }
 
     // ★ 比較頁快照 - 導航切換觸發
-    //   - 切換到比較頁（currentPage == 1）→ onComparePageEnter() 一次性拉入最新數據（自動過濾「還錢」）
-    //   - 離開比較頁 → onComparePageExit() 快照凍結
-    //   - 比較頁內操作時 isComparePageActive == true → 內部實時同步（維持原即時動畫）
     LaunchedEffect(currentPage) {
         if (currentPage == 1) vm.onComparePageEnter()
         else vm.onComparePageExit()
@@ -2286,7 +2283,6 @@ fun MainApp(
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
 
-    // ★ 選圖後走 pendingImageUpload（彈效果選擇面板）
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
         if (uri != null && target != null) {
@@ -2304,7 +2300,6 @@ fun MainApp(
         iconTargetRecord = null
     }
 
-    // ★ 拍照後走 pendingImageUpload
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val target = iconTargetRecord
         val uri = pendingCameraUri
@@ -2370,7 +2365,6 @@ fun MainApp(
                 noteText = note, amountText = amtText,
                 category = defaultCategory, currency = defaultCurrency,
                 selectAmountOnInput = amount != null && !keepManualAmount,
-                // ★ 點 Chips：金額輸入模式，唔進入文字編輯、唔彈候選列表
                 editingNote = false,
                 focusedField = "amount"
             )
@@ -2499,8 +2493,6 @@ fun MainApp(
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
-            
-            // 1. 重置篩選和頁面
             if (filter.modeOn) vm.setFilterModeOn(false)
             if (currentPage != 0) currentPage = 0
             
@@ -2508,17 +2500,13 @@ fun MainApp(
             val amt = prefillAmountOnLaunch
             val cat = prefillCategoryOnLaunch
             
-            // 2. 打開鍵盤邏輯
             when {
                 note.isNullOrBlank() && amt == null -> openKeyboardForce(null)
                 amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat)
                 else -> openKeyboardForce(note, cat)
             }
             
-            // 3. 【新增】觸發快速輸入區滾動回第一頁
-            // 這行代碼會讓 QuickInputSection 監聽到的 scrollToFirstTrigger 變化，從而執行 animateScrollToPage(0)
             quickInputScrollToFirstTrigger++
-            
             onKeyboardLaunchConsumed()
             keyboardPrefillCategory.value = null
         }
@@ -2550,7 +2538,7 @@ fun MainApp(
                 groupedByDate = ui.groupedByDate,
                 topNotes = ui.topNotes,
                 noteIconMap = ui.noteIconMap,
-                noteCategoryMap = ui.noteCategoryMap, // ★ 補返呢行：將 ui 嘅資料傳俾 LedgerContent
+                noteCategoryMap = ui.noteCategoryMap,
                 hasIncome = ui.hasIncome,
                 hasExpense = ui.hasExpense,
                 totalIncome = ui.totalIncome,
@@ -2751,7 +2739,6 @@ fun MainApp(
                 }
             },
             onFabTap = {
-                // ★ 點擊 FAB：快速輸入區一定滾回第一頁（帶動畫）
                 quickInputScrollToFirstTrigger++
                 if (showKeyboard) {
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
@@ -2773,6 +2760,7 @@ fun MainApp(
             onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
             allNoteNames = ui.allNoteNames,
             noteCategoryMap = ui.noteCategoryMap,
+            noteIconMap = ui.noteIconMap, // ★ 加入呢行
             nameFlashTrigger = nameFlashTrigger
         )
 
@@ -3009,7 +2997,6 @@ fun MainApp(
                                         val processed = removeBackground(original)
                                         Pair(original, processed)
                                     }
-                                    // ★ 下載完 → 彈效果面板，不直接上傳
                                     pendingImageUpload = PendingImageUpload(target, bitmaps.first, bitmaps.second)
                                 } catch (e: Exception) {
                                     Toast.makeText(context, "下載失敗：${e.message ?: "未知錯誤"}",
@@ -3033,7 +3020,6 @@ fun MainApp(
         }
     }
 
-    // ★ 圖片效果選擇面板（Toast 風格置底、可交互）
     if (pendingImageUpload != null) {
         Box(Modifier.fillMaxSize().zIndex(200f)) {
             Box(
@@ -3106,6 +3092,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
+    noteIconMap: Map<String, String>, // ★ 加入呢行
     nameFlashTrigger: Int,
 ) {
     val density = LocalDensity.current
@@ -3234,6 +3221,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             onKeyboardNext = onKeyboardNext,
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
+            noteIconMap = noteIconMap, // ★ 加入呢行
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -3349,6 +3337,7 @@ private fun AnimatedKeyboardLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
+    noteIconMap: Map<String, String>, // ★ 加入呢行
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
     modifier: Modifier = Modifier
@@ -3403,6 +3392,7 @@ private fun AnimatedKeyboardLayer(
             onPickCategory = { },
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
+            noteIconMap = noteIconMap, // ★ 加入呢行
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
             modifier = Modifier.fillMaxWidth()
@@ -6054,12 +6044,12 @@ fun LedgerKeyboardPanel(
     onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
     onPickCategory: () -> Unit,
     allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
+    noteIconMap: Map<String, String> = emptyMap(), // ★ 帶預設值防錯
     nameFlashTrigger: Int, showKeyboard: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    // ★ 提升到 panel 層，方便控制數字鍵盤與候選列表切換
     var noteFieldFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.noteText) {
@@ -6286,12 +6276,10 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // ★ 取得過濾後嘅建議項目
             val noteSuggestions = remember(state.noteText, allNoteNames) {
                 filterNoteSuggestions(state.noteText, allNoteNames)
             }
 
-            // ★ 整合數字鍵盤與建議項目嘅動態切換區
             Box(Modifier.fillMaxWidth().height(190.dp)) {
                 androidx.compose.animation.AnimatedContent(
                     targetState = noteFieldFocused,
@@ -6302,7 +6290,6 @@ fun LedgerKeyboardPanel(
                     label = "keyboard_or_suggestions"
                 ) { isNoteFocused ->
                     if (isNoteFocused) {
-                        // 狀態：焦點喺名稱輸入框 -> 顯示候選項目
                         if (noteSuggestions.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -6339,7 +6326,6 @@ fun LedgerKeyboardPanel(
                             }
                         }
                     } else {
-                        // 狀態：焦點喺其他地方 -> 顯示數字鍵盤
                         Column(
                             Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
