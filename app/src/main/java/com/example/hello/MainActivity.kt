@@ -3093,7 +3093,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     onKeyboardNext: () -> Unit,
     allNoteNames: List<String>,
     noteCategoryMap: Map<String, String>,
-    noteIconMap: Map<String, String>, // ★ 加入呢行
+    noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
 ) {
     val density = LocalDensity.current
@@ -3101,7 +3101,6 @@ private fun BoxScope.KeyboardAndFabLayer(
     val navBottomPx = WindowInsets.navigationBars.getBottom(density)
     val imeLiftDp = with(density) { (imeBottomPx - navBottomPx).coerceAtLeast(0).toDp() }
     val imeOpen = imeLiftDp > 0.dp
-    // ★ 呢個高度會隨住系統鍵盤彈出而由 92.dp 縮細到 8.dp
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
 
     Box(
@@ -3110,6 +3109,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             .fillMaxWidth()
             .padding(bottom = imeLiftDp)
     ) {
+        // [1] 頂部篩選器列
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -3204,14 +3204,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             Spacer(modifier = Modifier.width(60.dp))
         }
 
-        // ★ 呢度！將 bottomChromePad 傳遞俾 FAB
-        AnimatedFabLayer(
-            progressProvider = progressProvider,
-            bottomPadding = bottomChromePad, 
-            onFabTap = onFabTap,
-            modifier = Modifier.align(Alignment.BottomEnd)
-        )
-
+        // [2] 實體鍵盤面板層 (底層)
         AnimatedKeyboardLayer(
             showKeyboard = showKeyboard,
             progressProvider = progressProvider,
@@ -3222,12 +3215,22 @@ private fun BoxScope.KeyboardAndFabLayer(
             onKeyboardNext = onKeyboardNext,
             allNoteNames = allNoteNames,
             noteCategoryMap = noteCategoryMap,
-            noteIconMap = noteIconMap, // ★ 加入呢行
+            noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
         
+        // [3] FAB 按鈕層 (頂層) —— ★ 排喺鍵盤後面確保會被畫喺最高層，唔會被鍵盤食咗！
+        AnimatedFabLayer(
+            progressProvider = progressProvider,
+            bottomPadding = bottomChromePad,
+            imeOpen = imeOpen,
+            onFabTap = onFabTap,
+            modifier = Modifier.align(Alignment.BottomEnd)
+        )
+        
+        // [4] 搜尋建議浮出層
         if (currentPage == 0 && filterModeOn && filterSearchHasFocus) {
             val filterSuggestions = remember(filterSearch.text, allNoteNames) {
                 filterNoteSuggestions(filterSearch.text, allNoteNames)
@@ -3269,14 +3272,14 @@ private fun BoxScope.KeyboardAndFabLayer(
                 }
             }
         }
-        
     }
 }
 
 @Composable
 private fun AnimatedFabLayer(
     progressProvider: () -> Float,
-    bottomPadding: Dp, // ★ 新增參數：接收動態嘅底部邊距
+    bottomPadding: Dp,
+    imeOpen: Boolean, // ★ 加入系統鍵盤狀態參數
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3293,9 +3296,13 @@ private fun AnimatedFabLayer(
         modifier = modifier
             .graphicsLayer {
                 val currentP = progressProvider()
-                val fabX = lerp(20.dp, 86.dp, currentP).toPx()
-                // ★ 將原本寫死嘅 92.dp 改為動態嘅 bottomPadding
-                val fabY = lerp(bottomPadding, 388.dp, currentP).toPx()
+                // ★ 完美對齊數字框右側預留的 44.dp 空間中心
+                val targetX = 42.dp 
+                // ★ 根據系統鍵盤是否彈出，動態調整完美高度，避免移位
+                val targetY = if (imeOpen) 380.dp else 392.dp
+                
+                val fabX = lerp(20.dp, targetX, currentP).toPx()
+                val fabY = lerp(bottomPadding, targetY, currentP).toPx()
                 translationX = -fabX
                 translationY = -fabY
                 transformOrigin = TransformOrigin(1f, 1f)
@@ -3322,6 +3329,7 @@ private fun AnimatedFabLayer(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(24.dp)
+                // ★ 展開時旋轉 -405度 (-360 - 45)，加號完美變換成交叉掣
                 .graphicsLayer { rotationZ = progressProvider() * -405f }
         )
     }
