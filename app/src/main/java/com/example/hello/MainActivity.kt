@@ -1723,8 +1723,8 @@ fun FanMenuOverlay(
 
     // ★ 大幅縮短距離：死區由 40dp 減至 16dp，彈出距離由 105dp 減至 85dp
     val minRadiusPx = remember(density) { with(density) { 16.dp.toPx() } }
-    val radiusPx = remember(density) { with(density) { 85.dp.toPx() } }
-    val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+val radiusPx = remember(density) { with(density) { 105.dp.toPx() } } 
+val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
     val hitRadiusPx = remember(density) { with(density) { 40.dp.toPx() } } // 加大保底半徑
 
     val edgeThreshold = radiusPx + halfBtnPx
@@ -3713,7 +3713,7 @@ fun LedgerContent(
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
 
     // ★ 大幅縮短滑動參數：彈出距離減至 85dp，邊界閥值相應調整
-    val fanRadiusPx = remember(density) { with(density) { 85.dp.toPx() } }
+    val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
 
