@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="quick_add"
+        android:enabled="true"
+        android:icon="@drawable/ic_tile_add"
+        android:shortcutShortLabel="@string/shortcut_quick_add_short"
+        android:shortcutLongLabel="@string/shortcut_quick_add_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.example.hello"
+            android:targetClass="com.example.hello.MainActivity">
+            <!-- 🟢 傳遞參數，直接叫 MainActivity 彈鍵盤 -->
+            <extra android:name="extra_open_keyboard" android:value="true" />
+        </intent>
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+</shortcuts>
