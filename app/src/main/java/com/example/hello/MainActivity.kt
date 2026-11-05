@@ -3233,18 +3233,18 @@ private fun BoxScope.KeyboardAndFabLayer(
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // [3] FAB 按鈕層 (頂層) —— ★ 動態計算額外高度
+        // [3] FAB 按鈕層 (頂層) —— 精確計算額外高度
         val isTransport = keyboardState.noteText == "地鐵" || keyboardState.noteText == "巴士"
         val isTravel = keyboardState.category == "旅遊"
         var extraHeight = 0.dp
-        if (isTransport) extraHeight += 46.dp
-        if (isTravel) extraHeight += 46.dp
+        if (isTransport) extraHeight += 48.dp
+        if (isTravel) extraHeight += 48.dp
 
         AnimatedFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
             imeOpen = imeOpen,
-            extraHeight = extraHeight, // ★ 傳入動態高度
+            extraHeight = extraHeight,
             onFabTap = onFabTap,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
@@ -3298,7 +3298,7 @@ private fun AnimatedFabLayer(
     progressProvider: () -> Float,
     bottomPadding: Dp,
     imeOpen: Boolean,
-    extraHeight: Dp = 0.dp, // ★ 新增呢個參數
+    extraHeight: Dp = 0.dp,
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3315,10 +3315,14 @@ private fun AnimatedFabLayer(
         modifier = modifier
             .graphicsLayer {
                 val currentP = progressProvider()
-                // ★ 完美對齊數字框右側預留的 44.dp 空間中心
-                val targetX = 42.dp
-                // ★ 根據系統鍵盤同埋切換掣嘅高度，動態調整完美高度
-                val targetY = (if (imeOpen) 368.dp else 392.dp) + extraHeight
+                
+                // ★ 修正 1：完美對準數字框右側預留的空間中心
+                val targetX = 10.dp
+                
+                // ★ 修正 2：精準計算高度，確保無論 IME 是否彈出都能對齊
+                val baseY = if (imeOpen) 404.dp else 416.dp
+                val targetY = baseY + extraHeight
+                
                 val fabX = lerp(20.dp, targetX, currentP).toPx()
                 val fabY = lerp(bottomPadding, targetY, currentP).toPx()
                 translationX = -fabX
