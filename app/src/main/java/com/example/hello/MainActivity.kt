@@ -3032,7 +3032,7 @@ fun MainApp(
         }
     }
 
-        if (pendingImageUpload != null) {
+            if (pendingImageUpload != null) {
         Box(Modifier.fillMaxSize().zIndex(200f)) {
             Box(
                 Modifier
@@ -3080,96 +3080,7 @@ fun MainApp(
             }
         }
     }
-
-    // 🟢 新增：乘車消費專屬選擇介面
-    if (transportDialogState != null) {
-        val (amt, category) = transportDialogState!!
-        Dialog(
-            onDismissRequest = { 
-                transportDialogState = null 
-                // 如果取消，唔記帳，直接清走確認通知
-                transportPendingNotifId?.let { id ->
-                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                    nm?.cancel(id)
-                }
-            },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = SURFACE_CARD,
-                modifier = Modifier.fillMaxWidth(0.85f).wrapContentHeight()
-            ) {
-                Column(
-                    Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("🚇 檢測到乘車消費", fontSize = 16.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(8.dp))
-                    Text("HKD ${formatAmountNoDecimal(amt)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = BRAND_PRIMARY_DARK)
-                    Spacer(Modifier.height(28.dp))
-                    
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // 🚇 地鐵掣
-                        Button(
-                            onClick = {
-                                transportDialogState = null
-                                // 交返通知 ID 畀鍵盤，入帳時會自動取消通知
-                                keyboardPrefillNotifId.value = transportPendingNotifId
-                                openKeyboardForNew("地鐵", amt, category)
-                                quickInputScrollToFirstTrigger++
-                                onKeyboardLaunchConsumed()
-                            },
-                            modifier = Modifier.weight(1f).height(72.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = SURFACE_ELEVATED, contentColor = TEXT_PRIMARY)
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("🚇", fontSize = 24.sp)
-                                Spacer(Modifier.height(4.dp))
-                                Text("地鐵", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        
-                        // 🚌 巴士掣
-                        Button(
-                            onClick = {
-                                transportDialogState = null
-                                keyboardPrefillNotifId.value = transportPendingNotifId
-                                openKeyboardForNew("巴士", amt, category)
-                                quickInputScrollToFirstTrigger++
-                                onKeyboardLaunchConsumed()
-                            },
-                            modifier = Modifier.weight(1f).height(72.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = BRAND_PRIMARY, contentColor = Color.White)
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("🚌", fontSize = 24.sp)
-                                Spacer(Modifier.height(4.dp))
-                                Text("巴士", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
-                    TextButton(onClick = { 
-                        transportDialogState = null 
-                        transportPendingNotifId?.let { id ->
-                            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                            nm?.cancel(id)
-                        }
-                    }) {
-                        Text("取消", color = TEXT_SECONDARY)
-                    }
-                }
-            }
-        }
-    }
-} // 👈 呢個係 MainApp 嘅結尾括號，貼完呢個就啱喇
+} // 👈 呢個大括號係 MainApp 嘅結尾，貼到呢度為止！
 
 // =========================================================
 //  ★ KeyboardAndFabLayer
