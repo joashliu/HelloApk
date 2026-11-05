@@ -3233,11 +3233,18 @@ private fun BoxScope.KeyboardAndFabLayer(
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // [3] FAB 按鈕層 (頂層) —— ★ 排喺鍵盤後面確保會被畫喺最高層，唔會被鍵盤食咗！
+        // [3] FAB 按鈕層 (頂層) —— ★ 動態計算額外高度
+        val isTransport = keyboardState.noteText == "地鐵" || keyboardState.noteText == "巴士"
+        val isTravel = keyboardState.category == "旅遊"
+        var extraHeight = 0.dp
+        if (isTransport) extraHeight += 46.dp
+        if (isTravel) extraHeight += 46.dp
+
         AnimatedFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
             imeOpen = imeOpen,
+            extraHeight = extraHeight, // ★ 傳入動態高度
             onFabTap = onFabTap,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
@@ -3286,12 +3293,12 @@ private fun BoxScope.KeyboardAndFabLayer(
         }
     }
 }
-
 @Composable
 private fun AnimatedFabLayer(
     progressProvider: () -> Float,
     bottomPadding: Dp,
-    imeOpen: Boolean, // ★ 加入系統鍵盤狀態參數
+    imeOpen: Boolean,
+    extraHeight: Dp = 0.dp, // ★ 新增呢個參數
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3310,8 +3317,8 @@ private fun AnimatedFabLayer(
                 val currentP = progressProvider()
                 // ★ 完美對齊數字框右側預留的 44.dp 空間中心
                 val targetX = 42.dp
-                // ★ 根據系統鍵盤是否彈出，動態調整完美高度，避免移位
-                val targetY = if (imeOpen) 368.dp else 392.dp
+                // ★ 根據系統鍵盤同埋切換掣嘅高度，動態調整完美高度
+                val targetY = (if (imeOpen) 368.dp else 392.dp) + extraHeight
                 val fabX = lerp(20.dp, targetX, currentP).toPx()
                 val fabY = lerp(bottomPadding, targetY, currentP).toPx()
                 translationX = -fabX
@@ -3340,7 +3347,6 @@ private fun AnimatedFabLayer(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(24.dp)
-                // ★ 展開時旋轉 -405度 (-360 - 45)，加號完美變換成交叉掣
                 .graphicsLayer { rotationZ = progressProvider() * -405f }
         )
     }
