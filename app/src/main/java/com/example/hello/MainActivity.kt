@@ -1721,14 +1721,11 @@ fun FanMenuOverlay(
     centerProvider: () -> Offset,
     touchProvider: () -> Offset
 ) {
-    // ★ 先記住本 overlay 喺 root 嘅位置（放喺 early return 前面，
-    //   避免 return 前後 composable 結構改變而丟失 state）
     val boxPositionInRoot = remember { mutableStateOf(Offset.Zero) }
 
     val progress = progressProvider()
     if (progress <= 0.001f) return
 
-    // ★ 將傳入嘅全局座標轉成本 Box 局部座標
     val center = centerProvider() - boxPositionInRoot.value
     val currentTouch = touchProvider() - boxPositionInRoot.value
 
@@ -1736,10 +1733,11 @@ fun FanMenuOverlay(
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
 
-    val minRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
-    val radiusPx = remember(density) { with(density) { 105.dp.toPx() } }
+    // ★ 大幅縮短距離：死區由 40dp 減至 16dp，彈出距離由 105dp 減至 85dp
+    val minRadiusPx = remember(density) { with(density) { 16.dp.toPx() } }
+    val radiusPx = remember(density) { with(density) { 85.dp.toPx() } }
     val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-    val hitRadiusPx = remember(density) { with(density) { 30.dp.toPx() } }
+    val hitRadiusPx = remember(density) { with(density) { 40.dp.toPx() } } // 加大保底半徑
 
     val edgeThreshold = radiusPx + halfBtnPx
     val leftSpace = center.x
@@ -1773,8 +1771,8 @@ fun FanMenuOverlay(
         Modifier
             .fillMaxSize()
             .onGloballyPositioned { coords ->
-    boxPositionInRoot.value = coords.boundsInRoot().topLeft
-}
+                boxPositionInRoot.value = coords.boundsInRoot().topLeft
+            }
     ) {
         FAN_MENU_ACTIONS.forEachIndexed { i, action ->
             val angle = arcCenterAngle - 60f + i * 40f
@@ -3613,7 +3611,7 @@ fun LedgerContent(
     groupedByDate: List<Pair<String, List<Record>>>,
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
-    noteCategoryMap: Map<String, String>, // ★ 補返呢行：接收由上層傳落嚟嘅分類資料
+    noteCategoryMap: Map<String, String>,
     hasIncome: Boolean,
     hasExpense: Boolean,
     totalIncome: Double,
@@ -3735,7 +3733,9 @@ fun LedgerContent(
 
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
-    val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
+    
+    // ★ 大幅縮短滑動參數：彈出距離減至 85dp，邊界閥值相應調整
+    val fanRadiusPx = remember(density) { with(density) { 85.dp.toPx() } }
     val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
 
@@ -3745,7 +3745,8 @@ fun LedgerContent(
         label = "fanMenuProgress"
     )
 
-    val minFanRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
+    // ★ 大幅縮短死區參數：減至 16dp
+    val minFanRadiusPx = remember(density) { with(density) { 16.dp.toPx() } }
     val handleFanStart = remember {
         { r: Record, offset: Offset ->
             activeFanRecord = r
@@ -3778,7 +3779,7 @@ fun LedgerContent(
                 minRadiusPx = minFanRadiusPx,
                 arcCenterAngle = arcCenterAngle,
                 radiusPx = fanRadiusPx,
-                hitRadiusPx = with(density) { 30.dp.toPx() }
+                hitRadiusPx = with(density) { 40.dp.toPx() } // 加大保底半徑
             )
             val targetRecord = activeFanRecord
             activeFanRecord = null
@@ -4095,7 +4096,6 @@ fun LedgerContent(
             val sectionGap = 8.dp
             Spacer(Modifier.height(sectionGap))
 
-            // ★ 加入括號修正：((enter) togetherWith (exit)).using(SizeTransform)
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
@@ -4123,7 +4123,6 @@ fun LedgerContent(
                         QuickInputSection(
                             topNotes = topNotes,
                             noteIconMap = noteIconMap,
-                            // ★ 新增呢行，傳入類別資料
                             noteCategoryMap = noteCategoryMap,
                             maxRowsPerPage = 4,
                             skipAppearAnimation = !isFirstShow,
