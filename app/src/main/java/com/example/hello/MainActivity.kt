@@ -1253,15 +1253,19 @@ private fun computeLedgerUiState(
         noteIndex.topNotes.filter { it.first in notesWithPast }
     }
 
-    // ★ 精簡：由 noteIndex.topNotes 現算 quickInfo（與原本 buildNoteIndex 的口徑完全一致）
-    val quickInfo = noteIndex.topNotes.take(3).mapNotNull { (note, _) ->
-        if (note.isBlank()) null
-        else QuickNoteInfo(
-            note = note,
-            category = noteIndex.noteCategoryMap[note] ?: "飲食",
-            amount = noteIndex.recentAmountByNote[note] ?: 0.0
-        )
-    }
+        // ★ 精簡：由 noteIndex.topNotes 現算 quickInfo（與原本 buildNoteIndex 的口徑完全一致）
+    // 🟢 新增過濾：同步快速記賬介面，剔除已隱藏嘅項目，確保通知唔會再顯示
+    val quickInfo = noteIndex.topNotes
+        .filter { it.first !in hiddenQuickNotes }
+        .take(3)
+        .mapNotNull { (note, _) ->
+            if (note.isBlank()) null
+            else QuickNoteInfo(
+                note = note,
+                category = noteIndex.noteCategoryMap[note] ?: "飲食",
+                amount = noteIndex.recentAmountByNote[note] ?: 0.0
+            )
+        }
 
     return LedgerUiState(
         loading = loading,
