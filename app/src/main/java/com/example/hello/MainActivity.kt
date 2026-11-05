@@ -5971,9 +5971,8 @@ fun LedgerKeyboardPanel(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var noteFieldFocused by remember { mutableStateOf(false) }
 
-    // 🟢 臨時測試用：圓角半徑狀態（預設 48dp）
-    var debugCornerRadius by remember { mutableFloatStateOf(48f) }
-    val panelShape = RoundedCornerShape(debugCornerRadius.dp)
+    // 🟢 已固定為 34.dp
+    val panelShape = RoundedCornerShape(34.dp)
 
     LaunchedEffect(state.noteText) {
         if (state.noteText.isNotBlank()) {
@@ -6698,36 +6697,6 @@ fun LedgerKeyboardPanel(
                         else -> "入帳"
                     }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
-            }
-        }
-
-        // 🟢 臨時調試滑軌（固定喺最頂，試完 delete 咗呢段就得）
-        // 我特登加咗深色半透明背景，保證你一眼就見到佢！
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.8f))
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .zIndex(100f) // 確保喺最上層
-        ) {
-            Column {
-                Text(
-                    text = "調試圓角: ${debugCornerRadius.toInt()} dp", 
-                    fontSize = 14.sp, 
-                    color = Color.Yellow, 
-                    fontWeight = FontWeight.Bold
-                )
-                Slider(
-                    value = debugCornerRadius,
-                    onValueChange = { debugCornerRadius = it },
-                    valueRange = 0f..80f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.Red,
-                        activeTrackColor = Color.Red,
-                        inactiveTrackColor = Color.Gray
-                    )
-                )
             }
         }
     }
