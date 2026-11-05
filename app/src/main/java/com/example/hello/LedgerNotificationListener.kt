@@ -9,8 +9,9 @@ class LedgerNotificationListener : NotificationListenerService() {
 
     companion object {
         private const val TAG = "LedgerNotifListener"
-        // 地鐵／八達通／一般消費通知嘅關鍵字
+        // 擷取金額嘅 Regex 規則
         private val AMOUNT_PATTERN = Regex("""(?:HK\$|\$)\s*(\d+(?:\.\d{1,2})?)""")
+        // 觸發記帳嘅關鍵字（包括易乘碼）
         private val DEDUCT_KEYWORDS = listOf(
             "扣款", "已付款", "付款", "消費", "交易", "易乘碼", "地鐵", "港鐵", "入閘", "出閘"
         )
@@ -18,7 +19,6 @@ class LedgerNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
-        val pkg = sbn.packageName ?: ""
 
         val extras = sbn.notification?.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
@@ -53,7 +53,7 @@ class LedgerNotificationListener : NotificationListenerService() {
             }
         }
 
-        // 2. 一般消費處理邏輯 (掃描所有 App 嘅通知)
+        // 2. 一般消費處理邏輯 (掃描所有通知)
         // 冇扣款關鍵字就跳過（避免誤觸一般聊天或新聞通知）
         if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) return
 
@@ -61,9 +61,8 @@ class LedgerNotificationListener : NotificationListenerService() {
         val amount = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return
         if (amount <= 0.0 || amount > 5000.0) return
 
-        // 歸納名稱：如果係港鐵 App 出就叫「地鐵」，否則優先用 title
+        // 歸納名稱：優先用通知標題 (Title)，否則預設叫「消費」
         val note = when {
-            pkg == "com.mtr.mobile" -> "地鐵"
             title.isNotBlank() && title.length <= 20 -> title
             else -> "消費"
         }
@@ -82,5 +81,6 @@ class LedgerNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        // 唔需要處理
     }
 }
