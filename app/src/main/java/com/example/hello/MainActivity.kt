@@ -3107,14 +3107,20 @@ private fun BoxScope.KeyboardAndFabLayer(
     val imeOpen = imeLiftDp > 0.dp
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
 
-    // ★ 狀態：用嚟儲存金額框中心點嘅 Y 座標
+    // ★ 狀態 1：儲存金額框中心點嘅 Y 座標
     var amountFieldY by remember { mutableFloatStateOf(0f) }
+    // ★ 狀態 2：儲存整個大容器底部嘅 Y 座標
+    var containerBottomY by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
             .padding(bottom = imeLiftDp)
+            // ★ 動態獲取容器底部嘅絕對座標
+            .onGloballyPositioned { coords ->
+                containerBottomY = coords.positionInRoot().y + coords.size.height
+            }
     ) {
         // [1] 頂部篩選器列
         Row(
@@ -3225,18 +3231,17 @@ private fun BoxScope.KeyboardAndFabLayer(
             noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
-            onAmountFieldPositioned = { y -> amountFieldY = y }, // ★ 接收金額框 Y 座標
+            onAmountFieldPositioned = { y -> amountFieldY = y }, 
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // ★ 動態計算 Fab 目標高度：用螢幕高度減去金額框位置
-        val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
-        val dynamicTargetY = remember(amountFieldY, imeOpen, density) {
-            if (amountFieldY > 0f) {
-                // 螢幕高度 - 金額框 Y - 交叉掣半徑(28dp)，確保完美置中
-                with(density) { (screenHeightPx - amountFieldY - 28.dp.toPx()).toDp() }
+        // ★ 精確計算 Fab 距離容器底部嘅高度（完美消除鍵盤彈出嘅偏差）
+        val dynamicTargetY = remember(amountFieldY, containerBottomY, density) {
+            if (amountFieldY > 0f && containerBottomY > 0f) {
+                // 容器底部 Y - 金額框 Y - 交叉掣半徑(28dp)
+                with(density) { (containerBottomY - amountFieldY - 28.dp.toPx()).toDp() }
             } else {
-                if (imeOpen) 368.dp else 392.dp // 未攞到座標前嘅保底值
+                if (imeOpen) 368.dp else 392.dp 
             }
         }
 
@@ -3244,7 +3249,7 @@ private fun BoxScope.KeyboardAndFabLayer(
         AnimatedFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
-            targetY = dynamicTargetY, // ★ 傳遞動態計算嘅高度
+            targetY = dynamicTargetY, 
             onFabTap = onFabTap,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
