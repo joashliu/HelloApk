@@ -2286,6 +2286,8 @@ fun MainApp(
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
+    var transportDialogState by remember { mutableStateOf<Pair<Double, String>?>(null) }
+    var transportPendingNotifId by remember { mutableStateOf<Int?>(null) }
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
@@ -2494,7 +2496,7 @@ fun MainApp(
         }
     }
 
-    LaunchedEffect(keyboardLaunchToken) {
+        LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
             if (filter.modeOn) vm.setFilterModeOn(false)
@@ -2504,15 +2506,24 @@ fun MainApp(
             val amt = prefillAmountOnLaunch
             val cat = prefillCategoryOnLaunch
 
-            when {
-                note.isNullOrBlank() && amt == null -> openKeyboardForce(null)
-                amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat)
-                else -> openKeyboardForce(note, cat)
+            // 🟢 核心判斷：如果係「地鐵」且金額大於 0，並且有通知 ID（代表由確認通知撳入嚟）
+            if (note == "地鐵" && amt != null && amt > 0.0 && keyboardPrefillNotifId.value != null) {
+                // 儲存通知 ID，並暫時清空，等撳完掣再交返畀鍵盤處理（用嚟取消通知）
+                transportPendingNotifId = keyboardPrefillNotifId.value
+                keyboardPrefillNotifId.value = null
+                // 彈出選擇介面
+                transportDialogState = amt to (cat ?: "交通")
+            } else {
+                // 原有邏輯
+                when {
+                    note.isNullOrBlank() && amt == null -> openKeyboardForce(null)
+                    amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat)
+                    else -> openKeyboardForce(note, cat)
+                }
+                quickInputScrollToFirstTrigger++
+                onKeyboardLaunchConsumed()
+                keyboardPrefillCategory.value = null
             }
-
-            quickInputScrollToFirstTrigger++
-            onKeyboardLaunchConsumed()
-            keyboardPrefillCategory.value = null
         }
     }
 
@@ -3024,7 +3035,7 @@ fun MainApp(
         }
     }
 
-    if (pendingImageUpload != null) {
+        if (pendingImageUpload != null) {
         Box(Modifier.fillMaxSize().zIndex(200f)) {
             Box(
                 Modifier
@@ -3072,7 +3083,96 @@ fun MainApp(
             }
         }
     }
-}
+
+    // 🟢 新增：乘車消費專屬選擇介面
+    if (transportDialogState != null) {
+        val (amt, category) = transportDialogState!!
+        Dialog(
+            onDismissRequest = { 
+                transportDialogState = null 
+                // 如果取消，唔記帳，直接清走確認通知
+                transportPendingNotifId?.let { id ->
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    nm?.cancel(id)
+                }
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = SURFACE_CARD,
+                modifier = Modifier.fillMaxWidth(0.85f).wrapContentHeight()
+            ) {
+                Column(
+                    Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("🚇 檢測到乘車消費", fontSize = 16.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(8.dp))
+                    Text("HKD ${formatAmountNoDecimal(amt)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = BRAND_PRIMARY_DARK)
+                    Spacer(Modifier.height(28.dp))
+                    
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // 🚇 地鐵掣
+                        Button(
+                            onClick = {
+                                transportDialogState = null
+                                // 交返通知 ID 畀鍵盤，入帳時會自動取消通知
+                                keyboardPrefillNotifId.value = transportPendingNotifId
+                                openKeyboardForNew("地鐵", amt, category)
+                                quickInputScrollToFirstTrigger++
+                                onKeyboardLaunchConsumed()
+                            },
+                            modifier = Modifier.weight(1f).height(72.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SURFACE_ELEVATED, contentColor = TEXT_PRIMARY)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("🚇", fontSize = 24.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text("地鐵", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        
+                        // 🚌 巴士掣
+                        Button(
+                            onClick = {
+                                transportDialogState = null
+                                keyboardPrefillNotifId.value = transportPendingNotifId
+                                openKeyboardForNew("巴士", amt, category)
+                                quickInputScrollToFirstTrigger++
+                                onKeyboardLaunchConsumed()
+                            },
+                            modifier = Modifier.weight(1f).height(72.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = BRAND_PRIMARY, contentColor = Color.White)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("🚌", fontSize = 24.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text("巴士", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(onClick = { 
+                        transportDialogState = null 
+                        transportPendingNotifId?.let { id ->
+                            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                            nm?.cancel(id)
+                        }
+                    }) {
+                        Text("取消", color = TEXT_SECONDARY)
+                    }
+                }
+            }
+        }
+    }
+} // 👈 呢個係 MainApp 嘅結尾括號，貼完呢個就啱喇
 
 // =========================================================
 //  ★ KeyboardAndFabLayer
