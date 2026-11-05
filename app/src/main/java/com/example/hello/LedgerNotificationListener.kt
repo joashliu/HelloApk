@@ -24,7 +24,6 @@ class LedgerNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
         val pkg = sbn.packageName ?: return
-        if (pkg !in TARGET_PACKAGES) return
 
         val extras = sbn.notification?.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
@@ -35,21 +34,45 @@ class LedgerNotificationListener : NotificationListenerService() {
         val combined = "$title $text $bigText $subText"
         if (combined.isBlank()) return
 
-        // 冇扣款關鍵字就跳過（避免誤觸促銷通知）
+        // 1. AEON 短訊/任何 App 通知特定處理
+        if (combined.contains("AEON: We received a transaction", ignoreCase = true)) {
+            val aeonRegex = "transaction (.*?) at amount HKD([0-9.]+)".toRegex(RegexOption.IGNORE_CASE)
+            val match = aeonRegex.find(combined)
+
+            if (match != null) {
+                val rawMerchant = match.groupValues[1].trim()
+                val amount = match.groupValues[2].toDoubleOrNull() ?: 0.0
+
+                if (amount > 0.0) {
+                    val noteName = if (rawMerchant.contains("McDonalds", ignoreCase = true)) {
+                        "麥當勞"
+                    } else {
+                        rawMerchant
+                    }
+                    val category = if (noteName == "麥當勞") "飲食" else "個人"
+
+                    Log.d(TAG, "捕獲 AEON 通知：$noteName · $amount · $category")
+                    NotificationCaptureBridge.pushCaptured(noteName, amount, category)
+                    return 
+                }
+            }
+        }
+
+        // 2. 一般地鐵/八達通處理邏輯 (需符合 TARGET_PACKAGES)
+        if (pkg !in TARGET_PACKAGES) return
+
         if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) return
 
         val match = AMOUNT_PATTERN.find(combined) ?: return
         val amount = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return
         if (amount <= 0.0 || amount > 5000.0) return
 
-        // 歸納名稱：優先由 title 判斷，否則用「地鐵」
         val note = when {
             pkg == "com.mtr.mobile" -> "地鐵"
             title.isNotBlank() && title.length <= 20 -> title
             else -> "消費"
         }
 
-        // 分類映射（你自己按需要調整）
         val category = when {
             combined.contains("地鐵", true) || combined.contains("港鐵", true)
                 || combined.contains("易乘碼", true) -> "交通"
@@ -63,6 +86,5 @@ class LedgerNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // 唔需要處理
     }
 }
