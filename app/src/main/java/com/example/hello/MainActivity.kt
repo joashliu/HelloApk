@@ -461,10 +461,10 @@ private val SWIPE_SPRING = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy
 )
 
-// ===== 配色（iOS 簡約風格）=====
-val BRAND_PRIMARY = Color(0xFF6366F1)
-val BRAND_PRIMARY_DARK = Color(0xFF4F46E5)
-val BRAND_PRIMARY_LIGHT = Color(0xFFE0E7FF)
+// ===== 配色（泥黃色風格）=====
+val BRAND_PRIMARY = Color(0xFFB68D40)       // 泥黃色 (主色)
+val BRAND_PRIMARY_DARK = Color(0xFF8B6A2A)  // 深泥黃色 (用於按壓或強烈對比)
+val BRAND_PRIMARY_LIGHT = Color(0xFFF5EFE6) // 淺泥黃底色 (用於淡色標籤或背景)
 
 // iOS systemGroupedBackground / secondarySystemGroupedBackground
 val SURFACE_BG = Color(0xFFF2F2F7)
