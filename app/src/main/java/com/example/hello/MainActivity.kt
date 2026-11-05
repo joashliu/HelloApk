@@ -5998,7 +5998,7 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    val panelShape = RoundedCornerShape(16.dp)
+    val panelShape = RoundedCornerShape(48.dp)
     val panelScrollState = rememberScrollState()
     LaunchedEffect(state.editingNote, state.noteText, noteFieldFocused) {
         if (state.editingNote || noteFieldFocused) {
