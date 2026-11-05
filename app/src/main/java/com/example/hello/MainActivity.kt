@@ -1657,13 +1657,13 @@ fun getHoveredActionIndexWithCenter(
     minRadiusPx: Float,
     arcCenterAngle: Float,
     radiusPx: Float,          // 實際扇形半徑
-    hitRadiusPx: Float        // 按鈕可點擊半徑（作為保底）
+    hitRadiusPx: Float        // 按鈕可點擊半徑
 ): Int? {
     val dx = touch.x - center.x
     val dy = touch.y - center.y
     val distFromCenter = kotlin.math.hypot(dx, dy)
 
-    // 1. 如果手指離起點太近（未滑出取消區），當作放棄選擇
+    // 1. 縮短死區判定：只要手指離開起點極短距離就開始判定
     if (distFromCenter < minRadiusPx) return null
 
     // 2. 計算手指相對於中心點嘅滑動方向角度 (0~360度)
@@ -1677,10 +1677,8 @@ fun getHoveredActionIndexWithCenter(
     // 3. 搵出角度最接近嘅按鈕
     for (i in 0 until 4) {
         var btnAngle = arcCenterAngle - 60f + i * 40f
-        // 確保角度喺 0~360 範圍內
         btnAngle = (btnAngle % 360f + 360f) % 360f
 
-        // 計算兩個角度嘅最短距離
         var diff = kotlin.math.abs(touchAngleDeg - btnAngle)
         if (diff > 180f) diff = 360f - diff
 
@@ -1690,9 +1688,9 @@ fun getHoveredActionIndexWithCenter(
         }
     }
 
-    // 4. 扇形判定：只要角度偏差喺 35 度以內，無論手指滑到幾遠都算命中！
-    // 咁樣每粒掣都會有一個好闊嘅隱形扇形區域，隨手一滑就中
-    if (minAngleDiff <= 35f) {
+    // 4. 極大寬容度判定：只要角度偏差喺 60 度以內，無論手指滑到幾遠都算命中！
+    // 咁樣基本上成個上半螢幕都係觸發區，隨手一滑就自動吸附
+    if (minAngleDiff <= 60f) {
         return bestIndex
     }
 
