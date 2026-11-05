@@ -2286,8 +2286,8 @@ fun MainApp(
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
-    var transportDialogState by remember { mutableStateOf<Pair<Double, String>?>(null) }
-    var transportPendingNotifId by remember { mutableStateOf<Int?>(null) }
+
+    // (刪除咗 transportDialogState 同 transportPendingNotifId)
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
@@ -2496,7 +2496,7 @@ fun MainApp(
         }
     }
 
-        LaunchedEffect(keyboardLaunchToken) {
+                LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
             if (filter.modeOn) vm.setFilterModeOn(false)
@@ -2506,13 +2506,9 @@ fun MainApp(
             val amt = prefillAmountOnLaunch
             val cat = prefillCategoryOnLaunch
 
-            // 🟢 核心判斷：如果係「地鐵」且金額大於 0，並且有通知 ID（代表由確認通知撳入嚟）
+            // 🟢 當收到「地鐵」且有通知 ID 時，直接彈鍵盤，默認地鐵
             if (note == "地鐵" && amt != null && amt > 0.0 && keyboardPrefillNotifId.value != null) {
-                // 儲存通知 ID，並暫時清空，等撳完掣再交返畀鍵盤處理（用嚟取消通知）
-                transportPendingNotifId = keyboardPrefillNotifId.value
-                keyboardPrefillNotifId.value = null
-                // 彈出選擇介面
-                transportDialogState = amt to (cat ?: "交通")
+                openKeyboardForNew("地鐵", amt, "交通")
             } else {
                 // 原有邏輯
                 when {
@@ -2520,10 +2516,11 @@ fun MainApp(
                     amt != null && amt > 0.0 -> openKeyboardForNew(note ?: "", amt, cat)
                     else -> openKeyboardForce(note, cat)
                 }
-                quickInputScrollToFirstTrigger++
-                onKeyboardLaunchConsumed()
-                keyboardPrefillCategory.value = null
             }
+
+            quickInputScrollToFirstTrigger++
+            onKeyboardLaunchConsumed()
+            keyboardPrefillCategory.value = null
         }
     }
 
@@ -6063,11 +6060,10 @@ private val CHUNKED_CATEGORIES = CATEGORIES.chunked(2)
 fun LedgerKeyboardPanel(
     state: KeyboardState, onStateChange: (KeyboardState) -> Unit,
     onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
-    // ★ 精簡：移除 onPickCategory（原代碼從未調用）
     allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
     noteIconMap: Map<String, String> = emptyMap(),
     nameFlashTrigger: Int, showKeyboard: Boolean = true,
-    imeOpen: Boolean = false, // ★ 加入呢行：接收系統鍵盤狀態
+    imeOpen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -6095,7 +6091,6 @@ fun LedgerKeyboardPanel(
         if (!imeOpen) {
             noteFieldFocused = false
             focusManager.clearFocus(force = true)
-            // 同步更新 KeyboardState 狀態，避免卡喺編輯模式
             if (state.editingNote || state.focusedField == "note") {
                 onStateChange(state.copy(focusedField = "amount", editingNote = false))
             }
@@ -6188,6 +6183,66 @@ fun LedgerKeyboardPanel(
             }
 
             Spacer(Modifier.height(10.dp))
+
+            // =========================================================
+            // 🟢 新增：地鐵 / 巴士 切換掣 (參考旅遊 HKD/JPY 樣式)
+            // =========================================================
+            val isTransportContext = state.noteText == "地鐵" || state.noteText == "巴士"
+            
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isTransportContext,
+                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
+                exit = shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
+            ) {
+                Column(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("乘車工具", fontSize = 13.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.weight(1f))
+                        
+                        Surface(shape = RoundedCornerShape(12.dp), color = SURFACE_ELEVATED) {
+                            Row(Modifier.padding(4.dp)) {
+                                val isBus = state.noteText == "巴士"
+                                
+                                // 🚇 地鐵掣
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (!isBus) BRAND_PRIMARY else Color.Transparent)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { 
+                                            // 只改名稱，金額保持不變
+                                            onStateChange(state.copy(noteText = "地鐵", category = "交通", focusedField = "amount")) 
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                                ) {
+                                    Text("🚇 地鐵", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                        color = if (!isBus) Color.White else TEXT_SECONDARY)
+                                }
+                                
+                                // 🚌 巴士掣
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isBus) BRAND_PRIMARY else Color.Transparent)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { 
+                                            // 只改名稱，金額保持不變
+                                            onStateChange(state.copy(noteText = "巴士", category = "交通", focusedField = "amount")) 
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                                ) {
+                                    Text("🚌 巴士", fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                        color = if (isBus) Color.White else TEXT_SECONDARY)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
