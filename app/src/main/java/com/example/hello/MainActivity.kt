@@ -5971,6 +5971,10 @@ fun LedgerKeyboardPanel(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var noteFieldFocused by remember { mutableStateOf(false) }
 
+    // 🟢 臨時測試用：圓角半徑狀態（預設 48dp）
+    var debugCornerRadius by remember { mutableFloatStateOf(48f) }
+    val panelShape = RoundedCornerShape(debugCornerRadius.dp)
+
     LaunchedEffect(state.noteText) {
         if (state.noteText.isNotBlank()) {
             val lastCat = noteCategoryMap[state.noteText]
@@ -5987,7 +5991,6 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    // ★ 核心邏輯：當系統鍵盤收起時，自動退回數字鍵盤
     LaunchedEffect(imeOpen) {
         if (!imeOpen) {
             noteFieldFocused = false
@@ -5998,7 +6001,6 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    val panelShape = RoundedCornerShape(48.dp)
     val panelScrollState = rememberScrollState()
     LaunchedEffect(state.editingNote, state.noteText, noteFieldFocused) {
         if (state.editingNote || noteFieldFocused) {
@@ -6018,6 +6020,28 @@ fun LedgerKeyboardPanel(
                 .verticalScroll(panelScrollState)
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
+            // =========================================================
+            // 🟢 臨時調試滑軌（試完 delete 咗呢段就得）
+            // =========================================================
+            Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Text(
+                    text = "調試圓角: ${debugCornerRadius.toInt()} dp", 
+                    fontSize = 12.sp, 
+                    color = Color.Red, 
+                    fontWeight = FontWeight.Bold
+                )
+                Slider(
+                    value = debugCornerRadius,
+                    onValueChange = { debugCornerRadius = it },
+                    valueRange = 0f..80f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.Red,
+                        activeTrackColor = Color.Red
+                    )
+                )
+            }
+            // =========================================================
+
             val dateText = remember(state.timestamp) { formatDatePart(state.timestamp) }
             val timeText = remember(state.timestamp) { formatTimePart(state.timestamp) }
 
@@ -6085,9 +6109,6 @@ fun LedgerKeyboardPanel(
 
             Spacer(Modifier.height(10.dp))
 
-            // =========================================================
-            // 🟢 地鐵 / 巴士 切換掣
-            // =========================================================
             val isTransportContext = state.noteText == "地鐵" || state.noteText == "巴士"
             
             androidx.compose.animation.AnimatedVisibility(
@@ -6104,7 +6125,6 @@ fun LedgerKeyboardPanel(
                             Row(Modifier.padding(4.dp)) {
                                 val isBus = state.noteText == "巴士"
                                 
-                                // 🚇 地鐵掣
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -6121,7 +6141,6 @@ fun LedgerKeyboardPanel(
                                         color = if (!isBus) Color.White else TEXT_SECONDARY)
                                 }
                                 
-                                // 🚌 巴士掣
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -6143,9 +6162,6 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            // =========================================================
-            // 🟢 旅遊匯率切換掣
-            // =========================================================
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -6225,9 +6241,6 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            // =========================================================
-            // 🟢 金額輸入框（連內置 X 清除掣）
-            // =========================================================
             Surface(Modifier.fillMaxWidth().height(76.dp),
                 shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(
@@ -6244,7 +6257,6 @@ fun LedgerKeyboardPanel(
                         .padding(start = 22.dp, end = 12.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    // 左邊：$ 符號
                     Text(
                         text = if (state.category == "旅遊" && state.currency == "JPY") "¥" else "$",
                         fontSize = 24.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Bold,
@@ -6255,7 +6267,6 @@ fun LedgerKeyboardPanel(
                     val highlightColor = if (state.selectAmountOnInput) Color(0xFFDBEAFE)
                                          else Color.Transparent
 
-                    // 中間：數字
                     Box(
                         modifier = Modifier.padding(end = 44.dp)
                             .clip(RoundedCornerShape(10.dp))
@@ -6269,7 +6280,6 @@ fun LedgerKeyboardPanel(
                         )
                     }
                     
-                    // 🟢 右邊：直接放喺金額框入面嘅 X 清除掣
                     if (state.amountText.isNotEmpty()) {
                         Box(
                             modifier = Modifier
@@ -6279,7 +6289,6 @@ fun LedgerKeyboardPanel(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null
                                 ) { 
-                                    // 清空金額
                                     onStateChange(state.copy(amountText = "", selectAmountOnInput = false, focusedField = "amount")) 
                                 },
                             contentAlignment = Alignment.Center
