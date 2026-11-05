@@ -3107,6 +3107,9 @@ private fun BoxScope.KeyboardAndFabLayer(
     val imeOpen = imeLiftDp > 0.dp
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
 
+    // ★ 狀態：用嚟儲存金額框中心點嘅 Y 座標
+    var amountFieldY by remember { mutableFloatStateOf(0f) }
+
     Box(
         modifier = Modifier
             .align(Alignment.BottomCenter)
@@ -3222,14 +3225,26 @@ private fun BoxScope.KeyboardAndFabLayer(
             noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
+            onAmountFieldPositioned = { y -> amountFieldY = y }, // ★ 接收金額框 Y 座標
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
-        // [3] FAB 按鈕層 (頂層) —— ★ 排喺鍵盤後面確保會被畫喺最高層，唔會被鍵盤食咗！
+        // ★ 動態計算 Fab 目標高度：用螢幕高度減去金額框位置
+        val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+        val dynamicTargetY = remember(amountFieldY, imeOpen, density) {
+            if (amountFieldY > 0f) {
+                // 螢幕高度 - 金額框 Y - 交叉掣半徑(28dp)，確保完美置中
+                with(density) { (screenHeightPx - amountFieldY - 28.dp.toPx()).toDp() }
+            } else {
+                if (imeOpen) 368.dp else 392.dp // 未攞到座標前嘅保底值
+            }
+        }
+
+        // [3] FAB 按鈕層 (頂層) 
         AnimatedFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
-            imeOpen = imeOpen,
+            targetY = dynamicTargetY, // ★ 傳遞動態計算嘅高度
             onFabTap = onFabTap,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
@@ -3283,7 +3298,7 @@ private fun BoxScope.KeyboardAndFabLayer(
 private fun AnimatedFabLayer(
     progressProvider: () -> Float,
     bottomPadding: Dp,
-    imeOpen: Boolean, // ★ 加入系統鍵盤狀態參數
+    targetY: Dp, // ★ 將 imeOpen 改為接收動態 targetY
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -3300,12 +3315,10 @@ private fun AnimatedFabLayer(
         modifier = modifier
             .graphicsLayer {
                 val currentP = progressProvider()
-                // ★ 完美對齊數字框右側預留的 44.dp 空間中心
                 val targetX = 42.dp
-                // ★ 根據系統鍵盤是否彈出，動態調整完美高度，避免移位
-                val targetY = if (imeOpen) 368.dp else 392.dp
+
                 val fabX = lerp(20.dp, targetX, currentP).toPx()
-                val fabY = lerp(bottomPadding, targetY, currentP).toPx()
+                val fabY = lerp(bottomPadding, targetY, currentP).toPx() // ★ 使用傳入嘅目標 Y
                 translationX = -fabX
                 translationY = -fabY
                 transformOrigin = TransformOrigin(1f, 1f)
@@ -3332,7 +3345,6 @@ private fun AnimatedFabLayer(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(24.dp)
-                // ★ 展開時旋轉 -405度 (-360 - 45)，加號完美變換成交叉掣
                 .graphicsLayer { rotationZ = progressProvider() * -405f }
         )
     }
@@ -3352,16 +3364,13 @@ private fun AnimatedKeyboardLayer(
     noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
+    onAmountFieldPositioned: (Float) -> Unit = {}, // ★ 接收並傳遞 callback
     modifier: Modifier = Modifier
 ) {
     val currentP = progressProvider()
     val isActive = currentP > 0f || showKeyboard
 
     if (!isActive) return
-
-    // ★ 已完全移除 maxPanelHeight 嘅強制高度限制
-    // 咁樣當系統鍵盤推上嚟時，自訂鍵盤會保持完整高度並自然遮蓋上方嘅 Top Stat，
-    // 跌落嚟嘅時候亦會完整平滑過渡，唔會再出現被裁切嘅情況。
 
     Box(
         modifier = modifier
@@ -3399,6 +3408,7 @@ private fun AnimatedKeyboardLayer(
             nameFlashTrigger = nameFlashTrigger,
             showKeyboard = showKeyboard,
             imeOpen = imeOpen,
+            onAmountFieldPositioned = onAmountFieldPositioned, // ★ 將 callback 傳畀鍵盤
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -5963,11 +5973,11 @@ private val CHUNKED_CATEGORIES = CATEGORIES.chunked(2)
 fun LedgerKeyboardPanel(
     state: KeyboardState, onStateChange: (KeyboardState) -> Unit,
     onDismiss: () -> Unit, onConfirm: () -> Unit, onNext: () -> Unit,
-    // ★ 精簡：移除 onPickCategory（原代碼從未調用）
     allNoteNames: List<String>, noteCategoryMap: Map<String, String>,
     noteIconMap: Map<String, String> = emptyMap(),
     nameFlashTrigger: Int, showKeyboard: Boolean = true,
-    imeOpen: Boolean = false, // ★ 加入呢行：接收系統鍵盤狀態
+    imeOpen: Boolean = false, 
+    onAmountFieldPositioned: (Float) -> Unit = {}, // ★ 新增 callback 傳遞 Y 座標
     modifier: Modifier = Modifier
 ) {
     val ctx = LocalContext.current
@@ -5990,12 +6000,10 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    // ★ 核心邏輯：當系統鍵盤收起時，自動退回數字鍵盤
     LaunchedEffect(imeOpen) {
         if (!imeOpen) {
             noteFieldFocused = false
             focusManager.clearFocus(force = true)
-            // 同步更新 KeyboardState 狀態，避免卡喺編輯模式
             if (state.editingNote || state.focusedField == "note") {
                 onStateChange(state.copy(focusedField = "amount", editingNote = false))
             }
@@ -6168,7 +6176,11 @@ fun LedgerKeyboardPanel(
                 }
             }
 
-            Surface(Modifier.fillMaxWidth().height(76.dp),
+            // ★ 呢度加入 onGloballyPositioned 嚟獲取金額框 Y 座標
+            Surface(Modifier.fillMaxWidth().height(76.dp)
+                .onGloballyPositioned { coords ->
+                    onAmountFieldPositioned(coords.positionInRoot().y + (coords.size.height / 2f))
+                },
                 shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(
                     Modifier.fillMaxSize()
