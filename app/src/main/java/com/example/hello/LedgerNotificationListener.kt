@@ -15,14 +15,15 @@ class LedgerNotificationListener : NotificationListenerService() {
         private const val MAX_AMOUNT = 50000.0
 
         // 前綴金額：HKD6.00 / hk$4.90 / $10 / MOP 12.5 / RMB 30
+        // 注意：[\s\u00A0\u200B]* 支援普通空格、NBSP、零寬空格
         private val AMOUNT_PREFIX_PATTERN = Regex(
-            """(?:HKD|HK\$|MOP|RMB|CNY|USD|SGD|\$)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)""",
+            """(?:HKD|HK\$|MOP|RMB|CNY|USD|SGD|\$)[\s\u00A0\u200B]*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)""",
             RegexOption.IGNORE_CASE
         )
 
         // 後綴金額：6.00 HKD / 12.5 MOP
         private val AMOUNT_SUFFIX_PATTERN = Regex(
-            """([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)\s*(?:HKD|MOP|RMB|CNY)""",
+            """([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)[\s\u00A0\u200B]*(?:HKD|MOP|RMB|CNY)""",
             RegexOption.IGNORE_CASE
         )
 
@@ -72,20 +73,20 @@ class LedgerNotificationListener : NotificationListenerService() {
         val extras = notification.extras ?: return
 
         // 撈齊所有可能嘅文本欄位
-        val ticker       = notification.tickerText?.toString().orEmpty()
-        val title        = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text         = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val bigText      = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
-        val subText      = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
-        val infoText     = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
-        val progressText = extras.getCharSequence(Notification.EXTRA_PROGRESS_TEXT)?.toString().orEmpty()
-        val textLines    = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        // 注意：Notification.EXTRA_PROGRESS_TEXT 係 @hide，SDK 冇 expose，唔可以用
+        val ticker    = notification.tickerText?.toString().orEmpty()
+        val title     = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text      = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val bigText   = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
+        val subText   = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+        val infoText  = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
             ?.joinToString(" ") { it.toString() }
             .orEmpty()
         val messagesText = readMessagingStyle(extras)
 
         val combined = listOf(
-            ticker, title, text, bigText, subText, infoText, progressText, textLines, messagesText
+            ticker, title, text, bigText, subText, infoText, textLines, messagesText
         ).filter { it.isNotBlank() }.joinToString(" ")
 
         if (combined.isBlank()) return
