@@ -3303,8 +3303,7 @@ private fun AnimatedFabLayer(
                 // ★ 完美對齊數字框右側預留的 44.dp 空間中心
                 val targetX = 42.dp
                 // ★ 根據系統鍵盤是否彈出，動態調整完美高度，避免移位
-                val targetY = if (imeOpen) 380.dp else 392.dp
-
+                val targetY = if (imeOpen) 368.dp else 392.dp
                 val fabX = lerp(20.dp, targetX, currentP).toPx()
                 val fabY = lerp(bottomPadding, targetY, currentP).toPx()
                 translationX = -fabX
