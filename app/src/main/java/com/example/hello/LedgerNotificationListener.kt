@@ -10,12 +10,13 @@ class LedgerNotificationListener : NotificationListenerService() {
     companion object {
         private const val TAG = "LedgerNotifListener"
         
-        // 擷取一般消費金額嘅 Regex 規則 (例如 "HK$4.90" 或 "$100")
-        private val AMOUNT_PATTERN = Regex("""(?:HK\$|\$)\s*(\d+(?:\.\d{1,2})?)""")
+        // 終極金額 Regex：支援 HKD, HK$, $, 並且忽略大小寫 (例如 HKD6.00, hk$4.90, $10)
+        private val AMOUNT_PATTERN = Regex("""(?:HKD|HK\$|\$)\s*(\d+(?:\.\d{1,2})?)""", RegexOption.IGNORE_CASE)
         
-        // 觸發一般記帳嘅關鍵字（包括易乘碼）
+        // 終極關鍵字：加入英文扣款字眼 (transaction, payment 等) 同埋 AEON
         private val DEDUCT_KEYWORDS = listOf(
-            "扣款", "已付款", "付款", "消費", "交易", "易乘碼", "地鐵", "港鐵", "入閘", "出閘"
+            "扣款", "已付款", "付款", "消費", "交易", "易乘碼", "地鐵", "港鐵", "入閘", "出閘",
+            "transaction", "payment", "paid", "aeon"
         )
     }
 
@@ -23,81 +24,56 @@ class LedgerNotificationListener : NotificationListenerService() {
         if (sbn == null) return
 
         val extras = sbn.notification?.extras ?: return
+        
+        // 攞晒所有文字出嚟 (測試 App 好多時會將字塞落 Ticker 度)
+        val ticker = sbn.notification?.tickerText?.toString().orEmpty()
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
-        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
 
-        // 將所有可能出現文字嘅欄位夾埋一齊，確保唔會漏
-        val combined = "$title $text $bigText $subText"
+        // 將所有字夾埋一齊，確保唔會漏
+        val combined = "$ticker $title $text $bigText"
         if (combined.isBlank()) return
 
-        // ==========================================
-        // 1. AEON 短訊 / 任何 App 通知特定處理
-        // ==========================================
-        // 只要句嘢同時有 "AEON" 同 "We received a transaction" 就當係，唔使理有冇冒號
-        if (combined.contains("AEON", ignoreCase = true) && combined.contains("We received a transaction", ignoreCase = true)) {
-            
-            // 使用 \s+ 代替普通空格，就算 SMS 隱藏咗換行符號 (Newline) 都一定捉得中
-            val aeonRegex = """transaction\s+(.*?)\s+at amount HKD\s*([0-9.]+)""".toRegex(RegexOption.IGNORE_CASE)
-            val match = aeonRegex.find(combined)
-
-            if (match != null) {
-                val rawMerchant = match.groupValues[1].trim()
-                val amount = match.groupValues[2].toDoubleOrNull() ?: 0.0
-
-                if (amount > 0.0) {
-                    // 自動轉中文名
-                    val noteName = if (rawMerchant.contains("McDonalds", ignoreCase = true)) {
-                        "麥當勞"
-                    } else {
-                        rawMerchant
-                    }
-                    // 根據名稱設定分類
-                    val category = if (noteName == "麥當勞") "飲食" else "個人"
-
-                    Log.d(TAG, "捕獲 AEON 通知：$noteName · $amount · $category")
-                    NotificationCaptureBridge.pushCaptured(noteName, amount, category)
-                    return // 處理完 AEON 就直接 Return，結束
-                }
-            } else {
-                // 除錯用：如果中咗關鍵字但 Regex 抽唔到嘢，可以喺 Logcat 睇返系統到底俾咗咩字串你
-                Log.d(TAG, "AEON Regex 匹配失敗，原本通知字串係: $combined")
-            }
+        // 1. 檢查有冇扣款/交易字眼 (中英都得，冇就飛走)
+        if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) {
+            return
         }
 
-        // ==========================================
-        // 2. 一般消費處理邏輯 (掃描所有通知，例如易乘碼)
-        // ==========================================
-        // 冇扣款關鍵字就跳過（避免誤觸一般聊天或新聞通知）
-        if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) return
-
+        // 2. 搵金額 (成功搵到 HKD6.00 就會抽出 6.00)
         val match = AMOUNT_PATTERN.find(combined) ?: return
         val amount = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return
-        
+
         // 金額太細或太大就過濾走
         if (amount <= 0.0 || amount > 5000.0) return
 
-        // 歸納名稱：優先用通知標題 (Title)，否則預設叫「消費」
+        // 3. 判斷商戶名稱
         val note = when {
+            combined.contains("McDonalds", ignoreCase = true) -> "麥當勞"
+            combined.contains("KFC", ignoreCase = true) -> "KFC"
+            // 如果係易乘碼
+            combined.contains("易乘碼", ignoreCase = true) -> "地鐵"
+            // 如果係 AEON，嘗試抽 transaction 同 at amount 之間嘅字
+            combined.contains("AEON", ignoreCase = true) -> {
+                val merchantRegex = """transaction\s+(.*?)\s+at amount""".toRegex(RegexOption.IGNORE_CASE)
+                merchantRegex.find(combined)?.groupValues?.get(1)?.trim() ?: "AEON消費"
+            }
             title.isNotBlank() && title.length <= 20 -> title
             else -> "消費"
         }
 
-        // 分類映射 (按字眼自動估計)
+        // 4. 自動分類
         val category = when {
-            combined.contains("地鐵", true) || combined.contains("港鐵", true)
-                || combined.contains("易乘碼", true) -> "交通"
-            combined.contains("餐", true) || combined.contains("食", true) -> "飲食"
+            note == "地鐵" || combined.contains("港鐵", true) -> "交通"
+            note == "麥當勞" || note == "KFC" || combined.contains("餐", true) || combined.contains("食", true) -> "飲食"
             combined.contains("超市", true) || combined.contains("店", true) -> "購物"
             else -> "個人"
         }
 
-        Log.d(TAG, "捕獲通知：$note · $amount · $category → $combined")
+        Log.d(TAG, "成功捕獲：$note · $amount · $category → $combined")
         NotificationCaptureBridge.pushCaptured(note, amount, category)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // 唔需要處理通知移除事件
     }
 }
