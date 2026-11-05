@@ -3240,11 +3240,10 @@ private fun BoxScope.KeyboardAndFabLayer(
         if (isTransport) extraHeight += 48.dp
         if (isTravel) extraHeight += 48.dp
 
+                // [3] FAB 按鈕層 (頂層)
         AnimatedFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
-            imeOpen = imeOpen,
-            extraHeight = extraHeight,
             onFabTap = onFabTap,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
@@ -3297,61 +3296,42 @@ private fun BoxScope.KeyboardAndFabLayer(
 private fun AnimatedFabLayer(
     progressProvider: () -> Float,
     bottomPadding: Dp,
-    imeOpen: Boolean,
-    extraHeight: Dp = 0.dp,
     onFabTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isExpandedTint by remember {
-        derivedStateOf { progressProvider() > 0.35f }
-    }
-    val tintColor by animateColorAsState(
-        targetValue = if (isExpandedTint) TEXT_TERTIARY else Color.White,
-        animationSpec = tween(180),
-        label = "fabTint"
-    )
+    val currentP = progressProvider()
+    // 當鍵盤彈出時，FAB 就會淡出同縮小，交返個場畀鍵盤入面嘅 X 掣
+    val alpha = (1f - currentP * 2.5f).coerceIn(0f, 1f)
+    val scale = 1f - (0.5f * currentP)
+
+    if (alpha <= 0.01f) return
 
     Box(
         modifier = modifier
+            .padding(bottom = bottomPadding, end = 20.dp)
             .graphicsLayer {
-                val currentP = progressProvider()
-                
-                // ★ 修正 1：完美對準數字框右側預留的空間中心
-                val targetX = 10.dp
-                
-                // ★ 修正 2：精準計算高度，確保無論 IME 是否彈出都能對齊
-                val baseY = if (imeOpen) 404.dp else 416.dp
-                val targetY = baseY + extraHeight
-                
-                val fabX = lerp(20.dp, targetX, currentP).toPx()
-                val fabY = lerp(bottomPadding, targetY, currentP).toPx()
-                translationX = -fabX
-                translationY = -fabY
+                this.alpha = alpha
+                scaleX = scale
+                scaleY = scale
                 transformOrigin = TransformOrigin(1f, 1f)
-                shape = CircleShape
-                clip = true
             }
             .size(56.dp)
+            .shadow(4.dp, CircleShape)
+            .clip(CircleShape)
+            .background(BRAND_PRIMARY)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) { onFabTap() },
         contentAlignment = Alignment.Center
     ) {
-        Canvas(Modifier.matchParentSize()) {
-            val currentP = progressProvider()
-            val bgAlpha = (1f - currentP * 3.3f).coerceIn(0f, 1f)
-            drawCircle(color = BRAND_PRIMARY.copy(alpha = bgAlpha))
-        }
-
         Icon(
             Icons.Default.Add,
-            contentDescription = "Clear",
-            tint = tintColor,
+            contentDescription = "新增",
+            tint = Color.White,
             modifier = Modifier
-                .align(Alignment.Center)
                 .size(24.dp)
-                .graphicsLayer { rotationZ = progressProvider() * -405f }
+                .graphicsLayer { rotationZ = currentP * 90f } // 簡單旋轉
         )
     }
 }
@@ -6106,7 +6086,7 @@ fun LedgerKeyboardPanel(
             Spacer(Modifier.height(10.dp))
 
             // =========================================================
-            // 🟢 新增：地鐵 / 巴士 切換掣 (參考旅遊 HKD/JPY 樣式)
+            // 🟢 地鐵 / 巴士 切換掣
             // =========================================================
             val isTransportContext = state.noteText == "地鐵" || state.noteText == "巴士"
             
@@ -6133,7 +6113,6 @@ fun LedgerKeyboardPanel(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
                                         ) { 
-                                            // 只改名稱，金額保持不變
                                             onStateChange(state.copy(noteText = "地鐵", category = "交通", focusedField = "amount")) 
                                         }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -6151,7 +6130,6 @@ fun LedgerKeyboardPanel(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
                                         ) { 
-                                            // 只改名稱，金額保持不變
                                             onStateChange(state.copy(noteText = "巴士", category = "交通", focusedField = "amount")) 
                                         }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -6165,6 +6143,9 @@ fun LedgerKeyboardPanel(
                 }
             }
 
+            // =========================================================
+            // 🟢 旅遊匯率切換掣
+            // =========================================================
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.category == "旅遊",
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(),
@@ -6244,6 +6225,9 @@ fun LedgerKeyboardPanel(
                 }
             }
 
+            // =========================================================
+            // 🟢 金額輸入框（連內置 X 清除掣）
+            // =========================================================
             Surface(Modifier.fillMaxWidth().height(76.dp),
                 shape = RoundedCornerShape(16.dp), color = SURFACE_ELEVATED) {
                 Box(
@@ -6260,15 +6244,18 @@ fun LedgerKeyboardPanel(
                         .padding(start = 22.dp, end = 12.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
+                    // 左邊：$ 符號
                     Text(
                         text = if (state.category == "旅遊" && state.currency == "JPY") "¥" else "$",
                         fontSize = 24.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Bold,
                         modifier = Modifier.align(Alignment.CenterStart)
                     )
+                    
                     val showText = if (state.amountText.isEmpty()) "0" else state.amountText
                     val highlightColor = if (state.selectAmountOnInput) Color(0xFFDBEAFE)
                                          else Color.Transparent
 
+                    // 中間：數字
                     Box(
                         modifier = Modifier.padding(end = 44.dp)
                             .clip(RoundedCornerShape(10.dp))
@@ -6280,6 +6267,30 @@ fun LedgerKeyboardPanel(
                             color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
                             fontSize = 38.sp, fontWeight = FontWeight.Bold
                         )
+                    }
+                    
+                    // 🟢 右邊：直接放喺金額框入面嘅 X 清除掣
+                    if (state.amountText.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { 
+                                    // 清空金額
+                                    onStateChange(state.copy(amountText = "", selectAmountOnInput = false, focusedField = "amount")) 
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "清除金額",
+                                tint = TEXT_TERTIARY,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
