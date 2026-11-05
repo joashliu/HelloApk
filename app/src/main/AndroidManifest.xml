@@ -71,6 +71,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="ledgerapp" android:host="quickadd" />
             </intent-filter>
+            
+            <!-- 🟢 新增：註冊 Shortcut 快捷方式設定檔 -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+                
         </activity>
 
         <!-- 🟢 原有的通知監聽服務 -->
