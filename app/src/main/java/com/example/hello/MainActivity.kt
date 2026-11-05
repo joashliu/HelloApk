@@ -6020,28 +6020,6 @@ fun LedgerKeyboardPanel(
                 .verticalScroll(panelScrollState)
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
         ) {
-            // =========================================================
-            // 🟢 臨時調試滑軌（試完 delete 咗呢段就得）
-            // =========================================================
-            Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                Text(
-                    text = "調試圓角: ${debugCornerRadius.toInt()} dp", 
-                    fontSize = 12.sp, 
-                    color = Color.Red, 
-                    fontWeight = FontWeight.Bold
-                )
-                Slider(
-                    value = debugCornerRadius,
-                    onValueChange = { debugCornerRadius = it },
-                    valueRange = 0f..80f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.Red,
-                        activeTrackColor = Color.Red
-                    )
-                )
-            }
-            // =========================================================
-
             val dateText = remember(state.timestamp) { formatDatePart(state.timestamp) }
             val timeText = remember(state.timestamp) { formatTimePart(state.timestamp) }
 
@@ -6720,6 +6698,36 @@ fun LedgerKeyboardPanel(
                         else -> "入帳"
                     }, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
+            }
+        }
+
+        // 🟢 臨時調試滑軌（固定喺最頂，試完 delete 咗呢段就得）
+        // 我特登加咗深色半透明背景，保證你一眼就見到佢！
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.8f))
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .zIndex(100f) // 確保喺最上層
+        ) {
+            Column {
+                Text(
+                    text = "調試圓角: ${debugCornerRadius.toInt()} dp", 
+                    fontSize = 14.sp, 
+                    color = Color.Yellow, 
+                    fontWeight = FontWeight.Bold
+                )
+                Slider(
+                    value = debugCornerRadius,
+                    onValueChange = { debugCornerRadius = it },
+                    valueRange = 0f..80f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.Red,
+                        activeTrackColor = Color.Red,
+                        inactiveTrackColor = Color.Gray
+                    )
+                )
             }
         }
     }
