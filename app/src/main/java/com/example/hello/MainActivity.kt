@@ -1656,29 +1656,58 @@ fun getHoveredActionIndexWithCenter(
     touch: Offset,
     minRadiusPx: Float,
     arcCenterAngle: Float,
-    radiusPx: Float,          // ★ 新增：實際扇形半徑
-    hitRadiusPx: Float        // ★ 新增：按鈕可點擊半徑
+    radiusPx: Float,          // 實際扇形半徑
+    hitRadiusPx: Float        // 按鈕可點擊半徑（作為保底）
 ): Int? {
-    // 計算四個按鈕實際中心位置（同繪製邏輯完全一致）
-    val buttonCenters = Array(4) { i ->
-        val angle = arcCenterAngle - 60f + i * 40f
-        val angleRad = Math.toRadians(angle.toDouble())
-        val cx = center.x + radiusPx * kotlin.math.cos(angleRad).toFloat()
-        val cy = center.y + radiusPx * kotlin.math.sin(angleRad).toFloat()
-        Offset(cx, cy)
-    }
+    val dx = touch.x - center.x
+    val dy = touch.y - center.y
+    val distFromCenter = kotlin.math.hypot(dx, dy)
+
+    // 1. 如果手指離起點太近（未滑出取消區），當作放棄選擇
+    if (distFromCenter < minRadiusPx) return null
+
+    // 2. 計算手指相對於中心點嘅滑動方向角度 (0~360度)
+    val touchAngleRad = kotlin.math.atan2(dy, dx)
+    var touchAngleDeg = Math.toDegrees(touchAngleRad.toDouble()).toFloat()
+    if (touchAngleDeg < 0) touchAngleDeg += 360f
 
     var bestIndex: Int? = null
-    var bestDist = Float.MAX_VALUE
+    var minAngleDiff = Float.MAX_VALUE
 
+    // 3. 搵出角度最接近嘅按鈕
     for (i in 0 until 4) {
-        val dist = (touch - buttonCenters[i]).getDistance()
-        if (dist <= hitRadiusPx && dist < bestDist) {
-            bestDist = dist
+        var btnAngle = arcCenterAngle - 60f + i * 40f
+        // 確保角度喺 0~360 範圍內
+        btnAngle = (btnAngle % 360f + 360f) % 360f
+
+        // 計算兩個角度嘅最短距離
+        var diff = kotlin.math.abs(touchAngleDeg - btnAngle)
+        if (diff > 180f) diff = 360f - diff
+
+        if (diff < minAngleDiff) {
+            minAngleDiff = diff
             bestIndex = i
         }
     }
-    return bestIndex
+
+    // 4. 扇形判定：只要角度偏差喺 35 度以內，無論手指滑到幾遠都算命中！
+    // 咁樣每粒掣都會有一個好闊嘅隱形扇形區域，隨手一滑就中
+    if (minAngleDiff <= 35f) {
+        return bestIndex
+    }
+
+    // 5. 保底機制：傳統嘅圓形半徑判定
+    for (i in 0 until 4) {
+        val angleRad = Math.toRadians((arcCenterAngle - 60f + i * 40f).toDouble())
+        val cx = center.x + radiusPx * kotlin.math.cos(angleRad).toFloat()
+        val cy = center.y + radiusPx * kotlin.math.sin(angleRad).toFloat()
+        val dist = (touch - Offset(cx, cy)).getDistance()
+        if (dist <= hitRadiusPx) {
+            return i
+        }
+    }
+
+    return null
 }
 
 private val FAN_MENU_ACTIONS = listOf(
