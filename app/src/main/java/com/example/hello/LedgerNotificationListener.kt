@@ -1,6 +1,7 @@
 package com.example.hello
 
 import android.app.Notification
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -9,62 +10,129 @@ class LedgerNotificationListener : NotificationListenerService() {
 
     companion object {
         private const val TAG = "LedgerNotifListener"
-        
-        // 萬能金額 Regex：食晒 HKD, HK$, $ (例如 HKD6.00, hk$4.90, $10)
-        private val AMOUNT_PATTERN = Regex("""(?:HKD|HK\$|\$)\s*(\d+(?:\.\d{1,2})?)""", RegexOption.IGNORE_CASE)
-        
-        // 一般消費關鍵字（只係用嚟做保底，有指定商戶就唔使理佢）
+
+        // 金額上限（可按需要調整）
+        private const val MAX_AMOUNT = 50000.0
+
+        // 前綴金額：HKD6.00 / hk$4.90 / $10 / MOP 12.5 / RMB 30
+        private val AMOUNT_PREFIX_PATTERN = Regex(
+            """(?:HKD|HK\$|MOP|RMB|CNY|USD|SGD|\$)\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)""",
+            RegexOption.IGNORE_CASE
+        )
+
+        // 後綴金額：6.00 HKD / 12.5 MOP
+        private val AMOUNT_SUFFIX_PATTERN = Regex(
+            """([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)\s*(?:HKD|MOP|RMB|CNY)""",
+            RegexOption.IGNORE_CASE
+        )
+
+        // 一般消費關鍵字（保底過濾）
         private val DEDUCT_KEYWORDS = listOf(
             "扣款", "已付款", "付款", "消費", "交易", "易乘碼", "地鐵", "港鐵", "入閘", "出閘",
-            "transaction", "payment", "paid"
+            "transaction", "payment", "paid", "purchase", "charged"
         )
+
+        // 商戶白名單：key = 通知文本匹配關鍵字, value = 記帳用商戶名
+        private val MERCHANT_WHITELIST = listOf(
+            "McDonalds" to "麥當勞",
+            "麥當勞" to "麥當勞",
+            "KFC" to "KFC",
+            "肯德基" to "KFC"
+        )
+
+        private fun extractAmount(text: String): Double {
+            fun toDouble(raw: String) = raw.replace(",", "").toDoubleOrNull() ?: 0.0
+
+            AMOUNT_PREFIX_PATTERN.find(text)?.groupValues?.getOrNull(1)?.let {
+                val v = toDouble(it)
+                if (v > 0.0) return v
+            }
+            AMOUNT_SUFFIX_PATTERN.find(text)?.groupValues?.getOrNull(1)?.let {
+                val v = toDouble(it)
+                if (v > 0.0) return v
+            }
+            return 0.0
+        }
+    }
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        Log.d(TAG, "Listener connected")
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        Log.d(TAG, "Listener disconnected")
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
 
-        val extras = sbn.notification?.extras ?: return
-        
-        val ticker = sbn.notification?.tickerText?.toString().orEmpty()
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
+        val notification = sbn.notification ?: return
+        val extras = notification.extras ?: return
 
-        val combined = "$ticker $title $text $bigText"
+        // 撈齊所有可能嘅文本欄位
+        val ticker       = notification.tickerText?.toString().orEmpty()
+        val title        = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text         = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val bigText      = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
+        val subText      = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+        val infoText     = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString().orEmpty()
+        val progressText = extras.getCharSequence(Notification.EXTRA_PROGRESS_TEXT)?.toString().orEmpty()
+        val textLines    = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.joinToString(" ") { it.toString() }
+            .orEmpty()
+        val messagesText = readMessagingStyle(extras)
+
+        val combined = listOf(
+            ticker, title, text, bigText, subText, infoText, progressText, textLines, messagesText
+        ).filter { it.isNotBlank() }.joinToString(" ")
+
         if (combined.isBlank()) return
 
-        // 🎯 第一步：全句掃描搵金額 (搵到 HKD6.00 就會抽出 6.00)
-        val match = AMOUNT_PATTERN.find(combined)
-        val amount = match?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+        Log.d(TAG, "RAW combined=[$combined]")
 
-        // 如果連金額都冇，或者金額唔合理，就肯定唔係消費通知，直接飛走
-        if (amount <= 0.0 || amount > 5000.0) return
+        val amount = extractAmount(combined)
 
-        // 🎯 第二步：優先檢查「商戶白名單」 (無視任何扣款關鍵字！)
-        // 只要句嘢有「McDonalds」加埋頭先搵到嘅金額，即刻無條件彈出嚟！
-        if (combined.contains("McDonalds", ignoreCase = true) || combined.contains("麥當勞", ignoreCase = true)) {
-            Log.d(TAG, "🔥 觸發直通車：麥當勞 · $amount")
-            NotificationCaptureBridge.pushCaptured("麥當勞", amount, "飲食")
-            return
-        }
-        
-        if (combined.contains("KFC", ignoreCase = true)) {
-            Log.d(TAG, "🔥 觸發直通車：KFC · $amount")
-            NotificationCaptureBridge.pushCaptured("KFC", amount, "飲食")
-            return
+        // 🎯 白名單優先（先判斷商戶，再驗金額）
+        val whitelistHit = MERCHANT_WHITELIST.firstOrNull { (key, _) ->
+            combined.contains(key, ignoreCase = true)
         }
 
-        // ==========================================
-        // 🎯 第三步：如果唔係白名單商戶，先用一般關鍵字過濾 (做保底)
-        // ==========================================
+        if (whitelistHit != null) {
+            val (matchedKey, merchantName) = whitelistHit
+
+            if (amount <= 0.0 || amount > MAX_AMOUNT) {
+                // 白名單命中但金額唔合理 → 出 warning，方便排查
+                Log.w(
+                    TAG,
+                    "白名單命中 [$matchedKey → $merchantName]，但金額唔合理 (amount=$amount)，跳過 → $combined"
+                )
+                return
+            }
+
+            val category = when (merchantName) {
+                "麥當勞", "KFC" -> "飲食"
+                else -> "個人"
+            }
+
+            Log.d(TAG, "🔥 觸發直通車：$merchantName · $amount (matched=$matchedKey)")
+            NotificationCaptureBridge.pushCaptured(merchantName, amount, category)
+            return
+        }
+
+        // 🎯 非白名單：先驗金額合理性
+        if (amount <= 0.0 || amount > MAX_AMOUNT) return
+
+        // 🎯 一般關鍵字保底過濾
         if (DEDUCT_KEYWORDS.none { combined.contains(it, ignoreCase = true) }) {
-            return // 冇「付款」、「transaction」等字眼，當佢係普通短訊/新聞
+            return
         }
 
         // 歸納名稱
         val note = when {
             combined.contains("易乘碼", ignoreCase = true) -> "地鐵"
-            combined.contains("AEON", ignoreCase = true) -> "AEON消費" // 保底名
+            combined.contains("AEON", ignoreCase = true) -> "AEON消費"
             title.isNotBlank() && title.length <= 20 -> title
             else -> "消費"
         }
@@ -82,5 +150,16 @@ class LedgerNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        // 預留
+    }
+
+    /** 讀取 MessagingStyle 通知每一條訊息文本 */
+    @Suppress("DEPRECATION")
+    private fun readMessagingStyle(extras: Bundle): String {
+        val arr = extras.getParcelableArray(Notification.EXTRA_MESSAGES) ?: return ""
+        return arr.joinToString(" ") { item ->
+            val b = item as? Bundle ?: return@joinToString ""
+            b.getCharSequence("text")?.toString().orEmpty()
+        }
     }
 }
