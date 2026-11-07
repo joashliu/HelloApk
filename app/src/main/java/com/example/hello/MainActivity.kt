@@ -3318,6 +3318,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     nameFlashTrigger: Int,
 ) {
     val density = LocalDensity.current
+    val focusManager = LocalFocusManager.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val navBottomPx = WindowInsets.navigationBars.getBottom(density)
     val imeLiftDp = with(density) { (imeBottomPx - navBottomPx).coerceAtLeast(0).toDp() }
@@ -3485,7 +3486,12 @@ private fun BoxScope.KeyboardAndFabLayer(
                             filterSuggestions.forEach { s ->
                                 Row(
                                     Modifier.fillMaxWidth()
-                                        .clickable { onFilterSearchChange(TextFieldValue(s)) }
+                                        .clickable {
+                                            // 填入建議後即收起下拉（含完全相同字串）
+                                            onFilterSearchChange(TextFieldValue(s))
+                                            onFilterSearchFocusChange(false)
+                                            focusManager.clearFocus(force = true)
+                                        }
                                         .padding(horizontal = 16.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
