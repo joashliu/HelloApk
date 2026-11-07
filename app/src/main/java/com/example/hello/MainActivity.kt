@@ -1009,10 +1009,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     // ★ 資料透視表 state —— 必須喺類「內部」！
     //   因為 _records 同 viewModelScope 都係類內成員
     // ============================================================
-    val pivotUiState: StateFlow<PivotUiState> = _records
-        .map { records -> computePivotUiState(records) }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PivotUiState())
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
