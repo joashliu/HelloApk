@@ -655,11 +655,14 @@ data class PivotRow(
 
 @Immutable
 data class PivotUiState(
-    val months: List<String> = emptyList(),        // 倒序：12月 → 11月 → …
+    val months: List<String> = emptyList(),        // 升序：1月 → 12月（選定年份）
     val rows: List<PivotRow> = emptyList(),
     val monthTotals: Map<String, Double> = emptyMap(),
     val grandTotal: Double = 0.0,
     val loading: Boolean = true,
+    val availableYears: List<Int> = emptyList(),   // 有資料的年份，新→舊
+    val selectedYear: Int = 0,
+    val categories: List<String> = emptyList(),    // 顯示順序，供頂部 chips
 )
 
 @Immutable
@@ -905,11 +908,19 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ============================================================
     // ★★★ 資料透視表 state —— 必須喺類「內部」！
-    //    因為 _records 同 viewModelScope 都係類內成員
-    //    ★ 呢個就係之前 638 行 "Unresolved reference: _records" 嘅修復點
     // ============================================================
-    val pivotUiState: StateFlow<PivotUiState> = _records
-        .map { records -> computePivotUiState(records) }
+    private val _pivotYear = MutableStateFlow(
+        getTimestampMeta(System.currentTimeMillis()).year
+    )
+    val pivotYear: StateFlow<Int> = _pivotYear.asStateFlow()
+
+    fun setPivotYear(year: Int) {
+        if (year > 0) _pivotYear.value = year
+    }
+
+    val pivotUiState: StateFlow<PivotUiState> = combine(_records, _pivotYear) { records, year ->
+        computePivotUiState(records, year)
+    }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PivotUiState())
 
@@ -1440,20 +1451,20 @@ private fun computeCalendarUiState(records: List<Record>, monthKey: String, filt
 }
 
 // =========================================================
-//  ★ 資料透視表 - 計算函數（新增）
-//    月份由新至舊；類別 / 項目按「最新月份金額 → 全期總額」降序
+//  ★ 資料透視表 - 計算函數
+//    按選定年份；月份 1月→12月（左→右）；類別按年內總額降序
 // =========================================================
-private fun computePivotUiState(records: List<Record>): PivotUiState {
-    if (records.isEmpty()) return PivotUiState(loading = false)
-
-    val monthsSet = HashSet<String>()
-    // monthKey -> category -> note -> PivotCell
+private fun computePivotUiState(records: List<Record>, selectedYear: Int): PivotUiState {
+    val yearsSet = HashSet<Int>()
+    // monthKey -> category -> note -> PivotCell（只收納選定年份）
     val data = HashMap<String, HashMap<String, HashMap<String, PivotCell>>>()
 
     for (r in records) {
-        if (r.category == "還錢") continue          // 與比較頁 / 月曆「全部」口徑一致
-        val mk = getTimestampMeta(r.timestamp).monthKey
-        monthsSet.add(mk)
+        if (r.category == "還錢") continue
+        val meta = getTimestampMeta(r.timestamp)
+        yearsSet.add(meta.year)
+        if (meta.year != selectedYear) continue
+        val mk = meta.monthKey
         val catMap = data.getOrPut(mk) { HashMap() }
         val noteMap = catMap.getOrPut(r.category) { HashMap() }
         val key = r.note.ifBlank { "(無名稱)" }
@@ -1461,15 +1472,41 @@ private fun computePivotUiState(records: List<Record>): PivotUiState {
         noteMap[key] = PivotCell(existing.total + r.amount, existing.count + 1)
     }
 
-    val months = monthsSet.sortedDescending()   // 12月 → 11月 → 10月…
-    if (months.isEmpty()) return PivotUiState(loading = false)
-    val latestMonth = months.first()            // 最新月份（12月）
+    val availableYears = yearsSet.sortedDescending()
+    val year = when {
+        selectedYear in yearsSet -> selectedYear
+        availableYears.isNotEmpty() -> availableYears.first()
+        else -> selectedYear
+    }
 
-    // 各類別 / 項目的「全期總額」與「最新月份金額」——用嚟做排序
+    // 固定 1～12 月欄，左小右大
+    val months = (1..12).map { m -> "$year-${pad2(m)}" }
+
+    if (data.isEmpty()) {
+        return PivotUiState(
+            months = months,
+            rows = emptyList(),
+            monthTotals = emptyMap(),
+            grandTotal = 0.0,
+            loading = false,
+            availableYears = availableYears,
+            selectedYear = year,
+            categories = emptyList(),
+        )
+    }
+
+    // 排序用：年內總額；次要用「最新有資料月份」金額
     val categoryTotalAll = HashMap<String, Double>()
     val categoryLatest = HashMap<String, Double>()
     val noteTotalAll = HashMap<Pair<String, String>, Double>()
     val noteLatest = HashMap<Pair<String, String>, Double>()
+    var latestMonthWithData: String? = null
+    for (mk in months.asReversed()) {
+        if (data.containsKey(mk)) {
+            latestMonthWithData = mk
+            break
+        }
+    }
 
     for ((mk, catMap) in data) {
         for ((cat, noteMap) in catMap) {
@@ -1478,14 +1515,17 @@ private fun computePivotUiState(records: List<Record>): PivotUiState {
                 catSum += cell.total
                 val pair = cat to note
                 noteTotalAll[pair] = (noteTotalAll[pair] ?: 0.0) + cell.total
-                if (mk == latestMonth) noteLatest[pair] = (noteLatest[pair] ?: 0.0) + cell.total
+                if (mk == latestMonthWithData) {
+                    noteLatest[pair] = (noteLatest[pair] ?: 0.0) + cell.total
+                }
             }
             categoryTotalAll[cat] = (categoryTotalAll[cat] ?: 0.0) + catSum
-            if (mk == latestMonth) categoryLatest[cat] = (categoryLatest[cat] ?: 0.0) + catSum
+            if (mk == latestMonthWithData) {
+                categoryLatest[cat] = (categoryLatest[cat] ?: 0.0) + catSum
+            }
         }
     }
 
-    // 類別排序：先睇最新月份金額，再睇全期總額（都是由大至小）
     val sortedCats = categoryTotalAll.keys.sortedWith(
         compareByDescending<String> { categoryLatest[it] ?: 0.0 }
             .thenByDescending { categoryTotalAll[it] ?: 0.0 }
@@ -1493,7 +1533,6 @@ private fun computePivotUiState(records: List<Record>): PivotUiState {
 
     val rows = mutableListOf<PivotRow>()
     for (cat in sortedCats) {
-        // ===== 類別小計行 =====
         val catCells = HashMap<String, PivotCell>()
         var catTotal = 0.0
         for (mk in months) {
@@ -1504,7 +1543,6 @@ private fun computePivotUiState(records: List<Record>): PivotUiState {
         }
         rows.add(PivotRow(cat, "", true, catCells, catTotal))
 
-        // ===== 項目行（同樣按最新月份 → 全期總額 排序）=====
         val notesInCat = noteTotalAll.keys
             .filter { it.first == cat }
             .sortedWith(
@@ -1524,17 +1562,25 @@ private fun computePivotUiState(records: List<Record>): PivotUiState {
         }
     }
 
-    // 每月合計 + 總計
     val monthTotals = HashMap<String, Double>()
     var grandTotal = 0.0
     for (mk in months) {
         var sum = 0.0
         data[mk]?.forEach { (_, noteMap) -> noteMap.values.forEach { sum += it.total } }
-        monthTotals[mk] = sum
+        if (sum != 0.0) monthTotals[mk] = sum
         grandTotal += sum
     }
 
-    return PivotUiState(months, rows, monthTotals, grandTotal, loading = false)
+    return PivotUiState(
+        months = months,
+        rows = rows,
+        monthTotals = monthTotals,
+        grandTotal = grandTotal,
+        loading = false,
+        availableYears = availableYears,
+        selectedYear = year,
+        categories = sortedCats,
+    )
 }
 
 fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
@@ -2787,11 +2833,12 @@ fun MainApp(
                     justAddedIds = justAddedIds
                 )
             }
-            // ★ 新增：資料透視表頁
+            // ★ 資料透視表頁
             3 -> {
                 val pivotUi by vm.pivotUiState.collectAsState()
                 PivotContent(
                     pivotUi = pivotUi,
+                    onYearChange = { vm.setPivotYear(it) },
                     onAddClick = { currentPage = 0; openKeyboardForNew() }
                 )
             }
@@ -8639,13 +8686,37 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
 @Composable
 fun PivotContent(
     pivotUi: PivotUiState,
+    onYearChange: (Int) -> Unit,
     onAddClick: () -> Unit,
 ) {
     val hState = rememberScrollState()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val leftWidth = 140.dp
-    val colWidth = 88.dp
-    val headerHeight = 46.dp
+    val colWidth = 72.dp
+    val headerHeight = 42.dp
     val rowHeight = 38.dp
+    val stickyHeight = 40.dp
+
+    // category -> sticky header index in LazyColumn
+    val categoryHeaderIndex = remember(pivotUi.rows) {
+        val map = LinkedHashMap<String, Int>()
+        var idx = 0
+        for (row in pivotUi.rows) {
+            if (row.isCategory) {
+                map[row.category] = idx
+            }
+            idx++
+        }
+        map
+    }
+
+    fun scrollToCategory(cat: String) {
+        val index = categoryHeaderIndex[cat] ?: return
+        scope.launch {
+            listState.animateScrollToItem(index)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
         Column(
@@ -8654,13 +8725,83 @@ fun PivotContent(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            Text(
-                "資料透視表",
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                color = TEXT_PRIMARY,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            // ===== 標題 + 年份選擇 =====
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "資料透視表",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TEXT_PRIMARY,
+                    modifier = Modifier.weight(1f)
+                )
+                if (pivotUi.availableYears.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        pivotUi.availableYears.forEach { y ->
+                            val selected = y == pivotUi.selectedYear
+                            Surface(
+                                onClick = { onYearChange(y) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
+                                border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
+                            ) {
+                                Text(
+                                    "${y}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) Color.White else TEXT_PRIMARY,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ===== 類別 chips（點擊滾動到對應 sticky header）=====
+            if (pivotUi.categories.isNotEmpty()) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(pivotUi.categories.size) { i ->
+                        val cat = pivotUi.categories[i]
+                        val style = CATEGORY_STYLES[cat]
+                        Surface(
+                            onClick = { scrollToCategory(cat) },
+                            shape = RoundedCornerShape(20.dp),
+                            color = style?.bgColor ?: SURFACE_ELEVATED,
+                            border = BorderStroke(0.5.dp, (style?.fgColor ?: TEXT_SECONDARY).copy(alpha = 0.25f))
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (style != null) {
+                                    Icon(
+                                        style.icon, null,
+                                        tint = style.fgColor,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(Modifier.width(5.dp))
+                                }
+                                Text(
+                                    cat,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = style?.fgColor ?: TEXT_PRIMARY
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
             Surface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -8668,13 +8809,18 @@ fun PivotContent(
                 color = SURFACE_CARD,
                 border = BorderStroke(0.5.dp, DIVIDER_COLOR)
             ) {
-                if (pivotUi.months.isEmpty()) {
+                if (pivotUi.rows.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("暫時未有記錄", color = TEXT_SECONDARY, fontSize = 15.sp)
+                        Text(
+                            if (pivotUi.availableYears.isEmpty()) "暫時未有記錄"
+                            else "${pivotUi.selectedYear} 年暫時未有記錄",
+                            color = TEXT_SECONDARY,
+                            fontSize = 15.sp
+                        )
                     }
                 } else {
                     Column(Modifier.fillMaxSize()) {
-                        // ===== 表頭 =====
+                        // ===== 固定表頭（月份 1→12）=====
                         Row(
                             Modifier.fillMaxWidth().height(headerHeight).background(SURFACE_ELEVATED),
                             verticalAlignment = Alignment.CenterVertically
@@ -8683,8 +8829,12 @@ fun PivotContent(
                                 Modifier.width(leftWidth).fillMaxHeight().padding(start = 12.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
-                                Text("類別 / 項目", fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold, color = TEXT_SECONDARY)
+                                Text(
+                                    "類別 / 項目",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TEXT_SECONDARY
+                                )
                             }
                             Box(Modifier.weight(1f).clipToBounds()) {
                                 Row(
@@ -8696,8 +8846,12 @@ fun PivotContent(
                                             Modifier.width(colWidth).fillMaxHeight(),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(formatMonthLabel(mk), fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold, color = BRAND_PRIMARY_DARK)
+                                            Text(
+                                                formatMonthLabel(mk),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = BRAND_PRIMARY_DARK
+                                            )
                                         }
                                     }
                                     Box(
@@ -8705,98 +8859,52 @@ fun PivotContent(
                                             .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.5f)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text("總計", fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold, color = BRAND_PRIMARY_DARK)
+                                        Text(
+                                            "總計",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = BRAND_PRIMARY_DARK
+                                        )
                                     }
                                 }
                             }
                         }
                         HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
-                        // ===== 內容 =====
-                        LazyColumn(Modifier.fillMaxSize()) {
-                            itemsIndexed(pivotUi.rows) { _, row ->
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .height(rowHeight)
-                                        .background(
-                                            if (row.isCategory) SURFACE_ELEVATED.copy(alpha = 0.35f)
-                                            else SURFACE_CARD
-                                        ),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // 左：類別 or 項目
-                                    Box(
-                                        Modifier
-                                            .width(leftWidth)
-                                            .fillMaxHeight()
-                                            .padding(start = if (row.isCategory) 12.dp else 32.dp, end = 8.dp),
-                                        contentAlignment = Alignment.CenterStart
-                                    ) {
-                                        if (row.isCategory) {
-                                            val style = CATEGORY_STYLES[row.category]
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                if (style != null) {
-                                                    Icon(style.icon, null, tint = style.fgColor,
-                                                        modifier = Modifier.size(14.dp))
-                                                    Spacer(Modifier.width(4.dp))
-                                                }
-                                                Text(row.category, fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
-                                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        } else {
-                                            Text(row.note, fontSize = 12.sp, color = TEXT_PRIMARY,
-                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
+                        // ===== 內容：類別 sticky header + 項目行 =====
+                        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                            pivotUi.rows.forEach { row ->
+                                if (row.isCategory) {
+                                    stickyHeader(key = "cat_${row.category}") {
+                                        PivotCategoryStickyRow(
+                                            row = row,
+                                            months = pivotUi.months,
+                                            hState = hState,
+                                            leftWidth = leftWidth,
+                                            colWidth = colWidth,
+                                            height = stickyHeight,
+                                        )
                                     }
-                                    // 右：各月份金額（共用 hState 保證列對齊）
-                                    Box(Modifier.weight(1f).clipToBounds()) {
-                                        Row(
-                                            Modifier.horizontalScroll(hState).height(rowHeight),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            pivotUi.months.forEach { mk ->
-                                                val cell = row.cells[mk]
-                                                Box(
-                                                    Modifier.width(colWidth).fillMaxHeight(),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (cell != null && cell.total != 0.0) {
-                                                        Text(
-                                                            formatAmountNoDecimal(cell.total),
-                                                            fontSize = 12.sp, color = TEXT_PRIMARY,
-                                                            fontWeight = if (row.isCategory)
-                                                                FontWeight.Bold else FontWeight.Normal,
-                                                            maxLines = 1
-                                                        )
-                                                    } else {
-                                                        Text("–", fontSize = 12.sp, color = TEXT_TERTIARY)
-                                                    }
-                                                }
-                                            }
-                                            Box(
-                                                Modifier.width(colWidth).fillMaxHeight()
-                                                    .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.3f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    formatAmountNoDecimal(row.rowTotal),
-                                                    fontSize = 12.sp, color = BRAND_PRIMARY_DARK,
-                                                    fontWeight = FontWeight.Bold, maxLines = 1
-                                                )
-                                            }
-                                        }
+                                } else {
+                                    item(key = "note_${row.category}_${row.note}") {
+                                        PivotNoteRow(
+                                            row = row,
+                                            months = pivotUi.months,
+                                            hState = hState,
+                                            leftWidth = leftWidth,
+                                            colWidth = colWidth,
+                                            height = rowHeight,
+                                        )
+                                        HorizontalDivider(
+                                            color = DIVIDER_COLOR.copy(alpha = 0.5f),
+                                            thickness = 0.5.dp
+                                        )
                                     }
                                 }
-                                HorizontalDivider(
-                                    color = DIVIDER_COLOR.copy(alpha = 0.5f), thickness = 0.5.dp
-                                )
                             }
 
                             // ===== 底部總計 =====
-                            item {
+                            item(key = "grand_total") {
                                 Row(
                                     Modifier.fillMaxWidth().height(48.dp)
                                         .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.5f)),
@@ -8806,8 +8914,12 @@ fun PivotContent(
                                         Modifier.width(leftWidth).fillMaxHeight().padding(start = 12.dp),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
-                                        Text("總計", fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold, color = BRAND_PRIMARY_DARK)
+                                        Text(
+                                            "總計",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = BRAND_PRIMARY_DARK
+                                        )
                                     }
                                     Box(Modifier.weight(1f).clipToBounds()) {
                                         Row(
@@ -8819,11 +8931,18 @@ fun PivotContent(
                                                     Modifier.width(colWidth).fillMaxHeight(),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Text(
-                                                        formatAmountNoDecimal(pivotUi.monthTotals[mk] ?: 0.0),
-                                                        fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                                                        color = BRAND_PRIMARY_DARK, maxLines = 1
-                                                    )
+                                                    val total = pivotUi.monthTotals[mk] ?: 0.0
+                                                    if (total != 0.0) {
+                                                        Text(
+                                                            formatAmountNoDecimal(total),
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = BRAND_PRIMARY_DARK,
+                                                            maxLines = 1
+                                                        )
+                                                    } else {
+                                                        Text("–", fontSize = 12.sp, color = TEXT_TERTIARY)
+                                                    }
                                                 }
                                             }
                                             Box(
@@ -8832,8 +8951,10 @@ fun PivotContent(
                                             ) {
                                                 Text(
                                                     formatAmountNoDecimal(pivotUi.grandTotal),
-                                                    fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                                                    color = COLOR_EXPENSE, maxLines = 1
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = COLOR_EXPENSE,
+                                                    maxLines = 1
                                                 )
                                             }
                                         }
@@ -8856,6 +8977,167 @@ fun PivotContent(
                 .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
         ) {
             Icon(Icons.Default.Add, "新增")
+        }
+    }
+}
+
+@Composable
+private fun PivotCategoryStickyRow(
+    row: PivotRow,
+    months: List<String>,
+    hState: androidx.compose.foundation.ScrollState,
+    leftWidth: Dp,
+    colWidth: Dp,
+    height: Dp,
+) {
+    Column(Modifier.fillMaxWidth().background(SURFACE_CARD)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(height)
+                .background(SURFACE_ELEVATED),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .width(leftWidth)
+                    .fillMaxHeight()
+                    .padding(start = 12.dp, end = 8.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                val style = CATEGORY_STYLES[row.category]
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (style != null) {
+                        Icon(
+                            style.icon, null,
+                            tint = style.fgColor,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(
+                        row.category,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Box(Modifier.weight(1f).clipToBounds()) {
+                Row(
+                    Modifier.horizontalScroll(hState).height(height),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    months.forEach { mk ->
+                        val cell = row.cells[mk]
+                        Box(
+                            Modifier.width(colWidth).fillMaxHeight(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (cell != null && cell.total != 0.0) {
+                                Text(
+                                    formatAmountNoDecimal(cell.total),
+                                    fontSize = 12.sp,
+                                    color = TEXT_PRIMARY,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            } else {
+                                Text("–", fontSize = 12.sp, color = TEXT_TERTIARY)
+                            }
+                        }
+                    }
+                    Box(
+                        Modifier.width(colWidth).fillMaxHeight()
+                            .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            formatAmountNoDecimal(row.rowTotal),
+                            fontSize = 12.sp,
+                            color = BRAND_PRIMARY_DARK,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+        HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+    }
+}
+
+@Composable
+private fun PivotNoteRow(
+    row: PivotRow,
+    months: List<String>,
+    hState: androidx.compose.foundation.ScrollState,
+    leftWidth: Dp,
+    colWidth: Dp,
+    height: Dp,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(height)
+            .background(SURFACE_CARD),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier
+                .width(leftWidth)
+                .fillMaxHeight()
+                .padding(start = 28.dp, end = 8.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                row.note,
+                fontSize = 12.sp,
+                color = TEXT_PRIMARY,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Box(Modifier.weight(1f).clipToBounds()) {
+            Row(
+                Modifier.horizontalScroll(hState).height(height),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                months.forEach { mk ->
+                    val cell = row.cells[mk]
+                    Box(
+                        Modifier.width(colWidth).fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (cell != null && cell.total != 0.0) {
+                            Text(
+                                formatAmountNoDecimal(cell.total),
+                                fontSize = 12.sp,
+                                color = TEXT_PRIMARY,
+                                fontWeight = FontWeight.Normal,
+                                maxLines = 1
+                            )
+                        } else {
+                            Text("–", fontSize = 12.sp, color = TEXT_TERTIARY)
+                        }
+                    }
+                }
+                Box(
+                    Modifier.width(colWidth).fillMaxHeight()
+                        .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        formatAmountNoDecimal(row.rowTotal),
+                        fontSize = 12.sp,
+                        color = BRAND_PRIMARY_DARK,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+            }
         }
     }
 }
