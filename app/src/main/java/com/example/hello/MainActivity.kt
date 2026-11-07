@@ -5250,32 +5250,27 @@ fun CalendarContent(
     var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
     var selectedColIdx by remember { mutableStateOf<Int?>(null) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
-    var isDockedAtTop by remember { mutableStateOf(false) }
-    var dockedReleased by remember { mutableStateOf(false) }
-    var isDockingBack by remember { mutableStateOf(false) }
 
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
+    // 0 = 完整日曆；1 = 只剩選中嗰一行（永遠唔會 >1，日曆唔會消失）
+    var collapseP by remember { mutableFloatStateOf(0f) }
+    var isSettling by remember { mutableStateOf(false) }
+
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
-
-    val gridScrollOffsetAnim = remember { Animatable(0f) }
-    val detailsAlphaAnim = remember { Animatable(0f) }
-    var dragDownAmount by remember { mutableFloatStateOf(0f) }
-    val topRevealProgress = remember { Animatable(1f) }
-    var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
-
     val density = LocalDensity.current
+
     val headerHeightDp = 32.dp
     val headerHeightPx = remember(density) { with(density) { headerHeightDp.toPx() } }
     val triangleHeightDp = 11.dp
-    val triangleHeightPx = remember(density) { with(density) { triangleHeightDp.toPx() } }
-    val fabTopPaddingPx = remember(density) { with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp).toPx() } }
-    val minDetailHeightPx = remember(density) { with(density) { 112.dp.toPx() } }
     val handleBarHeightDp = 20.dp
-    var calendarBottomLimitPx by remember { mutableFloatStateOf(0f) }
+    val minDetailHeightPx = remember(density) { with(density) { 120.dp.toPx() } }
+    val fabTopPaddingPx = remember(density) {
+        with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp).toPx() }
+    }
 
     // ★ 網格日期計算依賴 safeMonthKey
     val curCal = remember(safeMonthKey) {
@@ -5291,7 +5286,6 @@ fun CalendarContent(
     val daysInMonth = curCal.getActualMaximum(Calendar.DAY_OF_MONTH)
     val isCurrentMonth = safeMonthKey == todayKey
 
-    // ★ 數據依賴 safeUiState
     val recordsByDay = safeUiState.recordsByDay
     val maxAbsNet = safeUiState.maxAbsNet
     val totalNet = safeUiState.totalNet
@@ -5338,189 +5332,117 @@ fun CalendarContent(
         heights
     }
 
-    val rowOffsetsPx = remember(rowHeightsPx, totalRows) {
-        val offsets = FloatArray(totalRows)
-        var cur = 0f
-        for (i in 0 until totalRows) {
-            offsets[i] = cur
-            cur += rowHeightsPx[i] + gridSpacingPx
-        }
-        offsets
+    val fullGridHeightPx = remember(rowHeightsPx, totalRows, gridSpacingPx) {
+        if (totalRows <= 0) 0f
+        else rowHeightsPx.sum() + gridSpacingPx * (totalRows - 1).coerceAtLeast(0)
     }
 
-    val handleDismiss = remember {
-        {
-            if (selectedDay != null) {
-                val currentActualOffset = (gridScrollOffsetAnim.value - dragDownAmount)
-                    .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
+    fun collapsibleRangeFor(rowIdx: Int): Float {
+        if (rowIdx !in 0 until totalRows) return 0f
+        val keep = rowHeightsPx[rowIdx]
+        return (fullGridHeightPx - keep).coerceAtLeast(0f)
+    }
 
-                selectedDay = null
-                selectedRowIdx = null
-                selectedColIdx = null
-                isDockedAtTop = false
-                dockedReleased = false
-                isDockingBack = false
+    fun animateCollapseTo(target: Float) {
+        isSettling = true
+        val start = collapseP
+        scope.launch {
+            try {
+                Animatable(start).animateTo(
+                    target.coerceIn(0f, 1f),
+                    spring(dampingRatio = 0.9f, stiffness = 380f)
+                ) { collapseP = value }
+            } finally {
+                isSettling = false
+            }
+        }
+    }
 
-                scope.launch {
-                    dragDownAmount = 0f
-                    gridScrollOffsetAnim.snapTo(currentActualOffset)
-                    gridScrollOffsetAnim.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 300f))
-                }
-                scope.launch {
-                    detailsAlphaAnim.snapTo(0f)
-                }
-                scope.launch {
-                    topRevealProgress.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 320f))
+    val handleDismiss: () -> Unit = {
+        if (selectedDay != null || collapseP > 0.01f) {
+            scope.launch {
+                val start = collapseP
+                isSettling = true
+                try {
+                    Animatable(start).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) {
+                        collapseP = value
+                    }
+                } finally {
+                    isSettling = false
+                    collapseP = 0f
+                    selectedDay = null
+                    selectedRowIdx = null
+                    selectedColIdx = null
+                    detailExpandedId = null
                 }
             }
         }
     }
 
-    // 依然保留 currentMonthKey 以便即時響應按鈕
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
 
-    val dismissConnection = remember(selectedRowIdx) {
-        object : NestedScrollConnection {
-            fun currentMaxDrag(): Float {
+    // ★ 跟手 nested scroll：同步改 collapseP，唔經 coroutine（解決唔跟手）
+    val detailNestedConnection = object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (selectedDay == null || isSettling) return Offset.Zero
                 val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
-                if (rowIdx !in rowOffsetsPx.indices) return 0f
-                val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-                val bottomLimit = calendarBottomLimitPx
-                if (bottomLimit <= 0f) return gridScroll * 0.85f
-                val h0 = (bottomLimit - headerHeightPx -
-                    rowOffsetsPx[rowIdx] + gridScroll - rowHeightsPx[rowIdx])
-                    .coerceAtLeast(0f)
-                return (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
-            }
+                val range = collapsibleRangeFor(rowIdx)
+                if (range <= 1f) return Offset.Zero
 
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < 0f && dragDownAmount > 0f) {
-                    if (isDockingBack) return Offset(0f, available.y)
-                    val consume = minOf(-available.y, dragDownAmount)
-                    dragDownAmount -= consume
-                    if (dragDownAmount <= 0.5f) {
-                        isDockedAtTop = false
-                        dockedReleased = false
-                    } else {
-                        isDockedAtTop = false
-                    }
-                    return Offset(0f, -consume)
+                // 手指向上（available.y < 0）且明細已到頂 → 先繼續收日曆（加大 collapseP）
+                if (available.y < 0f && detailScrollState.value <= 0) {
+                    val deltaP = -available.y / range
+                    val newP = (collapseP + deltaP).coerceIn(0f, 1f)
+                    val consumed = (newP - collapseP) * range
+                    collapseP = newP
+                    return Offset(0f, -consumed)
                 }
                 return Offset.Zero
             }
 
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (selectedDay == null || isSettling) return Offset.Zero
+                val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
+                val range = collapsibleRangeFor(rowIdx)
+                if (range <= 1f) return Offset.Zero
+
+                // 明細到頂後，手指再向下拉 → 展開日曆（細 collapseP），明細 box 向下收縮
                 if (available.y > 0f && detailScrollState.value <= 0) {
-                    if (isDockingBack) return Offset(0f, available.y)
-                    val maxDrag = currentMaxDrag()
-                    if (maxDrag <= 0.5f) return Offset.Zero
-                    if (isDockedAtTop || dragDownAmount >= maxDrag - 0.5f) {
-                        isDockedAtTop = true
-                        return Offset(0f, available.y)
-                    }
-                    val newDrag = (dragDownAmount + available.y).coerceAtMost(maxDrag)
-                    val consumedY = newDrag - dragDownAmount
-                    dragDownAmount = newDrag
-                    if (newDrag >= maxDrag - 0.5f) isDockedAtTop = true
-                    return Offset(0f, consumedY)
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (isDockingBack) return Velocity.Zero
-                val maxDrag = currentMaxDrag()
-                if (maxDrag <= 0.5f) return Velocity.Zero
-
-                if ((isDockedAtTop || dragDownAmount > maxDrag * 0.5f) && available.y < -80f) {
-                    isDockedAtTop = false
-                    dockedReleased = false
-                    isDockingBack = true
-                    val start = dragDownAmount
-                    scope.launch {
-                        try {
-                            Animatable(start).animateTo(
-                                0f, spring(dampingRatio = 0.85f, stiffness = 400f)
-                            ) { dragDownAmount = value }
-                        } finally {
-                            isDockingBack = false
-                        }
-                    }
-                    return available
-                }
-
-                if (dragDownAmount <= 0.5f) return Velocity.Zero
-
-                val snapTarget = when {
-                    available.y < -50f -> 0f
-                    available.y > 50f -> maxDrag
-                    dragDownAmount < maxDrag / 2f -> 0f
-                    else -> maxDrag
-                }
-                val start = dragDownAmount
-                val shouldDock = snapTarget >= maxDrag - 0.5f
-                scope.launch {
-                    Animatable(start).animateTo(
-                        snapTarget, spring(dampingRatio = 0.85f, stiffness = 400f)
-                    ) { dragDownAmount = value }
-                    isDockedAtTop = shouldDock
-                    dockedReleased = false
-                }
-                return Velocity.Zero
-            }
-        }
-    }
-
-    val topPullConnection = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (selectedDay == null) return Offset.Zero
-                val h = topSectionHeightPx.coerceAtLeast(1f)
-                if (available.y < 0f && topRevealProgress.value > 0.001f) {
-                    val delta = available.y / h
-                    val newP = (topRevealProgress.value + delta).coerceIn(0f, 1f)
-                    val consumed = (newP - topRevealProgress.value) * h
-                    scope.launch { topRevealProgress.snapTo(newP) }
+                    val deltaP = -available.y / range
+                    val newP = (collapseP + deltaP).coerceIn(0f, 1f)
+                    val consumed = (collapseP - newP) * range
+                    collapseP = newP
                     return Offset(0f, consumed)
                 }
                 return Offset.Zero
             }
-            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (selectedDay == null) return Offset.Zero
-                val h = topSectionHeightPx.coerceAtLeast(1f)
-                if (available.y > 0f && topRevealProgress.value < 0.999f) {
-                    val delta = available.y / h
-                    val newP = (topRevealProgress.value + delta).coerceIn(0f, 1f)
-                    val consumedY = (newP - topRevealProgress.value) * h
-                    scope.launch { topRevealProgress.snapTo(newP) }
-                    return Offset(0f, consumedY)
-                }
-                return Offset.Zero
-            }
+
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (selectedDay == null) return Velocity.Zero
-                if (topRevealProgress.value <= 0.001f || topRevealProgress.value >= 0.999f) {
-                    return Velocity.Zero
-                }
+                if (detailScrollState.value > 0) return Velocity.Zero
+                // 根據速度吸附到 0 或 1（最少保留一行）
                 val target = when {
-                    available.y > 50f -> 1f
-                    available.y < -50f -> 0f
-                    topRevealProgress.value >= 0.45f -> 1f
+                    available.y < -400f -> 1f   // 快速向上 → 收埋
+                    available.y > 400f -> 0f    // 快速向下 → 展開日曆
+                    collapseP >= 0.45f -> 1f
                     else -> 0f
                 }
-                topRevealProgress.animateTo(target, spring(dampingRatio = 0.85f, stiffness = 400f))
-                return Velocity.Zero
+                animateCollapseTo(target)
+                return available
             }
-        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
         val containerHeightPx = constraints.maxHeight.toFloat()
         val bottomLimitPx = containerHeightPx - fabTopPaddingPx
-        SideEffect { calendarBottomLimitPx = bottomLimitPx }
 
         Column(Modifier.fillMaxSize()) {
+            // ===== 月份導航 =====
             Box(Modifier.fillMaxWidth().background(SURFACE_BG).zIndex(30f).padding(horizontal = 10.dp, vertical = 10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Surface(
@@ -5531,20 +5453,23 @@ fun CalendarContent(
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                            if (currentMonthKey != todayKey) { monthDirection = if (todayKey > currentMonthKey) 1 else -1; onMonthChange(todayKey) }
+                            if (currentMonthKey != todayKey) {
+                                monthDirection = if (todayKey > currentMonthKey) 1 else -1
+                                onMonthChange(todayKey)
+                            }
                         }
                     ) {
                         Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp, color = Color.Black, fontWeight = FontWeight.Medium)
-
-                        // ★ 標題動畫依然依賴 currentMonthKey，確保禁掣即時反應
                         AnimatedContent(
                             targetState = currentMonthKey,
                             transitionSpec = {
                                 val forward = monthDirection > 0
                                 if (forward) {
-                                    (slideInHorizontally(tween(280)) { it } + fadeIn(tween(200))).togetherWith(slideOutHorizontally(tween(280)) { -it } + fadeOut(tween(180)))
+                                    (slideInHorizontally(tween(280)) { it } + fadeIn(tween(200)))
+                                        .togetherWith(slideOutHorizontally(tween(280)) { -it } + fadeOut(tween(180)))
                                 } else {
-                                    (slideInHorizontally(tween(280)) { -it } + fadeIn(tween(200))).togetherWith(slideOutHorizontally(tween(280)) { it } + fadeOut(tween(180)))
+                                    (slideInHorizontally(tween(280)) { -it } + fadeIn(tween(200)))
+                                        .togetherWith(slideOutHorizontally(tween(280)) { it } + fadeOut(tween(180)))
                                 }
                             },
                             label = "monthAnim"
@@ -5563,186 +5488,180 @@ fun CalendarContent(
                 }
             }
 
-            val topP = topRevealProgress.value
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .then(
-                        if (topSectionHeightPx > 0f) {
-                            Modifier.height(with(density) { (topSectionHeightPx * topP).toDp() })
-                        } else {
-                            Modifier.wrapContentHeight()
-                        }
-                    )
-                    .clipToBounds()
-                    .graphicsLayer { alpha = if (topSectionHeightPx > 0f) topP.coerceIn(0f, 1f) else 1f }
-            ) {
+            // ===== 統計區：選日後跟住 collapse 漸隱 =====
+            val topP = if (selectedDay != null) (1f - collapseP).coerceIn(0f, 1f) else 1f
+            if (topP > 0.01f) {
                 Column(
                     Modifier
                         .fillMaxWidth()
+                        .graphicsLayer { alpha = topP }
                         .padding(horizontal = 10.dp)
-                        .wrapContentHeight(unbounded = true, align = Alignment.Top)
-                        .onSizeChanged { size ->
-                            if (size.height > 0) {
-                                topSectionHeightPx = size.height.toFloat()
-                            }
-                        }
                 ) {
                     Spacer(Modifier.height(4.dp))
-
                     AnimatedCalendarCategoryChips(
                         visibleCategories = visibleCategories,
                         filterCategory = filterCategory,
                         onFilterCategoryChange = onFilterCategoryChange
                     )
-
                     Spacer(Modifier.height(14.dp))
-
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
                         AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
                         AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
                     }
-
                     Spacer(Modifier.height(8.dp))
                 }
             }
 
-            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds().nestedScroll(topPullConnection)) {
-                val actualGridOffset = (gridScrollOffsetAnim.value - dragDownAmount)
-                    .coerceIn(0f, gridScrollOffsetAnim.value.coerceAtLeast(0f))
+            // ===== 日曆 + 當日明細 =====
+            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+                val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
+                val selRow = selectedRowIdx ?: cachedSelectedRowIdx
 
-                Column(
-                    Modifier.fillMaxWidth()
-                        .offset { IntOffset(0, (headerHeightPx - actualGridOffset).roundToInt()) }
-                        .padding(horizontal = 10.dp)
-                ) {
-                    for (rowIdx in 0 until totalRows) {
-                        val isRowSelected = selectedRowIdx == rowIdx
-                        CalendarRow(
-                            rowIdx = rowIdx, firstDayOffset = firstDayOffset, daysInMonth = daysInMonth,
-                            today = today, isCurrentMonth = isCurrentMonth, recordsByDay = recordsByDay,
-                            displayMode = displayMode, maxAbsNet = maxAbsNet,
-                            selectedDay = if (isRowSelected) selectedDay else null,
-                            selectedCol = if (isRowSelected) selectedColIdx else null,
-                            animateValues = animateValues,
-                            onCellClick = { day, col ->
-                                if (selectedDay == day) {
-                                    handleDismiss()
-                                } else {
-                                    selectedDay = day
-                                    selectedRowIdx = rowIdx
-                                    selectedColIdx = col
-                                    cachedSelectedDay = day
-                                    cachedSelectedRowIdx = rowIdx
-                                    cachedSelectedCol = col
-                                    detailExpandedId = null
-
-                                    isDockedAtTop = false
-                                    dockedReleased = false
-
-                                    scope.launch {
-                                        val currentActual = gridScrollOffsetAnim.value - dragDownAmount
-                                        dragDownAmount = 0f
-                                        gridScrollOffsetAnim.snapTo(currentActual)
-                                        gridScrollOffsetAnim.animateTo(
-                                            rowOffsetsPx[rowIdx],
-                                            spring(dampingRatio = 0.9f, stiffness = 300f)
-                                        )
-                                    }
-                                    scope.launch { detailsAlphaAnim.snapTo(1f) }
-                                    scope.launch {
-                                        topRevealProgress.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 320f))
-                                    }
-                                }
-                            }
-                        )
-                        if (rowIdx < totalRows - 1) Spacer(Modifier.height(6.dp))
+                // 各行視覺高度：非選中行按 (1-p) 同步收縮（上：下距離比 = 速度比，同時到齊）
+                val visualHeights = FloatArray(totalRows) { i ->
+                    if (selectedDay != null && i != selRow) rowHeightsPx[i] * (1f - p)
+                    else rowHeightsPx.getOrElse(i) { 0f }
+                }
+                val visualGap = gridSpacingPx * (1f - p)
+                val gridBlockHeight = run {
+                    var sum = 0f
+                    for (i in 0 until totalRows) {
+                        if (visualHeights[i] > 0.5f || (selectedDay != null && i == selRow)) {
+                            sum += maxOf(visualHeights[i], if (selectedDay != null && i == selRow) rowHeightsPx[i] else 0f)
+                            if (i < totalRows - 1) sum += visualGap
+                        }
                     }
+                    if (selectedDay != null) {
+                        // 最少保留選中行高度
+                        maxOf(sum, rowHeightsPx.getOrElse(selRow) { 0f })
+                    } else sum
                 }
 
-                Box(Modifier.fillMaxWidth().height(headerHeightDp).align(Alignment.TopCenter).zIndex(20f).background(SURFACE_BG)) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 13.dp).fillMaxHeight(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                Column(Modifier.fillMaxSize()) {
+                    // 星期標題
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(headerHeightDp)
+                            .background(SURFACE_BG)
                     ) {
-                        CALENDAR_WEEKDAY_HEADERS.forEach { w ->
-                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                Text(text = w, fontSize = 12.sp, color = Color.Black, fontWeight = FontWeight.SemiBold, style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 13.dp).fillMaxHeight(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = w, fontSize = 12.sp, color = Color.Black,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                if (selectedRowIdx != null || detailsAlphaAnim.value > 0.01f) {
-                    val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
-                    val rowNY = rowOffsetsPx[rowIdx] - actualGridOffset
-                    val detailsTop = headerHeightPx + rowNY + rowHeightsPx[rowIdx]
-                    val detailsHeight = (bottomLimitPx - detailsTop).coerceAtLeast(minDetailHeightPx)
-
+                    // 日曆網格（向選中行收縮）
                     Box(
-                        Modifier.fillMaxWidth()
-                            .offset { IntOffset(0, detailsTop.roundToInt()) }
-                            .height(with(density) { detailsHeight.toDp() })
-                            .zIndex(30f)
-                            .graphicsLayer { alpha = detailsAlphaAnim.value }
+                        Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { gridBlockHeight.toDp() })
+                            .clipToBounds()
+                            .padding(horizontal = 10.dp)
                     ) {
-                        Column(Modifier.fillMaxSize()) {
-                            TrianglePointer(colIndex = cachedSelectedCol, color = SURFACE_CARD, triangleHeight = triangleHeightDp)
+                        var yAcc = 0f
+                        for (rowIdx in 0 until totalRows) {
+                            val isSel = selectedDay != null && rowIdx == selRow
+                            val h = if (isSel) rowHeightsPx[rowIdx] else visualHeights[rowIdx]
+                            if (h > 0.5f || isSel) {
+                                val drawH = if (isSel) rowHeightsPx[rowIdx] else h
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .offset { IntOffset(0, yAcc.roundToInt()) }
+                                        .height(with(density) { drawH.toDp() })
+                                        .clipToBounds()
+                                ) {
+                                    CalendarRow(
+                                        rowIdx = rowIdx,
+                                        firstDayOffset = firstDayOffset,
+                                        daysInMonth = daysInMonth,
+                                        today = today,
+                                        isCurrentMonth = isCurrentMonth,
+                                        recordsByDay = recordsByDay,
+                                        displayMode = displayMode,
+                                        maxAbsNet = maxAbsNet,
+                                        selectedDay = if (isSel) selectedDay else null,
+                                        selectedCol = if (isSel) selectedColIdx else null,
+                                        animateValues = animateValues,
+                                        heightFraction = if (isSel) 1f else (1f - p).coerceIn(0f, 1f),
+                                        onCellClick = { day, col ->
+                                            if (selectedDay == day) {
+                                                handleDismiss()
+                                            } else {
+                                                selectedDay = day
+                                                selectedRowIdx = rowIdx
+                                                selectedColIdx = col
+                                                cachedSelectedDay = day
+                                                cachedSelectedRowIdx = rowIdx
+                                                cachedSelectedCol = col
+                                                detailExpandedId = null
+                                                scope.launch { detailScrollState.scrollTo(0) }
+                                                animateCollapseTo(1f)
+                                            }
+                                        }
+                                    )
+                                }
+                                yAcc += drawH + visualGap
+                            }
+                        }
+                    }
+
+                    // 當日明細：永遠喺日曆塊下面，最少可見；可向上拉
+                    if (selectedDay != null || p > 0.01f) {
+                        val detailWeight = 1f
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .weight(detailWeight)
+                                .graphicsLayer { alpha = if (selectedDay != null) 1f else p }
+                        ) {
+                            TrianglePointer(
+                                colIndex = cachedSelectedCol,
+                                color = SURFACE_CARD,
+                                triangleHeight = triangleHeightDp
+                            )
                             Box(
-                                Modifier.fillMaxWidth().weight(1f)
-                                    .padding(horizontal = 10.dp).padding(bottom = 4.dp)
+                                Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .padding(horizontal = 10.dp)
+                                    .padding(bottom = 4.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(SURFACE_CARD)
                             ) {
                                 Column(Modifier.fillMaxSize()) {
+                                    // Handle：直接跟手拖
                                     Box(
                                         Modifier
                                             .fillMaxWidth()
                                             .height(handleBarHeightDp)
-                                            .pointerInput(selectedRowIdx, isDockingBack) {
+                                            .pointerInput(selRow) {
                                                 detectVerticalDragGestures(
                                                     onDragEnd = {
-                                                        val maxDrag = run {
-                                                            val r = selectedRowIdx ?: cachedSelectedRowIdx
-                                                            if (r !in rowOffsetsPx.indices) return@run 0f
-                                                            val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-                                                            val h0 = (bottomLimitPx - headerHeightPx -
-                                                                rowOffsetsPx[r] + gridScroll - rowHeightsPx[r])
-                                                                .coerceAtLeast(0f)
-                                                            (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
-                                                        }
-                                                        if (maxDrag <= 0.5f) return@detectVerticalDragGestures
-                                                        val snapTarget = when {
-                                                            dragDownAmount < maxDrag / 2f -> 0f
-                                                            else -> maxDrag
-                                                        }
-                                                        val shouldDock = snapTarget >= maxDrag - 0.5f
-                                                        scope.launch {
-                                                            Animatable(dragDownAmount).animateTo(
-                                                                snapTarget,
-                                                                spring(dampingRatio = 0.85f, stiffness = 400f)
-                                                            ) { dragDownAmount = value }
-                                                            isDockedAtTop = shouldDock
-                                                            dockedReleased = false
-                                                        }
+                                                        val target = if (collapseP >= 0.45f) 1f else 0f
+                                                        animateCollapseTo(target)
                                                     },
                                                     onVerticalDrag = { change, dragAmount ->
                                                         change.consume()
-                                                        if (isDockingBack) return@detectVerticalDragGestures
-                                                        val maxDrag = run {
-                                                            val r = selectedRowIdx ?: cachedSelectedRowIdx
-                                                            if (r !in rowOffsetsPx.indices) return@run 0f
-                                                            val gridScroll = gridScrollOffsetAnim.value.coerceAtLeast(0f)
-                                                            val h0 = (bottomLimitPx - headerHeightPx -
-                                                                rowOffsetsPx[r] + gridScroll - rowHeightsPx[r])
-                                                                .coerceAtLeast(0f)
-                                                            (h0 - minDetailHeightPx).coerceIn(0f, gridScroll)
-                                                        }
-                                                        val newDrag = (dragDownAmount + dragAmount).coerceIn(0f, maxDrag)
-                                                        dragDownAmount = newDrag
-                                                        isDockedAtTop = newDrag >= maxDrag - 0.5f
+                                                        if (isSettling) return@detectVerticalDragGestures
+                                                        val range = collapsibleRangeFor(selRow)
+                                                        if (range <= 1f) return@detectVerticalDragGestures
+                                                        // 向下拉 dragAmount>0 → 展開日曆 → p 變細
+                                                        val deltaP = -dragAmount / range
+                                                        collapseP = (collapseP + deltaP).coerceIn(0f, 1f)
                                                     }
                                                 )
                                             },
@@ -5759,15 +5678,22 @@ fun CalendarContent(
                                     Column(
                                         Modifier
                                             .fillMaxSize()
-                                            .nestedScroll(dismissConnection)
+                                            .nestedScroll(detailNestedConnection)
                                             .verticalScroll(detailScrollState)
                                     ) {
                                         DayDetailPanel(
                                             dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
                                             records = recordsByDay[cachedSelectedDay] ?: emptyList(),
-                                            expandedId = detailExpandedId, onExpandChange = { detailExpandedId = it },
-                                            onCopy = onCopyClick, onEdit = onEditClick, onFilter = onFilterClick, onDelete = onDeleteClick, onChangeIcon = onChangeIconClick,
-                                            onDismiss = { handleDismiss() }, deletingIds = deletingIds, justAddedIds = justAddedIds
+                                            expandedId = detailExpandedId,
+                                            onExpandChange = { detailExpandedId = it },
+                                            onCopy = onCopyClick,
+                                            onEdit = onEditClick,
+                                            onFilter = onFilterClick,
+                                            onDelete = onDeleteClick,
+                                            onChangeIcon = onChangeIconClick,
+                                            onDismiss = { handleDismiss() },
+                                            deletingIds = deletingIds,
+                                            justAddedIds = justAddedIds
                                         )
                                     }
                                 }
@@ -7829,6 +7755,7 @@ fun CalendarRow(
     displayMode: Int, maxAbsNet: Double,
     selectedDay: Int?, selectedCol: Int?,
     animateValues: Boolean = false,
+    heightFraction: Float = 1f,
     onCellClick: (day: Int, col: Int) -> Unit,
 ) {
     val spacing = 6.dp
@@ -7844,7 +7771,6 @@ fun CalendarRow(
         maxItems
     }
 
-    // ★ 高度改為動畫值：篩選切換時行高平滑過渡，避免瞬間跳動
     val targetContentHeight: Dp = when (displayMode) {
         0 -> 52.dp
         1 -> (34 + maxItemsInRow * 16).dp.coerceAtLeast(56.dp)
@@ -7864,13 +7790,21 @@ fun CalendarRow(
     val verticalPad = (contentHeight * (cellMaxScale - 1f) / 2f + 2.dp).coerceAtLeast(4.dp)
     val horizontalPad = 3.dp
 
-    // ★ 高度永遠固定，唔再乘 expansionFraction
-    val rowHeight = contentHeight + verticalPad * 2
+    val baseRowHeight = contentHeight + verticalPad * 2
+    val frac = heightFraction.coerceIn(0f, 1f)
+    val rowHeight = baseRowHeight * frac
 
     val todayDayOfMonth = remember(today) { today.get(Calendar.DAY_OF_MONTH) }
 
+    if (rowHeight < 0.5.dp) return
+
     Row(
-        Modifier.fillMaxWidth().height(rowHeight).clipToBounds().padding(horizontal = horizontalPad),
+        Modifier
+            .fillMaxWidth()
+            .height(rowHeight)
+            .clipToBounds()
+            .graphicsLayer { alpha = frac }
+            .padding(horizontal = horizontalPad),
         horizontalArrangement = Arrangement.spacedBy(spacing),
         verticalAlignment = Alignment.CenterVertically
     ) {
