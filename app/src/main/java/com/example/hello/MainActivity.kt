@@ -5505,21 +5505,37 @@ fun CalendarContent(
             // 拖動明細 bar 嘅像素進度 = collapseRange * p；頂部用同一距離上移
             val collapseRangeForTop = if (selectedDay != null) collapsibleRangeFor(selRowForTop) else 0f
             val topTranslatePx = collapseRangeForTop * pTop
-            val topVisibleH = (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+            // 尚未量度到高度時用 wrapContent，避免 height=0 永遠量唔到（格仔／chips 消失）
+            val topVisibleH = if (topSectionHeightPx <= 0f) {
+                -1f // sentinel：wrap
+            } else {
+                (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+            }
 
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(with(density) { topVisibleH.toDp() })
-                    .clipToBounds()
+                    .then(
+                        if (topVisibleH < 0f) {
+                            Modifier.wrapContentHeight()
+                        } else {
+                            Modifier
+                                .height(with(density) { topVisibleH.toDp() })
+                                .clipToBounds()
+                        }
+                    )
             ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
                         .onSizeChanged { sz ->
-                            if (sz.height > 0) topSectionHeightPx = sz.height.toFloat()
+                            if (sz.height > 0 && kotlin.math.abs(sz.height - topSectionHeightPx) > 1f) {
+                                topSectionHeightPx = sz.height.toFloat()
+                            }
                         }
-                        .offset { IntOffset(0, (-topTranslatePx).roundToInt()) }
+                        .offset {
+                            IntOffset(0, if (topSectionHeightPx > 0f) (-topTranslatePx).roundToInt() else 0)
+                        }
                         .padding(horizontal = 10.dp)
                 ) {
                     Spacer(Modifier.height(4.dp))
