@@ -640,6 +640,9 @@ val pivotUiState: StateFlow<PivotUiState> = _records
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PivotUiState())
 
+// =========================================================
+//  ★ 資料透視表 - 數據類
+// =========================================================
 @Immutable
 data class PivotCell(
     val total: Double = 0.0,
@@ -663,6 +666,103 @@ data class PivotUiState(
     val grandTotal: Double = 0.0,
     val loading: Boolean = true,
 )
+
+// =========================================================
+//  ★ 資料透視表 - 計算函數（頂層）
+// =========================================================
+private fun computePivotUiState(records: List<Record>): PivotUiState {
+    if (records.isEmpty()) return PivotUiState(loading = false)
+
+    val monthsSet = HashSet<String>()
+    // monthKey -> category -> note -> PivotCell
+    val data = HashMap<String, HashMap<String, HashMap<String, PivotCell>>>()
+
+    for (r in records) {
+        if (r.category == "還錢") continue          // 與比較頁 / 月曆「全部」口徑一致
+        val mk = getTimestampMeta(r.timestamp).monthKey
+        monthsSet.add(mk)
+        val catMap = data.getOrPut(mk) { HashMap() }
+        val noteMap = catMap.getOrPut(r.category) { HashMap() }
+        val key = r.note.ifBlank { "(無名稱)" }
+        val existing = noteMap[key] ?: PivotCell()
+        noteMap[key] = PivotCell(existing.total + r.amount, existing.count + 1)
+    }
+
+    val months = monthsSet.sortedDescending()   // 12月 → 11月 → 10月…
+    if (months.isEmpty()) return PivotUiState(loading = false)
+    val latestMonth = months.first()            // 最新月份（12月）
+
+    // 各類別 / 項目的「全期總額」與「最新月份金額」——用嚟做排序
+    val categoryTotalAll = HashMap<String, Double>()
+    val categoryLatest = HashMap<String, Double>()
+    val noteTotalAll = HashMap<Pair<String, String>, Double>()
+    val noteLatest = HashMap<Pair<String, String>, Double>()
+
+    for ((mk, catMap) in data) {
+        for ((cat, noteMap) in catMap) {
+            var catSum = 0.0
+            for ((note, cell) in noteMap) {
+                catSum += cell.total
+                val pair = cat to note
+                noteTotalAll[pair] = (noteTotalAll[pair] ?: 0.0) + cell.total
+                if (mk == latestMonth) noteLatest[pair] = (noteLatest[pair] ?: 0.0) + cell.total
+            }
+            categoryTotalAll[cat] = (categoryTotalAll[cat] ?: 0.0) + catSum
+            if (mk == latestMonth) categoryLatest[cat] = (categoryLatest[cat] ?: 0.0) + catSum
+        }
+    }
+
+    // 類別排序：先睇最新月份金額，再睇全期總額（都是由大至小）
+    val sortedCats = categoryTotalAll.keys.sortedWith(
+        compareByDescending<String> { categoryLatest[it] ?: 0.0 }
+            .thenByDescending { categoryTotalAll[it] ?: 0.0 }
+    )
+
+    val rows = mutableListOf<PivotRow>()
+    for (cat in sortedCats) {
+        // ===== 類別小計行 =====
+        val catCells = HashMap<String, PivotCell>()
+        var catTotal = 0.0
+        for (mk in months) {
+            val noteMap = data[mk]?.get(cat) ?: continue
+            var sum = 0.0; var cnt = 0
+            for (cell in noteMap.values) { sum += cell.total; cnt += cell.count }
+            if (sum != 0.0) { catCells[mk] = PivotCell(sum, cnt); catTotal += sum }
+        }
+        rows.add(PivotRow(cat, "", true, catCells, catTotal))
+
+        // ===== 項目行（同樣按最新月份 → 全期總額 排序）=====
+        val notesInCat = noteTotalAll.keys
+            .filter { it.first == cat }
+            .sortedWith(
+                compareByDescending<Pair<String, String>> { noteLatest[it] ?: 0.0 }
+                    .thenByDescending { noteTotalAll[it] ?: 0.0 }
+            )
+
+        for (pair in notesInCat) {
+            val note = pair.second
+            val noteCells = HashMap<String, PivotCell>()
+            var rowTotal = 0.0
+            for (mk in months) {
+                val cell = data[mk]?.get(cat)?.get(note) ?: continue
+                noteCells[mk] = cell; rowTotal += cell.total
+            }
+            rows.add(PivotRow(cat, note, false, noteCells, rowTotal))
+        }
+    }
+
+    // 每月合計 + 總計
+    val monthTotals = HashMap<String, Double>()
+    var grandTotal = 0.0
+    for (mk in months) {
+        var sum = 0.0
+        data[mk]?.forEach { (_, noteMap) -> noteMap.values.forEach { sum += it.total } }
+        monthTotals[mk] = sum
+        grandTotal += sum
+    }
+
+    return PivotUiState(months, rows, monthTotals, grandTotal, loading = false)
+}
 
 @Immutable
 data class WeeklyExpenseDay(
@@ -904,6 +1004,12 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     ) { records, mk, cat -> computeCalendarUiState(records, mk, cat) }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
+
+    // ★ 資料透視表 state（必須喺 LedgerViewModel 類內部：用到 _records / viewModelScope）
+    val pivotUiState: StateFlow<PivotUiState> = _records
+        .map { records -> computePivotUiState(records) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PivotUiState())
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1429,100 +1535,6 @@ private fun computeCalendarUiState(records: List<Record>, monthKey: String, filt
         avgPerItem = avgPerItem,
         avgPerDay = avgPerDay,
     )
-}
-
-private fun computePivotUiState(records: List<Record>): PivotUiState {
-    if (records.isEmpty()) return PivotUiState(loading = false)
-
-    val monthsSet = HashSet<String>()
-    // monthKey -> category -> note -> PivotCell
-    val data = HashMap<String, HashMap<String, HashMap<String, PivotCell>>>()
-
-    for (r in records) {
-        if (r.category == "還錢") continue          // 與比較頁 / 月曆「全部」口徑一致
-        val mk = getTimestampMeta(r.timestamp).monthKey
-        monthsSet.add(mk)
-        val catMap = data.getOrPut(mk) { HashMap() }
-        val noteMap = catMap.getOrPut(r.category) { HashMap() }
-        val key = r.note.ifBlank { "(無名稱)" }
-        val existing = noteMap[key] ?: PivotCell()
-        noteMap[key] = PivotCell(existing.total + r.amount, existing.count + 1)
-    }
-
-    val months = monthsSet.sortedDescending()   // 12月 → 11月 → 10月…
-    if (months.isEmpty()) return PivotUiState(loading = false)
-    val latestMonth = months.first()            // 最新月份（12月）
-
-    // 各類別 / 項目的「全期總額」與「最新月份金額」——用嚟做排序
-    val categoryTotalAll = HashMap<String, Double>()
-    val categoryLatest = HashMap<String, Double>()
-    val noteTotalAll = HashMap<Pair<String, String>, Double>()
-    val noteLatest = HashMap<Pair<String, String>, Double>()
-
-    for ((mk, catMap) in data) {
-        for ((cat, noteMap) in catMap) {
-            var catSum = 0.0
-            for ((note, cell) in noteMap) {
-                catSum += cell.total
-                val pair = cat to note
-                noteTotalAll[pair] = (noteTotalAll[pair] ?: 0.0) + cell.total
-                if (mk == latestMonth) noteLatest[pair] = (noteLatest[pair] ?: 0.0) + cell.total
-            }
-            categoryTotalAll[cat] = (categoryTotalAll[cat] ?: 0.0) + catSum
-            if (mk == latestMonth) categoryLatest[cat] = (categoryLatest[cat] ?: 0.0) + catSum
-        }
-    }
-
-    // 類別排序：先睇最新月份金額，再睇全期總額（都是由大至小）
-    val sortedCats = categoryTotalAll.keys.sortedWith(
-        compareByDescending<String> { categoryLatest[it] ?: 0.0 }
-            .thenByDescending { categoryTotalAll[it] ?: 0.0 }
-    )
-
-    val rows = mutableListOf<PivotRow>()
-    for (cat in sortedCats) {
-        // ===== 類別小計行 =====
-        val catCells = HashMap<String, PivotCell>()
-        var catTotal = 0.0
-        for (mk in months) {
-            val noteMap = data[mk]?.get(cat) ?: continue
-            var sum = 0.0; var cnt = 0
-            for (cell in noteMap.values) { sum += cell.total; cnt += cell.count }
-            if (sum != 0.0) { catCells[mk] = PivotCell(sum, cnt); catTotal += sum }
-        }
-        rows.add(PivotRow(cat, "", true, catCells, catTotal))
-
-        // ===== 項目行（同樣按最新月份 → 全期總額 排序）=====
-        val notesInCat = noteTotalAll.keys
-            .filter { it.first == cat }
-            .sortedWith(
-                compareByDescending<Pair<String, String>> { noteLatest[it] ?: 0.0 }
-                    .thenByDescending { noteTotalAll[it] ?: 0.0 }
-            )
-
-        for (pair in notesInCat) {
-            val note = pair.second
-            val noteCells = HashMap<String, PivotCell>()
-            var rowTotal = 0.0
-            for (mk in months) {
-                val cell = data[mk]?.get(cat)?.get(note) ?: continue
-                noteCells[mk] = cell; rowTotal += cell.total
-            }
-            rows.add(PivotRow(cat, note, false, noteCells, rowTotal))
-        }
-    }
-
-    // 每月合計 + 總計
-    val monthTotals = HashMap<String, Double>()
-    var grandTotal = 0.0
-    for (mk in months) {
-        var sum = 0.0
-        data[mk]?.forEach { (_, noteMap) -> noteMap.values.forEach { sum += it.total } }
-        monthTotals[mk] = sum
-        grandTotal += sum
-    }
-
-    return PivotUiState(months, rows, monthTotals, grandTotal, loading = false)
 }
 
 fun computeWeeklyExpenses(records: List<Record>): List<WeeklyExpenseDay> {
