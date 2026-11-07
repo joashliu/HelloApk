@@ -495,25 +495,6 @@ object CaptureOverlayController {
     }
 }
 
-/** 通知 Action：忽略確認橫幅 */
-class NotificationActionReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context?, intent: Intent?) {
-        if (context == null || intent == null) return
-        when (intent.action) {
-            "com.example.hello.ACTION_IGNORE_CAPTURE" -> {
-                val id = intent.getIntExtra("notif_id", -1)
-                if (id >= 0) {
-                    try {
-                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                        nm?.cancel(id)
-                    } catch (_: Exception) {}
-                }
-                CaptureOverlayController.dismiss(fade = true)
-            }
-        }
-    }
-}
-
 // 🟢 升級 Channel ID，強制系統重置橫幅權限
 private const val QUICK_ADD_CHANNEL_ID = "ledger_quick_add_v2"
 private const val CONFIRM_CHANNEL_ID = "ledger_capture_confirm_v5"
