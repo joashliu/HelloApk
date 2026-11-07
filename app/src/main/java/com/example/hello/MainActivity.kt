@@ -5498,16 +5498,14 @@ fun CalendarContent(
                 }
             }
 
-            // ===== 統計區：跟手向上平移（唔用漸隱，避免跳變）=====
+            // ===== 統計區：跟手向上平移（只升唔降記錄高度，避免收埋後量度成 0）=====
             val pTop = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
             var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
             val selRowForTop = selectedRowIdx ?: cachedSelectedRowIdx
-            // 拖動明細 bar 嘅像素進度 = collapseRange * p；頂部用同一距離上移
             val collapseRangeForTop = if (selectedDay != null) collapsibleRangeFor(selRowForTop) else 0f
             val topTranslatePx = collapseRangeForTop * pTop
-            // 尚未量度到高度時用 wrapContent，避免 height=0 永遠量唔到（格仔／chips 消失）
             val topVisibleH = if (topSectionHeightPx <= 0f) {
-                -1f // sentinel：wrap
+                -1f
             } else {
                 (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
             }
@@ -5528,8 +5526,15 @@ fun CalendarContent(
                 Column(
                     Modifier
                         .fillMaxWidth()
+                        // 用 requiredHeightIn 保持完整內容高度，唔受父層 clip 高度壓縮
+                        .then(
+                            if (topSectionHeightPx > 0f)
+                                Modifier.requiredHeight(with(density) { topSectionHeightPx.toDp() })
+                            else Modifier
+                        )
                         .onSizeChanged { sz ->
-                            if (sz.height > 0 && kotlin.math.abs(sz.height - topSectionHeightPx) > 1f) {
+                            // 只升唔降：記住最大完整高度，收埋時唔好被寫細
+                            if (sz.height > topSectionHeightPx + 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
                             }
                         }
@@ -5560,13 +5565,12 @@ fun CalendarContent(
                 val selRow = selectedRowIdx ?: cachedSelectedRowIdx
                 val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
                 val collapseRange = collapsibleRangeFor(selRow)
-                // 遮擋：可視高度由全日曆收到只剩選中行；格仔尺寸不變
+                // 遮擋：可視高度收到只剩選中行；格仔尺寸永遠完整
                 val visibleGridH = if (selectedDay != null) {
                     (fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)
                 } else {
                     fullGridHeightPx
                 }
-                // 內容上移：選中行移去可視區頂部
                 val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
                     rowOffsetsPx[selRow] * p
                 } else 0f
@@ -5603,7 +5607,7 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆網格：完整尺寸 + clip 遮擋（唔壓縮格仔）
+                    // 日曆網格：requiredHeight 鎖死完整高度，父層只負責 clip 遮擋（唔好壓縮行）
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -5614,6 +5618,7 @@ fun CalendarContent(
                         Column(
                             Modifier
                                 .fillMaxWidth()
+                                .requiredHeight(with(density) { fullGridHeightPx.toDp().coerceAtLeast(0.dp) })
                                 .offset { IntOffset(0, (-gridScroll).roundToInt()) }
                         ) {
                             for (rowIdx in 0 until totalRows) {
@@ -5728,7 +5733,8 @@ fun CalendarContent(
                                             onFilter = onFilterClick,
                                             onDelete = onDeleteClick,
                                             onChangeIcon = onChangeIconClick,
-                                            onDismiss = { handleDismiss() },
+                                            // 交叉：只向下展開日曆，唔清選取、明細唔消失
+                                            onDismiss = { animateCollapseTo(0f) },
                                             deletingIds = deletingIds,
                                             justAddedIds = justAddedIds
                                         )
