@@ -8794,48 +8794,15 @@ fun PivotContent(
                 }
             }
 
-            // ===== 類別 chips：自動換行，唔使橫滑 =====
+            // ===== 類別 chips：每行最少 5 個、等寬、左右對齊、少空隙 =====
             if (pivotUi.categories.isNotEmpty()) {
-                FlowRow(
+                PivotCategoryChipGrid(
+                    categories = pivotUi.categories,
+                    onClick = { scrollToCategory(it) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    pivotUi.categories.forEach { cat ->
-                        val style = CATEGORY_STYLES[cat]
-                        Surface(
-                            onClick = { scrollToCategory(cat) },
-                            shape = RoundedCornerShape(20.dp),
-                            color = style?.bgColor ?: SURFACE_ELEVATED,
-                            border = BorderStroke(
-                                0.5.dp,
-                                (style?.fgColor ?: TEXT_SECONDARY).copy(alpha = 0.25f)
-                            )
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (style != null) {
-                                    Icon(
-                                        style.icon, null,
-                                        tint = style.fgColor,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(Modifier.width(5.dp))
-                                }
-                                Text(
-                                    cat,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = style?.fgColor ?: TEXT_PRIMARY
-                                )
-                            }
-                        }
-                    }
-                }
+                        .padding(bottom = 10.dp)
+                )
             }
 
             Surface(
@@ -9011,6 +8978,97 @@ fun PivotContent(
                 .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
         ) {
             Icon(Icons.Default.Add, "新增")
+        }
+    }
+}
+
+/** 類別 chips 網格：每行最少 5 格、等寬、末行用空白佔位避免大空隙 */
+@Composable
+private fun PivotCategoryChipGrid(
+    categories: List<String>,
+    onClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val gap = 6.dp
+    val minCols = 5
+    val minChipWidth = 56.dp
+
+    BoxWithConstraints(modifier) {
+        val count = categories.size
+        if (count == 0) return@BoxWithConstraints
+
+        // 闊度夠就自動加欄，但唔少於 5（項目唔夠就用實際數量）
+        val widthBasedCols = (
+            (maxWidth + gap) / (minChipWidth + gap)
+        ).toInt().coerceAtLeast(1)
+
+        val cols = when {
+            count <= minCols -> count
+            else -> maxOf(minCols, minOf(count, widthBasedCols))
+        }
+
+        // 字級隨欄位數量微調，避免擠爆
+        val fontSize = when {
+            cols >= 7 -> 11.sp
+            cols >= 6 -> 12.sp
+            else -> 13.sp
+        }
+        val iconSize = if (cols >= 7) 12.dp else 14.dp
+        val hPad = if (cols >= 7) 6.dp else 8.dp
+
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            categories.chunked(cols).forEach { rowCats ->
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    rowCats.forEach { cat ->
+                        val style = CATEGORY_STYLES[cat]
+                        Surface(
+                            onClick = { onClick(cat) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(32.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = style?.bgColor ?: SURFACE_ELEVATED,
+                            border = BorderStroke(
+                                0.5.dp,
+                                (style?.fgColor ?: TEXT_SECONDARY).copy(alpha = 0.25f)
+                            )
+                        ) {
+                            Row(
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = hPad),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                if (style != null) {
+                                    Icon(
+                                        style.icon, null,
+                                        tint = style.fgColor,
+                                        modifier = Modifier.size(iconSize)
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    cat,
+                                    fontSize = fontSize,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = style?.fgColor ?: TEXT_PRIMARY,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    // 末行不足：用等寬空白佔位，chip 大小同上一行一致，避免拉開大空位
+                    repeat(cols - rowCats.size) {
+                        Spacer(Modifier.weight(1f).height(32.dp))
+                    }
+                }
+            }
         }
     }
 }
