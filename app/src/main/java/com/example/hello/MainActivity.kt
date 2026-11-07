@@ -1132,11 +1132,14 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
     val now = System.currentTimeMillis()
     val secNow = getTimestampMeta(now).secOfDay
 
-    // 使用次數、時間距離、最近金額、分類、圖標
+    // 使用次數、時間距離、建議金額（跟一日內時段）、分類、圖標
     val usageCountByNote = HashMap<String, Int>()
     val minDistByNote = LinkedHashMap<String, Int>()
+    // ★ 快速輸入金額：揀「一日入面時間最接近而家」嗰筆，唔係純最近一次
     val recentAmountByNote = HashMap<String, Double>()
-    val recentTsByNote = HashMap<String, Long>()
+    val amountMatchDistByNote = HashMap<String, Int>()
+    val amountMatchTsByNote = HashMap<String, Long>()
+    val categoryTsByNote = HashMap<String, Long>()
     val noteIconMap = HashMap<String, String>()
     val noteCategoryMap = HashMap<String, String>()
     val allNoteNames = ArrayList<String>()
@@ -1157,17 +1160,33 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
 
         val sec = getTimestampMeta(r.timestamp).secOfDay
         val d = abs(secNow - sec)
+        // 圓周距離：23:50 同 00:10 只差 20 分鐘
         val dist = if (d < 86400 - d) d else 86400 - d
         val prevMin = minDistByNote[note]
         if (prevMin == null || dist < prevMin) {
             minDistByNote[note] = dist
         }
 
-        // 最近一次使用的金額 / 分類
-        val prevTs = recentTsByNote[note] ?: 0L
-        if (r.timestamp >= prevTs) {
-            recentTsByNote[note] = r.timestamp
+        // ★ 建議金額：時段最貼近優先；同分用較新日期打破
+        //   例如午餐 12:30 / 晚餐 19:00 → 中午撳用午餐金額，夜晚撳用晚餐金額
+        val prevDist = amountMatchDistByNote[note]
+        val prevTs = amountMatchTsByNote[note] ?: 0L
+        val betterAmount = when {
+            prevDist == null -> true
+            dist < prevDist -> true
+            dist == prevDist && r.timestamp >= prevTs -> true
+            else -> false
+        }
+        if (betterAmount) {
+            amountMatchDistByNote[note] = dist
+            amountMatchTsByNote[note] = r.timestamp
             recentAmountByNote[note] = r.amount
+        }
+
+        // 分類仍跟最近一次紀錄（類別通常唔隨時段變）
+        val prevCatTs = categoryTsByNote[note] ?: 0L
+        if (r.timestamp >= prevCatTs) {
+            categoryTsByNote[note] = r.timestamp
             noteCategoryMap[note] = r.category
         }
 
