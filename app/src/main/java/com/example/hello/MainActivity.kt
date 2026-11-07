@@ -5518,26 +5518,6 @@ fun CalendarContent(
                 val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
                 val selRow = selectedRowIdx ?: cachedSelectedRowIdx
 
-                // 各行視覺高度：非選中行按 (1-p) 同步收縮（上：下距離比 = 速度比，同時到齊）
-                val visualHeights = FloatArray(totalRows) { i ->
-                    if (selectedDay != null && i != selRow) rowHeightsPx[i] * (1f - p)
-                    else rowHeightsPx.getOrElse(i) { 0f }
-                }
-                val visualGap = gridSpacingPx * (1f - p)
-                val gridBlockHeight = run {
-                    var sum = 0f
-                    for (i in 0 until totalRows) {
-                        if (visualHeights[i] > 0.5f || (selectedDay != null && i == selRow)) {
-                            sum += maxOf(visualHeights[i], if (selectedDay != null && i == selRow) rowHeightsPx[i] else 0f)
-                            if (i < totalRows - 1) sum += visualGap
-                        }
-                    }
-                    if (selectedDay != null) {
-                        // 最少保留選中行高度
-                        maxOf(sum, rowHeightsPx.getOrElse(selRow) { 0f })
-                    } else sum
-                }
-
                 Column(Modifier.fillMaxSize()) {
                     // 星期標題
                     Box(
@@ -5547,86 +5527,86 @@ fun CalendarContent(
                             .background(SURFACE_BG)
                     ) {
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 13.dp).fillMaxHeight(),
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 13.dp)
+                                .fillMaxHeight(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CALENDAR_WEEKDAY_HEADERS.forEach { w ->
                                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = w, fontSize = 12.sp, color = Color.Black,
+                                        text = w,
+                                        fontSize = 12.sp,
+                                        color = Color.Black,
                                         fontWeight = FontWeight.SemiBold,
-                                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                                        style = TextStyle(
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                        )
                                     )
                                 }
                             }
                         }
                     }
 
-                    // 日曆網格（向選中行收縮）
-                    Box(
+                    // 日曆網格：用 Column 順序排列，heightFraction 控制上下同步收縮
+                    Column(
                         Modifier
                             .fillMaxWidth()
-                            .height(with(density) { gridBlockHeight.toDp() })
-                            .clipToBounds()
                             .padding(horizontal = 10.dp)
                     ) {
-                        var yAcc = 0f
                         for (rowIdx in 0 until totalRows) {
                             val isSel = selectedDay != null && rowIdx == selRow
-                            val h = if (isSel) rowHeightsPx[rowIdx] else visualHeights[rowIdx]
-                            if (h > 0.5f || isSel) {
-                                val drawH = if (isSel) rowHeightsPx[rowIdx] else h
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .offset { IntOffset(0, yAcc.roundToInt()) }
-                                        .height(with(density) { drawH.toDp() })
-                                        .clipToBounds()
-                                ) {
-                                    CalendarRow(
-                                        rowIdx = rowIdx,
-                                        firstDayOffset = firstDayOffset,
-                                        daysInMonth = daysInMonth,
-                                        today = today,
-                                        isCurrentMonth = isCurrentMonth,
-                                        recordsByDay = recordsByDay,
-                                        displayMode = displayMode,
-                                        maxAbsNet = maxAbsNet,
-                                        selectedDay = if (isSel) selectedDay else null,
-                                        selectedCol = if (isSel) selectedColIdx else null,
-                                        animateValues = animateValues,
-                                        heightFraction = if (isSel) 1f else (1f - p).coerceIn(0f, 1f),
-                                        onCellClick = { day, col ->
-                                            if (selectedDay == day) {
-                                                handleDismiss()
-                                            } else {
-                                                selectedDay = day
-                                                selectedRowIdx = rowIdx
-                                                selectedColIdx = col
-                                                cachedSelectedDay = day
-                                                cachedSelectedRowIdx = rowIdx
-                                                cachedSelectedCol = col
-                                                detailExpandedId = null
-                                                scope.launch { detailScrollState.scrollTo(0) }
-                                                animateCollapseTo(1f)
-                                            }
+                            // 未選日：全部完整顯示；已選日：非選中行按 (1-p) 收
+                            val frac = when {
+                                selectedDay == null -> 1f
+                                isSel -> 1f
+                                else -> (1f - p).coerceIn(0f, 1f)
+                            }
+                            if (frac > 0.001f) {
+                                CalendarRow(
+                                    rowIdx = rowIdx,
+                                    firstDayOffset = firstDayOffset,
+                                    daysInMonth = daysInMonth,
+                                    today = today,
+                                    isCurrentMonth = isCurrentMonth,
+                                    recordsByDay = recordsByDay,
+                                    displayMode = displayMode,
+                                    maxAbsNet = maxAbsNet,
+                                    selectedDay = if (selectedDay != null) selectedDay else null,
+                                    selectedCol = if (isSel) selectedColIdx else null,
+                                    animateValues = animateValues,
+                                    heightFraction = frac,
+                                    onCellClick = { day, col ->
+                                        if (selectedDay == day) {
+                                            handleDismiss()
+                                        } else {
+                                            selectedDay = day
+                                            selectedRowIdx = rowIdx
+                                            selectedColIdx = col
+                                            cachedSelectedDay = day
+                                            cachedSelectedRowIdx = rowIdx
+                                            cachedSelectedCol = col
+                                            detailExpandedId = null
+                                            scope.launch { detailScrollState.scrollTo(0) }
+                                            animateCollapseTo(1f)
                                         }
-                                    )
+                                    }
+                                )
+                                if (rowIdx < totalRows - 1 && frac > 0.01f) {
+                                    Spacer(Modifier.height(6.dp * frac))
                                 }
-                                yAcc += drawH + visualGap
                             }
                         }
                     }
 
-                    // 當日明細：永遠喺日曆塊下面，最少可見；可向上拉
-                    if (selectedDay != null || p > 0.01f) {
-                        val detailWeight = 1f
+                    // 當日明細：永遠喺日曆下面，可向上佔滿剩餘空間
+                    if (selectedDay != null) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .weight(detailWeight)
-                                .graphicsLayer { alpha = if (selectedDay != null) 1f else p }
+                                .weight(1f)
                         ) {
                             TrianglePointer(
                                 colIndex = cachedSelectedCol,
@@ -5643,7 +5623,6 @@ fun CalendarContent(
                                     .background(SURFACE_CARD)
                             ) {
                                 Column(Modifier.fillMaxSize()) {
-                                    // Handle：直接跟手拖
                                     Box(
                                         Modifier
                                             .fillMaxWidth()
@@ -5659,7 +5638,6 @@ fun CalendarContent(
                                                         if (isSettling) return@detectVerticalDragGestures
                                                         val range = collapsibleRangeFor(selRow)
                                                         if (range <= 1f) return@detectVerticalDragGestures
-                                                        // 向下拉 dragAmount>0 → 展開日曆 → p 變細
                                                         val deltaP = -dragAmount / range
                                                         collapseP = (collapseP + deltaP).coerceIn(0f, 1f)
                                                     }
