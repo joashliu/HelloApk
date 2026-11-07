@@ -5337,6 +5337,16 @@ fun CalendarContent(
         else rowHeightsPx.sum() + gridSpacingPx * (totalRows - 1).coerceAtLeast(0)
     }
 
+    val rowOffsetsPx = remember(rowHeightsPx, totalRows, gridSpacingPx) {
+        val offsets = FloatArray(totalRows)
+        var cur = 0f
+        for (i in 0 until totalRows) {
+            offsets[i] = cur
+            cur += rowHeightsPx[i] + if (i < totalRows - 1) gridSpacingPx else 0f
+        }
+        offsets
+    }
+
     fun collapsibleRangeFor(rowIdx: Int): Float {
         if (rowIdx !in 0 until totalRows) return 0f
         val keep = rowHeightsPx[rowIdx]
@@ -5488,13 +5498,28 @@ fun CalendarContent(
                 }
             }
 
-            // ===== 統計區：選日後跟住 collapse 漸隱 =====
-            val topP = if (selectedDay != null) (1f - collapseP).coerceIn(0f, 1f) else 1f
-            if (topP > 0.01f) {
+            // ===== 統計區：跟手向上平移（唔用漸隱，避免跳變）=====
+            val pTop = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
+            var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
+            val selRowForTop = selectedRowIdx ?: cachedSelectedRowIdx
+            // 拖動明細 bar 嘅像素進度 = collapseRange * p；頂部用同一距離上移
+            val collapseRangeForTop = if (selectedDay != null) collapsibleRangeFor(selRowForTop) else 0f
+            val topTranslatePx = collapseRangeForTop * pTop
+            val topVisibleH = (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(with(density) { topVisibleH.toDp() })
+                    .clipToBounds()
+            ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .graphicsLayer { alpha = topP }
+                        .onSizeChanged { sz ->
+                            if (sz.height > 0) topSectionHeightPx = sz.height.toFloat()
+                        }
+                        .offset { IntOffset(0, (-topTranslatePx).roundToInt()) }
                         .padding(horizontal = 10.dp)
                 ) {
                     Spacer(Modifier.height(4.dp))
@@ -5517,6 +5542,18 @@ fun CalendarContent(
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
                 val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
                 val selRow = selectedRowIdx ?: cachedSelectedRowIdx
+                val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
+                val collapseRange = collapsibleRangeFor(selRow)
+                // 遮擋：可視高度由全日曆收到只剩選中行；格仔尺寸不變
+                val visibleGridH = if (selectedDay != null) {
+                    (fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)
+                } else {
+                    fullGridHeightPx
+                }
+                // 內容上移：選中行移去可視區頂部
+                val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
+                    rowOffsetsPx[selRow] * p
+                } else 0f
 
                 Column(Modifier.fillMaxSize()) {
                     // 星期標題
@@ -5550,21 +5587,21 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆網格：用 Column 順序排列，heightFraction 控制上下同步收縮
-                    Column(
+                    // 日曆網格：完整尺寸 + clip 遮擋（唔壓縮格仔）
+                    Box(
                         Modifier
                             .fillMaxWidth()
+                            .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
+                            .clipToBounds()
                             .padding(horizontal = 10.dp)
                     ) {
-                        for (rowIdx in 0 until totalRows) {
-                            val isSel = selectedDay != null && rowIdx == selRow
-                            // 未選日：全部完整顯示；已選日：非選中行按 (1-p) 收
-                            val frac = when {
-                                selectedDay == null -> 1f
-                                isSel -> 1f
-                                else -> (1f - p).coerceIn(0f, 1f)
-                            }
-                            if (frac > 0.001f) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                        ) {
+                            for (rowIdx in 0 until totalRows) {
+                                val isSel = selectedDay != null && rowIdx == selRow
                                 CalendarRow(
                                     rowIdx = rowIdx,
                                     firstDayOffset = firstDayOffset,
@@ -5574,13 +5611,19 @@ fun CalendarContent(
                                     recordsByDay = recordsByDay,
                                     displayMode = displayMode,
                                     maxAbsNet = maxAbsNet,
-                                    selectedDay = if (selectedDay != null) selectedDay else null,
+                                    selectedDay = selectedDay,
                                     selectedCol = if (isSel) selectedColIdx else null,
                                     animateValues = animateValues,
-                                    heightFraction = frac,
+                                    heightFraction = 1f,
                                     onCellClick = { day, col ->
                                         if (selectedDay == day) {
-                                            handleDismiss()
+                                            // 再點同一日：只收到最少一行，唔會完全消失
+                                            if (collapseP < 0.95f) {
+                                                animateCollapseTo(1f)
+                                            } else {
+                                                // 已係最少一行 → 展開返全日曆，仍然保留明細
+                                                animateCollapseTo(0f)
+                                            }
                                         } else {
                                             selectedDay = day
                                             selectedRowIdx = rowIdx
@@ -5594,8 +5637,8 @@ fun CalendarContent(
                                         }
                                     }
                                 )
-                                if (rowIdx < totalRows - 1 && frac > 0.01f) {
-                                    Spacer(Modifier.height(6.dp * frac))
+                                if (rowIdx < totalRows - 1) {
+                                    Spacer(Modifier.height(6.dp))
                                 }
                             }
                         }
