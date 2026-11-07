@@ -5255,9 +5255,12 @@ fun CalendarContent(
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
-    // 0 = 完整日曆；1 = 只剩選中嗰一行（永遠唔會 >1，日曆唔會消失）
+    // 階段 1：collapseP 0→1 日曆收到剩選中一行，明細停喺該日期格下
+    // 階段 2：chromeP 0→1（只喺 collapseP≈1 之後）星期行頂到頁頂，chips/stats 跟手推走
     var collapseP by remember { mutableFloatStateOf(0f) }
+    var chromeP by remember { mutableFloatStateOf(0f) }
     var isSettling by remember { mutableStateOf(false) }
+    var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
 
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -5347,10 +5350,65 @@ fun CalendarContent(
         offsets
     }
 
-    fun collapsibleRangeFor(rowIdx: Int): Float {
-        if (rowIdx !in 0 until totalRows) return 0f
-        val keep = rowHeightsPx[rowIdx]
-        return (fullGridHeightPx - keep).coerceAtLeast(0f)
+    fun selRowOf(day: Int?): Int {
+        if (day == null) return 0
+        return ((firstDayOffset + day - 1) / 7).coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+    }
+
+    fun collapseRangeForDay(day: Int?): Float {
+        val row = selRowOf(day)
+        if (row !in rowHeightsPx.indices) return 0f
+        return (fullGridHeightPx - rowHeightsPx[row]).coerceAtLeast(0f)
+    }
+
+    fun chromeRangePx(): Float = topSectionHeightPx.coerceAtLeast(1f)
+
+    /** 手指向上（px>0）→ 先階段1再階段2；回傳實際消耗 px */
+    fun applyDragUp(px: Float): Float {
+        if (px <= 0f || selectedDay == null) return 0f
+        var left = px
+        var consumed = 0f
+        // 階段 1：收日曆
+        if (collapseP < 0.999f && left > 0f) {
+            val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
+            val newP = (collapseP + left / range).coerceIn(0f, 1f)
+            val used = (newP - collapseP) * range
+            collapseP = newP
+            consumed += used
+            left -= used
+        }
+        // 階段 2：推走 chips/stats（星期自然頂到月份導航下）
+        if (collapseP >= 0.999f && left > 0f) {
+            val range = chromeRangePx()
+            val newP = (chromeP + left / range).coerceIn(0f, 1f)
+            val used = (newP - chromeP) * range
+            chromeP = newP
+            consumed += used
+        }
+        return consumed
+    }
+
+    /** 手指向下（px>0）→ 先退階段2再退階段1 */
+    fun applyDragDown(px: Float): Float {
+        if (px <= 0f || selectedDay == null) return 0f
+        var left = px
+        var consumed = 0f
+        if (chromeP > 0.001f && left > 0f) {
+            val range = chromeRangePx()
+            val newP = (chromeP - left / range).coerceIn(0f, 1f)
+            val used = (chromeP - newP) * range
+            chromeP = newP
+            consumed += used
+            left -= used
+        }
+        if (chromeP <= 0.001f && left > 0f) {
+            val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
+            val newP = (collapseP - left / range).coerceIn(0f, 1f)
+            val used = (collapseP - newP) * range
+            collapseP = newP
+            consumed += used
+        }
+        return consumed
     }
 
     fun animateCollapseTo(target: Float) {
@@ -5368,18 +5426,52 @@ fun CalendarContent(
         }
     }
 
+    fun animateChromeTo(target: Float) {
+        isSettling = true
+        val start = chromeP
+        scope.launch {
+            try {
+                Animatable(start).animateTo(
+                    target.coerceIn(0f, 1f),
+                    spring(dampingRatio = 0.9f, stiffness = 380f)
+                ) { chromeP = value }
+            } finally {
+                isSettling = false
+            }
+        }
+    }
+
+    fun snapAfterDrag() {
+        // 階段2優先吸附
+        if (chromeP > 0.01f || collapseP >= 0.99f) {
+            if (chromeP >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
+            if (collapseP < 0.99f) animateCollapseTo(1f)
+            return
+        }
+        if (collapseP >= 0.45f) animateCollapseTo(1f) else animateCollapseTo(0f)
+    }
+
     val handleDismiss: () -> Unit = {
-        if (selectedDay != null || collapseP > 0.01f) {
+        if (selectedDay != null || collapseP > 0.01f || chromeP > 0.01f) {
             scope.launch {
-                val start = collapseP
                 isSettling = true
                 try {
-                    Animatable(start).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) {
+                    // 先退 chrome 再退 collapse
+                    val c0 = chromeP
+                    if (c0 > 0.01f) {
+                        Animatable(c0).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) {
+                            chromeP = value
+                        }
+                    }
+                    chromeP = 0f
+                    val s0 = collapseP
+                    Animatable(s0).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) {
                         collapseP = value
                     }
                 } finally {
                     isSettling = false
                     collapseP = 0f
+                    chromeP = 0f
                     selectedDay = null
                     selectedRowIdx = null
                     selectedColIdx = null
@@ -5392,59 +5484,49 @@ fun CalendarContent(
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(enabled = selectedDay != null) { handleDismiss() }
 
-    // ★ 跟手 nested scroll：同步改 collapseP，唔經 coroutine（解決唔跟手）
+    // ★ 兩段式 nested scroll：上滑先收日曆，再推 chrome；下滑相反
     val detailNestedConnection = object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (selectedDay == null || isSettling) return Offset.Zero
-                val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
-                val range = collapsibleRangeFor(rowIdx)
-                if (range <= 1f) return Offset.Zero
-
-                // 手指向上（available.y < 0）且明細已到頂 → 先繼續收日曆（加大 collapseP）
-                if (available.y < 0f && detailScrollState.value <= 0) {
-                    val deltaP = -available.y / range
-                    val newP = (collapseP + deltaP).coerceIn(0f, 1f)
-                    val consumed = (newP - collapseP) * range
-                    collapseP = newP
-                    return Offset(0f, -consumed)
-                }
-                return Offset.Zero
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            if (selectedDay == null || isSettling) return Offset.Zero
+            // 手指向上 available.y < 0
+            if (available.y < 0f && detailScrollState.value <= 0) {
+                val used = applyDragUp(-available.y)
+                return Offset(0f, -used)
             }
+            return Offset.Zero
+        }
 
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                if (selectedDay == null || isSettling) return Offset.Zero
-                val rowIdx = selectedRowIdx ?: cachedSelectedRowIdx
-                val range = collapsibleRangeFor(rowIdx)
-                if (range <= 1f) return Offset.Zero
-
-                // 明細到頂後，手指再向下拉 → 展開日曆（細 collapseP），明細 box 向下收縮
-                if (available.y > 0f && detailScrollState.value <= 0) {
-                    val deltaP = -available.y / range
-                    val newP = (collapseP + deltaP).coerceIn(0f, 1f)
-                    val consumed = (collapseP - newP) * range
-                    collapseP = newP
-                    return Offset(0f, consumed)
-                }
-                return Offset.Zero
+        override fun onPostScroll(
+            consumed: Offset,
+            available: Offset,
+            source: NestedScrollSource
+        ): Offset {
+            if (selectedDay == null || isSettling) return Offset.Zero
+            // 明細到頂後向下 → 展開
+            if (available.y > 0f && detailScrollState.value <= 0) {
+                val used = applyDragDown(available.y)
+                return Offset(0f, used)
             }
+            return Offset.Zero
+        }
 
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (selectedDay == null) return Velocity.Zero
-                if (detailScrollState.value > 0) return Velocity.Zero
-                // 根據速度吸附到 0 或 1（最少保留一行）
-                val target = when {
-                    available.y < -400f -> 1f   // 快速向上 → 收埋
-                    available.y > 400f -> 0f    // 快速向下 → 展開日曆
-                    collapseP >= 0.45f -> 1f
-                    else -> 0f
+        override suspend fun onPreFling(available: Velocity): Velocity {
+            if (selectedDay == null) return Velocity.Zero
+            if (detailScrollState.value > 0) return Velocity.Zero
+            when {
+                available.y < -400f -> {
+                    // 快速向上
+                    if (collapseP < 0.99f) animateCollapseTo(1f)
+                    else animateChromeTo(1f)
                 }
-                animateCollapseTo(target)
-                return available
+                available.y > 400f -> {
+                    if (chromeP > 0.01f) animateChromeTo(0f)
+                    else animateCollapseTo(0f)
+                }
+                else -> snapAfterDrag()
             }
+            return available
+        }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
@@ -5498,25 +5580,54 @@ fun CalendarContent(
                 }
             }
 
-            // ===== 統計區：固定顯示（唔跟明細搶手勢，避免「一拖幾行」）=====
-            Column(
+            // ===== 統計區：只喺階段2（chromeP）先跟手推走；階段1 保持不動 =====
+            val chrome = if (selectedDay != null) chromeP.coerceIn(0f, 1f) else 0f
+            val topTranslatePx = topSectionHeightPx * chrome
+            val topVisibleH = if (topSectionHeightPx <= 0f) -1f
+            else (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp)
+                    .then(
+                        if (topVisibleH < 0f) Modifier.wrapContentHeight()
+                        else Modifier
+                            .height(with(density) { topVisibleH.toDp() })
+                            .clipToBounds()
+                    )
             ) {
-                Spacer(Modifier.height(4.dp))
-                AnimatedCalendarCategoryChips(
-                    visibleCategories = visibleCategories,
-                    filterCategory = filterCategory,
-                    onFilterCategoryChange = onFilterCategoryChange
-                )
-                Spacer(Modifier.height(14.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
-                    AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                    AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (topSectionHeightPx > 0f)
+                                Modifier.requiredHeight(with(density) { topSectionHeightPx.toDp() })
+                            else Modifier
+                        )
+                        .onSizeChanged { sz ->
+                            if (sz.height > topSectionHeightPx + 1f) {
+                                topSectionHeightPx = sz.height.toFloat()
+                            }
+                        }
+                        .offset {
+                            IntOffset(0, if (topSectionHeightPx > 0f) (-topTranslatePx).roundToInt() else 0)
+                        }
+                        .padding(horizontal = 10.dp)
+                ) {
+                    Spacer(Modifier.height(4.dp))
+                    AnimatedCalendarCategoryChips(
+                        visibleCategories = visibleCategories,
+                        filterCategory = filterCategory,
+                        onFilterCategoryChange = onFilterCategoryChange
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
+                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
-                Spacer(Modifier.height(8.dp))
             }
 
             // ===== 日曆 + 當日明細（滑動以明細為主：只改日曆可視窗）=====
@@ -5606,10 +5717,10 @@ fun CalendarContent(
                                         val rowOfDay = ((firstDayOffset + day - 1) / 7)
                                             .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
                                         if (selectedDay == day) {
-                                            if (collapseP < 0.95f) {
-                                                animateCollapseTo(1f)
-                                            } else {
-                                                animateCollapseTo(0f)
+                                            when {
+                                                chromeP > 0.05f -> animateChromeTo(0f)
+                                                collapseP < 0.95f -> animateCollapseTo(1f)
+                                                else -> animateCollapseTo(0f)
                                             }
                                         } else {
                                             selectedDay = day
@@ -5619,6 +5730,7 @@ fun CalendarContent(
                                             cachedSelectedRowIdx = rowOfDay
                                             cachedSelectedCol = col
                                             detailExpandedId = null
+                                            chromeP = 0f
                                             scope.launch { detailScrollState.scrollTo(0) }
                                             animateCollapseTo(1f)
                                         }
@@ -5659,17 +5771,13 @@ fun CalendarContent(
                                             .height(handleBarHeightDp)
                                             .pointerInput(selRow) {
                                                 detectVerticalDragGestures(
-                                                    onDragEnd = {
-                                                        val target = if (collapseP >= 0.45f) 1f else 0f
-                                                        animateCollapseTo(target)
-                                                    },
+                                                    onDragEnd = { snapAfterDrag() },
                                                     onVerticalDrag = { change, dragAmount ->
                                                         change.consume()
                                                         if (isSettling) return@detectVerticalDragGestures
-                                                        val range = collapsibleRangeFor(selRow)
-                                                        if (range <= 1f) return@detectVerticalDragGestures
-                                                        val deltaP = -dragAmount / range
-                                                        collapseP = (collapseP + deltaP).coerceIn(0f, 1f)
+                                                        // dragAmount>0 向下；<0 向上
+                                                        if (dragAmount < 0f) applyDragUp(-dragAmount)
+                                                        else applyDragDown(dragAmount)
                                                     }
                                                 )
                                             },
@@ -5699,8 +5807,21 @@ fun CalendarContent(
                                             onFilter = onFilterClick,
                                             onDelete = onDeleteClick,
                                             onChangeIcon = onChangeIconClick,
-                                            // 交叉：只向下展開日曆，唔清選取、明細唔消失
-                                            onDismiss = { animateCollapseTo(0f) },
+                                            // 交叉：退回階段2再階段1，保留選取同明細
+                                            onDismiss = {
+                                                scope.launch {
+                                                    isSettling = true
+                                                    try {
+                                                        if (chromeP > 0.01f) {
+                                                            Animatable(chromeP).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) { chromeP = value }
+                                                        }
+                                                        chromeP = 0f
+                                                        Animatable(collapseP).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) { collapseP = value }
+                                                    } finally {
+                                                        isSettling = false
+                                                    }
+                                                }
+                                            },
                                             deletingIds = deletingIds,
                                             justAddedIds = justAddedIds
                                         )
