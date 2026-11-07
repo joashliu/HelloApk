@@ -8707,11 +8707,13 @@ fun PivotContent(
     val hState = rememberScrollState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val leftWidth = 148.dp
     val colWidth = 72.dp
     val headerHeight = 42.dp
     val rowHeight = 38.dp
     val stickyHeight = 40.dp
+    val colWidthPx = remember(density, colWidth) { with(density) { colWidth.roundToPx() } }
 
     // 標題／年份：向下滾動時漸隱，滾到頂先出現
     val headerCollapse by remember {
@@ -8739,7 +8741,33 @@ fun PivotContent(
 
     fun scrollToCategory(cat: String) {
         val index = categoryHeaderIndex[cat] ?: return
-        scope.launch { listState.animateScrollToItem(index) }
+        val months = pivotUi.months
+        val year = pivotUi.selectedYear
+        scope.launch {
+            // 垂直：用較順滑嘅 tween，同時（若係今年）橫向捲去本月
+            val vertical = launch {
+                listState.animateScrollToItem(
+                    index = index,
+                    scrollOffset = 0
+                )
+            }
+            val nowMeta = getTimestampMeta(System.currentTimeMillis())
+            if (year == nowMeta.year && months.isNotEmpty()) {
+                val monthKey = "$year-${pad2(nowMeta.month)}"
+                val monthIdx = months.indexOf(monthKey)
+                if (monthIdx >= 0) {
+                    val target = (monthIdx * colWidthPx).coerceIn(0, hState.maxValue)
+                    // 與垂直滾動並行，體感更流暢
+                    launch {
+                        hState.animateScrollTo(
+                            value = target,
+                            animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)
+                        )
+                    }
+                }
+            }
+            vertical.join()
+        }
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
@@ -8982,7 +9010,12 @@ fun PivotContent(
     }
 }
 
-/** 類別 chips 網格：每行最少 5 格、等寬、末行用空白佔位避免大空隙 */
+/**
+ * 類別 chips 網格
+ * - 優先完整顯示文字（唔截斷）
+ * - 在「字完整」前提下盡量多欄（目標 ≥5，夠位先加）
+ * - 等寬 + 末行佔位，避免大空隙
+ */
 @Composable
 private fun PivotCategoryChipGrid(
     categories: List<String>,
@@ -8990,31 +9023,57 @@ private fun PivotCategoryChipGrid(
     modifier: Modifier = Modifier,
 ) {
     val gap = 6.dp
-    val minCols = 5
-    val minChipWidth = 56.dp
+    val preferredMinCols = 5
+    val density = LocalDensity.current
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
 
     BoxWithConstraints(modifier) {
         val count = categories.size
         if (count == 0) return@BoxWithConstraints
 
-        // 闊度夠就自動加欄，但唔少於 5（項目唔夠就用實際數量）
-        val widthBasedCols = (
-            (maxWidth + gap) / (minChipWidth + gap)
-        ).toInt().coerceAtLeast(1)
+        val maxWidthPx = constraints.maxWidth.toFloat()
+        val gapPx = with(density) { gap.toPx() }
 
-        val cols = when {
-            count <= minCols -> count
-            else -> maxOf(minCols, minOf(count, widthBasedCols))
+        data class ChipMetrics(val fontSize: TextUnit, val iconSize: Dp, val hPad: Dp, val cols: Int)
+
+        fun neededWidthPx(cat: String, fontSize: TextUnit, iconSize: Dp, hPad: Dp): Float {
+            val style = TextStyle(fontSize = fontSize, fontWeight = FontWeight.SemiBold)
+            val textW = textMeasurer.measure(text = cat, style = style).size.width.toFloat()
+            val hasIcon = CATEGORY_STYLES.containsKey(cat)
+            val iconPx = if (hasIcon) with(density) { (iconSize + 4.dp).toPx() } else 0f
+            val padPx = with(density) { (hPad * 2).toPx() }
+            return textW + iconPx + padPx
         }
 
-        // 字級隨欄位數量微調，避免擠爆
-        val fontSize = when {
-            cols >= 7 -> 11.sp
-            cols >= 6 -> 12.sp
-            else -> 13.sp
+        // 候選：大字 → 細字。完整顯示文字優先，再盡量多欄（夠位先爭 ≥5）
+        val candidates = listOf(
+            Triple(13.sp, 14.dp, 8.dp),
+            Triple(12.sp, 13.dp, 7.dp),
+            Triple(11.sp, 12.dp, 6.dp),
+        )
+
+        var bestFullText: ChipMetrics? = null          // 最大字 + 完整顯示
+        var bestWithMinCols: ChipMetrics? = null       // 完整顯示且 ≥ preferredMinCols
+
+        for ((fs, isz, hp) in candidates) {
+            val maxNeed = categories.maxOf { neededWidthPx(it, fs, isz, hp) }
+            val fitCols = ((maxWidthPx + gapPx) / (maxNeed + gapPx)).toInt().coerceAtLeast(1)
+            val cols = minOf(count, fitCols)
+            val metrics = ChipMetrics(fs, isz, hp, cols)
+            if (bestFullText == null) bestFullText = metrics
+            if (fitCols >= preferredMinCols && bestWithMinCols == null) {
+                bestWithMinCols = metrics
+                // 已係由大字掃落嚟，第一個達標即可
+                break
+            }
         }
-        val iconSize = if (cols >= 7) 12.dp else 14.dp
-        val hPad = if (cols >= 7) 6.dp else 8.dp
+
+        // 若細字先做到 ≥5 欄，用佢；否則用最大字完整顯示（欄位可能少過 5）
+        val chosen = bestWithMinCols ?: bestFullText ?: ChipMetrics(13.sp, 14.dp, 8.dp, 1)
+        val fontSize = chosen.fontSize
+        val iconSize = chosen.iconSize
+        val hPad = chosen.hPad
+        val cols = chosen.cols
 
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
             categories.chunked(cols).forEach { rowCats ->
@@ -9058,12 +9117,12 @@ private fun PivotCategoryChipGrid(
                                     fontWeight = FontWeight.SemiBold,
                                     color = style?.fgColor ?: TEXT_PRIMARY,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    softWrap = false,
+                                    overflow = TextOverflow.Visible
                                 )
                             }
                         }
                     }
-                    // 末行不足：用等寬空白佔位，chip 大小同上一行一致，避免拉開大空位
                     repeat(cols - rowCats.size) {
                         Spacer(Modifier.weight(1f).height(32.dp))
                     }
