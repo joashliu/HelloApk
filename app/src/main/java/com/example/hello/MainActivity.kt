@@ -6590,29 +6590,39 @@ fun LedgerKeyboardPanel(
                                 )
                             }
                         } else {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(3),
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                contentPadding = PaddingValues(bottom = 8.dp)
-                            ) {
-                                items(noteSuggestions, key = { it }) { s ->
-                                    QuickInputChip(
-                                        name = s,
-                                        iconUrl = noteIconMap[s] ?: "",
-                                        modifier = Modifier.fillMaxWidth().height(44.dp),
-                                        onClick = {
-                                            onStateChange(
-                                                state.copy(
-                                                    noteText = s,
-                                                    editingNote = false,
-                                                    focusedField = "amount"
-                                                )
+                            // 同快速輸入區：按文字實際闊度排，盡量完整顯示；只用盡頁闊時先 ellipsis
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
+                                val maxChipWidth = maxWidth
+                                val suggestScroll = rememberScrollState()
+                                FlowRow(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(suggestScroll)
+                                        .padding(bottom = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    noteSuggestions.forEach { s ->
+                                        key(s) {
+                                            QuickInputChip(
+                                                name = s,
+                                                iconUrl = noteIconMap[s] ?: "",
+                                                modifier = Modifier
+                                                    .height(44.dp)
+                                                    .widthIn(max = maxChipWidth),
+                                                onClick = {
+                                                    onStateChange(
+                                                        state.copy(
+                                                            noteText = s,
+                                                            editingNote = false,
+                                                            focusedField = "amount"
+                                                        )
+                                                    )
+                                                    focusManager.clearFocus()
+                                                }
                                             )
-                                            focusManager.clearFocus()
                                         }
-                                    )
+                                    }
                                 }
                             }
                         }
