@@ -5498,79 +5498,45 @@ fun CalendarContent(
                 }
             }
 
-            // ===== 統計區：跟手向上平移（只升唔降記錄高度，避免收埋後量度成 0）=====
-            val pTop = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
-            var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
-            val selRowForTop = selectedRowIdx ?: cachedSelectedRowIdx
-            val collapseRangeForTop = if (selectedDay != null) collapsibleRangeFor(selRowForTop) else 0f
-            val topTranslatePx = collapseRangeForTop * pTop
-            val topVisibleH = if (topSectionHeightPx <= 0f) {
-                -1f
-            } else {
-                (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
-            }
-
-            Box(
+            // ===== 統計區：固定顯示（唔跟明細搶手勢，避免「一拖幾行」）=====
+            Column(
                 Modifier
                     .fillMaxWidth()
-                    .then(
-                        if (topVisibleH < 0f) {
-                            Modifier.wrapContentHeight()
-                        } else {
-                            Modifier
-                                .height(with(density) { topVisibleH.toDp() })
-                                .clipToBounds()
-                        }
-                    )
+                    .padding(horizontal = 10.dp)
             ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        // 用 requiredHeightIn 保持完整內容高度，唔受父層 clip 高度壓縮
-                        .then(
-                            if (topSectionHeightPx > 0f)
-                                Modifier.requiredHeight(with(density) { topSectionHeightPx.toDp() })
-                            else Modifier
-                        )
-                        .onSizeChanged { sz ->
-                            // 只升唔降：記住最大完整高度，收埋時唔好被寫細
-                            if (sz.height > topSectionHeightPx + 1f) {
-                                topSectionHeightPx = sz.height.toFloat()
-                            }
-                        }
-                        .offset {
-                            IntOffset(0, if (topSectionHeightPx > 0f) (-topTranslatePx).roundToInt() else 0)
-                        }
-                        .padding(horizontal = 10.dp)
-                ) {
-                    Spacer(Modifier.height(4.dp))
-                    AnimatedCalendarCategoryChips(
-                        visibleCategories = visibleCategories,
-                        filterCategory = filterCategory,
-                        onFilterCategoryChange = onFilterCategoryChange
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
-                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                    }
-                    Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
+                AnimatedCalendarCategoryChips(
+                    visibleCategories = visibleCategories,
+                    filterCategory = filterCategory,
+                    onFilterCategoryChange = onFilterCategoryChange
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
+                    AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                    AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
                 }
+                Spacer(Modifier.height(8.dp))
             }
 
-            // ===== 日曆 + 當日明細 =====
+            // ===== 日曆 + 當日明細（滑動以明細為主：只改日曆可視窗）=====
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
                 val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
-                val selRow = selectedRowIdx ?: cachedSelectedRowIdx
+                // ★ 用日期反算行，唔依賴可能過期嘅 selectedRowIdx
+                val selRow = if (selectedDay != null) {
+                    ((firstDayOffset + selectedDay!! - 1) / 7).coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+                } else {
+                    0
+                }
                 val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
-                val collapseRange = collapsibleRangeFor(selRow)
-                // 遮擋：可視高度收到只剩選中行；格仔尺寸永遠完整
+                val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
+                // 可視高度：全日曆 → 只剩選中行
                 val visibleGridH = if (selectedDay != null) {
                     (fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)
                 } else {
                     fullGridHeightPx
                 }
+                // 上移量：令選中行頂部對齊可視窗頂部
                 val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
                     rowOffsetsPx[selRow] * p
                 } else 0f
@@ -5607,18 +5573,18 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆網格：requiredHeight 鎖死完整高度，父層只負責 clip 遮擋（唔好壓縮行）
+                    // 日曆：完整格仔 + clip 遮擋；unbounded 量度避免被父層壓扁
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
                             .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
                             .clipToBounds()
-                            .padding(horizontal = 10.dp)
                     ) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .requiredHeight(with(density) { fullGridHeightPx.toDp().coerceAtLeast(0.dp) })
+                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
                                 .offset { IntOffset(0, (-gridScroll).roundToInt()) }
                         ) {
                             for (rowIdx in 0 until totalRows) {
@@ -5637,20 +5603,20 @@ fun CalendarContent(
                                     animateValues = animateValues,
                                     heightFraction = 1f,
                                     onCellClick = { day, col ->
+                                        val rowOfDay = ((firstDayOffset + day - 1) / 7)
+                                            .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
                                         if (selectedDay == day) {
-                                            // 再點同一日：只收到最少一行，唔會完全消失
                                             if (collapseP < 0.95f) {
                                                 animateCollapseTo(1f)
                                             } else {
-                                                // 已係最少一行 → 展開返全日曆，仍然保留明細
                                                 animateCollapseTo(0f)
                                             }
                                         } else {
                                             selectedDay = day
-                                            selectedRowIdx = rowIdx
+                                            selectedRowIdx = rowOfDay
                                             selectedColIdx = col
                                             cachedSelectedDay = day
-                                            cachedSelectedRowIdx = rowIdx
+                                            cachedSelectedRowIdx = rowOfDay
                                             cachedSelectedCol = col
                                             detailExpandedId = null
                                             scope.launch { detailScrollState.scrollTo(0) }
@@ -7003,7 +6969,8 @@ fun AnimatedCalendarCategoryChips(
 
     // 1. 計算 Grid 需要的動態總高度 (每行 4 個)
     val rowCount = (targetKeys.size + 3) / 4
-    val targetHeight = if (rowCount == 0) 0.dp else (40.dp * rowCount) + (6.dp * (rowCount - 1))
+    // +2.dp 避免第三行 chips 底部被裁少少
+    val targetHeight = if (rowCount == 0) 0.dp else (40.dp * rowCount) + (6.dp * (rowCount - 1)) + 2.dp
 
     val animatedHeight by animateDpAsState(
         targetValue = targetHeight,
