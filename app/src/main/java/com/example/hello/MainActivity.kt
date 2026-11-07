@@ -31,7 +31,20 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.view.animation.AlphaAnimation
+import android.util.TypedValue
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -256,6 +269,8 @@ object NotificationCaptureBridge {
         topLatestCapturedNotification.value = captured
         val ctx = appContext ?: return
         try { refreshQuickAddNotification(ctx) } catch (_: Exception) {}
+        // 可選 Overlay（有權限且開關開先顯示；否則只走原有通知）
+        try { CaptureOverlayController.show(ctx, captured) } catch (_: Exception) {}
         pendingConfirmRunnable?.let { confirmHandler.removeCallbacks(it) }
         val runnable = Runnable {
             pendingConfirmRunnable = null
@@ -273,6 +288,7 @@ object NotificationCaptureBridge {
         lastNote = null
         lastAmount = 0.0
         lastPushMs = 0L
+        try { CaptureOverlayController.dismiss() } catch (_: Exception) {}
         appContext?.let {
             try { refreshQuickAddNotification(it) } catch (_: Exception) {}
         }
@@ -281,6 +297,221 @@ object NotificationCaptureBridge {
     fun formatAmountForLabel(v: Double): String =
         String.format(java.util.Locale.US, "%.2f", v)
             .trimEnd('0').trimEnd('.').ifEmpty { "0" }
+}
+
+// ===== 可選：消費通知底部 Overlay 浮窗（需「顯示在其他應用之上」）=====
+private const val PREF_OVERLAY_CAPTURE_ENABLED = "overlay_capture_enabled"
+private const val OVERLAY_AUTO_DISMISS_MS = 8_000L
+
+fun isOverlayCapturePrefEnabled(context: Context): Boolean =
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .getBoolean(PREF_OVERLAY_CAPTURE_ENABLED, true)
+
+fun setOverlayCapturePrefEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .edit().putBoolean(PREF_OVERLAY_CAPTURE_ENABLED, enabled).apply()
+}
+
+fun canDrawCaptureOverlay(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(context) else true
+
+/** 輕量 Toast 風格浮窗：非搶焦、單實例、5–10 秒自動淡出 */
+object CaptureOverlayController {
+    private var appContext: Context? = null
+    private var overlayView: View? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var dismissRunnable: Runnable? = null
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    fun isShowing(): Boolean = overlayView != null
+
+    fun dismiss(fade: Boolean = false) {
+        val ctx = appContext ?: return
+        val view = overlayView ?: return
+        dismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        dismissRunnable = null
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        if (fade) {
+            val anim = AlphaAnimation(1f, 0f).apply {
+                duration = 220
+                fillAfter = true
+            }
+            view.startAnimation(anim)
+            mainHandler.postDelayed({
+                try { wm?.removeView(view) } catch (_: Exception) {}
+                if (overlayView === view) overlayView = null
+            }, 230)
+        } else {
+            try { wm?.removeView(view) } catch (_: Exception) {}
+            overlayView = null
+        }
+    }
+
+    fun show(context: Context, captured: CapturedNotification) {
+        val ctx = context.applicationContext
+        appContext = ctx
+        // 權限或開關關閉 → 完全唔顯示，保留原有通知流程
+        if (!canDrawCaptureOverlay(ctx) || !isOverlayCapturePrefEnabled(ctx)) return
+
+        // 防重複：已有浮窗先拆走
+        dismiss(fade = false)
+
+        val density = ctx.resources.displayMetrics.density
+        fun dp(v: Int) = (v * density + 0.5f).toInt()
+
+        val panelBg = GradientDrawable().apply {
+            setColor(0xF0FFFFFF.toInt())
+            cornerRadius = dp(16).toFloat()
+            setStroke(dp(1), 0x22000000)
+        }
+        val primaryBtnBg = GradientDrawable().apply {
+            setColor(0xFF2563EB.toInt())
+            cornerRadius = dp(10).toFloat()
+        }
+        val ignoreBtnBg = GradientDrawable().apply {
+            setColor(0xFFF1F5F9.toInt())
+            cornerRadius = dp(10).toFloat()
+        }
+
+        val amountStr = NotificationCaptureBridge.formatAmountForLabel(captured.amount)
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = panelBg
+            elevation = dp(8).toFloat()
+        }
+        val title = TextView(ctx).apply {
+            text = "檢測到消費"
+            setTextColor(0xFF0F172A.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+        }
+        val body = TextView(ctx).apply {
+            text = "${captured.note} · HKD $amountStr"
+            setTextColor(0xFF334155.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setPadding(0, dp(4), 0, dp(12))
+        }
+        val btnRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        val ignoreBtn = TextView(ctx).apply {
+            text = "忽略"
+            gravity = Gravity.CENTER
+            setTextColor(0xFF64748B.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            background = ignoreBtnBg
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            isClickable = true
+            isFocusable = true
+        }
+        val addBtn = TextView(ctx).apply {
+            text = "記賬"
+            gravity = Gravity.CENTER
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            background = primaryBtnBg
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            isClickable = true
+            isFocusable = true
+        }
+        val ignoreLp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginEnd = dp(8)
+        }
+        val addLp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        btnRow.addView(ignoreBtn, ignoreLp)
+        btnRow.addView(addBtn, addLp)
+        root.addView(title)
+        root.addView(body)
+        root.addView(btnRow)
+
+        val container = FrameLayout(ctx).apply {
+            setPadding(dp(16), 0, dp(16), dp(28))
+            addView(
+                root,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
+        ignoreBtn.setOnClickListener {
+            dismiss(fade = true)
+        }
+        addBtn.setOnClickListener {
+            dismiss(fade = false)
+            try {
+                val intent = buildLaunchIntentForMain(
+                    ctx, captured.note, captured.amount, captured.category, null
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+            } catch (_: Exception) {}
+        }
+
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            // 非搶焦：唔搶鍵盤／唔擋住其他 App 操作
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM
+            y = 0
+            // 只接收浮窗自身點擊
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        try {
+            wm.addView(container, params)
+            overlayView = container
+            val fadeIn = AlphaAnimation(0f, 1f).apply { duration = 180 }
+            container.startAnimation(fadeIn)
+            val r = Runnable { dismiss(fade = true) }
+            dismissRunnable = r
+            mainHandler.postDelayed(r, OVERLAY_AUTO_DISMISS_MS)
+        } catch (_: Exception) {
+            overlayView = null
+        }
+    }
+}
+
+/** 通知 Action：忽略確認橫幅 */
+class NotificationActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        if (context == null || intent == null) return
+        when (intent.action) {
+            "com.example.hello.ACTION_IGNORE_CAPTURE" -> {
+                val id = intent.getIntExtra("notif_id", -1)
+                if (id >= 0) {
+                    try {
+                        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                        nm?.cancel(id)
+                    } catch (_: Exception) {}
+                }
+                CaptureOverlayController.dismiss(fade = true)
+            }
+        }
+    }
 }
 
 // 🟢 升級 Channel ID，強制系統重置橫幅權限
@@ -2070,6 +2301,7 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             NotificationCaptureBridge.init(applicationContext)
+            CaptureOverlayController.init(applicationContext)
             ensureNotificationChannels(applicationContext)
             cleanupStaleConfirmNotifications(applicationContext)
         }
@@ -3750,6 +3982,8 @@ fun FloatingNavBar(
 @Composable
 fun NotificationAccessGuide(context: Context) {
     var isGranted by remember { mutableStateOf<Boolean?>(null) }
+    var canOverlay by remember { mutableStateOf(canDrawCaptureOverlay(context)) }
+    var overlayPrefOn by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
     val scope = rememberCoroutineScope()
     var showPantanalHint by remember { mutableStateOf(false) }
 
@@ -3759,6 +3993,8 @@ fun NotificationAccessGuide(context: Context) {
                 .getEnabledListenerPackages(context)
                 .contains(context.packageName)
         }
+        canOverlay = canDrawCaptureOverlay(context)
+        overlayPrefOn = isOverlayCapturePrefEnabled(context)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -3771,6 +4007,8 @@ fun NotificationAccessGuide(context: Context) {
                             .getEnabledListenerPackages(context)
                             .contains(context.packageName)
                     }
+                    canOverlay = canDrawCaptureOverlay(context)
+                    overlayPrefOn = isOverlayCapturePrefEnabled(context)
                 }
             }
         }
@@ -3778,7 +4016,6 @@ fun NotificationAccessGuide(context: Context) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 🟢 檢查流体云/泛在服務權限是否正常
     LaunchedEffect(showPantanalHint) {
         if (showPantanalHint) {
             Toast.makeText(context, "提示：如需使用流体云體驗，請確保在系統設定開啟「泛在服務」", Toast.LENGTH_LONG).show()
@@ -3786,41 +4023,96 @@ fun NotificationAccessGuide(context: Context) {
         }
     }
 
-    if (isGranted == false) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .clickable {
-                    try {
-                        context.startActivity(
-                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                        )
-                        if (OppoFluidCloudBridge.isPantanalSupported(context) &&
-                            !OppoFluidCloudBridge.hasPantanalPermission(context)) {
-                            showPantanalHint = true
-                        }
-                    } catch (_: Exception) { }
-                },
-            shape = RoundedCornerShape(12.dp),
-            color = SURFACE_CARD,
-            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-        ) {
-            Row(
-                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+    Column(Modifier.fillMaxWidth()) {
+        if (isGranted == false) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        try {
+                            context.startActivity(
+                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            )
+                            if (OppoFluidCloudBridge.isPantanalSupported(context) &&
+                                !OppoFluidCloudBridge.hasPantanalPermission(context)) {
+                                showPantanalHint = true
+                            }
+                        } catch (_: Exception) { }
+                    },
+                shape = RoundedCornerShape(12.dp),
+                color = SURFACE_CARD,
+                border = BorderStroke(0.5.dp, DIVIDER_COLOR)
             ) {
-                Icon(Icons.Default.NotificationsActive, contentDescription = "開啟通知", tint = BRAND_PRIMARY)
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("開啟自動記賬功能",
-                        fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                        color = BRAND_PRIMARY_DARK)
-                    Text("點擊前往授權讀取通知，自動捕捉易乘碼消費",
-                        fontSize = 12.sp, color = TEXT_SECONDARY)
+                Row(
+                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.NotificationsActive, contentDescription = "開啟通知", tint = BRAND_PRIMARY)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("開啟自動記賬功能",
+                            fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                            color = BRAND_PRIMARY_DARK)
+                        Text("點擊前往授權讀取通知，自動捕捉易乘碼消費",
+                            fontSize = 12.sp, color = TEXT_SECONDARY)
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TEXT_TERTIARY)
                 }
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TEXT_TERTIARY)
+            }
+        }
+
+        // 底部浮窗：無懸浮窗權限時隱藏此功能入口（只保留通知記賬）
+        if (isGranted == true) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp)),
+                shape = RoundedCornerShape(12.dp),
+                color = SURFACE_CARD,
+                border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Layers, contentDescription = null, tint = BRAND_PRIMARY, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("消費浮窗提示", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TEXT_PRIMARY)
+                            Text(
+                                if (!canOverlay) "需先開啟「顯示在其他應用之上」"
+                                else "偵測到乘車／易程碼等消費時，底部彈出記賬浮窗",
+                                fontSize = 12.sp, color = TEXT_SECONDARY
+                            )
+                        }
+                        if (canOverlay) {
+                            Switch(
+                                checked = overlayPrefOn,
+                                onCheckedChange = {
+                                    overlayPrefOn = it
+                                    setOverlayCapturePrefEnabled(context, it)
+                                    if (!it) CaptureOverlayController.dismiss()
+                                }
+                            )
+                        } else {
+                            TextButton(onClick = {
+                                try {
+                                    val uri = Uri.parse("package:${context.packageName}")
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri)
+                                    )
+                                } catch (_: Exception) {
+                                    try {
+                                        context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                                    } catch (_: Exception) {}
+                                }
+                            }) {
+                                Text("去開啟", color = BRAND_PRIMARY, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
