@@ -655,14 +655,15 @@ data class PivotRow(
 
 @Immutable
 data class PivotUiState(
-    val months: List<String> = emptyList(),        // 升序：1月 → 12月（選定年份）
+    val months: List<String> = emptyList(),        // 升序：1月 → 至今／12月
     val rows: List<PivotRow> = emptyList(),
     val monthTotals: Map<String, Double> = emptyMap(),
     val grandTotal: Double = 0.0,
     val loading: Boolean = true,
-    val availableYears: List<Int> = emptyList(),   // 有資料的年份，新→舊
+    val availableYears: List<Int> = emptyList(),   // 有資料的年份，小→大
     val selectedYear: Int = 0,
     val categories: List<String> = emptyList(),    // 顯示順序，供頂部 chips
+    val noteIconMap: Map<String, String> = emptyMap(),
 )
 
 @Immutable
@@ -1458,11 +1459,15 @@ private fun computePivotUiState(records: List<Record>, selectedYear: Int): Pivot
     val yearsSet = HashSet<Int>()
     // monthKey -> category -> note -> PivotCell（只收納選定年份）
     val data = HashMap<String, HashMap<String, HashMap<String, PivotCell>>>()
+    val noteIconMap = HashMap<String, String>()
 
     for (r in records) {
         if (r.category == "還錢") continue
         val meta = getTimestampMeta(r.timestamp)
         yearsSet.add(meta.year)
+        if (r.note.isNotBlank() && r.iconUrl.isNotBlank() && !noteIconMap.containsKey(r.note)) {
+            noteIconMap[r.note] = r.iconUrl
+        }
         if (meta.year != selectedYear) continue
         val mk = meta.monthKey
         val catMap = data.getOrPut(mk) { HashMap() }
@@ -1472,15 +1477,23 @@ private fun computePivotUiState(records: List<Record>, selectedYear: Int): Pivot
         noteMap[key] = PivotCell(existing.total + r.amount, existing.count + 1)
     }
 
-    val availableYears = yearsSet.sortedDescending()
+    // 年份左→右：小至大
+    val availableYears = yearsSet.sorted()
     val year = when {
         selectedYear in yearsSet -> selectedYear
-        availableYears.isNotEmpty() -> availableYears.first()
+        availableYears.isNotEmpty() -> availableYears.last() // 預設最新一年
         else -> selectedYear
     }
 
-    // 固定 1～12 月欄，左小右大
-    val months = (1..12).map { m -> "$year-${pad2(m)}" }
+    // 月份 1→N：若係今年只顯示到本月，未來月份唔顯示
+    val nowMeta = getTimestampMeta(System.currentTimeMillis())
+    val maxMonth = when {
+        year < nowMeta.year -> 12
+        year > nowMeta.year -> 0
+        else -> nowMeta.month
+    }
+    val months = if (maxMonth <= 0) emptyList()
+                 else (1..maxMonth).map { m -> "$year-${pad2(m)}" }
 
     if (data.isEmpty()) {
         return PivotUiState(
@@ -1492,6 +1505,7 @@ private fun computePivotUiState(records: List<Record>, selectedYear: Int): Pivot
             availableYears = availableYears,
             selectedYear = year,
             categories = emptyList(),
+            noteIconMap = noteIconMap,
         )
     }
 
@@ -1580,6 +1594,7 @@ private fun computePivotUiState(records: List<Record>, selectedYear: Int): Pivot
         availableYears = availableYears,
         selectedYear = year,
         categories = sortedCats,
+        noteIconMap = noteIconMap,
     )
 }
 
@@ -8682,7 +8697,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
 // =========================================================
 //  ★ PivotContent（資料透視表頁面）
 // =========================================================
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun PivotContent(
     pivotUi: PivotUiState,
@@ -8692,20 +8707,31 @@ fun PivotContent(
     val hState = rememberScrollState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val leftWidth = 140.dp
+    val leftWidth = 148.dp
     val colWidth = 72.dp
     val headerHeight = 42.dp
     val rowHeight = 38.dp
     val stickyHeight = 40.dp
 
-    // category -> sticky header index in LazyColumn
+    // 標題／年份：向下滾動時漸隱，滾到頂先出現
+    val headerCollapse by remember {
+        derivedStateOf {
+            val idx = listState.firstVisibleItemIndex
+            val offset = listState.firstVisibleItemScrollOffset
+            when {
+                idx > 0 -> 1f
+                else -> (offset / 120f).coerceIn(0f, 1f)
+            }
+        }
+    }
+    val headerAlpha = 1f - headerCollapse
+    val headerHeightDp = (56.dp * (1f - headerCollapse)).coerceAtLeast(0.dp)
+
     val categoryHeaderIndex = remember(pivotUi.rows) {
         val map = LinkedHashMap<String, Int>()
         var idx = 0
         for (row in pivotUi.rows) {
-            if (row.isCategory) {
-                map[row.category] = idx
-            }
+            if (row.isCategory) map[row.category] = idx
             idx++
         }
         map
@@ -8713,9 +8739,7 @@ fun PivotContent(
 
     fun scrollToCategory(cat: String) {
         val index = categoryHeaderIndex[cat] ?: return
-        scope.launch {
-            listState.animateScrollToItem(index)
-        }
+        scope.launch { listState.animateScrollToItem(index) }
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
@@ -8725,59 +8749,70 @@ fun PivotContent(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            // ===== 標題 + 年份選擇 =====
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "資料透視表",
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TEXT_PRIMARY,
-                    modifier = Modifier.weight(1f)
-                )
-                if (pivotUi.availableYears.isNotEmpty()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        pivotUi.availableYears.forEach { y ->
-                            val selected = y == pivotUi.selectedYear
-                            Surface(
-                                onClick = { onYearChange(y) },
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
-                                border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
-                            ) {
-                                Text(
-                                    "${y}",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selected) Color.White else TEXT_PRIMARY,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
+            // ===== 標題 + 年份（可摺疊）=====
+            if (headerHeightDp > 0.dp) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(headerHeightDp)
+                        .graphicsLayer { alpha = headerAlpha },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "資料透視表",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TEXT_PRIMARY,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (pivotUi.availableYears.isNotEmpty()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 已係小→大
+                            pivotUi.availableYears.forEach { y ->
+                                val selected = y == pivotUi.selectedYear
+                                Surface(
+                                    onClick = { onYearChange(y) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
+                                    border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
+                                ) {
+                                    Text(
+                                        "$y",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selected) Color.White else TEXT_PRIMARY,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // ===== 類別 chips（點擊滾動到對應 sticky header）=====
+            // ===== 類別 chips：自動換行，唔使橫滑 =====
             if (pivotUi.categories.isNotEmpty()) {
-                LazyRow(
+                FlowRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(pivotUi.categories.size) { i ->
-                        val cat = pivotUi.categories[i]
+                    pivotUi.categories.forEach { cat ->
                         val style = CATEGORY_STYLES[cat]
                         Surface(
                             onClick = { scrollToCategory(cat) },
                             shape = RoundedCornerShape(20.dp),
                             color = style?.bgColor ?: SURFACE_ELEVATED,
-                            border = BorderStroke(0.5.dp, (style?.fgColor ?: TEXT_SECONDARY).copy(alpha = 0.25f))
+                            border = BorderStroke(
+                                0.5.dp,
+                                (style?.fgColor ?: TEXT_SECONDARY).copy(alpha = 0.25f)
+                            )
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -8820,7 +8855,7 @@ fun PivotContent(
                     }
                 } else {
                     Column(Modifier.fillMaxSize()) {
-                        // ===== 固定表頭（月份 1→12）=====
+                        // ===== 固定表頭（只顯示到本月）=====
                         Row(
                             Modifier.fillMaxWidth().height(headerHeight).background(SURFACE_ELEVATED),
                             verticalAlignment = Alignment.CenterVertically
@@ -8871,7 +8906,6 @@ fun PivotContent(
                         }
                         HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
 
-                        // ===== 內容：類別 sticky header + 項目行 =====
                         LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                             pivotUi.rows.forEach { row ->
                                 if (row.isCategory) {
@@ -8894,6 +8928,7 @@ fun PivotContent(
                                             leftWidth = leftWidth,
                                             colWidth = colWidth,
                                             height = rowHeight,
+                                            iconUrl = pivotUi.noteIconMap[row.note] ?: "",
                                         )
                                         HorizontalDivider(
                                             color = DIVIDER_COLOR.copy(alpha = 0.5f),
@@ -8903,7 +8938,6 @@ fun PivotContent(
                                 }
                             }
 
-                            // ===== 底部總計 =====
                             item(key = "grand_total") {
                                 Row(
                                     Modifier.fillMaxWidth().height(48.dp)
@@ -9077,6 +9111,7 @@ private fun PivotNoteRow(
     leftWidth: Dp,
     colWidth: Dp,
     height: Dp,
+    iconUrl: String,
 ) {
     Row(
         Modifier
@@ -9085,19 +9120,22 @@ private fun PivotNoteRow(
             .background(SURFACE_CARD),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
+        Row(
             Modifier
                 .width(leftWidth)
                 .fillMaxHeight()
-                .padding(start = 28.dp, end = 8.dp),
-            contentAlignment = Alignment.CenterStart
+                .padding(start = 20.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            IconView(iconUrl = iconUrl, name = row.note, size = 20.dp)
+            Spacer(Modifier.width(6.dp))
             Text(
                 row.note,
                 fontSize = 12.sp,
                 color = TEXT_PRIMARY,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
         }
         Box(Modifier.weight(1f).clipToBounds()) {
