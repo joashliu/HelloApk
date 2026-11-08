@@ -4227,8 +4227,11 @@ fun LedgerContent(
                 scope.launch {
                     delay(120)
                     when (hovered) {
-                        0 -> latestOnCopy(targetRecord); 1 -> latestOnEdit(targetRecord)
-                        2 -> latestOnFilterByName(targetRecord.note); 3 -> latestOnDelete(targetRecord)
+                        // 👉 將呢度拆返開做獨立 4 行
+                        0 -> latestOnCopy(targetRecord)
+                        1 -> latestOnEdit(targetRecord)
+                        2 -> latestOnFilterByName(targetRecord.note)
+                        3 -> latestOnDelete(targetRecord)
                     }
                 }
             }
