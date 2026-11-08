@@ -4136,21 +4136,21 @@ fun LedgerContent(
     }
     
     var isFilterDeckExpanded by remember { mutableStateOf(true) }
-    // ★ 記錄最後一次手動展開嘅時間 (500ms 保護期)
-    var manualExpandTime by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(isScrolledAway) {
         // 滾上最頂時自動展開
         if (!isScrolledAway) isFilterDeckExpanded = true
     }
 
-    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + 無論幾時向下滾都收起啤牌
+    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + ★ 只攔截手動 Drag 嚟收起啤牌
     val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, maxCollapsePx, isFilterDeckExpanded) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                val now = System.currentTimeMillis()
-                // ★ 500ms 保護期：如果啱啱撳咗展開，就算有殘留嘅向下滾動慣性，都唔會自動收起
-                if (available.y < -5f && isFilterDeckExpanded && isScrolledAway && (now - manualExpandTime > 500L)) {
+                // ★ 判斷係咪手動拖曳 (排除慣性 Fling)
+                val isManualDrag = source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.Drag
+                
+                // ★ 只有手動向下拉 (available.y < -5f) 先會自動收起，慣性滾動唔會干擾
+                if (isManualDrag && available.y < -5f && isFilterDeckExpanded && isScrolledAway) {
                     isFilterDeckExpanded = false
                 }
                 
@@ -4390,7 +4390,6 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
-            // 頂部背景色動畫：滾動時抽走底色，令 Clips 獨立出嚟
             val topBarBgColor by animateColorAsState(
                 targetValue = if (isScrolledAway) Color.Transparent else SURFACE_CARD,
                 animationSpec = tween(250)
@@ -4431,19 +4430,14 @@ fun LedgerContent(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = if (isScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // ★ 加入 animateContentSize 同 AnimatedContent，令高度切換同淡入淡出完美結合
-                    Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.8f, 350f))) {
-                        androidx.compose.animation.AnimatedContent(
+                    // ★ 核心動畫修正：使用 animateContentSize + Crossfade 達成順滑變形，不再有大小突變嘅閃爍
+                    Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.85f, 350f))) {
+                        androidx.compose.animation.Crossfade(
                             targetState = isScrolledAway,
-                            transitionSpec = {
-                                (fadeIn(tween(250)) + scaleIn(initialScale = 0.95f)).togetherWith(
-                                    fadeOut(tween(200)) + scaleOut(targetScale = 0.95f)
-                                ).using(SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.85f, stiffness = 300f) })
-                            },
-                            label = "stats_animated_content"
+                            animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            label = "stats_crossfade"
                         ) { scrolled ->
                             if (scrolled) {
-                                // 滾動後變成 Clips 形式
                                 FilterTopStatsChips(
                                     income = totalIncome, 
                                     expense = totalExpense, 
@@ -4451,7 +4445,6 @@ fun LedgerContent(
                                     filteredCount = filtered.size
                                 )
                             } else {
-                                // 默認大 Box 原狀
                                 TopStats(
                                     hasIncome = hasIncome, hasExpense = hasExpense,
                                     income = totalIncome, expense = totalExpense,
@@ -4526,10 +4519,7 @@ fun LedgerContent(
                             months = availableMonths,
                             selectedMonth = filterMonth,
                             isExpanded = isFilterDeckExpanded,
-                            onToggleExpand = { 
-                                isFilterDeckExpanded = true
-                                manualExpandTime = System.currentTimeMillis() // ★ 點擊展開時，更新 manualExpandTime，啟動半秒保護期
-                            },
+                            onToggleExpand = { isFilterDeckExpanded = true },
                             onCategorySelect = { onFilterCategoryChange(if (it == filterCategory) null else it) },
                             onMonthSelect = { onFilterMonthChange(if (it == filterMonth) null else it) }
                         )
