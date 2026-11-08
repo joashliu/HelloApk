@@ -4600,504 +4600,9 @@ fun LedgerContent(
     }
 }
 
-// ==========================================
-// ★ 無縫變形版 TopStats 組件及 Helpers
-// ==========================================
-
-enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT }
-private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp, val h: Dp)
-
-@Composable
-fun TopStats(
-    hasIncome: Boolean, hasExpense: Boolean,
-    income: Double, expense: Double,
-    isFilterMode: Boolean = false, filteredCount: Int? = null,
-    showCategory: Boolean = false, categoryName: String = "",
-    avgExpense: Double? = null,
-    animateValues: Boolean = false,
-    isCompact: Boolean = false // ★ 控制大細變形狀態
-) {
-    val balance = income - expense
-    val showIncome = hasIncome || (!hasIncome && !hasExpense)
-    val showExpense = hasExpense
-    val showAvg = isFilterMode && avgExpense != null && avgExpense > 0
-    val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
-
-    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, isFilterMode) {
-        val list = mutableListOf<StatBlockType>()
-        if (isFilterMode) {
-            list.add(StatBlockType.COUNT)
-            list.add(StatBlockType.INC)
-            list.add(StatBlockType.EXP)
-            if (showAvg) list.add(StatBlockType.AVG)
-            list.add(StatBlockType.BAL)
-        } else {
-            if (showCategory) list.add(StatBlockType.CAT)
-            if (showIncome) list.add(StatBlockType.INC)
-            if (showExpense) list.add(StatBlockType.EXP)
-            if (showAvg) list.add(StatBlockType.AVG)
-            list.add(StatBlockType.BAL)
-        }
-        list
-    }
-
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        val totalW = maxWidth
-        
-        val geoMapPair = remember(activeBlocks, totalW) {
-            // [正常模式佈局]
-            val nGapX = 6.dp
-            val nGapY = 2.dp
-            val nRowH = 52.dp
-            val nMap = mutableMapOf<StatBlockType, BlockGeometry>()
-            val nRows = when (activeBlocks.size) {
-                1, 2, 3 -> listOf(activeBlocks)
-                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
-                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
-                else -> emptyList()
-            }
-            nRows.forEachIndexed { rIdx, row ->
-                val w = (totalW - nGapX * (row.size - 1).coerceAtLeast(0)) / row.size
-                val y = (nRowH + nGapY) * rIdx
-                row.forEachIndexed { cIdx, block ->
-                    val x = (w + nGapX) * cIdx
-                    nMap[block] = BlockGeometry(x, y, w, nRowH)
-                }
-            }
-
-            // [Clips 壓縮模式佈局] - FlowRow 排列法
-            val cGapX = 8.dp
-            val cGapY = 8.dp
-            val cRowH = 34.dp
-            val cMap = mutableMapOf<StatBlockType, BlockGeometry>()
-            var cx = 0.dp
-            var cy = 0.dp
-            activeBlocks.forEach { block ->
-                val w = when(block) {
-                    StatBlockType.COUNT -> 65.dp
-                    StatBlockType.CAT -> 75.dp
-                    StatBlockType.INC, StatBlockType.EXP, StatBlockType.BAL -> 95.dp
-                    StatBlockType.AVG -> 85.dp
-                    else -> 80.dp
-                }
-                if (cx + w > totalW) {
-                    cx = 0.dp
-                    cy += cRowH + cGapY
-                }
-                cMap[block] = BlockGeometry(cx, cy, w, cRowH)
-                cx += w + cGapX
-            }
-            Pair(nMap, cMap)
-        }
-
-        val nMap = geoMapPair.first
-        val cMap = geoMapPair.second
-
-        val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
-        val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
-
-        val targetHeight = if (isCompact) cMaxY else nMaxY
-        val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
-        val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
-
-        Box(Modifier.fillMaxWidth().height(animHeight)) {
-            activeBlocks.forEach { block ->
-                val nGeo = nMap[block]!!
-                val cGeo = cMap[block]!!
-                
-                // 無縫變形插值
-                val x = androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress)
-                val y = androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress)
-                val w = androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress)
-                val h = androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress)
-
-                // Clips 模式時淡入邊框及底色
-                val bgColor = androidx.compose.ui.graphics.lerp(Color.Transparent, SURFACE_CARD, progress)
-                val borderColor = androidx.compose.ui.graphics.lerp(Color.Transparent, DIVIDER_COLOR.copy(alpha=0.4f), progress)
-
-                Box(
-                    Modifier
-                        .offset(x = x, y = y)
-                        .width(w)
-                        .height(h)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(bgColor)
-                        .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
-                ) {
-                    when (block) {
-                        StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
-                        StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
-                        StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
-                        StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
-                        StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
-                        StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AnimatedStatBlock(
-    compactProgress: Float,
-    iconNormal: ImageVector,
-    iconColorNormal: Color,
-    labelNormal: String,
-    valueNormal: String,
-    valueColorNormal: Color,
-    showDollar: Boolean = true,
-    animateValues: Boolean = false,
-    isCount: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    val finalValueString = if (showDollar) {
-        if (valueNormal.startsWith("-")) "-$" + valueNormal.substring(1) else "$" + valueNormal
-    } else if (isCount && compactProgress > 0.5f) {
-        "${valueNormal}筆"
-    } else valueNormal
-
-    androidx.compose.ui.layout.Layout(
-        content = {
-            // [0] 圖標 (Clips 模式時淡出)
-            Icon(iconNormal, null, tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)), modifier = Modifier.size(16.dp))
-
-            // [1] 標籤
-            Text(
-                text = labelNormal,
-                fontSize = 11.sp,
-                color = TEXT_SECONDARY,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                softWrap = false
-            )
-
-            // [2] 數值 (無縫縮放 19sp -> 13sp)
-            val currentFontSize = (19f - 6f * compactProgress).sp
-            RollingNumber(
-                text = finalValueString,
-                color = valueColorNormal,
-                fontSize = currentFontSize,
-                fontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold,
-                animateChanges = animateValues
-            )
-        },
-        modifier = modifier.fillMaxSize()
-    ) { measurables, constraints ->
-        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
-
-        layout(constraints.maxWidth, constraints.maxHeight) {
-            fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
-
-            val titleGapNormal = 4.dp.roundToPx()
-
-            // 📍 正常模式 (置中、上下排列)
-            val topRowWNormal = iconP.width + titleGapNormal + labelP.width
-            val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
-            val topRowHNormal = maxOf(iconP.height, labelP.height)
-            val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
-
-            val nIconX = topRowXNormal
-            val nLabelX = nIconX + iconP.width + titleGapNormal
-            val nIconY = topRowYNormal + (topRowHNormal - iconP.height) / 2
-            val nLabelY = topRowYNormal + (topRowHNormal - labelP.height) / 2
-
-            val nValueX = (constraints.maxWidth - valueP.width) / 2
-            val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
-
-            // 📍 Clips 模式 (靠左、水平排列)
-            val startPad = 10.dp.roundToPx()
-            val gapCompact = 6.dp.roundToPx()
-            val cLabelX = startPad
-            val cLabelY = (constraints.maxHeight - labelP.height) / 2
-            val cValueX = cLabelX + labelP.width + gapCompact
-            val cValueY = (constraints.maxHeight - valueP.height) / 2
-
-            // Icon 喺 Clips 模式時無形，放喺 Label 中間一齊走
-            val cIconX = cLabelX
-            val cIconY = cLabelY
-
-            // ★ 執行物理過渡
-            iconP.placeRelative(lerpI(nIconX, cIconX, compactProgress), lerpI(nIconY, cIconY, compactProgress))
-            labelP.placeRelative(lerpI(nLabelX, cLabelX, compactProgress), lerpI(nLabelY, cLabelY, compactProgress))
-            valueP.placeRelative(lerpI(nValueX, cValueX, compactProgress), lerpI(nValueY, cValueY, compactProgress))
-        }
-    }
-}
-
-@Composable
-fun FilterDeckArea(
-    categories: List<String?>,
-    selectedCategory: String?,
-    months: List<String>,
-    selectedMonth: String?,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit,
-    onCategorySelect: (String?) -> Unit,
-    onMonthSelect: (String?) -> Unit
-) {
-    val density = LocalDensity.current
-    val gap = 6.dp
-    val chipH = 34.dp
-
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f))
-    ) {
-        val totalWidth = maxWidth
-        val chipW = (totalWidth - gap * 3) / 4
-
-        val catRows = (categories.size + 3) / 4
-        val monthList = listOf<String?>(null) + months
-        val monthRows = (monthList.size + 3) / 4
-
-        // 展開高度：類別與月份全部平排
-        val expandedHeight = (catRows * (chipH + gap).value).dp + 8.dp + (monthRows * (chipH + gap).value).dp
-        // 疊起高度：得一行
-        val collapsedHeight = chipH + 8.dp
-
-        Box(Modifier.fillMaxWidth().height(if (isExpanded) expandedHeight else collapsedHeight)) {
-            // 收起時背景可以點擊展開
-            if (!isExpanded) {
-                Box(Modifier.fillMaxSize().clickable(interactionSource = remember{MutableInteractionSource()}, indication=null) { onToggleExpand() })
-            }
-
-            // 類別 Chips
-            categories.forEachIndexed { idx, cat ->
-                val isSelected = cat == selectedCategory
-                val col = idx % 4
-                val row = idx / 4
-                val expX = col * (chipW + gap).value
-                val expY = row * (chipH + gap).value
-
-                // 疊起目標：畫面左手邊 25% 嘅位置，形成一個 Deck
-                val deckX = (totalWidth.value / 4) - (chipW.value / 2)
-                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
-                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
-                val colX = deckX + staggerX
-                val colY = staggerY
-
-                val targetX = if (isExpanded) expX else colX
-                val targetY = if (isExpanded) expY else colY
-
-                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "x_$idx")
-                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "y_$idx")
-                
-                // 選中嘅排最面，其他順序排列
-                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
-
-                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
-                    AnimatedFilterChip(
-                        selected = isSelected, label = cat ?: "全部", fillWidth = true,
-                        onClick = { if (isExpanded) onCategorySelect(cat) else onToggleExpand() }
-                    )
-                }
-            }
-
-            // 月份 Chips
-            val monthStartY = catRows * (chipH + gap).value + 8f
-            monthList.forEachIndexed { idx, m ->
-                val isSelected = m == selectedMonth
-                val col = idx % 4
-                val row = idx / 4
-                val expX = col * (chipW + gap).value
-                val expY = monthStartY + row * (chipH + gap).value
-
-                // 疊起目標：畫面右手邊 75% 嘅位置，形成另一個 Deck
-                val deckX = (totalWidth.value * 3 / 4) - (chipW.value / 2)
-                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
-                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
-                val colX = deckX + staggerX
-                val colY = staggerY
-
-                val targetX = if (isExpanded) expX else colX
-                val targetY = if (isExpanded) expY else colY
-
-                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "mx_$idx")
-                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "my_$idx")
-                
-                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
-
-                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
-                    AnimatedFilterChip(
-                        selected = isSelected, label = m?.let{formatMonthLabel(it)} ?: "全年", fillWidth = true,
-                        onClick = { if (isExpanded) onMonthSelect(m) else onToggleExpand() }
-                    )
-                }
-            }
-        }
-    }
-}
-
-private enum class StatBlockType { CAT, INC, EXP, AVG, BAL }
-private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp)
-
 // 🟢 核心：全局統一嘅物理彈簧，保證高度、位置、大小、內部排版「完美同步」
 private val MASTER_SPRING_DP = spring<Dp>(dampingRatio = 0.9f, stiffness = 400f)
 private val MASTER_SPRING_FLOAT = spring<Float>(dampingRatio = 0.9f, stiffness = 400f)
-
-@Composable
-fun TopStats(
-    hasIncome: Boolean, hasExpense: Boolean,
-    income: Double, expense: Double,
-    isFilterMode: Boolean = false, filteredCount: Int? = null,
-    showCategory: Boolean = false, categoryName: String = "",
-    avgExpense: Double? = null,
-    animateValues: Boolean = false
-) {
-    val balance = income - expense
-    val showIncome = hasIncome || (!hasIncome && !hasExpense)
-    val showExpense = hasExpense
-    val showAvg = isFilterMode && avgExpense != null && avgExpense > 0
-    val targetBalColor = if (balance >= 0) BRAND_PRIMARY else COLOR_EXPENSE
-
-    // 1. 決定目前有哪些板塊需要顯示，並根據模式智能排序！
-    // ★ 精簡：showBal 永遠 true，直接用 true 字面量
-    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, isFilterMode) {
-        val list = mutableListOf<StatBlockType>()
-        if (isFilterMode) {
-            if (showCategory) list.add(StatBlockType.CAT)
-            list.add(StatBlockType.BAL)
-            if (showIncome) list.add(StatBlockType.INC)
-            if (showExpense) list.add(StatBlockType.EXP)
-            if (showAvg) list.add(StatBlockType.AVG)
-        } else {
-            if (showCategory) list.add(StatBlockType.CAT)
-            if (showIncome) list.add(StatBlockType.INC)
-            if (showExpense) list.add(StatBlockType.EXP)
-            if (showAvg) list.add(StatBlockType.AVG)
-            list.add(StatBlockType.BAL)
-        }
-        list
-    }
-
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
-        val totalW = maxWidth
-        val gapX = 6.dp
-        val gapY = 2.dp
-        val rowH = 52.dp
-
-        // 2. 佈局大腦：精確計算每個板塊嘅 X, Y, Width
-        val geoMap = remember(activeBlocks, totalW) {
-            val map = mutableMapOf<StatBlockType, BlockGeometry>()
-            val rows = when (activeBlocks.size) {
-                1 -> listOf(activeBlocks)
-                2 -> listOf(activeBlocks)
-                3 -> listOf(activeBlocks)
-                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
-                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
-                else -> emptyList()
-            }
-
-            rows.forEachIndexed { rIdx, row ->
-                val itemsInRow = row.size
-                val w = (totalW - gapX * (itemsInRow - 1).coerceAtLeast(0)) / itemsInRow
-                val y = (rowH + gapY) * rIdx
-                row.forEachIndexed { cIdx, block ->
-                    val x = (w + gapX) * cIdx
-                    map[block] = BlockGeometry(x, y, w)
-                }
-            }
-            map
-        }
-
-        // 3. 高度動畫
-        val targetHeight = if (activeBlocks.size > 3) (rowH * 2 + gapY) else rowH
-        val animHeight by animateDpAsState(targetValue = targetHeight, animationSpec = MASTER_SPRING_DP, label = "containerHeight")
-
-        // 畫布區域
-        Box(Modifier.fillMaxWidth().height(animHeight)) {
-
-            // 類別 (Category)
-            StatBlockItem(
-                type = StatBlockType.CAT, isActive = activeBlocks.contains(StatBlockType.CAT),
-                geoMap = geoMap, rowH = rowH
-            ) {
-                val catStyle = CATEGORY_STYLES[categoryName]
-                AnimatedStatBlock(
-                    isFilterMode = isFilterMode,
-                    iconNormal = catStyle?.icon ?: Icons.Default.Category,
-                    iconColorNormal = catStyle?.fgColor ?: TEXT_PRIMARY,
-                    labelNormal = "類別", labelFilter = "",
-                    valueNormal = categoryName, valueFilter = categoryName,
-                    valueColorNormal = TEXT_PRIMARY,
-                    showDollarNormal = false, showDollarFilter = false,
-                    animateValues = animateValues,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // 收入 (Income)
-            StatBlockItem(
-                type = StatBlockType.INC, isActive = activeBlocks.contains(StatBlockType.INC),
-                geoMap = geoMap, rowH = rowH
-            ) {
-                AnimatedStatBlock(
-                    isFilterMode = isFilterMode,
-                    iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME,
-                    labelNormal = "收入", labelFilter = "收入",
-                    valueNormal = formatAmountNoDecimal(income), valueFilter = formatAmountNoDecimal(income),
-                    valueColorNormal = COLOR_INCOME,
-                    animateValues = animateValues,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // 支出 (Expense)
-            StatBlockItem(
-                type = StatBlockType.EXP, isActive = activeBlocks.contains(StatBlockType.EXP),
-                geoMap = geoMap, rowH = rowH
-            ) {
-                AnimatedStatBlock(
-                    isFilterMode = isFilterMode,
-                    iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE,
-                    labelNormal = "支出", labelFilter = "支出",
-                    valueNormal = formatAmountNoDecimal(expense), valueFilter = formatAmountNoDecimal(expense),
-                    valueColorNormal = COLOR_EXPENSE,
-                    animateValues = animateValues,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // 均支 (Average)
-            StatBlockItem(
-                type = StatBlockType.AVG, isActive = activeBlocks.contains(StatBlockType.AVG),
-                geoMap = geoMap, rowH = rowH
-            ) {
-                AnimatedStatBlock(
-                    isFilterMode = isFilterMode,
-                    iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B),
-                    labelNormal = "均支", labelFilter = "均支",
-                    valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueFilter = formatAmountNoDecimal(avgExpense ?: 0.0),
-                    valueColorNormal = Color(0xFFF59E0B),
-                    animateValues = animateValues,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // 餘額 / 筆數 (Balance)
-            StatBlockItem(
-                type = StatBlockType.BAL, isActive = activeBlocks.contains(StatBlockType.BAL),
-                geoMap = geoMap, rowH = rowH
-            ) {
-                AnimatedStatBlock(
-                    isFilterMode = isFilterMode,
-                    iconNormal = Icons.Default.AccountBalanceWallet, iconFilter = Icons.Default.FilterList,
-                    iconColorNormal = targetBalColor, iconColorFilter = BRAND_PRIMARY,
-                    labelNormal = "餘額", labelFilter = "",
-                    valueNormal = formatAmountNoDecimal(balance), valueFilter = "${filteredCount ?: 0} 筆",
-                    valueColorNormal = targetBalColor, valueColorFilter = BRAND_PRIMARY,
-                    showDollarNormal = true, showDollarFilter = false,
-                    animateValues = animateValues,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun StatBlockItem(
@@ -5139,122 +4644,6 @@ private fun StatBlockItem(
                 .clipToBounds()
         ) {
             content()
-        }
-    }
-}
-
-// 🟢 專責內部文字同 Icon 嘅平滑過渡佈局
-@Composable
-private fun AnimatedStatBlock(
-    isFilterMode: Boolean,
-    iconNormal: ImageVector,
-    iconFilter: ImageVector = iconNormal,
-    iconColorNormal: Color,
-    iconColorFilter: Color = iconColorNormal,
-    labelNormal: String,
-    labelFilter: String,
-    valueNormal: String,
-    valueFilter: String,
-    valueColorNormal: Color,
-    valueColorFilter: Color = valueColorNormal,
-    showDollarNormal: Boolean = true,
-    showDollarFilter: Boolean = true,
-    animateValues: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    val progress by animateFloatAsState(
-        targetValue = if (isFilterMode) 1f else 0f,
-        animationSpec = MASTER_SPRING_FLOAT,
-        label = "statBlockAnim"
-    )
-
-    val currentIconColor = androidx.compose.ui.graphics.lerp(iconColorNormal, iconColorFilter, progress)
-    val currentValueColor = androidx.compose.ui.graphics.lerp(valueColorNormal, valueColorFilter, progress)
-    val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, progress)
-
-    val targetValueText = if (isFilterMode) valueFilter else valueNormal
-    val targetShowDollar = if (isFilterMode) showDollarFilter else showDollarNormal
-    val targetIcon = if (isFilterMode) iconFilter else iconNormal
-
-    val finalValueString = if (targetShowDollar) {
-        if (targetValueText.startsWith("-")) "-$" + targetValueText.substring(1) else "$" + targetValueText
-    } else targetValueText
-
-    androidx.compose.ui.layout.Layout(
-        content = {
-            // [0] 圖標
-            Crossfade(targetState = targetIcon, label = "icon", animationSpec = tween(200)) { ico ->
-                Icon(ico, null, tint = currentIconColor, modifier = Modifier.size((16f - 1f * progress).dp))
-            }
-
-            // [1] 標籤
-            val currentLabel = if (isFilterMode && labelFilter.isEmpty()) labelNormal else if (isFilterMode) labelFilter else labelNormal
-            val labelAlpha = if (isFilterMode && labelFilter.isEmpty()) (1f - progress * 2.5f).coerceIn(0f, 1f) else 1f
-            Text(
-                text = currentLabel,
-                fontSize = (11f + 4f * progress).sp,
-                color = currentLabelColor.copy(alpha = labelAlpha),
-                fontWeight = if (progress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
-                maxLines = 1,
-                softWrap = false
-            )
-
-            // [2] 數值（★ 逐位獨立滾動，僅變動位動畫）
-            RollingNumber(
-                text = finalValueString,
-                color = currentValueColor,
-                fontSize = (19f - 4f * progress).sp,
-                fontWeight = FontWeight.ExtraBold,
-                animateChanges = animateValues
-            )
-        },
-        modifier = modifier.fillMaxHeight()
-    ) { measurables, constraints ->
-        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
-
-        layout(constraints.maxWidth, constraints.maxHeight) {
-            fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
-
-            val titleGapNormal = 4.dp.roundToPx()
-            val gap1 = 4.dp.roundToPx()
-            val gap2 = 5.dp.roundToPx()
-
-            // 📍 正常模式 (上下排列)
-            val topRowWNormal = iconP.width + titleGapNormal + labelP.width
-            val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
-
-            val topRowHNormal = maxOf(iconP.height, labelP.height)
-            val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
-
-            val iconXNormal = topRowXNormal
-            val labelXNormal = iconXNormal + iconP.width + titleGapNormal
-
-            val iconYNormal = topRowYNormal + (topRowHNormal - iconP.height) / 2
-            val labelYNormal = topRowYNormal + (topRowHNormal - labelP.height) / 2
-
-            val valueXNormal = (constraints.maxWidth - valueP.width) / 2
-            val valueYNormal = (constraints.maxHeight / 2) + 1.dp.roundToPx()
-
-            // 📍 篩選模式 (左右平排)
-            val effectiveLabelW = if (labelFilter.isEmpty()) 0 else labelP.width
-            val effectiveGap1 = if (effectiveLabelW > 0) gap1 else 0
-            val totalWFilter = iconP.width + effectiveGap1 + effectiveLabelW + gap2 + valueP.width
-            val startXFilter = (constraints.maxWidth - totalWFilter) / 2
-
-            val iconXFilter = startXFilter
-            val labelXFilter = iconXFilter + iconP.width + effectiveGap1
-            val valueXFilter = startXFilter + totalWFilter - valueP.width
-
-            val iconYFilter = (constraints.maxHeight - iconP.height) / 2
-            val labelYFilter = (constraints.maxHeight - labelP.height) / 2
-            val valueYFilter = (constraints.maxHeight - valueP.height) / 2
-
-            // ✨ 平滑過渡坐標
-            iconP.placeRelative(lerpI(iconXNormal, iconXFilter, progress), lerpI(iconYNormal, iconYFilter, progress))
-            labelP.placeRelative(lerpI(labelXNormal, labelXFilter, progress), lerpI(labelYNormal, labelYFilter, progress))
-            valueP.placeRelative(lerpI(valueXNormal, valueXFilter, progress), lerpI(valueYNormal, valueYFilter, progress))
         }
     }
 }
@@ -10935,4 +10324,358 @@ fun AnimatedAmount(
     }
 }
 
-// ★ 精簡：原 DollarAmount(...) 整個函數從未調用，直接刪除
+// ==========================================
+// ★ 唯一正確版 TopStats 組件及 Helpers
+// ==========================================
+
+enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT }
+private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp, val h: Dp)
+
+@Composable
+fun TopStats(
+    hasIncome: Boolean, hasExpense: Boolean,
+    income: Double, expense: Double,
+    isFilterMode: Boolean = false, filteredCount: Int? = null,
+    showCategory: Boolean = false, categoryName: String = "",
+    avgExpense: Double? = null,
+    animateValues: Boolean = false,
+    isCompact: Boolean = false 
+) {
+    val balance = income - expense
+    val showIncome = hasIncome || (!hasIncome && !hasExpense)
+    val showExpense = hasExpense
+    val showAvg = isFilterMode && avgExpense != null && avgExpense > 0
+    val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
+
+    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, isFilterMode) {
+        val list = mutableListOf<StatBlockType>()
+        if (isFilterMode) {
+            list.add(StatBlockType.COUNT)
+            list.add(StatBlockType.INC)
+            list.add(StatBlockType.EXP)
+            if (showAvg) list.add(StatBlockType.AVG)
+            list.add(StatBlockType.BAL)
+        } else {
+            if (showCategory) list.add(StatBlockType.CAT)
+            if (showIncome) list.add(StatBlockType.INC)
+            if (showExpense) list.add(StatBlockType.EXP)
+            if (showAvg) list.add(StatBlockType.AVG)
+            list.add(StatBlockType.BAL)
+        }
+        list
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        val totalW = maxWidth
+        
+        val geoMapPair = remember(activeBlocks, totalW) {
+            // [正常模式佈局]
+            val nGapX = 6.dp
+            val nGapY = 2.dp
+            val nRowH = 52.dp
+            val nMap = mutableMapOf<StatBlockType, BlockGeometry>()
+            val nRows = when (activeBlocks.size) {
+                1, 2, 3 -> listOf(activeBlocks)
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
+                else -> emptyList()
+            }
+            nRows.forEachIndexed { rIdx, row ->
+                val w = (totalW - nGapX * (row.size - 1).coerceAtLeast(0)) / row.size
+                val y = (nRowH + nGapY) * rIdx
+                row.forEachIndexed { cIdx, block ->
+                    val x = (w + nGapX) * cIdx
+                    nMap[block] = BlockGeometry(x, y, w, nRowH)
+                }
+            }
+
+            // [Clips 壓縮模式佈局] - FlowRow 排列法
+            val cGapX = 8.dp
+            val cGapY = 8.dp
+            val cRowH = 34.dp
+            val cMap = mutableMapOf<StatBlockType, BlockGeometry>()
+            var cx = 0.dp
+            var cy = 0.dp
+            activeBlocks.forEach { block ->
+                val w = when(block) {
+                    StatBlockType.COUNT -> 65.dp
+                    StatBlockType.CAT -> 75.dp
+                    StatBlockType.INC, StatBlockType.EXP, StatBlockType.BAL -> 95.dp
+                    StatBlockType.AVG -> 85.dp
+                    else -> 80.dp
+                }
+                if (cx + w > totalW) {
+                    cx = 0.dp
+                    cy += cRowH + cGapY
+                }
+                cMap[block] = BlockGeometry(cx, cy, w, cRowH)
+                cx += w + cGapX
+            }
+            Pair(nMap, cMap)
+        }
+
+        val nMap = geoMapPair.first
+        val cMap = geoMapPair.second
+
+        val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
+        val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
+
+        val targetHeight = if (isCompact) cMaxY else nMaxY
+        val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
+        val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
+
+        Box(Modifier.fillMaxWidth().height(animHeight)) {
+            activeBlocks.forEach { block ->
+                val nGeo = nMap[block]!!
+                val cGeo = cMap[block]!!
+                
+                // 無縫變形插值
+                val x = androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress)
+                val y = androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress)
+                val w = androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress)
+                val h = androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress)
+
+                // Clips 模式時淡入邊框及底色
+                val bgColor = androidx.compose.ui.graphics.lerp(Color.Transparent, SURFACE_CARD, progress)
+                val borderColor = androidx.compose.ui.graphics.lerp(Color.Transparent, DIVIDER_COLOR.copy(alpha=0.4f), progress)
+
+                Box(
+                    Modifier
+                        .offset(x = x, y = y)
+                        .width(w)
+                        .height(h)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(bgColor)
+                        .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
+                ) {
+                    when (block) {
+                        StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
+                        StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
+                        StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
+                        StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
+                        StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
+                        StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnimatedStatBlock(
+    compactProgress: Float,
+    iconNormal: ImageVector,
+    iconColorNormal: Color,
+    labelNormal: String,
+    valueNormal: String,
+    valueColorNormal: Color,
+    showDollar: Boolean = true,
+    animateValues: Boolean = false,
+    isCount: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val finalValueString = if (showDollar) {
+        if (valueNormal.startsWith("-")) "-$" + valueNormal.substring(1) else "$" + valueNormal
+    } else if (isCount && compactProgress > 0.5f) {
+        "${valueNormal}筆"
+    } else valueNormal
+
+    androidx.compose.ui.layout.Layout(
+        content = {
+            // [0] 圖標 (Clips 模式時淡出)
+            Icon(iconNormal, null, tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)), modifier = Modifier.size(16.dp))
+
+            // [1] 標籤
+            Text(
+                text = labelNormal,
+                fontSize = 11.sp,
+                color = TEXT_SECONDARY,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
+            )
+
+            // [2] 數值 (無縫縮放 19sp -> 13sp)
+            val currentFontSize = (19f - 6f * compactProgress).sp
+            RollingNumber(
+                text = finalValueString,
+                color = valueColorNormal,
+                fontSize = currentFontSize,
+                fontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold,
+                animateChanges = animateValues
+            )
+        },
+        modifier = modifier.fillMaxSize()
+    ) { measurables, constraints ->
+        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
+
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
+
+            val titleGapNormal = 4.dp.roundToPx()
+
+            // 📍 正常模式 (置中、上下排列)
+            val topRowWNormal = iconP.width + titleGapNormal + labelP.width
+            val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
+            val topRowHNormal = maxOf(iconP.height, labelP.height)
+            val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
+
+            val nIconX = topRowXNormal
+            val nLabelX = nIconX + iconP.width + titleGapNormal
+            val nIconY = topRowYNormal + (topRowHNormal - iconP.height) / 2
+            val nLabelY = topRowYNormal + (topRowHNormal - labelP.height) / 2
+
+            val nValueX = (constraints.maxWidth - valueP.width) / 2
+            val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
+
+            // 📍 Clips 模式 (靠左、水平排列)
+            val startPad = 10.dp.roundToPx()
+            val gapCompact = 6.dp.roundToPx()
+            val cLabelX = startPad
+            val cLabelY = (constraints.maxHeight - labelP.height) / 2
+            val cValueX = cLabelX + labelP.width + gapCompact
+            val cValueY = (constraints.maxHeight - valueP.height) / 2
+
+            val cIconX = cLabelX
+            val cIconY = cLabelY
+
+            // ★ 執行物理過渡
+            iconP.placeRelative(lerpI(nIconX, cIconX, compactProgress), lerpI(nIconY, cIconY, compactProgress))
+            labelP.placeRelative(lerpI(nLabelX, cLabelX, compactProgress), lerpI(nLabelY, cLabelY, compactProgress))
+            valueP.placeRelative(lerpI(nValueX, cValueX, compactProgress), lerpI(nValueY, cValueY, compactProgress))
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun FilterTopStatsChips(income: Double, expense: Double, avgExpense: Double, filteredCount: Int) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        StatMiniChip("筆數", filteredCount.toDouble(), BRAND_PRIMARY, isCount = true)
+        StatMiniChip("收入", income, COLOR_INCOME)
+        StatMiniChip("支出", expense, COLOR_EXPENSE)
+        if (avgExpense > 0) {
+            StatMiniChip("均支", avgExpense, Color(0xFFF59E0B))
+        }
+        val balance = income - expense
+        StatMiniChip("結餘", balance, if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE)
+    }
+}
+
+@Composable
+fun StatMiniChip(label: String, value: Double, color: Color, isCount: Boolean = false) {
+    val text = if (isCount) "${value.toInt()}筆" else "$${formatAmountNoDecimal(value)}"
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = SURFACE_CARD,
+        border = BorderStroke(0.5.dp, color.copy(alpha = 0.3f))
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 11.sp, color = TEXT_SECONDARY)
+            Spacer(Modifier.width(6.dp))
+            Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
+        }
+    }
+}
+
+@Composable
+fun FilterDeckArea(
+    categories: List<String?>,
+    selectedCategory: String?,
+    months: List<String>,
+    selectedMonth: String?,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onCategorySelect: (String?) -> Unit,
+    onMonthSelect: (String?) -> Unit
+) {
+    val density = LocalDensity.current
+    val gap = 6.dp
+    val chipH = 34.dp
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f))
+    ) {
+        val totalWidth = maxWidth
+        val chipW = (totalWidth - gap * 3) / 4
+
+        val catRows = (categories.size + 3) / 4
+        val monthList = listOf<String?>(null) + months
+        val monthRows = (monthList.size + 3) / 4
+
+        val expandedHeight = (catRows * (chipH + gap).value).dp + 8.dp + (monthRows * (chipH + gap).value).dp
+        val collapsedHeight = chipH + 8.dp
+
+        Box(Modifier.fillMaxWidth().height(if (isExpanded) expandedHeight else collapsedHeight)) {
+            if (!isExpanded) {
+                Box(Modifier.fillMaxSize().clickable(interactionSource = remember{MutableInteractionSource()}, indication=null) { onToggleExpand() })
+            }
+
+            categories.forEachIndexed { idx, cat ->
+                val isSelected = cat == selectedCategory
+                val col = idx % 4
+                val row = idx / 4
+                val expX = col * (chipW + gap).value
+                val expY = row * (chipH + gap).value
+
+                val deckX = (totalWidth.value / 4) - (chipW.value / 2)
+                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
+                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
+                val colX = deckX + staggerX
+                val colY = staggerY
+
+                val targetX = if (isExpanded) expX else colX
+                val targetY = if (isExpanded) expY else colY
+
+                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "x_$idx")
+                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "y_$idx")
+                
+                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
+
+                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                    AnimatedFilterChip(
+                        selected = isSelected, label = cat ?: "全部", fillWidth = true,
+                        onClick = { if (isExpanded) onCategorySelect(cat) else onToggleExpand() }
+                    )
+                }
+            }
+
+            val monthStartY = catRows * (chipH + gap).value + 8f
+            monthList.forEachIndexed { idx, m ->
+                val isSelected = m == selectedMonth
+                val col = idx % 4
+                val row = idx / 4
+                val expX = col * (chipW + gap).value
+                val expY = monthStartY + row * (chipH + gap).value
+
+                val deckX = (totalWidth.value * 3 / 4) - (chipW.value / 2)
+                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
+                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
+                val colX = deckX + staggerX
+                val colY = staggerY
+
+                val targetX = if (isExpanded) expX else colX
+                val targetY = if (isExpanded) expY else colY
+
+                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "mx_$idx")
+                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "my_$idx")
+                
+                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
+
+                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                    AnimatedFilterChip(
+                        selected = isSelected, label = m?.let{formatMonthLabel(it)} ?: "全年", fillWidth = true,
+                        onClick = { if (isExpanded) onMonthSelect(m) else onToggleExpand() }
+                    )
+                }
+            }
+        }
+    }
+}
