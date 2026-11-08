@@ -3963,10 +3963,8 @@ fun FloatingNavBar(
 @Composable
 fun NotificationAccessGuide(context: Context) {
     var isGranted by remember { mutableStateOf<Boolean?>(null) }
-    var canOverlay by remember { mutableStateOf(canDrawCaptureOverlay(context)) }
-    var overlayPrefOn by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
-    val scope = rememberCoroutineScope()
     var showPantanalHint by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         isGranted = withContext(Dispatchers.IO) {
@@ -3974,8 +3972,6 @@ fun NotificationAccessGuide(context: Context) {
                 .getEnabledListenerPackages(context)
                 .contains(context.packageName)
         }
-        canOverlay = canDrawCaptureOverlay(context)
-        overlayPrefOn = isOverlayCapturePrefEnabled(context)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -3988,8 +3984,6 @@ fun NotificationAccessGuide(context: Context) {
                             .getEnabledListenerPackages(context)
                             .contains(context.packageName)
                     }
-                    canOverlay = canDrawCaptureOverlay(context)
-                    overlayPrefOn = isOverlayCapturePrefEnabled(context)
                 }
             }
         }
@@ -4004,96 +3998,41 @@ fun NotificationAccessGuide(context: Context) {
         }
     }
 
-    Column(Modifier.fillMaxWidth()) {
-        if (isGranted == false) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        try {
-                            context.startActivity(
-                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                            )
-                            if (OppoFluidCloudBridge.isPantanalSupported(context) &&
-                                !OppoFluidCloudBridge.hasPantanalPermission(context)) {
-                                showPantanalHint = true
-                            }
-                        } catch (_: Exception) { }
-                    },
-                shape = RoundedCornerShape(12.dp),
-                color = SURFACE_CARD,
-                border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.NotificationsActive, contentDescription = "開啟通知", tint = BRAND_PRIMARY)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("開啟自動記賬功能",
-                            fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                            color = BRAND_PRIMARY_DARK)
-                        Text("點擊前往授權讀取通知，自動捕捉易乘碼消費",
-                            fontSize = 12.sp, color = TEXT_SECONDARY)
-                    }
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TEXT_TERTIARY)
-                }
-            }
-        }
-
-        // 底部浮窗：無懸浮窗權限時隱藏此功能入口（只保留通知記賬）
-        if (isGranted == true) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(12.dp)),
-                shape = RoundedCornerShape(12.dp),
-                color = SURFACE_CARD,
-                border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-            ) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Layers, contentDescription = null, tint = BRAND_PRIMARY, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("消費浮窗提示", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TEXT_PRIMARY)
-                            Text(
-                                if (!canOverlay) "需先開啟「顯示在其他應用之上」"
-                                else "偵測到乘車／易程碼等消費時，底部彈出記賬浮窗",
-                                fontSize = 12.sp, color = TEXT_SECONDARY
-                            )
+    if (isGranted == false) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
+                    try {
+                        context.startActivity(
+                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                        )
+                        if (OppoFluidCloudBridge.isPantanalSupported(context) &&
+                            !OppoFluidCloudBridge.hasPantanalPermission(context)) {
+                            showPantanalHint = true
                         }
-                        if (canOverlay) {
-                            Switch(
-                                checked = overlayPrefOn,
-                                onCheckedChange = {
-                                    overlayPrefOn = it
-                                    setOverlayCapturePrefEnabled(context, it)
-                                    if (!it) CaptureOverlayController.dismiss()
-                                }
-                            )
-                        } else {
-                            TextButton(onClick = {
-                                try {
-                                    val uri = Uri.parse("package:${context.packageName}")
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri)
-                                    )
-                                } catch (_: Exception) {
-                                    try {
-                                        context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
-                                    } catch (_: Exception) {}
-                                }
-                            }) {
-                                Text("去開啟", color = BRAND_PRIMARY, fontSize = 13.sp)
-                            }
-                        }
-                    }
+                    } catch (_: Exception) { }
+                },
+            shape = RoundedCornerShape(12.dp),
+            color = SURFACE_CARD,
+            border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.NotificationsActive, contentDescription = "開啟通知", tint = BRAND_PRIMARY)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("開啟自動記賬功能",
+                        fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                        color = BRAND_PRIMARY_DARK)
+                    Text("點擊前往授權讀取通知，自動捕捉易乘碼消費",
+                        fontSize = 12.sp, color = TEXT_SECONDARY)
                 }
+                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TEXT_TERTIARY)
             }
         }
     }
@@ -4507,7 +4446,7 @@ fun LedgerContent(
                 )
             }
 
-            BoxWithConstraints(
+                        BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
@@ -4540,10 +4479,12 @@ fun LedgerContent(
                 val p = futureBtnProgress.value
                 val gap = 6.dp
                 val totalW = maxWidth - 16.dp
-                val slotCount = 3f + p
-                val slotW = (totalW - gap * (slotCount - 1f)) / slotCount
+                val showOverlayBtn = isNotificationGranted
+                val btnCount = if (showOverlayBtn) 2 else 1
+                val slotCount = 3f + btnCount * p
+                val slotW = if (slotCount > 0f) (totalW - gap * (slotCount - 1f)) / slotCount else totalW
                 val statsWidth = slotW * 3f + gap * 2f
-                val btnWidth = slotW * p
+                val singleBtnWidth = slotW * p
 
                 Row(
                     modifier = Modifier
@@ -4564,10 +4505,11 @@ fun LedgerContent(
                     }
 
                     if (p > 0.001f) {
+                        // 第一粒：顯示未來項目
                         Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
                         Box(
                             modifier = Modifier
-                                .width(btnWidth.coerceAtLeast(0.dp))
+                                .width(singleBtnWidth.coerceAtLeast(0.dp))
                                 .graphicsLayer { alpha = p },
                             contentAlignment = Alignment.Center
                         ) {
@@ -4581,6 +4523,53 @@ fun LedgerContent(
                                     contentDescription = "顯示未來項目",
                                     tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
                                 )
+                            }
+                        }
+
+                        // 第二粒：消費浮窗提示開關
+                        if (showOverlayBtn) {
+                            Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
+                            Box(
+                                modifier = Modifier
+                                    .width(singleBtnWidth.coerceAtLeast(0.dp))
+                                    .graphicsLayer { alpha = p },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        if (!canDrawCaptureOverlay(context)) {
+                                            // 冇懸浮窗權限 → 跳去申請
+                                            try {
+                                                val uri = Uri.parse("package:${context.packageName}")
+                                                context.startActivity(
+                                                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri)
+                                                )
+                                            } catch (_: Exception) {
+                                                try {
+                                                    context.startActivity(
+                                                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                                                    )
+                                                } catch (_: Exception) {}
+                                            }
+                                        } else {
+                                            val newValue = !overlayCaptureEnabled
+                                            overlayCaptureEnabled = newValue
+                                            setOverlayCapturePrefEnabled(context, newValue)
+                                            if (!newValue) CaptureOverlayController.dismiss()
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Layers,
+                                        contentDescription = "消費浮窗提示",
+                                        tint = when {
+                                            !canDrawCaptureOverlay(context) -> Color(0xFFF59E0B)
+                                            overlayCaptureEnabled -> BRAND_PRIMARY
+                                            else -> TEXT_TERTIARY
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -9088,6 +9077,16 @@ fun PivotContent(
     val rowHeight = 38.dp
     val stickyHeight = 40.dp
     val colWidthPx = remember(density, colWidth) { with(density) { colWidth.roundToPx() } }
+
+    val context = LocalContext.current
+    var isNotificationGranted by remember { mutableStateOf(false) }
+    var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
+
+    LaunchedEffect(Unit) {
+        isNotificationGranted = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+        }
+    }
 
     // 標題／年份：向下滾動時漸隱，滾到頂先出現
     val headerCollapse by remember {
