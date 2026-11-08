@@ -4605,50 +4605,6 @@ private val MASTER_SPRING_DP = spring<Dp>(dampingRatio = 0.9f, stiffness = 400f)
 private val MASTER_SPRING_FLOAT = spring<Float>(dampingRatio = 0.9f, stiffness = 400f)
 
 @Composable
-private fun StatBlockItem(
-    type: StatBlockType,
-    isActive: Boolean,
-    geoMap: Map<StatBlockType, BlockGeometry>,
-    rowH: Dp,
-    content: @Composable () -> Unit
-) {
-    val targetGeo = geoMap[type]
-    var memoryGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp)) }
-    var isInitialized by remember { mutableStateOf(false) }
-
-    if (targetGeo != null) {
-        memoryGeo = targetGeo
-        isInitialized = true
-    }
-
-    if (!isInitialized) return
-
-    val animX by animateDpAsState(memoryGeo.x, MASTER_SPRING_DP, label = "x_$type")
-    val animY by animateDpAsState(memoryGeo.y, MASTER_SPRING_DP, label = "y_$type")
-    val animW by animateDpAsState(memoryGeo.w, MASTER_SPRING_DP, label = "w_$type")
-
-    val alpha by animateFloatAsState(if (isActive) 1f else 0f, MASTER_SPRING_FLOAT, label = "alpha_$type")
-    val scale by animateFloatAsState(if (isActive) 1f else 0.85f, MASTER_SPRING_FLOAT, label = "scale_$type")
-
-    if (alpha > 0.01f) {
-        Box(
-            Modifier
-                .offset(x = animX, y = animY)
-                .width(animW)
-                .height(rowH)
-                .graphicsLayer {
-                    this.alpha = alpha
-                    this.scaleX = scale
-                    this.scaleY = scale
-                }
-                .clipToBounds()
-        ) {
-            content()
-        }
-    }
-}
-
-@Composable
 fun WeeklyExpenseChart(
     data: List<WeeklyExpenseDay>,
     listState: LazyListState,
