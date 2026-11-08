@@ -4232,8 +4232,10 @@ fun LedgerContent(
                 scope.launch {
                     delay(120)
                     when (hovered) {
-                        0 -> latestOnCopy(targetRecord); 1 -> latestOnEdit(targetRecord)
-                        2 -> latestOnFilterByName(targetRecord.note); 3 -> latestOnDelete(targetRecord)
+                        0 -> latestOnCopy(targetRecord)
+                        1 -> latestOnEdit(targetRecord)
+                        2 -> latestOnFilterByName(targetRecord.note)
+                        3 -> latestOnDelete(targetRecord)
                     }
                 }
             }
@@ -4248,6 +4250,9 @@ fun LedgerContent(
     val singleCategory by remember(filterMode, filtered) { derivedStateOf { if (!filterMode || filtered.isEmpty()) null else { val firstCat = filtered[0].category; if (filtered.all { it.category == firstCat }) firstCat else null } } }
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
+    
+    // 👉 補返呢行，等下面 TopStats 認得呢個變數
+    val showCategoryChip = filterMode && singleCategory != null
 
     val displayGroups = groupedByDate
     val isFanActive = activeFanRecord != null
