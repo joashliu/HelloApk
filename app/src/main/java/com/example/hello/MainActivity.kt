@@ -4147,7 +4147,7 @@ fun LedgerContent(
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 // ★ 判斷係咪手動拖曳 (排除慣性 Fling)
-                val isManualDrag = source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.Drag
+                val isManualDrag = source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.Drag || source.toString() == "UserInput"
                 
                 // ★ 只有手動向下拉 (available.y < -5f) 先會自動收起，慣性滾動唔會干擾
                 if (isManualDrag && available.y < -5f && isFilterDeckExpanded && isScrolledAway) {
@@ -4390,6 +4390,7 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
+            // 頂部背景色動畫：滾動時抽走底色，令 Clips 獨立出嚟
             val topBarBgColor by animateColorAsState(
                 targetValue = if (isScrolledAway) Color.Transparent else SURFACE_CARD,
                 animationSpec = tween(250)
@@ -4430,32 +4431,18 @@ fun LedgerContent(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = if (isScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // ★ 核心動畫修正：使用 animateContentSize + Crossfade 達成順滑變形，不再有大小突變嘅閃爍
-                    Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.85f, 350f))) {
-                        androidx.compose.animation.Crossfade(
-                            targetState = isScrolledAway,
-                            animationSpec = tween(300, easing = FastOutSlowInEasing),
-                            label = "stats_crossfade"
-                        ) { scrolled ->
-                            if (scrolled) {
-                                FilterTopStatsChips(
-                                    income = totalIncome, 
-                                    expense = totalExpense, 
-                                    avgExpense = avgExpense, 
-                                    filteredCount = filtered.size
-                                )
-                            } else {
-                                TopStats(
-                                    hasIncome = hasIncome, hasExpense = hasExpense,
-                                    income = totalIncome, expense = totalExpense,
-                                    isFilterMode = filterMode,
-                                    filteredCount = if (filterMode) filtered.size else null,
-                                    showCategory = showCategoryChip, categoryName = cachedCategory,
-                                    avgExpense = avgExpense,
-                                    animateValues = animateTopStats
-                                )
-                            }
-                        }
+                    Box(modifier = Modifier.width(statsWidth)) {
+                        // ★ 替換為全新原生無縫物理變形 (Morphing) 的 TopStats，消除閃爍
+                        TopStats(
+                            hasIncome = hasIncome, hasExpense = hasExpense,
+                            income = totalIncome, expense = totalExpense,
+                            isFilterMode = filterMode,
+                            filteredCount = if (filterMode) filtered.size else null,
+                            showCategory = showCategoryChip, categoryName = cachedCategory,
+                            avgExpense = avgExpense,
+                            animateValues = animateTopStats,
+                            isCompact = isScrolledAway // 控制係咪切換為 Clips 狀態
+                        )
                     }
 
                     if (p > 0.001f) {
@@ -4561,7 +4548,7 @@ fun LedgerContent(
 
             Spacer(Modifier.height(sectionGap))
 
-            // 底部清單區域，套用 topScrollConnection 用嚟攔截向下撥動
+            // 底部清單區域，套用 topScrollConnection 用嚟攔截手動向下撥動
             Box(
                 Modifier.weight(1f).fillMaxWidth().clipToBounds()
                     .nestedScroll(topScrollConnection) 
@@ -4614,40 +4601,228 @@ fun LedgerContent(
 }
 
 // ==========================================
-// ★ Helper Composables
+// ★ 無縫變形版 TopStats 組件及 Helpers
 // ==========================================
 
-@OptIn(ExperimentalLayoutApi::class)
+enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT }
+private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp, val h: Dp)
+
 @Composable
-fun FilterTopStatsChips(income: Double, expense: Double, avgExpense: Double, filteredCount: Int) {
-    FlowRow(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        StatMiniChip("筆數", filteredCount.toDouble(), BRAND_PRIMARY, isCount = true)
-        StatMiniChip("收入", income, COLOR_INCOME)
-        StatMiniChip("支出", expense, COLOR_EXPENSE)
-        if (avgExpense > 0) {
-            StatMiniChip("均支", avgExpense, Color(0xFFF59E0B))
+fun TopStats(
+    hasIncome: Boolean, hasExpense: Boolean,
+    income: Double, expense: Double,
+    isFilterMode: Boolean = false, filteredCount: Int? = null,
+    showCategory: Boolean = false, categoryName: String = "",
+    avgExpense: Double? = null,
+    animateValues: Boolean = false,
+    isCompact: Boolean = false // ★ 控制大細變形狀態
+) {
+    val balance = income - expense
+    val showIncome = hasIncome || (!hasIncome && !hasExpense)
+    val showExpense = hasExpense
+    val showAvg = isFilterMode && avgExpense != null && avgExpense > 0
+    val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
+
+    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, isFilterMode) {
+        val list = mutableListOf<StatBlockType>()
+        if (isFilterMode) {
+            list.add(StatBlockType.COUNT)
+            list.add(StatBlockType.INC)
+            list.add(StatBlockType.EXP)
+            if (showAvg) list.add(StatBlockType.AVG)
+            list.add(StatBlockType.BAL)
+        } else {
+            if (showCategory) list.add(StatBlockType.CAT)
+            if (showIncome) list.add(StatBlockType.INC)
+            if (showExpense) list.add(StatBlockType.EXP)
+            if (showAvg) list.add(StatBlockType.AVG)
+            list.add(StatBlockType.BAL)
         }
-        val balance = income - expense
-        StatMiniChip("結餘", balance, if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE)
+        list
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        val totalW = maxWidth
+        
+        val geoMapPair = remember(activeBlocks, totalW) {
+            // [正常模式佈局]
+            val nGapX = 6.dp
+            val nGapY = 2.dp
+            val nRowH = 52.dp
+            val nMap = mutableMapOf<StatBlockType, BlockGeometry>()
+            val nRows = when (activeBlocks.size) {
+                1, 2, 3 -> listOf(activeBlocks)
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
+                else -> emptyList()
+            }
+            nRows.forEachIndexed { rIdx, row ->
+                val w = (totalW - nGapX * (row.size - 1).coerceAtLeast(0)) / row.size
+                val y = (nRowH + nGapY) * rIdx
+                row.forEachIndexed { cIdx, block ->
+                    val x = (w + nGapX) * cIdx
+                    nMap[block] = BlockGeometry(x, y, w, nRowH)
+                }
+            }
+
+            // [Clips 壓縮模式佈局] - FlowRow 排列法
+            val cGapX = 8.dp
+            val cGapY = 8.dp
+            val cRowH = 34.dp
+            val cMap = mutableMapOf<StatBlockType, BlockGeometry>()
+            var cx = 0.dp
+            var cy = 0.dp
+            activeBlocks.forEach { block ->
+                val w = when(block) {
+                    StatBlockType.COUNT -> 65.dp
+                    StatBlockType.CAT -> 75.dp
+                    StatBlockType.INC, StatBlockType.EXP, StatBlockType.BAL -> 95.dp
+                    StatBlockType.AVG -> 85.dp
+                    else -> 80.dp
+                }
+                if (cx + w > totalW) {
+                    cx = 0.dp
+                    cy += cRowH + cGapY
+                }
+                cMap[block] = BlockGeometry(cx, cy, w, cRowH)
+                cx += w + cGapX
+            }
+            Pair(nMap, cMap)
+        }
+
+        val nMap = geoMapPair.first
+        val cMap = geoMapPair.second
+
+        val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
+        val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
+
+        val targetHeight = if (isCompact) cMaxY else nMaxY
+        val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
+        val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
+
+        Box(Modifier.fillMaxWidth().height(animHeight)) {
+            activeBlocks.forEach { block ->
+                val nGeo = nMap[block]!!
+                val cGeo = cMap[block]!!
+                
+                // 無縫變形插值
+                val x = androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress)
+                val y = androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress)
+                val w = androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress)
+                val h = androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress)
+
+                // Clips 模式時淡入邊框及底色
+                val bgColor = androidx.compose.ui.graphics.lerp(Color.Transparent, SURFACE_CARD, progress)
+                val borderColor = androidx.compose.ui.graphics.lerp(Color.Transparent, DIVIDER_COLOR.copy(alpha=0.4f), progress)
+
+                Box(
+                    Modifier
+                        .offset(x = x, y = y)
+                        .width(w)
+                        .height(h)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(bgColor)
+                        .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
+                ) {
+                    when (block) {
+                        StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
+                        StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
+                        StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
+                        StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
+                        StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
+                        StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-fun StatMiniChip(label: String, value: Double, color: Color, isCount: Boolean = false) {
-    val text = if (isCount) "${value.toInt()}筆" else "$${formatAmountNoDecimal(value)}"
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = SURFACE_CARD,
-        border = BorderStroke(0.5.dp, color.copy(alpha = 0.3f))
-    ) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, fontSize = 11.sp, color = TEXT_SECONDARY)
-            Spacer(Modifier.width(6.dp))
-            Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
+private fun AnimatedStatBlock(
+    compactProgress: Float,
+    iconNormal: ImageVector,
+    iconColorNormal: Color,
+    labelNormal: String,
+    valueNormal: String,
+    valueColorNormal: Color,
+    showDollar: Boolean = true,
+    animateValues: Boolean = false,
+    isCount: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val finalValueString = if (showDollar) {
+        if (valueNormal.startsWith("-")) "-$" + valueNormal.substring(1) else "$" + valueNormal
+    } else if (isCount && compactProgress > 0.5f) {
+        "${valueNormal}筆"
+    } else valueNormal
+
+    androidx.compose.ui.layout.Layout(
+        content = {
+            // [0] 圖標 (Clips 模式時淡出)
+            Icon(iconNormal, null, tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)), modifier = Modifier.size(16.dp))
+
+            // [1] 標籤
+            Text(
+                text = labelNormal,
+                fontSize = 11.sp,
+                color = TEXT_SECONDARY,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
+            )
+
+            // [2] 數值 (無縫縮放 19sp -> 13sp)
+            val currentFontSize = (19f - 6f * compactProgress).sp
+            RollingNumber(
+                text = finalValueString,
+                color = valueColorNormal,
+                fontSize = currentFontSize,
+                fontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold,
+                animateChanges = animateValues
+            )
+        },
+        modifier = modifier.fillMaxSize()
+    ) { measurables, constraints ->
+        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
+
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
+
+            val titleGapNormal = 4.dp.roundToPx()
+
+            // 📍 正常模式 (置中、上下排列)
+            val topRowWNormal = iconP.width + titleGapNormal + labelP.width
+            val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
+            val topRowHNormal = maxOf(iconP.height, labelP.height)
+            val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
+
+            val nIconX = topRowXNormal
+            val nLabelX = nIconX + iconP.width + titleGapNormal
+            val nIconY = topRowYNormal + (topRowHNormal - iconP.height) / 2
+            val nLabelY = topRowYNormal + (topRowHNormal - labelP.height) / 2
+
+            val nValueX = (constraints.maxWidth - valueP.width) / 2
+            val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
+
+            // 📍 Clips 模式 (靠左、水平排列)
+            val startPad = 10.dp.roundToPx()
+            val gapCompact = 6.dp.roundToPx()
+            val cLabelX = startPad
+            val cLabelY = (constraints.maxHeight - labelP.height) / 2
+            val cValueX = cLabelX + labelP.width + gapCompact
+            val cValueY = (constraints.maxHeight - valueP.height) / 2
+
+            // Icon 喺 Clips 模式時無形，放喺 Label 中間一齊走
+            val cIconX = cLabelX
+            val cIconY = cLabelY
+
+            // ★ 執行物理過渡
+            iconP.placeRelative(lerpI(nIconX, cIconX, compactProgress), lerpI(nIconY, cIconY, compactProgress))
+            labelP.placeRelative(lerpI(nLabelX, cLabelX, compactProgress), lerpI(nLabelY, cLabelY, compactProgress))
+            valueP.placeRelative(lerpI(nValueX, cValueX, compactProgress), lerpI(nValueY, cValueY, compactProgress))
         }
     }
 }
