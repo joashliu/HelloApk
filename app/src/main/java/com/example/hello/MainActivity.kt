@@ -4128,10 +4128,28 @@ fun LedgerContent(
         if (filterMode) quickInputCollapseOffset = 0f
     }
 
-    // 正常模式嘅 QuickInput 滾動壓縮邏輯
-    val quickInputScrollConnection = remember(filterMode, topNotes, isAutoAnimating) {
+    // 追蹤係咪離開咗頂部，用嚟控制變形同展開
+    val isScrolledAway by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 20
+        }
+    }
+    
+    var isFilterDeckExpanded by remember { mutableStateOf(true) }
+    LaunchedEffect(isScrolledAway) {
+        // 滾上最頂時自動展開
+        if (!isScrolledAway) isFilterDeckExpanded = true
+    }
+
+    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + ★ 無論幾時向下滾都收起啤牌
+    val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, maxCollapsePx, isFilterDeckExpanded) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // ★ 靈魂所在：只要偵測到向下滾動 (available.y < -5f)，就即刻收起啤牌
+                if (available.y < -5f && isFilterDeckExpanded && isScrolledAway) {
+                    isFilterDeckExpanded = false
+                }
+                
                 if (filterMode || topNotes.isEmpty() || isAutoAnimating) return Offset.Zero
                 val delta = available.y
                 val next = (quickInputCollapseOffset - delta).coerceIn(0f, maxCollapsePx)
@@ -4161,19 +4179,6 @@ fun LedgerContent(
     }
 
     val collapseProgress = if (maxCollapsePx > 0f) (quickInputCollapseOffset / maxCollapsePx).coerceIn(0f, 1f) else 0f
-
-    // ★ 新增：追蹤係咪離開咗頂部，用嚟控制啤牌疊起同時間軸消失
-    val isScrolledAway by remember {
-        derivedStateOf {
-            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 20
-        }
-    }
-    
-    var isFilterDeckExpanded by remember { mutableStateOf(true) }
-    LaunchedEffect(isScrolledAway) {
-        // 向下滾動就收埋變啤牌，滾上頂就自動展開
-        isFilterDeckExpanded = !isScrolledAway
-    }
 
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
@@ -4227,71 +4232,19 @@ fun LedgerContent(
                 scope.launch {
                     delay(120)
                     when (hovered) {
-                        0 -> latestOnCopy(targetRecord)
-                        1 -> latestOnEdit(targetRecord)
-                        2 -> latestOnFilterByName(targetRecord.note)
-                        3 -> latestOnDelete(targetRecord)
+                        0 -> latestOnCopy(targetRecord); 1 -> latestOnEdit(targetRecord)
+                        2 -> latestOnFilterByName(targetRecord.note); 3 -> latestOnDelete(targetRecord)
                     }
                 }
             }
         }
     }
 
-    LaunchedEffect(scrollToTopTrigger) {
-        if (scrollToTopTrigger > 0) {
-            try {
-                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
-                listState.animateScrollToItem(0)
-            } catch (_: Exception) {}
-        }
-    }
+    LaunchedEffect(scrollToTopTrigger) { if (scrollToTopTrigger > 0) { try { if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3); listState.animateScrollToItem(0) } catch (_: Exception) {} } }
+    LaunchedEffect(showKeyboard) { if (showKeyboard) { if (quickInputCollapseOffset > 0f) { launch { try { isAutoAnimating = true; Animatable(quickInputCollapseOffset).animateTo(0f, spring(0.85f, 400f)) { quickInputCollapseOffset = this.value } } finally { isAutoAnimating = false } } } try { if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3); listState.animateScrollToItem(0) } catch (_: Exception) {} } }
+    LaunchedEffect(showFuture) { try { if (showFuture) { if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3); listState.animateScrollToItem(0) } else { if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0) } } catch (_: Exception) {} }
+    LaunchedEffect(filterMode) { try { if (!filterMode) { delay(50); listState.animateScrollToItem(0) } else { quickInputCollapseOffset = 0f; if (listState.firstVisibleItemIndex > 20) { listState.animateScrollToItem(0) } } } catch (_: Exception) {} }
 
-    LaunchedEffect(showKeyboard) {
-        if (showKeyboard) {
-            if (quickInputCollapseOffset > 0f) {
-                launch {
-                    try {
-                        isAutoAnimating = true
-                        Animatable(quickInputCollapseOffset).animateTo(0f, spring(0.85f, 400f)) {
-                            quickInputCollapseOffset = this.value
-                        }
-                    } finally {
-                        isAutoAnimating = false
-                    }
-                }
-            }
-            try {
-                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
-                listState.animateScrollToItem(0)
-            } catch (_: Exception) {}
-        }
-    }
-
-    LaunchedEffect(showFuture) {
-        try {
-            if (showFuture) {
-                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
-                listState.animateScrollToItem(0)
-            } else {
-                if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
-            }
-        } catch (_: Exception) {}
-    }
-
-    LaunchedEffect(filterMode) {
-        try {
-            if (!filterMode) {
-                delay(50)
-                listState.animateScrollToItem(0)
-            } else {
-                quickInputCollapseOffset = 0f
-                if (listState.firstVisibleItemIndex > 20) {
-                    listState.animateScrollToItem(0)
-                }
-            }
-        } catch (_: Exception) {}
-    }
-    
     val singleCategory by remember(filterMode, filtered) { derivedStateOf { if (!filterMode || filtered.isEmpty()) null else { val firstCat = filtered[0].category; if (filtered.all { it.category == firstCat }) firstCat else null } } }
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
@@ -4371,14 +4324,20 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
-            // [1] 頂部統計區塊：動態切換大 Box (正常) vs 碎 Clips (篩選)
+            // ★ 頂部背景色動畫：滾動時抽走底色，令 Clips 獨立出嚟
+            val topBarBgColor by animateColorAsState(
+                targetValue = if (isScrolledAway) Color.Transparent else SURFACE_CARD,
+                animationSpec = tween(250)
+            )
+
+            // [1] 頂部統計區塊：動態切換大 Box (未滾動) vs 碎 Clips (已滾動)
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp, bottom = 0.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .then(if (!filterMode) Modifier.background(SURFACE_CARD) else Modifier) // 篩選模式下抽走底色，令 Clips 睇落更獨立
+                    .background(topBarBgColor)
                     .pointerInput(Unit) {
                         detectHorizontalDragGestures(
                             onDragStart = { dragStartProgress = futureBtnProgress.value; totalDragPx = 0f },
@@ -4403,16 +4362,36 @@ fun LedgerContent(
                 val singleBtnWidth = slotW * p
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = if (filterMode) 0.dp else 8.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = if (isScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(modifier = Modifier.width(statsWidth)) {
-                        if (filterMode) {
-                            // 篩選模式：散開嘅 Clips
-                            FilterTopStatsChips(totalIncome, totalExpense, avgExpense, filtered.size)
-                        } else {
-                            // 正常模式：傳統大 Box
-                            TopStats(hasIncome, hasExpense, totalIncome, totalExpense, false, null, false, "", null, animateTopStats)
+                        // ★ 核心動畫：利用 Crossfade 喺原狀同 Clips 之間流暢切換
+                        androidx.compose.animation.Crossfade(
+                            targetState = isScrolledAway,
+                            animationSpec = tween(250),
+                            label = "stats_crossfade"
+                        ) { scrolled ->
+                            if (scrolled) {
+                                // 滾動後變成 Clips 形式
+                                FilterTopStatsChips(
+                                    income = totalIncome, 
+                                    expense = totalExpense, 
+                                    avgExpense = avgExpense, 
+                                    filteredCount = filtered.size
+                                )
+                            } else {
+                                // 默認大 Box 原狀
+                                TopStats(
+                                    hasIncome = hasIncome, hasExpense = hasExpense,
+                                    income = totalIncome, expense = totalExpense,
+                                    isFilterMode = filterMode,
+                                    filteredCount = if (filterMode) filtered.size else null,
+                                    showCategory = showCategoryChip, categoryName = cachedCategory,
+                                    avgExpense = avgExpense,
+                                    animateValues = animateTopStats
+                                )
+                            }
                         }
                     }
 
@@ -4470,14 +4449,14 @@ fun LedgerContent(
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
                         
-                        // ★ 全新嘅啤牌式疊加佈局：FilterDeckArea
+                        // ★ 啤牌式疊加佈局
                         FilterDeckArea(
                             categories = listOf(null) + visibleCategories,
                             selectedCategory = filterCategory,
                             months = availableMonths,
                             selectedMonth = filterMonth,
                             isExpanded = isFilterDeckExpanded,
-                            onToggleExpand = { isFilterDeckExpanded = true }, // 點擊展開
+                            onToggleExpand = { isFilterDeckExpanded = true },
                             onCategorySelect = { onFilterCategoryChange(if (it == filterCategory) null else it) },
                             onMonthSelect = { onFilterMonthChange(if (it == filterMonth) null else it) }
                         )
@@ -4519,10 +4498,10 @@ fun LedgerContent(
 
             Spacer(Modifier.height(sectionGap))
 
-            // 底部清單區域，恢復原本 QuickInputScrollConnection
+            // 底部清單區域，套用 topScrollConnection 用嚟攔截向下撥動
             Box(
                 Modifier.weight(1f).fillMaxWidth().clipToBounds()
-                    .nestedScroll(quickInputScrollConnection) 
+                    .nestedScroll(topScrollConnection) 
                     .graphicsLayer {
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
