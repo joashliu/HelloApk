@@ -4136,17 +4136,21 @@ fun LedgerContent(
     }
     
     var isFilterDeckExpanded by remember { mutableStateOf(true) }
+    // ★ 記錄最後一次手動展開嘅時間 (500ms 保護期)
+    var manualExpandTime by remember { mutableLongStateOf(0L) }
+
     LaunchedEffect(isScrolledAway) {
         // 滾上最頂時自動展開
         if (!isScrolledAway) isFilterDeckExpanded = true
     }
 
-    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + ★ 無論幾時向下滾都收起啤牌
+    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + 無論幾時向下滾都收起啤牌
     val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, maxCollapsePx, isFilterDeckExpanded) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // ★ 靈魂所在：只要偵測到向下滾動 (available.y < -5f)，就即刻收起啤牌
-                if (available.y < -5f && isFilterDeckExpanded && isScrolledAway) {
+                val now = System.currentTimeMillis()
+                // ★ 500ms 保護期：如果啱啱撳咗展開，就算有殘留嘅向下滾動慣性，都唔會自動收起
+                if (available.y < -5f && isFilterDeckExpanded && isScrolledAway && (now - manualExpandTime > 500L)) {
                     isFilterDeckExpanded = false
                 }
                 
@@ -4306,10 +4310,9 @@ fun LedgerContent(
             }
         }
     }
+    
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
-    
-    // 👉 補返呢行，等下面 TopStats 認得呢個變數
     val showCategoryChip = filterMode && singleCategory != null
 
     val displayGroups = groupedByDate
@@ -4387,7 +4390,7 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
-            // ★ 頂部背景色動畫：滾動時抽走底色，令 Clips 獨立出嚟
+            // 頂部背景色動畫：滾動時抽走底色，令 Clips 獨立出嚟
             val topBarBgColor by animateColorAsState(
                 targetValue = if (isScrolledAway) Color.Transparent else SURFACE_CARD,
                 animationSpec = tween(250)
@@ -4428,12 +4431,16 @@ fun LedgerContent(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = if (isScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.width(statsWidth)) {
-                        // ★ 核心動畫：利用 Crossfade 喺原狀同 Clips 之間流暢切換
-                        androidx.compose.animation.Crossfade(
+                    // ★ 加入 animateContentSize 同 AnimatedContent，令高度切換同淡入淡出完美結合
+                    Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.8f, 350f))) {
+                        androidx.compose.animation.AnimatedContent(
                             targetState = isScrolledAway,
-                            animationSpec = tween(250),
-                            label = "stats_crossfade"
+                            transitionSpec = {
+                                (fadeIn(tween(250)) + scaleIn(initialScale = 0.95f)).togetherWith(
+                                    fadeOut(tween(200)) + scaleOut(targetScale = 0.95f)
+                                ).using(SizeTransform(clip = false) { _, _ -> spring(dampingRatio = 0.85f, stiffness = 300f) })
+                            },
+                            label = "stats_animated_content"
                         ) { scrolled ->
                             if (scrolled) {
                                 // 滾動後變成 Clips 形式
@@ -4512,14 +4519,17 @@ fun LedgerContent(
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
                         
-                        // ★ 啤牌式疊加佈局
+                        // 啤牌式疊加佈局
                         FilterDeckArea(
                             categories = listOf(null) + visibleCategories,
                             selectedCategory = filterCategory,
                             months = availableMonths,
                             selectedMonth = filterMonth,
                             isExpanded = isFilterDeckExpanded,
-                            onToggleExpand = { isFilterDeckExpanded = true },
+                            onToggleExpand = { 
+                                isFilterDeckExpanded = true
+                                manualExpandTime = System.currentTimeMillis() // ★ 點擊展開時，更新 manualExpandTime，啟動半秒保護期
+                            },
                             onCategorySelect = { onFilterCategoryChange(if (it == filterCategory) null else it) },
                             onMonthSelect = { onFilterMonthChange(if (it == filterMonth) null else it) }
                         )
@@ -4614,7 +4624,7 @@ fun LedgerContent(
 }
 
 // ==========================================
-// ★ 新增的 Helper Composables (請貼在 MainActivity.kt 任何頂層位置)
+// ★ Helper Composables
 // ==========================================
 
 @OptIn(ExperimentalLayoutApi::class)
