@@ -4390,10 +4390,11 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
-            // 頂部背景色動畫：滾動時抽走底色，令 Clips 獨立出嚟
+            // ★ 修改：將 Transparent 改為 SURFACE_BG，無縫融入背景，徹底消除黑色陰影
             val topBarBgColor by animateColorAsState(
-                targetValue = if (isScrolledAway) Color.Transparent else SURFACE_CARD,
-                animationSpec = tween(250)
+                targetValue = if (isScrolledAway) SURFACE_BG else SURFACE_CARD,
+                animationSpec = tween(350, easing = FastOutSlowInEasing),
+                label = "topBarBg"
             )
 
             // [1] 頂部統計區塊：動態切換大 Box (未滾動) vs 碎 Clips (已滾動)
@@ -10345,27 +10346,20 @@ fun TopStats(
                 }
             }
 
-            // [Clips 壓縮模式佈局] - FlowRow 排列法
+            // [Clips 壓縮模式佈局] - ★ 動態完美等分闊度 (每行最多 3 個)
             val cGapX = 8.dp
             val cGapY = 8.dp
             val cRowH = 34.dp
             val cMap = mutableMapOf<StatBlockType, BlockGeometry>()
-            var cx = 0.dp
-            var cy = 0.dp
-            activeBlocks.forEach { block ->
-                val w = when(block) {
-                    StatBlockType.COUNT -> 65.dp
-                    StatBlockType.CAT -> 75.dp
-                    StatBlockType.INC, StatBlockType.EXP, StatBlockType.BAL -> 95.dp
-                    StatBlockType.AVG -> 85.dp
-                    else -> 80.dp
+            
+            val chunked = activeBlocks.chunked(3)
+            chunked.forEachIndexed { rIdx, rowBlocks ->
+                val cy = (cRowH + cGapY) * rIdx
+                val itemW = (totalW - cGapX * (rowBlocks.size - 1).coerceAtLeast(0)) / rowBlocks.size
+                rowBlocks.forEachIndexed { cIdx, block ->
+                    val cx = (itemW + cGapX) * cIdx
+                    cMap[block] = BlockGeometry(cx, cy, itemW, cRowH)
                 }
-                if (cx + w > totalW) {
-                    cx = 0.dp
-                    cy += cRowH + cGapY
-                }
-                cMap[block] = BlockGeometry(cx, cy, w, cRowH)
-                cx += w + cGapX
             }
             Pair(nMap, cMap)
         }
@@ -10385,15 +10379,14 @@ fun TopStats(
                 val nGeo = nMap[block]!!
                 val cGeo = cMap[block]!!
                 
-                // 無縫變形插值
                 val x = androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress)
                 val y = androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress)
                 val w = androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress)
                 val h = androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress)
 
-                // Clips 模式時淡入邊框及底色
-                val bgColor = androidx.compose.ui.graphics.lerp(Color.Transparent, SURFACE_CARD, progress)
-                val borderColor = androidx.compose.ui.graphics.lerp(Color.Transparent, DIVIDER_COLOR.copy(alpha=0.4f), progress)
+                // ★ 修改：使用 copy(alpha = 0f) 避免黑色陰影陷阱
+                val bgColor = androidx.compose.ui.graphics.lerp(SURFACE_CARD.copy(alpha = 0f), SURFACE_CARD, progress)
+                val borderColor = androidx.compose.ui.graphics.lerp(DIVIDER_COLOR.copy(alpha = 0f), DIVIDER_COLOR.copy(alpha = 0.5f), progress)
 
                 Box(
                     Modifier
@@ -10437,22 +10430,22 @@ private fun AnimatedStatBlock(
         "${valueNormal}筆"
     } else valueNormal
 
+    // ★ 修改：文字顏色會隨住變形，漸變去更深色嘅 TEXT_PRIMARY
+    val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, compactProgress)
+
     androidx.compose.ui.layout.Layout(
         content = {
-            // [0] 圖標 (Clips 模式時淡出)
             Icon(iconNormal, null, tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)), modifier = Modifier.size(16.dp))
-
-            // [1] 標籤
+            
             Text(
                 text = labelNormal,
                 fontSize = 11.sp,
-                color = TEXT_SECONDARY,
-                fontWeight = FontWeight.Medium,
+                color = currentLabelColor, // ★ 應用漸變深色
+                fontWeight = if (compactProgress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false
             )
 
-            // [2] 數值 (無縫縮放 19sp -> 13sp)
             val currentFontSize = (19f - 6f * compactProgress).sp
             RollingNumber(
                 text = finalValueString,
@@ -10487,10 +10480,12 @@ private fun AnimatedStatBlock(
             val nValueX = (constraints.maxWidth - valueP.width) / 2
             val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
 
-            // 📍 Clips 模式 (靠左、水平排列)
-            val startPad = 10.dp.roundToPx()
+            // 📍 Clips 模式 (★ 修改為動態置中水平排列)
             val gapCompact = 6.dp.roundToPx()
-            val cLabelX = startPad
+            val cTotalW = labelP.width + gapCompact + valueP.width
+            val cStartX = (constraints.maxWidth - cTotalW) / 2 // ★ 完美置中
+            
+            val cLabelX = cStartX
             val cLabelY = (constraints.maxHeight - labelP.height) / 2
             val cValueX = cLabelX + labelP.width + gapCompact
             val cValueY = (constraints.maxHeight - valueP.height) / 2
@@ -10498,7 +10493,7 @@ private fun AnimatedStatBlock(
             val cIconX = cLabelX
             val cIconY = cLabelY
 
-            // ★ 執行物理過渡
+            // 執行物理過渡
             iconP.placeRelative(lerpI(nIconX, cIconX, compactProgress), lerpI(nIconY, cIconY, compactProgress))
             labelP.placeRelative(lerpI(nLabelX, cLabelX, compactProgress), lerpI(nLabelY, cLabelY, compactProgress))
             valueP.placeRelative(lerpI(nValueX, cValueX, compactProgress), lerpI(nValueY, cValueY, compactProgress))
