@@ -784,6 +784,8 @@ data class FilterState(
     val month: String? = null,
     val search: String = "",
     val showFuture: Boolean = false,
+    val startTimeMin: Int = 0,
+    val endTimeMin: Int = 1440,
 )
 
 @Immutable
@@ -1000,6 +1002,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun setFilterMonth(v: String?)      { _filter.update { it.copy(month = v) } }
     fun setFilterSearch(v: String)      { _filter.update { it.copy(search = v) } }
     fun setShowFuture(v: Boolean)       { _filter.update { it.copy(showFuture = v) } }
+    
+    // 👉 加入呢個函數
+    fun setFilterTimeRange(startMin: Int, endMin: Int) {
+        _filter.update { it.copy(startTimeMin = startMin, endTimeMin = endMin) }
+    }
 
     private val _justAddedIds = MutableStateFlow<Set<String>>(emptySet())
     val justAddedIds: StateFlow<Set<String>> = _justAddedIds.asStateFlow()
@@ -1463,10 +1470,15 @@ private fun computeLedgerUiState(
 
     val filterCat = filter.category
     val filterMon = filter.month
-    val catMonthFiltered = if (filterCat == null && filterMon == null) searchFiltered else {
+    val startMin = filter.startTimeMin
+    val endMin = filter.endTimeMin
+    
+    val catMonthFiltered = if (filterCat == null && filterMon == null && startMin == 0 && endMin == 1440) searchFiltered else {
         searchFiltered.filter { r ->
+            val minOfDay = getTimestampMeta(r.timestamp).secOfDay / 60
             (filterCat == null || r.category == filterCat) &&
-            (filterMon == null || getTimestampMeta(r.timestamp).monthKey == filterMon)
+            (filterMon == null || getTimestampMeta(r.timestamp).monthKey == filterMon) &&
+            (minOfDay in startMin..endMin)
         }
     }
 
@@ -2994,6 +3006,10 @@ fun MainApp(
                 onFilterCategoryChange = { vm.setFilterCategory(it) },
                 filterMonth = filter.month,
                 onFilterMonthChange = { vm.setFilterMonth(it) },
+                // 👉 加入呢三行
+                filterStartTimeMin = filter.startTimeMin,
+                filterEndTimeMin = filter.endTimeMin,
+                onFilterTimeRangeChange = { s, e -> vm.setFilterTimeRange(s, e) },
                 availableMonths = ui.availableMonths,
                 visibleCategories = ui.visibleCategories,
                 expandedId = expandedId,
@@ -4037,6 +4053,12 @@ fun NotificationAccessGuide(context: Context) {
         }
     }
 }
+fun formatTimeMin(min: Int): String {
+    val h = min / 60
+    val m = min % 60
+    return "${pad2(h)}:${pad2(m)}"
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun LedgerContent(
@@ -4056,6 +4078,9 @@ fun LedgerContent(
     onFilterCategoryChange: (String?) -> Unit,
     filterMonth: String?,
     onFilterMonthChange: (String?) -> Unit,
+    filterStartTimeMin: Int,
+    filterEndTimeMin: Int,
+    onFilterTimeRangeChange: (Int, Int) -> Unit,
     availableMonths: List<String>,
     visibleCategories: List<String>,
     expandedId: String?,
@@ -4169,7 +4194,6 @@ fun LedgerContent(
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
 
-    // ★ 大幅縮短滑動參數：彈出距離減至 85dp，邊界閥值相應調整
     val fanRadiusPx = remember(density) { with(density) { 105.dp.toPx() } }
     val fanHalfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
     val fanEdgeThreshold = fanRadiusPx + fanHalfBtnPx
@@ -4180,7 +4204,6 @@ fun LedgerContent(
         label = "fanMenuProgress"
     )
 
-    // ★ 大幅縮短死區參數：減至 16dp
     val minFanRadiusPx = remember(density) { with(density) { 16.dp.toPx() } }
     val handleFanStart = remember {
         { r: Record, offset: Offset ->
@@ -4214,7 +4237,7 @@ fun LedgerContent(
                 minRadiusPx = minFanRadiusPx,
                 arcCenterAngle = arcCenterAngle,
                 radiusPx = fanRadiusPx,
-                hitRadiusPx = with(density) { 40.dp.toPx() } // 加大保底半徑
+                hitRadiusPx = with(density) { 40.dp.toPx() } 
             )
             val targetRecord = activeFanRecord
             activeFanRecord = null
@@ -4432,7 +4455,7 @@ fun LedgerContent(
                 }
             }
 
-            // 👉 請將呢段狀態變數加喺呢度 (avgExpense 同 futureBtnRevealed 之間)
+            // 狀態變數移至適當位置
             val context = LocalContext.current
             var isNotificationGranted by remember { mutableStateOf(false) }
             var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
@@ -4442,7 +4465,6 @@ fun LedgerContent(
                     NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
                 }
             }
-            // ========================================================
 
             var futureBtnRevealed by rememberSaveable { mutableStateOf(false) }
             val futureBtnProgress = remember { Animatable(if (futureBtnRevealed) 1f else 0f) }
@@ -4458,7 +4480,7 @@ fun LedgerContent(
                 )
             }
 
-                        BoxWithConstraints(
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
@@ -4550,17 +4572,12 @@ fun LedgerContent(
                                 IconButton(
                                     onClick = {
                                         if (!canDrawCaptureOverlay(context)) {
-                                            // 冇懸浮窗權限 → 跳去申請
                                             try {
                                                 val uri = Uri.parse("package:${context.packageName}")
-                                                context.startActivity(
-                                                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri)
-                                                )
+                                                context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, uri))
                                             } catch (_: Exception) {
                                                 try {
-                                                    context.startActivity(
-                                                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
-                                                    )
+                                                    context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
                                                 } catch (_: Exception) {}
                                             }
                                         } else {
@@ -4688,6 +4705,36 @@ fun LedgerContent(
                                     )
                                 }
                             }
+                        }
+                        
+                        // 時間範圍篩選器
+                        Spacer(Modifier.height(sectionGap + 8.dp))
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("時間範圍", fontSize = 13.sp, color = TEXT_SECONDARY, fontWeight = FontWeight.Medium)
+                                Text("${formatTimeMin(filterStartTimeMin)} - ${formatTimeMin(filterEndTimeMin)}", 
+                                     fontSize = 13.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                            }
+                            
+                            var sliderValues by remember(filterStartTimeMin, filterEndTimeMin) {
+                                mutableStateOf(filterStartTimeMin.toFloat()..filterEndTimeMin.toFloat())
+                            }
+                            
+                            androidx.compose.material3.RangeSlider(
+                                value = sliderValues,
+                                onValueChange = { sliderValues = it },
+                                onValueChangeFinished = {
+                                    onFilterTimeRangeChange(sliderValues.start.roundToInt(), sliderValues.endInclusive.roundToInt())
+                                },
+                                valueRange = 0f..1440f,
+                                steps = 95, // 1440分鐘 / 15分鐘一格 = 96格 (95 steps)
+                                colors = androidx.compose.material3.SliderDefaults.colors(
+                                    thumbColor = BRAND_PRIMARY,
+                                    activeTrackColor = BRAND_PRIMARY,
+                                    inactiveTrackColor = DIVIDER_COLOR
+                                ),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            )
                         }
                     }
                 }
