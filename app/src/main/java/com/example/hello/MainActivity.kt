@@ -4432,6 +4432,18 @@ fun LedgerContent(
                 }
             }
 
+            // 👉 請將呢段狀態變數加喺呢度 (avgExpense 同 futureBtnRevealed 之間)
+            val context = LocalContext.current
+            var isNotificationGranted by remember { mutableStateOf(false) }
+            var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
+
+            LaunchedEffect(Unit) {
+                isNotificationGranted = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+                }
+            }
+            // ========================================================
+
             var futureBtnRevealed by rememberSaveable { mutableStateOf(false) }
             val futureBtnProgress = remember { Animatable(if (futureBtnRevealed) 1f else 0f) }
             val barScope = rememberCoroutineScope()
@@ -9077,16 +9089,6 @@ fun PivotContent(
     val rowHeight = 38.dp
     val stickyHeight = 40.dp
     val colWidthPx = remember(density, colWidth) { with(density) { colWidth.roundToPx() } }
-
-    val context = LocalContext.current
-    var isNotificationGranted by remember { mutableStateOf(false) }
-    var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
-
-    LaunchedEffect(Unit) {
-        isNotificationGranted = kotlinx.coroutines.withContext(Dispatchers.IO) {
-            NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
-        }
-    }
 
     // 標題／年份：向下滾動時漸隱，滾到頂先出現
     val headerCollapse by remember {
