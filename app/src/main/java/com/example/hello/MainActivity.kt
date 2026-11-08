@@ -4120,24 +4120,35 @@ fun LedgerContent(
     }
 
     val density = LocalDensity.current
-    val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
-    var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
-
+    
+    // 篩選模式下嘅壓縮距離縮短，對應 25% 嘅高度縮減，做到 1:1 緊貼手指
+    val maxQuickCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
+    val maxFilterCollapsePx = remember(density) { with(density) { 70.dp.toPx() } }
+    
+    var topCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
 
     LaunchedEffect(filterMode) {
-        if (filterMode) quickInputCollapseOffset = 0f
+        if (filterMode) topCollapseOffset = 0f
     }
 
-    val quickInputScrollConnection = remember(filterMode, topNotes, isAutoAnimating) {
+    val currentMaxCollapsePx = if (filterMode) maxFilterCollapsePx else maxQuickCollapsePx
+    val collapseProgress = if (currentMaxCollapsePx > 0f) (topCollapseOffset / currentMaxCollapsePx).coerceIn(0f, 1f) else 0f
+    
+    // ★ Sticky Header 縮放比例：最多縮細到原本嘅 75%
+    val filterTargetScale = if (filterMode) 1f - (collapseProgress * 0.25f) else 1f
+
+    val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, currentMaxCollapsePx) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (filterMode || topNotes.isEmpty() || isAutoAnimating) return Offset.Zero
+                if (isAutoAnimating) return Offset.Zero
+                if (!filterMode && topNotes.isEmpty()) return Offset.Zero
+                if (currentMaxCollapsePx <= 0f) return Offset.Zero
 
                 val delta = available.y
-                val next = (quickInputCollapseOffset - delta).coerceIn(0f, maxCollapsePx)
-                val consumed = quickInputCollapseOffset - next
-                quickInputCollapseOffset = next
+                val next = (topCollapseOffset - delta).coerceIn(0f, currentMaxCollapsePx)
+                val consumed = topCollapseOffset - next
+                topCollapseOffset = next
                 return Offset(0f, consumed)
             }
         }
@@ -4147,21 +4158,19 @@ fun LedgerContent(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(isListScrolling) {
-        if (!isListScrolling && !isAutoAnimating && quickInputCollapseOffset > 0f && quickInputCollapseOffset < maxCollapsePx) {
+        if (!isListScrolling && !isAutoAnimating && topCollapseOffset > 0f && topCollapseOffset < currentMaxCollapsePx) {
             try {
                 isAutoAnimating = true
-                val target = if (quickInputCollapseOffset > maxCollapsePx * 0.5f) maxCollapsePx else 0f
-                val a = Animatable(quickInputCollapseOffset)
+                val target = if (topCollapseOffset > currentMaxCollapsePx * 0.5f) currentMaxCollapsePx else 0f
+                val a = Animatable(topCollapseOffset)
                 a.animateTo(target, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                    quickInputCollapseOffset = this.value
+                    topCollapseOffset = this.value
                 }
             } finally {
                 isAutoAnimating = false
             }
         }
     }
-
-    val collapseProgress = if (maxCollapsePx > 0f) (quickInputCollapseOffset / maxCollapsePx).coerceIn(0f, 1f) else 0f
 
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
@@ -4266,13 +4275,13 @@ fun LedgerContent(
 
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
-            if (quickInputCollapseOffset > 0f) {
+            if (topCollapseOffset > 0f) {
                 launch {
                     try {
                         isAutoAnimating = true
-                        val a = Animatable(quickInputCollapseOffset)
+                        val a = Animatable(topCollapseOffset)
                         a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                            quickInputCollapseOffset = this.value
+                            topCollapseOffset = this.value
                         }
                     } finally {
                         isAutoAnimating = false
@@ -4304,7 +4313,7 @@ fun LedgerContent(
                 delay(50)
                 listState.animateScrollToItem(0)
             } else {
-                quickInputCollapseOffset = 0f
+                topCollapseOffset = 0f
                 if (listState.firstVisibleItemIndex > 20) {
                     listState.animateScrollToItem(0)
                 }
@@ -4322,7 +4331,6 @@ fun LedgerContent(
         }
     }
     val isSingleCategoryFilter = singleCategory != null
-
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
 
@@ -4455,7 +4463,6 @@ fun LedgerContent(
                 }
             }
 
-            // 狀態變數移至適當位置
             val context = LocalContext.current
             var isNotificationGranted by remember { mutableStateOf(false) }
             var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
@@ -4480,11 +4487,31 @@ fun LedgerContent(
                 )
             }
 
+            // [1] 頂部統計區塊 (Sticky Header 縮放版)
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp, bottom = 0.dp)
+                    .then(
+                        if (filterMode) {
+                            Modifier
+                                .layout { measurable, constraints ->
+                                    val placeable = measurable.measure(constraints)
+                                    val newHeight = (placeable.height * filterTargetScale).roundToInt().coerceAtLeast(0)
+                                    layout(placeable.width, newHeight) {
+                                        // 向上偏移補償縮放後嘅空白，令元件完美貼住頂部
+                                        val offsetY = (-(placeable.height * (1f - filterTargetScale)) / 2f).roundToInt()
+                                        placeable.placeRelative(0, offsetY)
+                                    }
+                                }
+                                .graphicsLayer {
+                                    scaleX = filterTargetScale
+                                    scaleY = filterTargetScale
+                                    alpha = 1f // ★ 保持 100% 透明度，營造 Sticky 效果
+                                }
+                        } else Modifier
+                    )
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
                     .pointerInput(Unit) {
@@ -4539,7 +4566,6 @@ fun LedgerContent(
                     }
 
                     if (p > 0.001f) {
-                        // 第一粒：顯示未來項目
                         Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
                         Box(
                             modifier = Modifier
@@ -4560,7 +4586,6 @@ fun LedgerContent(
                             }
                         }
 
-                        // 第二粒：消費浮窗提示開關
                         if (showOverlayBtn) {
                             Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
                             Box(
@@ -4606,8 +4631,10 @@ fun LedgerContent(
             }
 
             val sectionGap = 8.dp
-            Spacer(Modifier.height(sectionGap))
+            // ★ 間距同樣跟隨縮放比例
+            Spacer(Modifier.height(sectionGap * filterTargetScale))
 
+            // [2] 內容區塊 (QuickInput / 篩選控制)
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
@@ -4643,9 +4670,9 @@ fun LedgerContent(
                                 scope.launch {
                                     try {
                                         isAutoAnimating = true
-                                        val a = Animatable(quickInputCollapseOffset)
+                                        val a = Animatable(topCollapseOffset)
                                         a.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 400f)) {
-                                            quickInputCollapseOffset = this.value
+                                            topCollapseOffset = this.value
                                         }
                                     } finally {
                                         isAutoAnimating = false
@@ -4660,7 +4687,25 @@ fun LedgerContent(
                         )
                     }
                 } else {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
+                    // ★ 篩選控制 Sticky 縮放版
+                    Column(
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 0.dp)
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(constraints)
+                                val newHeight = (placeable.height * filterTargetScale).roundToInt().coerceAtLeast(0)
+                                layout(placeable.width, newHeight) {
+                                    val offsetY = (-(placeable.height * (1f - filterTargetScale)) / 2f).roundToInt()
+                                    placeable.placeRelative(0, offsetY)
+                                }
+                            }
+                            .graphicsLayer {
+                                scaleX = filterTargetScale
+                                scaleY = filterTargetScale
+                                alpha = 1f // ★ 保持 100% 透明度
+                                clip = true
+                            }
+                    ) {
                         val allCategories: List<String?> = remember(visibleCategories) {
                             listOf(null) + visibleCategories
                         }
@@ -4707,7 +4752,6 @@ fun LedgerContent(
                             }
                         }
                         
-                        // 時間範圍篩選器
                         Spacer(Modifier.height(sectionGap + 8.dp))
                         Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -4727,7 +4771,7 @@ fun LedgerContent(
                                     onFilterTimeRangeChange(sliderValues.start.roundToInt(), sliderValues.endInclusive.roundToInt())
                                 },
                                 valueRange = 0f..1440f,
-                                steps = 95, // 1440分鐘 / 15分鐘一格 = 96格 (95 steps)
+                                steps = 95,
                                 colors = androidx.compose.material3.SliderDefaults.colors(
                                     thumbColor = BRAND_PRIMARY,
                                     activeTrackColor = BRAND_PRIMARY,
@@ -4740,14 +4784,14 @@ fun LedgerContent(
                 }
             }
 
-            Spacer(Modifier.height(sectionGap))
+            Spacer(Modifier.height(sectionGap * filterTargetScale))
 
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .clipToBounds()
-                    .nestedScroll(quickInputScrollConnection)
+                    .nestedScroll(topScrollConnection) 
                     .graphicsLayer {
                         val p = keyboardProgressProvider()
                         alpha = 1f - (p * 0.4f)
