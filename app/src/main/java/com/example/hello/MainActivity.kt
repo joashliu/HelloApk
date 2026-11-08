@@ -4227,7 +4227,6 @@ fun LedgerContent(
                 scope.launch {
                     delay(120)
                     when (hovered) {
-                        // 👉 將呢度拆返開做獨立 4 行
                         0 -> latestOnCopy(targetRecord)
                         1 -> latestOnEdit(targetRecord)
                         2 -> latestOnFilterByName(targetRecord.note)
@@ -4238,11 +4237,61 @@ fun LedgerContent(
         }
     }
 
-    LaunchedEffect(scrollToTopTrigger) { if (scrollToTopTrigger > 0) { try { if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3); listState.animateScrollToItem(0) } catch (_: Exception) {} } }
-    LaunchedEffect(showKeyboard) { if (showKeyboard) { if (quickInputCollapseOffset > 0f) { launch { try { isAutoAnimating = true; Animatable(quickInputCollapseOffset).animateTo(0f, spring(0.85f, 400f)) { quickInputCollapseOffset = this.value } } finally { isAutoAnimating = false } } } try { if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3); listState.animateScrollToItem(0) } catch (_: Exception) {} } }
-    LaunchedEffect(showFuture) { try { if (showFuture) { if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3); listState.animateScrollToItem(0) } else { if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0) } } catch (_: Exception) {} }
-    LaunchedEffect(filterMode) { try { if (!filterMode) { delay(50); listState.animateScrollToItem(0) } else { quickInputCollapseOffset = 0f; if (listState.firstVisibleItemIndex > 20) { listState.animateScrollToItem(0) } } } catch (_: Exception) {} }
+    LaunchedEffect(scrollToTopTrigger) {
+        if (scrollToTopTrigger > 0) {
+            try {
+                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
+                listState.animateScrollToItem(0)
+            } catch (_: Exception) {}
+        }
+    }
 
+    LaunchedEffect(showKeyboard) {
+        if (showKeyboard) {
+            if (quickInputCollapseOffset > 0f) {
+                launch {
+                    try {
+                        isAutoAnimating = true
+                        Animatable(quickInputCollapseOffset).animateTo(0f, spring(0.85f, 400f)) {
+                            quickInputCollapseOffset = this.value
+                        }
+                    } finally {
+                        isAutoAnimating = false
+                    }
+                }
+            }
+            try {
+                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
+                listState.animateScrollToItem(0)
+            } catch (_: Exception) {}
+        }
+    }
+
+    LaunchedEffect(showFuture) {
+        try {
+            if (showFuture) {
+                if (listState.firstVisibleItemIndex > 5) listState.scrollToItem(3)
+                listState.animateScrollToItem(0)
+            } else {
+                if (listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
+            }
+        } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(filterMode) {
+        try {
+            if (!filterMode) {
+                delay(50)
+                listState.animateScrollToItem(0)
+            } else {
+                quickInputCollapseOffset = 0f
+                if (listState.firstVisibleItemIndex > 20) {
+                    listState.animateScrollToItem(0)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+    
     val singleCategory by remember(filterMode, filtered) { derivedStateOf { if (!filterMode || filtered.isEmpty()) null else { val firstCat = filtered[0].category; if (filtered.all { it.category == firstCat }) firstCat else null } } }
     var cachedCategory by remember { mutableStateOf("飲食") }
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
