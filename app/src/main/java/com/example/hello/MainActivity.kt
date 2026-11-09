@@ -1494,11 +1494,12 @@ private fun computeLedgerUiState(
     var firstNote: String? = null
     var allSameNote = true
 
-    // ★ 有揀特定月份 → 只計嗰個月；揀「全年」(filter.month == null) → 用晒全部篩選結果
-    val topStatRecords = if (filter.month == null) {
-        ledgerRecords
-    } else {
-        ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == filter.month }
+    // ★ 非篩選模式：永遠用本月；篩選模式：跟 chip 月份（null = 全年）
+    val currentMonthKey = getTimestampMeta(now).monthKey
+    val topStatRecords = when {
+        !filter.modeOn -> ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == currentMonthKey }
+        filter.month == null -> ledgerRecords
+        else -> ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == filter.month }
     }
 
     for (r in topStatRecords) {
@@ -4161,10 +4162,14 @@ fun LedgerContent(
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
     val showCategoryChip = filterMode && singleCategory != null
 
-    // ★ 有揀特定月份 → 只計嗰個月；揀「全年」(filterMonth == null) → 用晒全部篩選結果
-    val statRecords = remember(filtered, filterMonth) {
-        if (filterMonth == null) filtered
-        else filtered.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
+    // ★ 非篩選模式：永遠用本月；篩選模式：跟 chip 月份（null = 全年）
+    val currentMonthStr = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+    val statRecords = remember(filtered, filterMonth, filterMode, currentMonthStr) {
+        when {
+            !filterMode -> filtered.filter { monthKeyFromTimestamp(it.timestamp) == currentMonthStr }
+            filterMonth == null -> filtered
+            else -> filtered.filter { monthKeyFromTimestamp(it.timestamp) == filterMonth }
+        }
     }
     
     val avgExpense = remember(statRecords, filterMode) {
