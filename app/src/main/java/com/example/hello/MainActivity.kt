@@ -4440,8 +4440,8 @@ fun LedgerContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.85f, 350f))) {
-                        // 確保如果唔係 filterMode，就算碌落去都唔會變形 (因為唔需要變形)
-                        val shouldCompact = filterMode && effectiveScrolledAway
+                        // ★ 已經移除 filterMode 限制：依家無論係咪篩選狀態，向下滾動都會無縫變成獨立 Clips
+                        val shouldCompact = effectiveScrolledAway
                         
                         TopStats(
                             hasIncome = hasIncome, hasExpense = hasExpense,
