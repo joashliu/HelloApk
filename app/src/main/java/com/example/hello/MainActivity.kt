@@ -1495,9 +1495,9 @@ private fun computeLedgerUiState(
     var allSameNote = true
 
     val currentMonthKey = getTimestampMeta(now).monthKey
-    val topStatRecords = if (filter.modeOn) ledgerRecords else {
-        ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == currentMonthKey }
-    }
+    // ★ 修改：如果有揀特定月份就用嗰個月，如果揀「全年」或者冇揀，就淨係計當前月份
+    val targetMonthKey = filter.month ?: currentMonthKey
+    val topStatRecords = ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == targetMonthKey }
 
     for (r in topStatRecords) {
         if (r.id !in deletingIds && r.category != "還錢") {
@@ -4124,13 +4124,12 @@ fun LedgerContent(
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
 
-    // ★ 加入退出保護狀態
+    // ★ 退出保護狀態
     var isExitingFilter by remember { mutableStateOf(false) }
 
     LaunchedEffect(filterMode) {
         try {
             if (!filterMode) {
-                // 退回正常模式時，立刻標記為正在退出，鎖死為展開狀態
                 isExitingFilter = true
                 quickInputCollapseOffset = 0f
                 listState.animateScrollToItem(0)
@@ -4160,32 +4159,46 @@ fun LedgerContent(
     LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
     val showCategoryChip = filterMode && singleCategory != null
 
-    // 追蹤係咪離開咗頂部，用嚟控制變形同展開
+    // ★ 只抽返當前月份/選定月份出嚟計均支同筆數，避免數字暴增
+    val currentMonthStr = remember { monthKeyFromTimestamp(System.currentTimeMillis()) }
+    val targetMonthStr = filterMonth ?: currentMonthStr
+    val statRecords = remember(filtered, targetMonthStr) {
+        filtered.filter { monthKeyFromTimestamp(it.timestamp) == targetMonthStr }
+    }
+    
+    val avgExpense = remember(statRecords, filterMode) {
+        if (!filterMode) 0.0
+        else {
+            val exps = statRecords.filter { it.category != INCOME_CATEGORY && it.category != "還錢" }
+            if (exps.isNotEmpty()) exps.sumOf { it.amount } / exps.size else 0.0
+        }
+    }
+    val displayCount = if (filterMode) statRecords.size else null
+
+    // 追蹤係咪離開咗頂部
     val isScrolledAway by remember {
         derivedStateOf {
             listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 20
         }
     }
     
-    // ★ 核心判定：只有真正滾動離開頂部，並且「唔係退出緊篩選模式」，先至會縮細
+    // 只有真正滾動離開頂部，並且「唔係退出緊篩選模式」，先至會縮細
     val effectiveScrolledAway = isScrolledAway && !isExitingFilter
     
     var isFilterDeckExpanded by remember { mutableStateOf(true) }
     var manualExpandTime by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(effectiveScrolledAway) {
-        // 滾上最頂時自動展開
         if (!effectiveScrolledAway) isFilterDeckExpanded = true
     }
 
-    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + ★ 只攔截手動 Drag 嚟收起啤牌
     val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, maxCollapsePx, isFilterDeckExpanded) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val isManualDrag = source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.Drag || source.toString() == "UserInput"
                 val now = System.currentTimeMillis()
                 
-                // ★ 500ms 保護期：如果啱啱撳咗展開，就算有殘留嘅向下滾動，都唔會自動收起
+                // ★ 500ms 保護期：如果啱啱撳咗展開，就算有殘留嘅慣性，都唔會自動收起啤牌
                 if (isManualDrag && available.y < -5f && isFilterDeckExpanded && effectiveScrolledAway && (now - manualExpandTime > 500L)) {
                     isFilterDeckExpanded = false
                 }
@@ -4375,7 +4388,6 @@ fun LedgerContent(
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(SURFACE_BG)) {
             NotificationAccessGuide(context = LocalContext.current)
-            val avgExpense = remember(filtered, filterMode) { if (!filterMode) 0.0 else { val exps = filtered.filter { it.category != INCOME_CATEGORY }; if (exps.isNotEmpty()) exps.sumOf { it.amount } / exps.size else 0.0 } }
 
             val context = LocalContext.current
             var isNotificationGranted by remember { mutableStateOf(false) }
@@ -4398,13 +4410,12 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
-            // 頂部背景色動畫：改為用 SURFACE_BG 避免黑色陰影，並用 effectiveScrolledAway
+            // 頂部背景色動畫：使用 SURFACE_BG 避免陰影
             val topBarBgColor by animateColorAsState(
                 targetValue = if (effectiveScrolledAway) SURFACE_BG else SURFACE_CARD,
                 animationSpec = tween(350, easing = FastOutSlowInEasing)
             )
 
-            // [1] 頂部統計區塊：動態切換大 Box (未滾動) vs 碎 Clips (已滾動)
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -4439,19 +4450,17 @@ fun LedgerContent(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = if (effectiveScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.85f, 350f))) {
-                        // ★ 已經移除 filterMode 限制：依家無論係咪篩選狀態，向下滾動都會無縫變成獨立 Clips
-                        val shouldCompact = effectiveScrolledAway
-                        
+                    Box(modifier = Modifier.width(statsWidth)) {
+                        // ★ 完美版 TopStats (原生變形、0值自動消失)
                         TopStats(
                             hasIncome = hasIncome, hasExpense = hasExpense,
                             income = totalIncome, expense = totalExpense,
                             isFilterMode = filterMode,
-                            filteredCount = if (filterMode) filtered.size else null,
+                            filteredCount = displayCount,
                             showCategory = showCategoryChip, categoryName = cachedCategory,
                             avgExpense = avgExpense,
                             animateValues = animateTopStats,
-                            isCompact = shouldCompact
+                            isCompact = effectiveScrolledAway
                         )
                     }
 
@@ -4490,7 +4499,7 @@ fun LedgerContent(
             val sectionGap = 8.dp
             Spacer(Modifier.height(sectionGap))
 
-            // [2] 內容區塊 (QuickInput / 啤牌疊起篩選控制)
+            // [2] 內容區塊
             AnimatedContent(
                 targetState = filterMode,
                 modifier = Modifier.fillMaxWidth(),
@@ -4509,7 +4518,6 @@ fun LedgerContent(
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
                         
-                        // 啤牌式疊加佈局
                         FilterDeckArea(
                             categories = listOf(null) + visibleCategories,
                             selectedCategory = filterCategory,
@@ -4518,13 +4526,12 @@ fun LedgerContent(
                             isExpanded = isFilterDeckExpanded,
                             onToggleExpand = { 
                                 isFilterDeckExpanded = true
-                                manualExpandTime = System.currentTimeMillis() // 啟動保護期
+                                manualExpandTime = System.currentTimeMillis()
                             },
                             onCategorySelect = { onFilterCategoryChange(if (it == filterCategory) null else it) },
                             onMonthSelect = { onFilterMonthChange(if (it == filterMonth) null else it) }
                         )
                         
-                        // 時間範圍篩選器：滾動時自動消失 ( AnimatedVisibility )
                         Spacer(Modifier.height(8.dp))
                         androidx.compose.animation.AnimatedVisibility(
                             visible = isFilterDeckExpanded,
@@ -4561,7 +4568,6 @@ fun LedgerContent(
 
             Spacer(Modifier.height(sectionGap))
 
-            // 底部清單區域，套用 topScrollConnection 用嚟攔截手動向下撥動
             Box(
                 Modifier.weight(1f).fillMaxWidth().clipToBounds()
                     .nestedScroll(topScrollConnection) 
@@ -4614,7 +4620,7 @@ fun LedgerContent(
 }
 
 // ==========================================
-// ★ Helper Composables
+// ★ TopStats & Helper Composables
 // ==========================================
 
 enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT }
@@ -4801,7 +4807,6 @@ private fun AnimatedStatBlock(
             val nLabelX = nIconX + iconP.width + titleGapNormal
             val nIconY = topRowYNormal + (topRowHNormal - iconP.height) / 2
             val nLabelY = topRowYNormal + (topRowHNormal - labelP.height) / 2
-
             val nValueX = (constraints.maxWidth - valueP.width) / 2
             val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
 
@@ -10594,22 +10599,6 @@ fun AnimatedAmount(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun StatMiniChip(label: String, value: Double, color: Color, isCount: Boolean = false) {
-    val text = if (isCount) "${value.toInt()}筆" else "$${formatAmountNoDecimal(value)}"
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = SURFACE_CARD,
-        border = BorderStroke(0.5.dp, color.copy(alpha = 0.3f))
-    ) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, fontSize = 11.sp, color = TEXT_SECONDARY)
-            Spacer(Modifier.width(6.dp))
-            Text(text, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
         }
     }
 }
