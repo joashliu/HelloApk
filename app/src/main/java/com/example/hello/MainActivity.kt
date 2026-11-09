@@ -1920,6 +1920,47 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
 
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun formatAmountNoDecimal(amount: Double): String = String.format(Locale.US, "%,.0f", amount)
+
+/**
+ * 解析語音記帳輸入，例如：
+ * 「麥當勞28」「麥當勞 28 蚊」「咖啡 15.5 元」「28」「巴士」
+ * @return Pair(項目名稱, 金額?)；名稱可為空字串
+ */
+fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
+    var text = raw.trim()
+    if (text.isEmpty()) return "" to null
+
+    // 清走常見單位／口語
+    text = text
+        .replace("塊錢", "")
+        .replace("蚊半", ".5")
+        .replace("塊半", ".5")
+        .replace(Regex("[蚊元塊圓块圆錢]"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    // 純數字
+    text.toDoubleOrNull()?.let { return "" to it }
+
+    // 名稱在前、金額在後：麥當勞28 / 麥當勞 28.5
+    val tailAmount = Regex("""^(.+?)\s*(\d+(?:\.\d+)?)\s*$""").find(text)
+    if (tailAmount != null) {
+        val name = tailAmount.groupValues[1].trim()
+        val amt = tailAmount.groupValues[2].toDoubleOrNull()
+        if (name.isNotEmpty() && amt != null && amt > 0) return name to amt
+    }
+
+    // 金額在前、名稱在後：28 麥當勞
+    val headAmount = Regex("""^(\d+(?:\.\d+)?)\s*(.+)$""").find(text)
+    if (headAmount != null) {
+        val amt = headAmount.groupValues[1].toDoubleOrNull()
+        val name = headAmount.groupValues[2].trim()
+        if (name.isNotEmpty() && amt != null && amt > 0) return name to amt
+    }
+
+    // 淨係名稱
+    return text to null
+}
 fun compactAmount(value: Double): String {
     val absV = abs(value)
     val sign = if (value < 0) "-" else ""
@@ -3228,6 +3269,21 @@ fun MainApp(
                     openKeyboardForNew()
                 }
             },
+            onVoiceResult = { note, amount ->
+                if (filter.modeOn) vm.setFilterModeOn(false)
+                if (currentPage != 0) currentPage = 0
+                // 用語音解析出嘅名稱／金額預填鍵盤；分類跟 noteCategoryMap 或最近使用
+                val cat = when {
+                    note.isNotBlank() -> ui.noteCategoryMap[note]
+                    else -> null
+                }
+                openKeyboardForNew(
+                    note = note,
+                    amount = amount,
+                    forceCategory = cat
+                )
+                quickInputScrollToFirstTrigger++
+            },
             keyboardState = keyboardState,
             onKeyboardStateChange = { newState ->
                 if (newState.amountText != keyboardState.amountText) {
@@ -3565,6 +3621,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     filterSearchFocusRequester: FocusRequester,
     onFilterButtonTap: () -> Unit,
     onFabTap: () -> Unit,
+    onVoiceResult: (note: String, amount: Double?) -> Unit = { _, _ -> },
     keyboardState: KeyboardState,
     onKeyboardStateChange: (KeyboardState) -> Unit,
     onKeyboardDismiss: () -> Unit,
@@ -3713,6 +3770,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
             onFabTap = onFabTap,
+            onVoiceResult = onVoiceResult,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
 
@@ -3767,16 +3825,77 @@ private fun BoxScope.KeyboardAndFabLayer(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun AnimatedFabLayer(
     progressProvider: () -> Float,
     bottomPadding: Dp,
     onFabTap: () -> Unit,
+    onVoiceResult: (note: String, amount: Double?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val currentP = progressProvider()
     // 當鍵盤彈出時，FAB 就會淡出同縮小，交返個場畀鍵盤入面嘅 X 掣
     val alpha = (1f - currentP * 2.5f).coerceIn(0f, 1f)
     val scale = 1f - (0.5f * currentP)
+
+    var listening by remember { mutableStateOf(false) }
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        listening = false
+        if (result.resultCode != android.app.Activity.RESULT_OK) {
+            Toast.makeText(context, "未識別到語音", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        val spoken = result.data
+            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            ?.trim()
+        if (spoken.isNullOrBlank()) {
+            Toast.makeText(context, "未識別到語音", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        val (note, amount) = parseVoiceLedgerInput(spoken)
+        if (note.isBlank() && (amount == null || amount <= 0.0)) {
+            Toast.makeText(context, "聽唔明：「$spoken」", Toast.LENGTH_SHORT).show()
+            return@rememberLauncherForActivityResult
+        }
+        Toast.makeText(
+            context,
+            buildString {
+                append("識別：")
+                if (note.isNotBlank()) append(note)
+                if (amount != null) append(" \$${formatAmountNoDecimal(amount)}")
+            },
+            Toast.LENGTH_SHORT
+        ).show()
+        onVoiceResult(note, amount)
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startVoiceRecognition(context, speechLauncher) { listening = it }
+        } else {
+            Toast.makeText(context, "需要麥克風權限先可以用語音記帳", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun requestVoiceInput() {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        val granted = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            startVoiceRecognition(context, speechLauncher) { listening = it }
+        } else {
+            micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     if (alpha <= 0.01f) return
 
@@ -3792,21 +3911,49 @@ private fun AnimatedFabLayer(
             .size(56.dp)
             .shadow(4.dp, CircleShape)
             .clip(CircleShape)
-            .background(BRAND_PRIMARY)
-            .clickable(
+            .background(if (listening) Color(0xFFDC2626) else BRAND_PRIMARY)
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onFabTap() },
+                indication = null,
+                onClick = onFabTap,
+                onLongClick = { requestVoiceInput() }
+            ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            Icons.Default.Add,
-            contentDescription = "新增",
+            if (listening) Icons.Default.Mic else Icons.Default.Add,
+            contentDescription = if (listening) "語音輸入中" else "新增（長按語音）",
             tint = Color.White,
             modifier = Modifier
                 .size(24.dp)
-                .graphicsLayer { rotationZ = currentP * 90f } // 簡單旋轉
+                .graphicsLayer { rotationZ = if (listening) 0f else currentP * 90f }
         )
+    }
+}
+
+private fun startVoiceRecognition(
+    context: Context,
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+    onListening: (Boolean) -> Unit
+) {
+    try {
+        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            // 香港用戶優先粵語／繁中
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-HK")
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-HK")
+            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "講項目同金額，例如：麥當勞二十八蚊")
+        }
+        onListening(true)
+        launcher.launch(intent)
+    } catch (_: Exception) {
+        onListening(false)
+        Toast.makeText(context, "呢部機唔支援語音識別", Toast.LENGTH_SHORT).show()
     }
 }
 
