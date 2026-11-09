@@ -7717,17 +7717,32 @@ fun QuickInputSection(
                 label = "quickPanelHeight"
             )
 
-            val collapsedHeight = 44.dp
+            // 摺疊時高度收到 0，唔留「展開快速輸入」掣位；列表可一路滑到 Top Stats 後便
+            val collapsedHeight = 0.dp
             val finalHeight = androidx.compose.ui.unit.lerp(animatedHeight, collapsedHeight, collapseProgress)
 
             Box(
-                Modifier.fillMaxWidth().height(finalHeight)
+                Modifier
+                    .fillMaxWidth()
+                    .height(finalHeight)
+                    .graphicsLayer {
+                        // 整區漸變淡出 + 輕微縮小，營造消失喺 Top Stats 後便嘅朦朧感
+                        alpha = (1f - collapseProgress).coerceIn(0f, 1f)
+                        scaleY = 1f - (collapseProgress * 0.12f)
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                        if (collapseProgress > 0.05f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val blurPx = (collapseProgress * 18f).roundToInt().coerceIn(1, 24)
+                            renderEffect = getCachedBlurEffect(blurPx)
+                        } else {
+                            renderEffect = null
+                        }
+                    }
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
                     .nestedScroll(nestedScrollConnection)
             ) {
-                val mainAlpha = (1f - collapseProgress * 2.5f).coerceIn(0f, 1f)
-                val mainScale = 1f - (collapseProgress * 0.08f)
+                val mainAlpha = (1f - collapseProgress * 1.2f).coerceIn(0f, 1f)
+                val mainScale = 1f - (collapseProgress * 0.06f)
                 val revealPx = manageRevealProgress * manageButtonWidthPx
 
                 // ★ 從左側拉出嘅選單（包含旅遊與管理）
@@ -7895,36 +7910,7 @@ fun QuickInputSection(
                     }
                 }
 
-                // ★ 解決重疊問題：當 manageRevealProgress 大過 0 時，按鈕會向右退縮，並淡出消失
-                val basePillAlpha = ((collapseProgress - 0.6f) * 2.5f).coerceIn(0f, 1f)
-                val pillAlpha = basePillAlpha * (1f - manageRevealProgress)
-
-                if (pillAlpha > 0.01f) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            // 向右退讓動效
-                            .offset { IntOffset((manageRevealProgress * 60f).roundToInt(), 0) }
-                            .graphicsLayer { alpha = pillAlpha },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            onClick = onExpandClick,
-                            shape = CircleShape,
-                            color = SURFACE_ELEVATED,
-                            modifier = Modifier.height(34.dp).wrapContentWidth()
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.KeyboardArrowDown, "展開", tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("展開快速輸入", fontSize = 13.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
-                            }
-                        }
-                    }
-                }
+                // 已移除「展開快速輸入」掣：摺疊時整區淡出收埋，向下滑動仍會由 nestedScroll 即刻展開
             }
         }
     }
