@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 語音記帳 -->
+    <shortcut
+        android:shortcutId="voice_add"
+        android:enabled="true"
+        android:icon="@drawable/ic_tile_add"
+        android:shortcutShortLabel="@string/shortcut_voice_add_short"
+        android:shortcutLongLabel="@string/shortcut_voice_add_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.example.hello"
+            android:targetClass="com.example.hello.MainActivity">
+            <!-- 🟢 直接叫 MainActivity 開始語音記帳 -->
+            <extra android:name="extra_voice_input" android:value="true" />
+        </intent>
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+
+    <!-- 原本：快速記帳（彈鍵盤） -->
     <shortcut
         android:shortcutId="quick_add"
         android:enabled="true"
