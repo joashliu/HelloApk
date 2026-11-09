@@ -4124,9 +4124,41 @@ fun LedgerContent(
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
 
+    // ★ 加入退出保護狀態
+    var isExitingFilter by remember { mutableStateOf(false) }
+
     LaunchedEffect(filterMode) {
-        if (filterMode) quickInputCollapseOffset = 0f
+        try {
+            if (!filterMode) {
+                // 退回正常模式時，立刻標記為正在退出，鎖死為展開狀態
+                isExitingFilter = true
+                quickInputCollapseOffset = 0f
+                listState.animateScrollToItem(0)
+                isExitingFilter = false
+            } else {
+                quickInputCollapseOffset = 0f
+                if (listState.firstVisibleItemIndex > 20) {
+                    listState.animateScrollToItem(0)
+                }
+            }
+        } catch (_: Exception) {
+            isExitingFilter = false
+        }
     }
+
+    val singleCategory by remember(filterMode, filtered) {
+        derivedStateOf {
+            if (!filterMode || filtered.isEmpty()) null
+            else {
+                val firstCat = filtered[0].category
+                if (filtered.all { it.category == firstCat }) firstCat else null
+            }
+        }
+    }
+    
+    var cachedCategory by remember { mutableStateOf("飲食") }
+    LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
+    val showCategoryChip = filterMode && singleCategory != null
 
     // 追蹤係咪離開咗頂部，用嚟控制變形同展開
     val isScrolledAway by remember {
@@ -4135,22 +4167,26 @@ fun LedgerContent(
         }
     }
     
+    // ★ 核心判定：只有真正滾動離開頂部，並且「唔係退出緊篩選模式」，先至會縮細
+    val effectiveScrolledAway = isScrolledAway && !isExitingFilter
+    
     var isFilterDeckExpanded by remember { mutableStateOf(true) }
+    var manualExpandTime by remember { mutableLongStateOf(0L) }
 
-    LaunchedEffect(isScrolledAway) {
+    LaunchedEffect(effectiveScrolledAway) {
         // 滾上最頂時自動展開
-        if (!isScrolledAway) isFilterDeckExpanded = true
+        if (!effectiveScrolledAway) isFilterDeckExpanded = true
     }
 
     // 正常模式嘅 QuickInput 滾動壓縮邏輯 + ★ 只攔截手動 Drag 嚟收起啤牌
     val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, maxCollapsePx, isFilterDeckExpanded) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // ★ 判斷係咪手動拖曳 (排除慣性 Fling)
                 val isManualDrag = source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.Drag || source.toString() == "UserInput"
+                val now = System.currentTimeMillis()
                 
-                // ★ 只有手動向下拉 (available.y < -5f) 先會自動收起，慣性滾動唔會干擾
-                if (isManualDrag && available.y < -5f && isFilterDeckExpanded && isScrolledAway) {
+                // ★ 500ms 保護期：如果啱啱撳咗展開，就算有殘留嘅向下滾動，都唔會自動收起
+                if (isManualDrag && available.y < -5f && isFilterDeckExpanded && effectiveScrolledAway && (now - manualExpandTime > 500L)) {
                     isFilterDeckExpanded = false
                 }
                 
@@ -4287,34 +4323,6 @@ fun LedgerContent(
         } catch (_: Exception) {}
     }
 
-    LaunchedEffect(filterMode) {
-        try {
-            if (!filterMode) {
-                delay(50)
-                listState.animateScrollToItem(0)
-            } else {
-                quickInputCollapseOffset = 0f
-                if (listState.firstVisibleItemIndex > 20) {
-                    listState.animateScrollToItem(0)
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
-    val singleCategory by remember(filterMode, filtered) {
-        derivedStateOf {
-            if (!filterMode || filtered.isEmpty()) null
-            else {
-                val firstCat = filtered[0].category
-                if (filtered.all { it.category == firstCat }) firstCat else null
-            }
-        }
-    }
-    
-    var cachedCategory by remember { mutableStateOf("飲食") }
-    LaunchedEffect(singleCategory) { if (singleCategory != null) cachedCategory = singleCategory!! }
-    val showCategoryChip = filterMode && singleCategory != null
-
     val displayGroups = groupedByDate
     val isFanActive = activeFanRecord != null
     val activeFanId = activeFanRecord?.id
@@ -4390,11 +4398,10 @@ fun LedgerContent(
                 futureBtnProgress.animateTo(if (futureBtnRevealed) 1f else 0f, spring(0.82f, 380f))
             }
 
-            // ★ 修改：將 Transparent 改為 SURFACE_BG，無縫融入背景，徹底消除黑色陰影
+            // 頂部背景色動畫：改為用 SURFACE_BG 避免黑色陰影，並用 effectiveScrolledAway
             val topBarBgColor by animateColorAsState(
-                targetValue = if (isScrolledAway) SURFACE_BG else SURFACE_CARD,
-                animationSpec = tween(350, easing = FastOutSlowInEasing),
-                label = "topBarBg"
+                targetValue = if (effectiveScrolledAway) SURFACE_BG else SURFACE_CARD,
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
             )
 
             // [1] 頂部統計區塊：動態切換大 Box (未滾動) vs 碎 Clips (已滾動)
@@ -4429,11 +4436,13 @@ fun LedgerContent(
                 val singleBtnWidth = slotW * p
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = if (isScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = if (effectiveScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.width(statsWidth)) {
-                        // ★ 替換為全新原生無縫物理變形 (Morphing) 的 TopStats，消除閃爍
+                    Box(modifier = Modifier.width(statsWidth).animateContentSize(spring(0.85f, 350f))) {
+                        // 確保如果唔係 filterMode，就算碌落去都唔會變形 (因為唔需要變形)
+                        val shouldCompact = filterMode && effectiveScrolledAway
+                        
                         TopStats(
                             hasIncome = hasIncome, hasExpense = hasExpense,
                             income = totalIncome, expense = totalExpense,
@@ -4442,7 +4451,7 @@ fun LedgerContent(
                             showCategory = showCategoryChip, categoryName = cachedCategory,
                             avgExpense = avgExpense,
                             animateValues = animateTopStats,
-                            isCompact = isScrolledAway // 控制係咪切換為 Clips 狀態
+                            isCompact = shouldCompact
                         )
                     }
 
@@ -4507,7 +4516,10 @@ fun LedgerContent(
                             months = availableMonths,
                             selectedMonth = filterMonth,
                             isExpanded = isFilterDeckExpanded,
-                            onToggleExpand = { isFilterDeckExpanded = true },
+                            onToggleExpand = { 
+                                isFilterDeckExpanded = true
+                                manualExpandTime = System.currentTimeMillis() // 啟動保護期
+                            },
                             onCategorySelect = { onFilterCategoryChange(if (it == filterCategory) null else it) },
                             onMonthSelect = { onFilterMonthChange(if (it == filterMonth) null else it) }
                         )
@@ -4598,6 +4610,311 @@ fun LedgerContent(
                 )))
         )
         FanMenuOverlay(progressProvider = { fanMenuProgress.value }, centerProvider = { fanMenuCenterState.value }, touchProvider = { fanMenuTouchState.value })
+    }
+}
+
+// ==========================================
+// ★ Helper Composables
+// ==========================================
+
+enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT }
+private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp, val h: Dp)
+
+@Composable
+fun TopStats(
+    hasIncome: Boolean, hasExpense: Boolean,
+    income: Double, expense: Double,
+    isFilterMode: Boolean = false, filteredCount: Int? = null,
+    showCategory: Boolean = false, categoryName: String = "",
+    avgExpense: Double? = null,
+    animateValues: Boolean = false,
+    isCompact: Boolean = false 
+) {
+    val balance = income - expense
+    val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
+
+    val activeBlocks = remember(showCategory, income, expense, avgExpense, balance, isFilterMode, filteredCount) {
+        val list = mutableListOf<StatBlockType>()
+        if (isFilterMode) {
+            if ((filteredCount ?: 0) > 0) list.add(StatBlockType.COUNT)
+            if (income != 0.0) list.add(StatBlockType.INC)
+            if (expense != 0.0) list.add(StatBlockType.EXP)
+            if ((avgExpense ?: 0.0) > 0.0) list.add(StatBlockType.AVG)
+            if (balance != 0.0) list.add(StatBlockType.BAL)
+        } else {
+            if (showCategory) list.add(StatBlockType.CAT)
+            if (income != 0.0) list.add(StatBlockType.INC)
+            if (expense != 0.0) list.add(StatBlockType.EXP)
+            if ((avgExpense ?: 0.0) > 0.0) list.add(StatBlockType.AVG)
+            if (balance != 0.0) list.add(StatBlockType.BAL)
+        }
+        if (list.isEmpty()) list.add(StatBlockType.BAL)
+        list
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        val totalW = maxWidth
+        
+        val geoMapPair = remember(activeBlocks, totalW) {
+            val nGapX = 6.dp
+            val nGapY = 2.dp
+            val nRowH = 52.dp
+            val nMap = mutableMapOf<StatBlockType, BlockGeometry>()
+            val nRows = when (activeBlocks.size) {
+                1, 2, 3 -> listOf(activeBlocks)
+                4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
+                5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
+                6 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
+                else -> emptyList()
+            }
+            nRows.forEachIndexed { rIdx, row ->
+                val w = (totalW - nGapX * (row.size - 1).coerceAtLeast(0)) / row.size
+                val y = (nRowH + nGapY) * rIdx
+                row.forEachIndexed { cIdx, block ->
+                    val x = (w + nGapX) * cIdx
+                    nMap[block] = BlockGeometry(x, y, w, nRowH)
+                }
+            }
+
+            val cGapX = 8.dp
+            val cGapY = 8.dp
+            val cRowH = 34.dp
+            val cMap = mutableMapOf<StatBlockType, BlockGeometry>()
+            
+            val chunked = activeBlocks.chunked(3)
+            chunked.forEachIndexed { rIdx, rowBlocks ->
+                val cy = (cRowH + cGapY) * rIdx
+                val itemW = (totalW - cGapX * (rowBlocks.size - 1).coerceAtLeast(0)) / rowBlocks.size
+                rowBlocks.forEachIndexed { cIdx, block ->
+                    val cx = (itemW + cGapX) * cIdx
+                    cMap[block] = BlockGeometry(cx, cy, itemW, cRowH)
+                }
+            }
+            Pair(nMap, cMap)
+        }
+
+        val nMap = geoMapPair.first
+        val cMap = geoMapPair.second
+
+        val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 52.dp
+        val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 34.dp
+
+        val targetHeight = if (isCompact) cMaxY else nMaxY
+        val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
+        val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
+
+        val allPossibleBlocks = listOf(StatBlockType.COUNT, StatBlockType.CAT, StatBlockType.INC, StatBlockType.EXP, StatBlockType.AVG, StatBlockType.BAL)
+
+        Box(Modifier.fillMaxWidth().height(animHeight)) {
+            allPossibleBlocks.forEach { block ->
+                val isVisible = activeBlocks.contains(block)
+                
+                var memNGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp, 0.dp)) }
+                var memCGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp, 0.dp)) }
+                
+                LaunchedEffect(nMap[block]) { nMap[block]?.let { memNGeo = it } }
+                LaunchedEffect(cMap[block]) { cMap[block]?.let { memCGeo = it } }
+                
+                val nGeo = nMap[block] ?: memNGeo
+                val cGeo = cMap[block] ?: memCGeo
+                
+                val x by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress), MASTER_SPRING_DP, label = "x_$block")
+                val y by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress), MASTER_SPRING_DP, label = "y_$block")
+                val w by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress), MASTER_SPRING_DP, label = "w_$block")
+                val h by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress), MASTER_SPRING_DP, label = "h_$block")
+
+                val bgColor = androidx.compose.ui.graphics.lerp(SURFACE_CARD.copy(alpha = 0f), SURFACE_CARD, progress)
+                val borderColor = androidx.compose.ui.graphics.lerp(DIVIDER_COLOR.copy(alpha = 0f), DIVIDER_COLOR.copy(alpha = 0.5f), progress)
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isVisible,
+                    enter = fadeIn(tween(250)) + scaleIn(spring(0.85f, 300f), initialScale = 0.7f),
+                    exit = fadeOut(tween(200)) + scaleOut(spring(0.85f, 300f), targetScale = 0.7f),
+                    modifier = Modifier.offset(x = x, y = y).width(w).height(h)
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(bgColor)
+                            .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
+                    ) {
+                        when (block) {
+                            StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
+                            StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
+                            StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
+                            StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
+                            StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
+                            StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnimatedStatBlock(
+    compactProgress: Float,
+    iconNormal: ImageVector,
+    iconColorNormal: Color,
+    labelNormal: String,
+    valueNormal: String,
+    valueColorNormal: Color,
+    showDollar: Boolean = true,
+    animateValues: Boolean = false,
+    isCount: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    val finalValueString = if (showDollar) {
+        if (valueNormal.startsWith("-")) "-$" + valueNormal.substring(1) else "$" + valueNormal
+    } else if (isCount && compactProgress > 0.5f) {
+        "${valueNormal}筆"
+    } else valueNormal
+
+    val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, compactProgress)
+
+    androidx.compose.ui.layout.Layout(
+        content = {
+            Icon(iconNormal, null, tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)), modifier = Modifier.size(16.dp))
+            Text(text = labelNormal, fontSize = 11.sp, color = currentLabelColor, fontWeight = if (compactProgress > 0.5f) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, softWrap = false)
+            val currentFontSize = (19f - 6f * compactProgress).sp
+            RollingNumber(text = finalValueString, color = valueColorNormal, fontSize = currentFontSize, fontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold, animateChanges = animateValues)
+        },
+        modifier = modifier.fillMaxSize()
+    ) { measurables, constraints ->
+        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
+
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
+            val titleGapNormal = 4.dp.roundToPx()
+
+            val topRowWNormal = iconP.width + titleGapNormal + labelP.width
+            val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
+            val topRowHNormal = maxOf(iconP.height, labelP.height)
+            val topRowYNormal = (constraints.maxHeight / 2) - topRowHNormal + 1.dp.roundToPx()
+
+            val nIconX = topRowXNormal
+            val nLabelX = nIconX + iconP.width + titleGapNormal
+            val nIconY = topRowYNormal + (topRowHNormal - iconP.height) / 2
+            val nLabelY = topRowYNormal + (topRowHNormal - labelP.height) / 2
+
+            val nValueX = (constraints.maxWidth - valueP.width) / 2
+            val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
+
+            val gapCompact = 6.dp.roundToPx()
+            val cTotalW = labelP.width + gapCompact + valueP.width
+            val cStartX = (constraints.maxWidth - cTotalW) / 2
+            
+            val cLabelX = cStartX
+            val cLabelY = (constraints.maxHeight - labelP.height) / 2
+            val cValueX = cLabelX + labelP.width + gapCompact
+            val cValueY = (constraints.maxHeight - valueP.height) / 2
+            val cIconX = cLabelX
+            val cIconY = cLabelY
+
+            iconP.placeRelative(lerpI(nIconX, cIconX, compactProgress), lerpI(nIconY, cIconY, compactProgress))
+            labelP.placeRelative(lerpI(nLabelX, cLabelX, compactProgress), lerpI(nLabelY, cLabelY, compactProgress))
+            valueP.placeRelative(lerpI(nValueX, cValueX, compactProgress), lerpI(nValueY, cValueY, compactProgress))
+        }
+    }
+}
+
+@Composable
+fun FilterDeckArea(
+    categories: List<String?>,
+    selectedCategory: String?,
+    months: List<String>,
+    selectedMonth: String?,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onCategorySelect: (String?) -> Unit,
+    onMonthSelect: (String?) -> Unit
+) {
+    val density = LocalDensity.current
+    val gap = 6.dp
+    val chipH = 34.dp
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f))
+    ) {
+        val totalWidth = maxWidth
+        val chipW = (totalWidth - gap * 3) / 4
+
+        val catRows = (categories.size + 3) / 4
+        val monthList = listOf<String?>(null) + months
+        val monthRows = (monthList.size + 3) / 4
+
+        val expandedHeight = (catRows * (chipH + gap).value).dp + 8.dp + (monthRows * (chipH + gap).value).dp
+        val collapsedHeight = chipH + 8.dp
+
+        Box(Modifier.fillMaxWidth().height(if (isExpanded) expandedHeight else collapsedHeight)) {
+            if (!isExpanded) {
+                Box(Modifier.fillMaxSize().clickable(interactionSource = remember{MutableInteractionSource()}, indication=null) { onToggleExpand() })
+            }
+
+            categories.forEachIndexed { idx, cat ->
+                val isSelected = cat == selectedCategory
+                val col = idx % 4
+                val row = idx / 4
+                val expX = col * (chipW + gap).value
+                val expY = row * (chipH + gap).value
+
+                val deckX = (totalWidth.value / 4) - (chipW.value / 2)
+                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
+                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
+                val colX = deckX + staggerX
+                val colY = staggerY
+
+                val targetX = if (isExpanded) expX else colX
+                val targetY = if (isExpanded) expY else colY
+
+                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "x_$idx")
+                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "y_$idx")
+                
+                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
+
+                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                    AnimatedFilterChip(
+                        selected = isSelected, label = cat ?: "全部", fillWidth = true,
+                        onClick = { if (isExpanded) onCategorySelect(cat) else onToggleExpand() }
+                    )
+                }
+            }
+
+            val monthStartY = catRows * (chipH + gap).value + 8f
+            monthList.forEachIndexed { idx, m ->
+                val isSelected = m == selectedMonth
+                val col = idx % 4
+                val row = idx / 4
+                val expX = col * (chipW + gap).value
+                val expY = monthStartY + row * (chipH + gap).value
+
+                val deckX = (totalWidth.value * 3 / 4) - (chipW.value / 2)
+                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
+                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
+                val colX = deckX + staggerX
+                val colY = staggerY
+
+                val targetX = if (isExpanded) expX else colX
+                val targetY = if (isExpanded) expY else colY
+
+                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "mx_$idx")
+                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "my_$idx")
+                
+                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
+
+                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                    AnimatedFilterChip(
+                        selected = isSelected, label = m?.let{formatMonthLabel(it)} ?: "全年", fillWidth = true,
+                        onClick = { if (isExpanded) onMonthSelect(m) else onToggleExpand() }
+                    )
+                }
+            }
+        }
     }
 }
 
