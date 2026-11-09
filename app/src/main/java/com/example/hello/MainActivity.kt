@@ -803,6 +803,7 @@ data class LedgerUiState(
     val noteIconMap: Map<String, String> = emptyMap(),
     val allNoteNames: List<String> = emptyList(),
     val noteCategoryMap: Map<String, String> = emptyMap(),
+    val noteUsageCount: Map<String, Int> = emptyMap(),
     val availableMonths: List<String> = emptyList(),
     val visibleCategories: List<String> = emptyList(),
     val topQuickNotesInfo: List<QuickNoteInfo> = emptyList(),
@@ -815,6 +816,7 @@ data class NoteIndex(
     val noteIconMap: Map<String, String> = emptyMap(),
     val allNoteNames: List<String> = emptyList(),
     val noteCategoryMap: Map<String, String> = emptyMap(),
+    val noteUsageCount: Map<String, Int> = emptyMap(),
     val topNotes: List<Pair<String, Int>> = emptyList(),
     // ★ 精簡：移除 topQuickNotesInfo（改由 computeLedgerUiState 現算）
 )
@@ -1449,6 +1451,7 @@ private fun buildNoteIndex(records: List<Record>): NoteIndex {
         noteIconMap = noteIconMap,
         allNoteNames = allNoteNames,
         noteCategoryMap = noteCategoryMap,
+        noteUsageCount = usageCountByNote,
         topNotes = topNotes,
     )
 }
@@ -1577,6 +1580,7 @@ private fun computeLedgerUiState(
         noteIconMap = noteIndex.noteIconMap,
         allNoteNames = noteIndex.allNoteNames,
         noteCategoryMap = noteIndex.noteCategoryMap,
+        noteUsageCount = noteIndex.noteUsageCount,
         availableMonths = availableMonths,
         visibleCategories = visibleCategories,
         topQuickNotesInfo = quickInfo,
@@ -2540,6 +2544,7 @@ fun LightweightEntryApp(
                     topNotes = ui.topNotes,
                     noteIconMap = ui.noteIconMap,
                     noteCategoryMap = ui.noteCategoryMap,
+                    noteUsageCount = ui.noteUsageCount,
                     maxRowsPerPage = 3,
                     skipAppearAnimation = false,
                     collapseProgress = 0f,
@@ -3000,6 +3005,7 @@ fun MainApp(
                 topNotes = ui.topNotes,
                 noteIconMap = ui.noteIconMap,
                 noteCategoryMap = ui.noteCategoryMap,
+                noteUsageCount = ui.noteUsageCount,
                 hasIncome = ui.hasIncome,
                 hasExpense = ui.hasExpense,
                 totalIncome = ui.totalIncome,
@@ -4072,6 +4078,7 @@ fun LedgerContent(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     noteCategoryMap: Map<String, String>,
+    noteUsageCount: Map<String, Int> = emptyMap(),
     hasIncome: Boolean,
     hasExpense: Boolean,
     totalIncome: Double,
@@ -4541,9 +4548,32 @@ fun LedgerContent(
             ) { isFilter ->
                 if (!isFilter) {
                     if (topNotes.isNotEmpty() || hiddenQuickNotes.isNotEmpty()) {
-                        QuickInputSection(topNotes, noteIconMap, noteCategoryMap, 4, !isFirstShow, collapseProgress, 
-                            onExpandClick = { scope.launch { try { isAutoAnimating = true; Animatable(quickInputCollapseOffset).animateTo(0f, spring(0.85f, 400f)) { quickInputCollapseOffset = this.value } } finally { isAutoAnimating = false } } }, 
-                            onClick = onQuickInputClick, hiddenQuickNotes = hiddenQuickNotes, onHideNote = onHideNote, onUnhideNote = onUnhideNote, scrollToFirstTrigger = quickInputScrollToFirstTrigger)
+                        QuickInputSection(
+                            topNotes = topNotes,
+                            noteIconMap = noteIconMap,
+                            noteCategoryMap = noteCategoryMap,
+                            noteUsageCount = noteUsageCount,
+                            maxRowsPerPage = 4,
+                            skipAppearAnimation = !isFirstShow,
+                            collapseProgress = collapseProgress,
+                            onExpandClick = {
+                                scope.launch {
+                                    try {
+                                        isAutoAnimating = true
+                                        Animatable(quickInputCollapseOffset).animateTo(0f, spring(0.85f, 400f)) {
+                                            quickInputCollapseOffset = this.value
+                                        }
+                                    } finally {
+                                        isAutoAnimating = false
+                                    }
+                                }
+                            },
+                            onClick = onQuickInputClick,
+                            hiddenQuickNotes = hiddenQuickNotes,
+                            onHideNote = onHideNote,
+                            onUnhideNote = onUnhideNote,
+                            scrollToFirstTrigger = quickInputScrollToFirstTrigger
+                        )
                     }
                 } else {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 0.dp)) {
@@ -7531,6 +7561,7 @@ fun QuickInputSection(
     topNotes: List<Pair<String, Int>>,
     noteIconMap: Map<String, String>,
     noteCategoryMap: Map<String, String>,
+    noteUsageCount: Map<String, Int> = emptyMap(),
     maxRowsPerPage: Int = 4,
     skipAppearAnimation: Boolean = false,
     collapseProgress: Float = 0f,
@@ -7544,18 +7575,31 @@ fun QuickInputSection(
     // ★ 旅遊模式狀態
     var travelModeOn by remember { mutableStateOf(false) }
 
-    // ★ 過濾邏輯：如果開咗旅遊模式，就只顯示「旅遊」類別嘅項目
-    val visibleTopNotes = remember(topNotes, hiddenQuickNotes, travelModeOn, noteCategoryMap) {
-        topNotes.filter {
-            val isTravel = noteCategoryMap[it.first] == "旅遊"
-            it.first !in hiddenQuickNotes && (!travelModeOn || isTravel)
+    // ★ 一般模式：用 topNotes（最多約 30，時間匹配 + 使用次數）
+    // ★ 旅遊模式：用晒所有「旅遊」類別項目，按使用次數大→小，唔受 top 30 限制
+    val visibleTopNotes = remember(
+        topNotes, hiddenQuickNotes, travelModeOn, noteCategoryMap, noteUsageCount
+    ) {
+        if (travelModeOn) {
+            noteCategoryMap.entries
+                .filter { (name, cat) ->
+                    cat == "旅遊" && name.isNotBlank() && name !in hiddenQuickNotes
+                }
+                .map { (name, _) -> name to (noteUsageCount[name] ?: 0) }
+                .sortedByDescending { it.second }
+        } else {
+            topNotes.filter { it.first !in hiddenQuickNotes }
         }
     }
 
     if (visibleTopNotes.isEmpty() && hiddenQuickNotes.isEmpty() && !travelModeOn) return
 
     val topNoteNames = remember(visibleTopNotes) { visibleTopNotes.map { it.first } }
-    val items = remember(topNoteNames) { topNoteNames.take(30).map { it to 0 } }
+    // 旅遊模式顯示全部旅遊項目；一般模式維持最多 30
+    val items = remember(topNoteNames, travelModeOn) {
+        if (travelModeOn) topNoteNames.map { it to 0 }
+        else topNoteNames.take(30).map { it to 0 }
+    }
 
     var showManageDialog by remember { mutableStateOf(false) }
     var longPressTarget by remember { mutableStateOf<String?>(null) }
