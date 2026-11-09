@@ -4173,6 +4173,26 @@ fun LedgerContent(
             if (exps.isNotEmpty()) exps.sumOf { it.amount } / exps.size else 0.0
         }
     }
+    // 篩選模式：平均消費時間（分上午／下午）
+    val (avgMorningLabel, avgAfternoonLabel) = remember(statRecords, filterMode) {
+        if (!filterMode) Pair<String?, String?>(null, null)
+        else {
+            val exps = statRecords.filter { it.category != INCOME_CATEGORY && it.category != "還錢" }
+            var amSum = 0; var amCnt = 0
+            var pmSum = 0; var pmCnt = 0
+            for (r in exps) {
+                val minOfDay = getTimestampMeta(r.timestamp).secOfDay / 60
+                if (minOfDay < 12 * 60) {
+                    amSum += minOfDay; amCnt++
+                } else {
+                    pmSum += minOfDay; pmCnt++
+                }
+            }
+            val am = if (amCnt > 0) formatTimeMin(amSum / amCnt) else null
+            val pm = if (pmCnt > 0) formatTimeMin(pmSum / pmCnt) else null
+            Pair(am, pm)
+        }
+    }
     val displayCount = if (filterMode) statRecords.size else null
 
     // 追蹤係咪離開咗頂部
@@ -4461,6 +4481,8 @@ fun LedgerContent(
                             filteredCount = displayCount,
                             showCategory = showCategoryChip, categoryName = cachedCategory,
                             avgExpense = avgExpense,
+                            avgMorningLabel = avgMorningLabel,
+                            avgAfternoonLabel = avgAfternoonLabel,
                             animateValues = animateTopStats,
                             isCompact = effectiveScrolledAway
                         )
@@ -4634,7 +4656,7 @@ fun LedgerContent(
 // ★ TopStats & Helper Composables
 // ==========================================
 
-enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT }
+enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT, TIME_AM, TIME_PM }
 private data class BlockGeometry(val x: Dp, val y: Dp, val w: Dp, val h: Dp)
 
 @Composable
@@ -4644,20 +4666,27 @@ fun TopStats(
     isFilterMode: Boolean = false, filteredCount: Int? = null,
     showCategory: Boolean = false, categoryName: String = "",
     avgExpense: Double? = null,
+    avgMorningLabel: String? = null,
+    avgAfternoonLabel: String? = null,
     animateValues: Boolean = false,
     isCompact: Boolean = false 
 ) {
     val balance = income - expense
     val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
 
-    val activeBlocks = remember(showCategory, income, expense, avgExpense, balance, isFilterMode, filteredCount) {
+    val activeBlocks = remember(
+        showCategory, income, expense, avgExpense, balance, isFilterMode, filteredCount,
+        avgMorningLabel, avgAfternoonLabel
+    ) {
         val list = mutableListOf<StatBlockType>()
         if (isFilterMode) {
+            // 篩選模式：唔顯示結餘
             if ((filteredCount ?: 0) > 0) list.add(StatBlockType.COUNT)
             if (income != 0.0) list.add(StatBlockType.INC)
             if (expense != 0.0) list.add(StatBlockType.EXP)
             if ((avgExpense ?: 0.0) > 0.0) list.add(StatBlockType.AVG)
-            if (balance != 0.0) list.add(StatBlockType.BAL)
+            if (avgMorningLabel != null) list.add(StatBlockType.TIME_AM)
+            if (avgAfternoonLabel != null) list.add(StatBlockType.TIME_PM)
         } else {
             if (showCategory) list.add(StatBlockType.CAT)
             if (income != 0.0) list.add(StatBlockType.INC)
@@ -4665,7 +4694,7 @@ fun TopStats(
             if ((avgExpense ?: 0.0) > 0.0) list.add(StatBlockType.AVG)
             if (balance != 0.0) list.add(StatBlockType.BAL)
         }
-        if (list.isEmpty()) list.add(StatBlockType.BAL)
+        if (list.isEmpty()) list.add(StatBlockType.COUNT)
         list
     }
 
@@ -4682,7 +4711,9 @@ fun TopStats(
                 4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
                 5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
                 6 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
-                else -> emptyList()
+                7 -> listOf(activeBlocks.take(4), activeBlocks.drop(4))
+                8 -> listOf(activeBlocks.take(4), activeBlocks.drop(4))
+                else -> listOf(activeBlocks.take(4), activeBlocks.drop(4))
             }
             nRows.forEachIndexed { rIdx, row ->
                 val w = (totalW - nGapX * (row.size - 1).coerceAtLeast(0)) / row.size
@@ -4720,7 +4751,10 @@ fun TopStats(
         val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
         val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
 
-        val allPossibleBlocks = listOf(StatBlockType.COUNT, StatBlockType.CAT, StatBlockType.INC, StatBlockType.EXP, StatBlockType.AVG, StatBlockType.BAL)
+        val allPossibleBlocks = listOf(
+            StatBlockType.COUNT, StatBlockType.CAT, StatBlockType.INC, StatBlockType.EXP,
+            StatBlockType.AVG, StatBlockType.BAL, StatBlockType.TIME_AM, StatBlockType.TIME_PM
+        )
 
         Box(Modifier.fillMaxWidth().height(animHeight)) {
             allPossibleBlocks.forEach { block ->
@@ -4763,6 +4797,8 @@ fun TopStats(
                             StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
                             StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
                             StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
+                            StatBlockType.TIME_AM -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.WbSunny, iconColorNormal = Color(0xFFF59E0B), labelNormal = "上午均時", valueNormal = avgMorningLabel ?: "--:--", valueColorNormal = Color(0xFFF59E0B), showDollar = false, animateValues = animateValues)
+                            StatBlockType.TIME_PM -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.NightsStay, iconColorNormal = Color(0xFF6366F1), labelNormal = "下午均時", valueNormal = avgAfternoonLabel ?: "--:--", valueColorNormal = Color(0xFF6366F1), showDollar = false, animateValues = animateValues)
                         }
                     }
                 }
@@ -8477,9 +8513,9 @@ fun FilterResultsBarChart(
 ) {
     if (records.isEmpty()) return
 
-    // 時間升序：左舊右新
+    // 最新日期在左，舊日期在右
     val ordered = remember(records) {
-        records.sortedBy { it.timestamp }
+        records.sortedByDescending { it.timestamp }
     }
     val maxAmount = remember(ordered) {
         ordered.maxOf { it.amount }.coerceAtLeast(0.0001)
