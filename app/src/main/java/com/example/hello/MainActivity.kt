@@ -2806,14 +2806,13 @@ fun MainApp(
 
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
-    // 其他頁撳 FAB 返記帳頁時，頂部滑入動畫 token
-    var headerSlideInToken by remember { mutableIntStateOf(0) }
+    // 其他頁撳 FAB 返記帳頁：首幀由隱藏狀態開始滑入（避免閃爍）
+    var headerEnterFromHidden by remember { mutableStateOf(false) }
 
     fun goLedgerAndAdd(openKeyboard: () -> Unit = {}) {
-        val fromOther = currentPage != 0
-        if (fromOther) {
+        if (currentPage != 0) {
+            headerEnterFromHidden = true
             currentPage = 0
-            headerSlideInToken++
         }
         openKeyboard()
     }
@@ -3225,7 +3224,8 @@ fun MainApp(
                 onHideNote = { vm.hideQuickNote(it) },
                 onUnhideNote = { vm.unhideQuickNote(it) },
                 quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger,
-                headerSlideInToken = headerSlideInToken
+                headerEnterFromHidden = headerEnterFromHidden,
+                onHeaderEnterConsumed = { headerEnterFromHidden = false }
             )
             1 -> {
                 val compareMonthA by vm.compareMonthA.collectAsState()
@@ -4632,8 +4632,9 @@ fun LedgerContent(
     onHideNote: (String) -> Unit = {},
     onUnhideNote: (String) -> Unit = {},
     quickInputScrollToFirstTrigger: Int = 0,
-    /** 由其他頁 FAB 返嚟時 >0，觸發頂部 TopStats／快速輸入由上滑入 */
-    headerSlideInToken: Int = 0,
+    /** 由其他頁 FAB 返嚟：首幀由隱藏狀態開始滑入 */
+    headerEnterFromHidden: Boolean = false,
+    onHeaderEnterConsumed: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
@@ -4648,18 +4649,26 @@ fun LedgerContent(
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
 
-    // 由其他頁撳 FAB 返記帳頁：頂部由上滑入
-    val headerSlideY = remember { Animatable(0f) }
-    val headerSlideAlpha = remember { Animatable(1f) }
-    LaunchedEffect(headerSlideInToken) {
-        if (headerSlideInToken <= 0) return@LaunchedEffect
-        val fromY = with(density) { (-72).dp.toPx() }
-        headerSlideY.snapTo(fromY)
-        headerSlideAlpha.snapTo(0f)
+    // 由其他頁撳 FAB 返記帳頁：remember 初值已係隱藏，首幀唔會閃現
+    val fromHeaderY = with(density) { (-72).dp.toPx() }
+    val headerSlideY = remember {
+        Animatable(if (headerEnterFromHidden) fromHeaderY else 0f)
+    }
+    val headerSlideAlpha = remember {
+        Animatable(if (headerEnterFromHidden) 0f else 1f)
+    }
+    LaunchedEffect(headerEnterFromHidden) {
+        if (!headerEnterFromHidden) return@LaunchedEffect
+        // 若 composition 重用（未 dispose），補一次 snap 再播動畫
+        if (headerSlideAlpha.value > 0.01f) {
+            headerSlideY.snapTo(fromHeaderY)
+            headerSlideAlpha.snapTo(0f)
+        }
         launch {
             headerSlideY.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 320f))
         }
         headerSlideAlpha.animateTo(1f, tween(durationMillis = 320, easing = FastOutSlowInEasing))
+        onHeaderEnterConsumed()
     }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
