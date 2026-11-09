@@ -682,6 +682,11 @@ val BRAND_PRIMARY = Color(0xFFB68D40)       // 泥黃色 (主色)
 val BRAND_PRIMARY_DARK = Color(0xFF8B6A2A)  // 深泥黃色 (用於按壓或強烈對比)
 val BRAND_PRIMARY_LIGHT = Color(0xFFF5EFE6) // 淺泥黃底色 (用於淡色標籤或背景)
 
+// 頂部（TopStats／快速輸入）滑入 同 鍵盤展開：統一時長，同步完成
+const val HEADER_KEYBOARD_EXPAND_DELAY_MS = 30
+const val HEADER_KEYBOARD_EXPAND_MS = 480
+const val HEADER_KEYBOARD_COLLAPSE_MS = 420
+
 // iOS systemGroupedBackground / secondarySystemGroupedBackground
 val SURFACE_BG = Color(0xFFF2F2F7)
 val SURFACE_CARD = Color(0xFFFFFFFF)
@@ -2834,14 +2839,21 @@ fun MainApp(
 
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
 
+    // 同頂部滑入（headerEnter）共用：展開 30ms delay + 480ms；收起 420ms
     val keyboardAnimProgress = remember { Animatable(0f) }
     LaunchedEffect(showKeyboard) {
         if (showKeyboard) {
             keyboardAnimProgress.snapTo(0f)
-            delay(30)
-            keyboardAnimProgress.animateTo(1f, tween(480, easing = FastOutSlowInEasing))
+            delay(HEADER_KEYBOARD_EXPAND_DELAY_MS)
+            keyboardAnimProgress.animateTo(
+                1f,
+                tween(HEADER_KEYBOARD_EXPAND_MS, easing = FastOutSlowInEasing)
+            )
         } else {
-            keyboardAnimProgress.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
+            keyboardAnimProgress.animateTo(
+                0f,
+                tween(HEADER_KEYBOARD_COLLAPSE_MS, easing = FastOutSlowInEasing)
+            )
         }
     }
 
@@ -4664,10 +4676,11 @@ fun LedgerContent(
             headerSlideY.snapTo(fromHeaderY)
             headerSlideAlpha.snapTo(0f)
         }
-        launch {
-            headerSlideY.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 320f))
-        }
-        headerSlideAlpha.animateTo(1f, tween(durationMillis = 320, easing = FastOutSlowInEasing))
+        // 同鍵盤展開：相同 delay + duration + easing，同一時間完成
+        delay(HEADER_KEYBOARD_EXPAND_DELAY_MS)
+        val spec = tween<Float>(HEADER_KEYBOARD_EXPAND_MS, easing = FastOutSlowInEasing)
+        launch { headerSlideY.animateTo(0f, spec) }
+        headerSlideAlpha.animateTo(1f, spec)
         onHeaderEnterConsumed()
     }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
