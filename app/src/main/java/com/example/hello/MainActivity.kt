@@ -4864,61 +4864,67 @@ fun FilterDeckArea(
             }
 
             categories.forEachIndexed { idx, cat ->
-                val isSelected = cat == selectedCategory
-                val col = idx % 4
-                val row = idx / 4
-                val expX = col * (chipW + gap).value
-                val expY = row * (chipH + gap).value
+                // ★ 核心修改：加入 key 追蹤 Clip 身份，當 idx 改變時，會觸發流暢嘅位移動畫
+                key(cat ?: "all_categories_key") {
+                    val isSelected = cat == selectedCategory
+                    val col = idx % 4
+                    val row = idx / 4
+                    val expX = col * (chipW + gap).value
+                    val expY = row * (chipH + gap).value
 
-                val deckX = (totalWidth.value / 4) - (chipW.value / 2)
-                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
-                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
-                val colX = deckX + staggerX
-                val colY = staggerY
+                    val deckX = (totalWidth.value / 4) - (chipW.value / 2)
+                    val staggerX = if (isSelected) 0f else (idx % 3) * 2f
+                    val staggerY = if (isSelected) 0f else (idx % 3) * 3f
+                    val colX = deckX + staggerX
+                    val colY = staggerY
 
-                val targetX = if (isExpanded) expX else colX
-                val targetY = if (isExpanded) expY else colY
+                    val targetX = if (isExpanded) expX else colX
+                    val targetY = if (isExpanded) expY else colY
 
-                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "x_$idx")
-                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "y_$idx")
-                
-                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
+                    val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "x_$cat")
+                    val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "y_$cat")
+                    
+                    val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
 
-                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
-                    AnimatedFilterChip(
-                        selected = isSelected, label = cat ?: "全部", fillWidth = true,
-                        onClick = { if (isExpanded) onCategorySelect(cat) else onToggleExpand() }
-                    )
+                    Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                        AnimatedFilterChip(
+                            selected = isSelected, label = cat ?: "全部", fillWidth = true,
+                            onClick = { if (isExpanded) onCategorySelect(cat) else onToggleExpand() }
+                        )
+                    }
                 }
             }
 
             val monthStartY = catRows * (chipH + gap).value + 8f
             monthList.forEachIndexed { idx, m ->
-                val isSelected = m == selectedMonth
-                val col = idx % 4
-                val row = idx / 4
-                val expX = col * (chipW + gap).value
-                val expY = monthStartY + row * (chipH + gap).value
+                // ★ 月份同樣加入 key 綁定
+                key(m ?: "all_months_key") {
+                    val isSelected = m == selectedMonth
+                    val col = idx % 4
+                    val row = idx / 4
+                    val expX = col * (chipW + gap).value
+                    val expY = monthStartY + row * (chipH + gap).value
 
-                val deckX = (totalWidth.value * 3 / 4) - (chipW.value / 2)
-                val staggerX = if (isSelected) 0f else (idx % 3) * 2f
-                val staggerY = if (isSelected) 0f else (idx % 3) * 3f
-                val colX = deckX + staggerX
-                val colY = staggerY
+                    val deckX = (totalWidth.value * 3 / 4) - (chipW.value / 2)
+                    val staggerX = if (isSelected) 0f else (idx % 3) * 2f
+                    val staggerY = if (isSelected) 0f else (idx % 3) * 3f
+                    val colX = deckX + staggerX
+                    val colY = staggerY
 
-                val targetX = if (isExpanded) expX else colX
-                val targetY = if (isExpanded) expY else colY
+                    val targetX = if (isExpanded) expX else colX
+                    val targetY = if (isExpanded) expY else colY
 
-                val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "mx_$idx")
-                val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "my_$idx")
-                
-                val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
+                    val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "mx_$m")
+                    val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "my_$m")
+                    
+                    val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
 
-                Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
-                    AnimatedFilterChip(
-                        selected = isSelected, label = m?.let{formatMonthLabel(it)} ?: "全年", fillWidth = true,
-                        onClick = { if (isExpanded) onMonthSelect(m) else onToggleExpand() }
-                    )
+                    Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                        AnimatedFilterChip(
+                            selected = isSelected, label = m?.let{formatMonthLabel(it)} ?: "全年", fillWidth = true,
+                            onClick = { if (isExpanded) onMonthSelect(m) else onToggleExpand() }
+                        )
+                    }
                 }
             }
         }
