@@ -217,6 +217,8 @@ private val keyboardPrefillAmount = mutableStateOf<Double?>(null)
 private val keyboardPrefillCategory = mutableStateOf<String?>(null)
 private val keyboardPrefillNotifId = mutableStateOf<Int?>(null)
 private val keyboardPrefillFluidCardId = mutableStateOf<String?>(null)
+// 🟢 桌面 Shortcut / 外部入口觸發語音記帳
+private val voiceLaunchToken = mutableStateOf(0)
 
 // 🟢 啟動狀態：等 Firestore 第一次回傳先收 Splash
 object AppStartupState {
@@ -2416,6 +2418,8 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_PREFILL_CATEGORY = "extra_prefill_category"
         const val EXTRA_CANCEL_NOTIF_ID = "extra_cancel_notif_id"
         const val EXTRA_FROM_TILE = "extra_from_tile"
+        /** 桌面長按 App icon → 語音記帳 Shortcut */
+        const val EXTRA_VOICE_INPUT = "extra_voice_input"
     }
 
     private val notificationPermissionLauncher =
@@ -2446,6 +2450,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val token = keyboardLaunchToken.value
+            val voiceToken = voiceLaunchToken.value
             val prefillNote = keyboardPrefillNote.value
             val prefillAmount = keyboardPrefillAmount.value
             val prefillCategory = keyboardPrefillCategory.value
@@ -2493,6 +2498,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         MainApp(
                             keyboardLaunchToken = token,
+                            voiceLaunchToken = voiceToken,
                             prefillNoteOnLaunch = prefillNote,
                             prefillAmountOnLaunch = prefillAmount,
                             prefillCategoryOnLaunch = prefillCategory,
@@ -2522,8 +2528,22 @@ class MainActivity : ComponentActivity() {
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
 
-        // 🟢 處理來自 UPK 流体云嘅 DeepLink 指令
+        // 🟢 桌面 Shortcut：語音記帳（extra 可能係 boolean 或字串 "true"）
+        val voiceExtra = intent.getBooleanExtra(EXTRA_VOICE_INPUT, false) ||
+            intent.getStringExtra(EXTRA_VOICE_INPUT) == "true"
+        if (voiceExtra) {
+            voiceLaunchToken.value += 1
+            intent.removeExtra(EXTRA_VOICE_INPUT)
+            return
+        }
+        // 🟢 DeepLink：ledgerapp://voice
         val uri = intent.data
+        if (uri != null && uri.scheme == "ledgerapp" && uri.host == "voice") {
+            voiceLaunchToken.value += 1
+            intent.data = null
+            return
+        }
+        // 🟢 處理來自 UPK 流体云嘅 DeepLink 指令
         if (uri != null && uri.scheme == "ledgerapp" && uri.host == "quickadd") {
             keyboardLaunchToken.value += 1
             keyboardPrefillNote.value = uri.getQueryParameter("note")
@@ -2758,6 +2778,7 @@ private fun getCachedBlurEffect(radiusPx: Int): androidx.compose.ui.graphics.Ren
 @Composable
 fun MainApp(
     keyboardLaunchToken: Int = 0,
+    voiceLaunchToken: Int = 0,
     prefillNoteOnLaunch: String? = null,
     prefillAmountOnLaunch: Double? = null,
     prefillCategoryOnLaunch: String? = null,
@@ -3381,6 +3402,7 @@ fun MainApp(
                 )
                 quickInputScrollToFirstTrigger++
             },
+            voiceLaunchToken = voiceLaunchToken,
             keyboardState = keyboardState,
             onKeyboardStateChange = { newState ->
                 if (newState.amountText != keyboardState.amountText) {
@@ -3719,6 +3741,7 @@ private fun BoxScope.KeyboardAndFabLayer(
     onFilterButtonTap: () -> Unit,
     onFabTap: () -> Unit,
     onVoiceResult: (note: String, amount: Double?) -> Unit = { _, _ -> },
+    voiceLaunchToken: Int = 0,
     keyboardState: KeyboardState,
     onKeyboardStateChange: (KeyboardState) -> Unit,
     onKeyboardDismiss: () -> Unit,
@@ -3868,6 +3891,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             bottomPadding = bottomChromePad,
             onFabTap = onFabTap,
             onVoiceResult = onVoiceResult,
+            voiceLaunchToken = voiceLaunchToken,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
 
@@ -3928,6 +3952,7 @@ private fun AnimatedFabLayer(
     bottomPadding: Dp,
     onFabTap: () -> Unit,
     onVoiceResult: (note: String, amount: Double?) -> Unit = { _, _ -> },
+    voiceLaunchToken: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -3939,6 +3964,7 @@ private fun AnimatedFabLayer(
     var listening by remember { mutableStateOf(false) }
     var partialText by remember { mutableStateOf("") }
     var statusHint by remember { mutableStateOf("聽緊…") }
+    var pendingVoiceStart by remember { mutableStateOf(false) }
 
     val recognizer = remember {
         if (android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -4087,7 +4113,15 @@ private fun AnimatedFabLayer(
         else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
 
-    if (alpha <= 0.01f) return
+    // 🟢 桌面 Shortcut / DeepLink 觸發：進 App 後自動開始語音
+    LaunchedEffect(voiceLaunchToken) {
+        if (voiceLaunchToken <= 0) return@LaunchedEffect
+        // 等 UI 同權限就緒
+        delay(450)
+        if (!listening) requestVoiceInput()
+    }
+
+    if (alpha <= 0.01f && !listening) return
 
     Row(
         modifier = modifier
