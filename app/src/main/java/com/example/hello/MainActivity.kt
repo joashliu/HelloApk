@@ -3965,6 +3965,15 @@ private fun AnimatedFabLayer(
     var partialText by remember { mutableStateOf("") }
     var statusHint by remember { mutableStateOf("聽緊…") }
     var pendingVoiceStart by remember { mutableStateOf(false) }
+    // 錄音／其他 App 佔用咪高風時，重試一次
+    var audioRetryUsed by remember { mutableStateOf(false) }
+    var audioFocusRequest by remember {
+        mutableStateOf<android.media.AudioFocusRequest?>(null)
+    }
+
+    val audioManager = remember {
+        context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+    }
 
     val recognizer = remember {
         if (android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -3972,14 +3981,61 @@ private fun AnimatedFabLayer(
         } else null
     }
 
+    fun releaseMicFocus() {
+        try {
+            val req = audioFocusRequest
+            if (req != null) {
+                audioManager.abandonAudioFocusRequest(req)
+            }
+        } catch (_: Exception) {}
+        audioFocusRequest = null
+    }
+
+    /** 搶 transient exclusive 音訊焦點，盡量令錄屏／其他收音暫時讓路 */
+    fun requestMicFocus(): Boolean {
+        return try {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val req = android.media.AudioFocusRequest.Builder(
+                android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+            )
+                .setAudioAttributes(attrs)
+                .setAcceptsDelayedFocusGain(true)
+                .setOnAudioFocusChangeListener { }
+                .build()
+            val result = audioManager.requestAudioFocus(req)
+            audioFocusRequest = req
+            result == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED ||
+                result == android.media.AudioManager.AUDIOFOCUS_REQUEST_DELAYED
+        } catch (_: Exception) {
+            // API 降級：舊式 requestAudioFocus
+            try {
+                @Suppress("DEPRECATION")
+                val result = audioManager.requestAudioFocus(
+                    null,
+                    android.media.AudioManager.STREAM_MUSIC,
+                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+                )
+                result == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
     fun stopListening() {
         try { recognizer?.stopListening() } catch (_: Exception) {}
         try { recognizer?.cancel() } catch (_: Exception) {}
         listening = false
+        releaseMicFocus()
     }
 
     fun handleFinalText(spoken: String) {
         listening = false
+        releaseMicFocus()
+        audioRetryUsed = false
         partialText = spoken
         val (note, amount) = parseVoiceLedgerInput(spoken)
         if (note.isBlank() && (amount == null || amount <= 0.0)) {
@@ -4001,6 +4057,43 @@ private fun AnimatedFabLayer(
         onVoiceResult(note, amount)
     }
 
+    fun startInAppListening() {
+        val r = recognizer
+        if (r == null) {
+            Toast.makeText(context, "呢部機唔支援語音識別", Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            // 先搶咪高風焦點（對抗系統錄屏開咗「錄製音訊」）
+            requestMicFocus()
+
+            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-HK")
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-HK")
+                putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+                // 優先語音識別音源（若引擎支援）
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE,
+                    false
+                )
+            }
+            partialText = ""
+            statusHint = "準備中…"
+            listening = true
+            r.startListening(intent)
+        } catch (e: Exception) {
+            listening = false
+            releaseMicFocus()
+            Toast.makeText(context, "無法啟動語音識別", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     DisposableEffect(recognizer) {
         val r = recognizer
         if (r == null) {
@@ -4010,6 +4103,7 @@ private fun AnimatedFabLayer(
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
                     statusHint = "請開始講…"
                     partialText = ""
+                    audioRetryUsed = false
                 }
                 override fun onBeginningOfSpeech() {
                     statusHint = "聽緊…"
@@ -4020,19 +4114,42 @@ private fun AnimatedFabLayer(
                     statusHint = "識別中…"
                 }
                 override fun onError(error: Int) {
+                    // 咪被佔用／忙線：自動搶焦點再試一次
+                    val micBusy = error == android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
+                        error == android.speech.SpeechRecognizer.ERROR_AUDIO ||
+                        error == android.speech.SpeechRecognizer.ERROR_CLIENT ||
+                        error == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                    if (micBusy && !audioRetryUsed) {
+                        audioRetryUsed = true
+                        statusHint = "咪忙碌，重試中…"
+                        try { r.cancel() } catch (_: Exception) {}
+                        releaseMicFocus()
+                        // 喺主線程稍後重試
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            requestMicFocus()
+                            startInAppListening()
+                        }, 350)
+                        return
+                    }
+
                     listening = false
+                    releaseMicFocus()
                     val msg = when (error) {
                         android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "聽唔到，再試一次"
                         android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "冇聽到聲"
                         android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "冇麥克風權限"
+                        android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                        android.speech.SpeechRecognizer.ERROR_AUDIO ->
+                            "咪高風被佔用（錄屏可試關「錄製音訊」）"
                         android.speech.SpeechRecognizer.ERROR_NETWORK,
                         android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "網絡問題"
                         else -> "語音識別失敗"
                     }
                     statusHint = msg
                     if (error != android.speech.SpeechRecognizer.ERROR_CLIENT) {
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                     }
+                    audioRetryUsed = false
                 }
                 override fun onResults(results: android.os.Bundle?) {
                     val spoken = results
@@ -4042,6 +4159,7 @@ private fun AnimatedFabLayer(
                     if (!spoken.isNullOrBlank()) handleFinalText(spoken)
                     else {
                         listening = false
+                        releaseMicFocus()
                         statusHint = "未識別到"
                     }
                 }
@@ -4061,35 +4179,8 @@ private fun AnimatedFabLayer(
             onDispose {
                 try { r.cancel() } catch (_: Exception) {}
                 try { r.destroy() } catch (_: Exception) {}
+                releaseMicFocus()
             }
-        }
-    }
-
-    fun startInAppListening() {
-        val r = recognizer
-        if (r == null) {
-            Toast.makeText(context, "呢部機唔支援語音識別", Toast.LENGTH_SHORT).show()
-            return
-        }
-        try {
-            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(
-                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
-                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-HK")
-                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-HK")
-                putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            }
-            partialText = ""
-            statusHint = "準備中…"
-            listening = true
-            r.startListening(intent)
-        } catch (e: Exception) {
-            listening = false
-            Toast.makeText(context, "無法啟動語音識別", Toast.LENGTH_SHORT).show()
         }
     }
 
