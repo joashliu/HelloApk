@@ -4192,14 +4192,16 @@ fun LedgerContent(
         if (!effectiveScrolledAway) isFilterDeckExpanded = true
     }
 
+    // 正常模式嘅 QuickInput 滾動壓縮邏輯 + ★ 只攔截手動 Drag 嚟收起啤牌
     val topScrollConnection = remember(filterMode, topNotes, isAutoAnimating, maxCollapsePx, isFilterDeckExpanded) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val isManualDrag = source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.Drag || source.toString() == "UserInput"
                 val now = System.currentTimeMillis()
                 
-                // ★ 500ms 保護期：如果啱啱撳咗展開，就算有殘留嘅慣性，都唔會自動收起啤牌
-                if (isManualDrag && available.y < -5f && isFilterDeckExpanded && effectiveScrolledAway && (now - manualExpandTime > 500L)) {
+                // ★ 修正：拎走咗 effectiveScrolledAway 限制！
+                // 依家只要係手動向下拉 (available.y < -2f)，就算係由最頂開始拉，都會即刻觸發啤牌摺疊！
+                if (isManualDrag && available.y < -2f && isFilterDeckExpanded && (now - manualExpandTime > 500L)) {
                     isFilterDeckExpanded = false
                 }
                 
