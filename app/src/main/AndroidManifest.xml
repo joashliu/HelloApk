@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 🟢 語音記帳（長按 FAB） -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -39,6 +40,10 @@
         <package android:name="com.oplus.pantanal.ums" />
         <intent>
             <action android:name="android.service.notification.NotificationListenerService" />
+        </intent>
+        <!-- 🟢 語音識別 -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
