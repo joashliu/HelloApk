@@ -2806,6 +2806,17 @@ fun MainApp(
 
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
+    // 其他頁撳 FAB 返記帳頁時，頂部滑入動畫 token
+    var headerSlideInToken by remember { mutableIntStateOf(0) }
+
+    fun goLedgerAndAdd(openKeyboard: () -> Unit = {}) {
+        val fromOther = currentPage != 0
+        if (fromOther) {
+            currentPage = 0
+            headerSlideInToken++
+        }
+        openKeyboard()
+    }
     var filterSearch by remember { mutableStateOf(TextFieldValue("")) }
     var filterSearchHasFocus by remember { mutableStateOf(false) }
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
@@ -3213,7 +3224,8 @@ fun MainApp(
                 hiddenQuickNotes = ui.hiddenQuickNotes,
                 onHideNote = { vm.hideQuickNote(it) },
                 onUnhideNote = { vm.unhideQuickNote(it) },
-                quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger
+                quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger,
+                headerSlideInToken = headerSlideInToken
             )
             1 -> {
                 val compareMonthA by vm.compareMonthA.collectAsState()
@@ -3235,7 +3247,7 @@ fun MainApp(
                         vm.setCompareMonthB(newB)
                         if (newA != compareMonthA) vm.setCompareMonthA(newA)
                     },
-                    onAddClick = { currentPage = 0; openKeyboardForNew() }
+                    onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
                 )
             }
             2 -> {
@@ -3248,19 +3260,20 @@ fun MainApp(
                     onMonthChange = { vm.setCalendarMonthKey(it) },
                     filterCategory = calendarFilterCategory,
                     onFilterCategoryChange = { vm.setCalendarFilterCategory(it) },
-                    onCopyClick = { r -> currentPage = 0; openKeyboardForCopy(r) },
-                    onEditClick = { r -> currentPage = 0; openKeyboardForEdit(r) },
+                    onCopyClick = { r -> goLedgerAndAdd { openKeyboardForCopy(r) } },
+                    onEditClick = { r -> goLedgerAndAdd { openKeyboardForEdit(r) } },
                     onFilterClick = { r ->
-                        currentPage = 0
-                        vm.setFilterCategory(null)
-                        vm.setFilterMonth(null)
-                        filterSearch = TextFieldValue(r.note)
-                        vm.setFilterSearch(r.note)
-                        vm.setFilterModeOn(true)
+                        goLedgerAndAdd {
+                            vm.setFilterCategory(null)
+                            vm.setFilterMonth(null)
+                            filterSearch = TextFieldValue(r.note)
+                            vm.setFilterSearch(r.note)
+                            vm.setFilterModeOn(true)
+                        }
                     },
                     onDeleteClick = { deleteRecordWithUndo(it) },
                     onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                    onAddClick = { currentPage = 0; openKeyboardForNew() },
+                    onAddClick = { goLedgerAndAdd { openKeyboardForNew() } },
                     deletingIds = deletingIds,
                     justAddedIds = justAddedIds
                 )
@@ -3271,7 +3284,7 @@ fun MainApp(
                 PivotContent(
                     pivotUi = pivotUi,
                     onYearChange = { vm.setPivotYear(it) },
-                    onAddClick = { currentPage = 0; openKeyboardForNew() }
+                    onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
                 )
             }
         }
@@ -3383,23 +3396,22 @@ fun MainApp(
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
                 } else {
                     if (filter.modeOn) vm.setFilterModeOn(false)
-                    if (currentPage != 0) currentPage = 0
-                    openKeyboardForNew()
+                    goLedgerAndAdd { openKeyboardForNew() }
                 }
             },
             onVoiceResult = { note, amount ->
                 if (filter.modeOn) vm.setFilterModeOn(false)
-                if (currentPage != 0) currentPage = 0
-                // 用語音解析出嘅名稱／金額預填鍵盤；分類跟 noteCategoryMap 或最近使用
                 val cat = when {
                     note.isNotBlank() -> ui.noteCategoryMap[note]
                     else -> null
                 }
-                openKeyboardForNew(
-                    note = note,
-                    amount = amount,
-                    forceCategory = cat
-                )
+                goLedgerAndAdd {
+                    openKeyboardForNew(
+                        note = note,
+                        amount = amount,
+                        forceCategory = cat
+                    )
+                }
                 quickInputScrollToFirstTrigger++
             },
             voiceLaunchToken = voiceLaunchToken,
@@ -4620,6 +4632,8 @@ fun LedgerContent(
     onHideNote: (String) -> Unit = {},
     onUnhideNote: (String) -> Unit = {},
     quickInputScrollToFirstTrigger: Int = 0,
+    /** 由其他頁 FAB 返嚟時 >0，觸發頂部 TopStats／快速輸入由上滑入 */
+    headerSlideInToken: Int = 0,
 ) {
     val listState = rememberLazyListState()
 
@@ -4633,6 +4647,20 @@ fun LedgerContent(
 
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
+
+    // 由其他頁撳 FAB 返記帳頁：頂部由上滑入
+    val headerSlideY = remember { Animatable(0f) }
+    val headerSlideAlpha = remember { Animatable(1f) }
+    LaunchedEffect(headerSlideInToken) {
+        if (headerSlideInToken <= 0) return@LaunchedEffect
+        val fromY = with(density) { (-72).dp.toPx() }
+        headerSlideY.snapTo(fromY)
+        headerSlideAlpha.snapTo(0f)
+        launch {
+            headerSlideY.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 320f))
+        }
+        headerSlideAlpha.animateTo(1f, tween(durationMillis = 320, easing = FastOutSlowInEasing))
+    }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
 
@@ -4958,6 +4986,10 @@ fun LedgerContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp, bottom = 0.dp)
+                    .graphicsLayer {
+                        translationY = headerSlideY.value
+                        alpha = headerSlideAlpha.value
+                    }
                     .clip(RoundedCornerShape(12.dp))
                     .background(topBarBgColor)
                     .pointerInput(Unit) {
@@ -5038,10 +5070,15 @@ fun LedgerContent(
             val sectionGap = 8.dp
             Spacer(Modifier.height(sectionGap))
 
-            // [2] 內容區塊
+            // [2] 內容區塊（快速輸入／篩選區）— 同 TopStats 一齊由上滑入
             AnimatedContent(
                 targetState = filterMode,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        translationY = headerSlideY.value
+                        alpha = headerSlideAlpha.value
+                    },
                 transitionSpec = {
                     ((fadeIn(tween(220, delayMillis = 90)) + expandVertically(spring(0.85f, 300f), expandFrom = Alignment.Top)) togetherWith 
                     (fadeOut(tween(150)) + shrinkVertically(spring(0.85f, 300f), shrinkTowards = Alignment.Top))).using(SizeTransform(clip = true) { _, _ -> spring(0.85f, 300f) })
