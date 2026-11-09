@@ -10299,26 +10299,26 @@ fun TopStats(
     isCompact: Boolean = false 
 ) {
     val balance = income - expense
-    val showIncome = hasIncome || (!hasIncome && !hasExpense)
-    val showExpense = hasExpense
-    val showAvg = isFilterMode && avgExpense != null && avgExpense > 0
     val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
 
-    val activeBlocks = remember(showCategory, showIncome, showExpense, showAvg, isFilterMode) {
+    // ★ 核心修改：動態篩選出數值唔係 0 嘅板塊
+    val activeBlocks = remember(showCategory, income, expense, avgExpense, balance, isFilterMode, filteredCount) {
         val list = mutableListOf<StatBlockType>()
         if (isFilterMode) {
-            list.add(StatBlockType.COUNT)
-            list.add(StatBlockType.INC)
-            list.add(StatBlockType.EXP)
-            if (showAvg) list.add(StatBlockType.AVG)
-            list.add(StatBlockType.BAL)
+            if ((filteredCount ?: 0) > 0) list.add(StatBlockType.COUNT)
+            if (income != 0.0) list.add(StatBlockType.INC)
+            if (expense != 0.0) list.add(StatBlockType.EXP)
+            if ((avgExpense ?: 0.0) > 0.0) list.add(StatBlockType.AVG)
+            if (balance != 0.0) list.add(StatBlockType.BAL)
         } else {
             if (showCategory) list.add(StatBlockType.CAT)
-            if (showIncome) list.add(StatBlockType.INC)
-            if (showExpense) list.add(StatBlockType.EXP)
-            if (showAvg) list.add(StatBlockType.AVG)
-            list.add(StatBlockType.BAL)
+            if (income != 0.0) list.add(StatBlockType.INC)
+            if (expense != 0.0) list.add(StatBlockType.EXP)
+            if ((avgExpense ?: 0.0) > 0.0) list.add(StatBlockType.AVG)
+            if (balance != 0.0) list.add(StatBlockType.BAL)
         }
+        // 保底：如果咁啱全部都係 0，至少顯示結餘 0，避免成行吉咗
+        if (list.isEmpty()) list.add(StatBlockType.BAL)
         list
     }
 
@@ -10335,6 +10335,7 @@ fun TopStats(
                 1, 2, 3 -> listOf(activeBlocks)
                 4 -> listOf(activeBlocks.take(2), activeBlocks.drop(2))
                 5 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
+                6 -> listOf(activeBlocks.take(3), activeBlocks.drop(3))
                 else -> emptyList()
             }
             nRows.forEachIndexed { rIdx, row ->
@@ -10346,7 +10347,7 @@ fun TopStats(
                 }
             }
 
-            // [Clips 壓縮模式佈局] - ★ 動態完美等分闊度 (每行最多 3 個)
+            // [Clips 壓縮模式佈局] - 動態完美等分闊度 (每行最多 3 個)
             val cGapX = 8.dp
             val cGapY = 8.dp
             val cRowH = 34.dp
@@ -10367,43 +10368,60 @@ fun TopStats(
         val nMap = geoMapPair.first
         val cMap = geoMapPair.second
 
-        val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
-        val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 0.dp
+        val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 52.dp
+        val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 34.dp
 
         val targetHeight = if (isCompact) cMaxY else nMaxY
         val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
         val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
 
-        Box(Modifier.fillMaxWidth().height(animHeight)) {
-            activeBlocks.forEach { block ->
-                val nGeo = nMap[block]!!
-                val cGeo = cMap[block]!!
-                
-                val x = androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress)
-                val y = androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress)
-                val w = androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress)
-                val h = androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress)
+        // 窮舉所有可能性，配合 AnimatedVisibility 控制每一粒嘅生死
+        val allPossibleBlocks = listOf(StatBlockType.COUNT, StatBlockType.CAT, StatBlockType.INC, StatBlockType.EXP, StatBlockType.AVG, StatBlockType.BAL)
 
-                // ★ 修改：使用 copy(alpha = 0f) 避免黑色陰影陷阱
+        Box(Modifier.fillMaxWidth().height(animHeight)) {
+            allPossibleBlocks.forEach { block ->
+                val isVisible = activeBlocks.contains(block)
+                
+                // ★ 記憶最後一次嘅位置與尺寸，確保消失時可以原地縮細淡出，而唔會因為變 0 而飛走
+                var memNGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp, 0.dp)) }
+                var memCGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp, 0.dp)) }
+                
+                LaunchedEffect(nMap[block]) { nMap[block]?.let { memNGeo = it } }
+                LaunchedEffect(cMap[block]) { cMap[block]?.let { memCGeo = it } }
+                
+                val nGeo = nMap[block] ?: memNGeo
+                val cGeo = cMap[block] ?: memCGeo
+                
+                val x by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress), MASTER_SPRING_DP, label = "x_$block")
+                val y by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress), MASTER_SPRING_DP, label = "y_$block")
+                val w by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress), MASTER_SPRING_DP, label = "w_$block")
+                val h by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress), MASTER_SPRING_DP, label = "h_$block")
+
                 val bgColor = androidx.compose.ui.graphics.lerp(SURFACE_CARD.copy(alpha = 0f), SURFACE_CARD, progress)
                 val borderColor = androidx.compose.ui.graphics.lerp(DIVIDER_COLOR.copy(alpha = 0f), DIVIDER_COLOR.copy(alpha = 0.5f), progress)
 
-                Box(
-                    Modifier
-                        .offset(x = x, y = y)
-                        .width(w)
-                        .height(h)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(bgColor)
-                        .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
+                // ★ 使用 AnimatedVisibility 包裹，當數值為 0 (isVisible = false) 就會流暢縮細消失
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isVisible,
+                    enter = fadeIn(tween(250)) + scaleIn(spring(0.85f, 300f), initialScale = 0.7f),
+                    exit = fadeOut(tween(200)) + scaleOut(spring(0.85f, 300f), targetScale = 0.7f),
+                    modifier = Modifier.offset(x = x, y = y).width(w).height(h)
                 ) {
-                    when (block) {
-                        StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
-                        StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
-                        StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
-                        StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
-                        StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
-                        StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(bgColor)
+                            .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
+                    ) {
+                        when (block) {
+                            StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
+                            StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
+                            StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
+                            StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
+                            StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
+                            StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
+                        }
                     }
                 }
             }
