@@ -5920,12 +5920,14 @@ fun CalendarContent(
                         }
                     }
 
-                    // 當日明細：永遠喺日曆下面，可向上佔滿剩餘空間
+                    // 當日明細：永遠喺日曆下面；底部預留 FAB + 導航高度，唔會被 FAB 遮住
                     if (selectedDay != null) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
+                                // FAB 喺 BottomEnd：nav + FAB(56) + 間距，明細最底唔超過 FAB 頂
+                                .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp)
                         ) {
                             TrianglePointer(
                                 colIndex = cachedSelectedCol,
