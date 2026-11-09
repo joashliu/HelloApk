@@ -4564,6 +4564,15 @@ fun LedgerContent(
                                 )
                             }
                         }
+
+                        // ★ 篩選結果棒形圖：永遠可見，位於時間範圍下方、列表上方
+                        if (filtered.isNotEmpty()) {
+                            Spacer(Modifier.height(10.dp))
+                            FilterResultsBarChart(
+                                records = filtered,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
             }
@@ -8455,6 +8464,159 @@ fun FadedText(
         },
         modifier = modifier
     )
+}
+
+/**
+ * 篩選模式專用：當前篩選結果每一筆一條棒，永遠固定喺類別 chips / 時間範圍下方、列表上方。
+ * - 按時間由舊→新（左→右）
+ * - 高度按金額比例；收入用綠色，支出用紅色（還錢當支出）
+ * - 項目多時可橫向捲動，每支棒有最小寬度
+ */
+@Composable
+fun FilterResultsBarChart(
+    records: List<Record>,
+    modifier: Modifier = Modifier,
+) {
+    if (records.isEmpty()) return
+
+    // 時間升序：左舊右新
+    val ordered = remember(records) {
+        records.sortedBy { it.timestamp }
+    }
+    val maxAmount = remember(ordered) {
+        ordered.maxOf { it.amount }.coerceAtLeast(0.0001)
+    }
+    val expenseSum = remember(ordered) {
+        ordered.filter { it.category != INCOME_CATEGORY }.sumOf { it.amount }
+    }
+    val incomeSum = remember(ordered) {
+        ordered.filter { it.category == INCOME_CATEGORY }.sumOf { it.amount }
+    }
+    val count = ordered.size
+
+    val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val minBarWidth = 10.dp
+    val barGap = 3.dp
+    val chartBarAreaHeight = 56.dp
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = SURFACE_CARD,
+        border = BorderStroke(0.5.dp, DIVIDER_COLOR)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "篩選結果",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TEXT_PRIMARY
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "${count} 筆",
+                    fontSize = 12.sp,
+                    color = TEXT_SECONDARY,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.weight(1f))
+                if (incomeSum > 0) {
+                    Text(
+                        "+${formatAmountNoDecimal(incomeSum)}",
+                        fontSize = 12.sp,
+                        color = COLOR_INCOME,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (expenseSum > 0) Spacer(Modifier.width(8.dp))
+                }
+                if (expenseSum > 0) {
+                    Text(
+                        "-${formatAmountNoDecimal(expenseSum)}",
+                        fontSize = 12.sp,
+                        color = COLOR_EXPENSE,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            BoxWithConstraints(Modifier.fillMaxWidth().height(chartBarAreaHeight)) {
+                val availablePx = constraints.maxWidth.toFloat()
+                val minBarPx = with(density) { minBarWidth.toPx() }
+                val gapPx = with(density) { barGap.toPx() }
+                val idealBarPx = if (count <= 1) {
+                    availablePx
+                } else {
+                    (availablePx - gapPx * (count - 1)) / count
+                }
+                val useScroll = idealBarPx < minBarPx
+                val barPx = if (useScroll) minBarPx else idealBarPx.coerceAtLeast(2f)
+                val totalContentPx = if (count <= 1) availablePx
+                    else barPx * count + gapPx * (count - 1)
+
+                val rowModifier = if (useScroll) {
+                    Modifier
+                        .horizontalScroll(scrollState)
+                        .width(with(density) { totalContentPx.toDp() })
+                        .fillMaxHeight()
+                } else {
+                    Modifier.fillMaxSize()
+                }
+
+                Row(
+                    modifier = rowModifier,
+                    horizontalArrangement = if (useScroll) {
+                        Arrangement.spacedBy(barGap)
+                    } else {
+                        Arrangement.spacedBy(with(density) { gapPx.toDp() })
+                    },
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    ordered.forEach { r ->
+                        val ratio = (r.amount / maxAmount).toFloat().coerceIn(0.04f, 1f)
+                        val isIncome = r.category == INCOME_CATEGORY
+                        val barColor = if (isIncome) COLOR_INCOME else COLOR_EXPENSE
+                        val style = CATEGORY_STYLES[r.category]
+                        val fillColor = style?.fgColor?.copy(alpha = 0.85f) ?: barColor
+
+                        Box(
+                            modifier = Modifier
+                                .width(with(density) { barPx.toDp() })
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                .background(SURFACE_ELEVATED.copy(alpha = 0.6f)),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(ratio)
+                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                fillColor.copy(alpha = 0.95f),
+                                                fillColor.copy(alpha = 0.55f)
+                                            )
+                                        )
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
