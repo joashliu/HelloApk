@@ -306,6 +306,61 @@ object NotificationCaptureBridge {
 private const val PREF_OVERLAY_CAPTURE_ENABLED = "overlay_capture_enabled"
 private const val OVERLAY_AUTO_DISMISS_MS = 8_000L
 
+// 未完成入帳鍵盤草稿（名稱／金額／開關狀態）
+private const val PREF_KB_OPEN = "keyboard_draft_open"
+private const val PREF_KB_AMOUNT = "keyboard_draft_amount"
+private const val PREF_KB_NOTE = "keyboard_draft_note"
+private const val PREF_KB_CATEGORY = "keyboard_draft_category"
+private const val PREF_KB_EDITING_NOTE = "keyboard_draft_editing_note"
+private const val PREF_KB_EDIT_ID = "keyboard_draft_edit_id"
+private const val PREF_KB_TIMESTAMP = "keyboard_draft_timestamp"
+private const val PREF_KB_CURRENCY = "keyboard_draft_currency"
+private const val PREF_KB_RATE = "keyboard_draft_rate"
+private const val PREF_KB_FOCUS = "keyboard_draft_focus"
+
+fun loadKeyboardDraft(context: Context): Pair<Boolean, KeyboardState> {
+    val p = context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+    val open = p.getBoolean(PREF_KB_OPEN, false)
+    val state = KeyboardState(
+        amountText = p.getString(PREF_KB_AMOUNT, "") ?: "",
+        noteText = p.getString(PREF_KB_NOTE, "") ?: "",
+        category = p.getString(PREF_KB_CATEGORY, "飲食") ?: "飲食",
+        editingNote = p.getBoolean(PREF_KB_EDITING_NOTE, false),
+        editingRecordId = p.getString(PREF_KB_EDIT_ID, null),
+        timestamp = p.getLong(PREF_KB_TIMESTAMP, System.currentTimeMillis()),
+        selectAmountOnInput = false,
+        currency = p.getString(PREF_KB_CURRENCY, "HKD") ?: "HKD",
+        exchangeRateText = p.getString(PREF_KB_RATE, "0.052") ?: "0.052",
+        focusedField = p.getString(PREF_KB_FOCUS, "amount") ?: "amount"
+    )
+    return open to state
+}
+
+fun saveKeyboardDraft(context: Context, open: Boolean, state: KeyboardState) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE).edit()
+        .putBoolean(PREF_KB_OPEN, open)
+        .putString(PREF_KB_AMOUNT, state.amountText)
+        .putString(PREF_KB_NOTE, state.noteText)
+        .putString(PREF_KB_CATEGORY, state.category)
+        .putBoolean(PREF_KB_EDITING_NOTE, state.editingNote)
+        .putString(PREF_KB_EDIT_ID, state.editingRecordId)
+        .putLong(PREF_KB_TIMESTAMP, state.timestamp)
+        .putString(PREF_KB_CURRENCY, state.currency)
+        .putString(PREF_KB_RATE, state.exchangeRateText)
+        .putString(PREF_KB_FOCUS, state.focusedField)
+        .apply()
+}
+
+fun clearKeyboardDraftPrefs(context: Context) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE).edit()
+        .putBoolean(PREF_KB_OPEN, false)
+        .putString(PREF_KB_AMOUNT, "")
+        .putString(PREF_KB_NOTE, "")
+        .putString(PREF_KB_EDIT_ID, null)
+        .putBoolean(PREF_KB_EDITING_NOTE, false)
+        .apply()
+}
+
 fun isOverlayCapturePrefEnabled(context: Context): Boolean =
     context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
         .getBoolean(PREF_OVERLAY_CAPTURE_ENABLED, true)
@@ -2835,7 +2890,10 @@ fun MainApp(
     var uploading by remember { mutableStateOf(false) }
     // ★ 待確認圖片效果
     var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
-    var showKeyboard by remember { mutableStateOf(false) }
+    // 還原未完成入帳草稿；唔自動開鍵盤（除 shortcut／磁貼）
+    val restoredDraft = remember { loadKeyboardDraft(context) }
+    var showKeyboard by remember { mutableStateOf(restoredDraft.first) }
+    var keyboardState by remember { mutableStateOf(restoredDraft.second) }
 
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
 
@@ -2857,23 +2915,40 @@ fun MainApp(
         }
     }
 
-    var keyboardState by remember { mutableStateOf(KeyboardState()) }
+    // 持續保存草稿同開關狀態
+    LaunchedEffect(showKeyboard, keyboardState) {
+        saveKeyboardDraft(context, showKeyboard, keyboardState)
+    }
+
     var scrollToTopTrigger by remember { mutableIntStateOf(0) }
     var quickInputScrollToFirstTrigger by remember { mutableIntStateOf(0) }
     var nameFlashTrigger by remember { mutableIntStateOf(0) }
     var afterSaveHint by remember { mutableStateOf<AfterSaveHint?>(null) }
     var afterSaveHintVisible by remember { mutableStateOf(false) }
 
+    /** 收起鍵盤，但保留未完成輸入 */
     fun dismissKeyboard() {
         showKeyboard = false
-        keyboardState = KeyboardState()
         keyboardController?.hide()
         focusManager.clearFocus()
+        saveKeyboardDraft(context, false, keyboardState)
+    }
+
+    /** 入帳成功後先清空草稿 */
+    fun clearKeyboardAfterSave() {
+        keyboardState = KeyboardState()
+        showKeyboard = false
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        clearKeyboardDraftPrefs(context)
     }
 
     LaunchedEffect(currentPage) {
+        // 轉去其他頁只收起鍵盤，保留草稿
         if (currentPage != 0 && showKeyboard) {
-            dismissKeyboard()
+            showKeyboard = false
+            keyboardController?.hide()
+            focusManager.clearFocus()
         }
     }
 
@@ -2886,10 +2961,24 @@ fun MainApp(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                if (showKeyboard) {
-                    dismissKeyboard()
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    // 離開 App：保存狀態，唔清空、唔強制關（還原時跟 prefs）
+                    saveKeyboardDraft(context, showKeyboard, keyboardState)
                 }
+                Lifecycle.Event.ON_RESUME -> {
+                    // 唔自動開關鍵盤；只確保草稿仍在 memory
+                    val (open, draft) = loadKeyboardDraft(context)
+                    // 若 memory 已被清但 prefs 有草稿，補返
+                    if (keyboardState.amountText.isBlank() && keyboardState.noteText.isBlank() &&
+                        (draft.amountText.isNotBlank() || draft.noteText.isNotBlank())
+                    ) {
+                        keyboardState = draft
+                    }
+                    // 唔喺 resume 強行 set showKeyboard，避免同用戶意圖衝突
+                    // （重新進入由 remember 初值／Activity recreate 還原）
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -3114,7 +3203,7 @@ fun MainApp(
             ) { newId -> afterSaveHint = AfterSaveHint(newId, category, totalThisMonth) }
         }
 
-        dismissKeyboard()
+        clearKeyboardAfterSave()
         scrollToTopTrigger++
 
         keyboardPrefillNotifId.value?.let { notifId ->
