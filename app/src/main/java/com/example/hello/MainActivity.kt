@@ -7024,7 +7024,6 @@ private fun AnimatedActionButton(
 }
 
 @Composable
-@Composable
 fun DayCategoryPieDialog(
     title: String,
     slices: List<Pair<String, Double>>,
