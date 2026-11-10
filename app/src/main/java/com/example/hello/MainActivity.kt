@@ -5286,7 +5286,10 @@ fun LedgerContent(
                                         activeTrackColor = BRAND_PRIMARY,
                                         inactiveTrackColor = DIVIDER_COLOR
                                     ),
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    // 左右向內縮少少，拇指唔貼邊，方便手指拖
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
                                 )
                             }
                         }
