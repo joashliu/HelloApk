@@ -8180,36 +8180,16 @@ fun AnimatedCalendarCategoryChips(
             items = targetKeys,
             key = { it ?: "all_categories_key" }
         ) { cat ->
-
-            // 3. 處理新加入 Chip 的縮放與向上滑動進場
-            var appear by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { appear = true }
-
-            val scale by animateFloatAsState(
-                targetValue = if (appear) 1f else 0.55f,
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
-                label = "chipScale"
-            )
-            val offsetY by animateFloatAsState(
-                targetValue = if (appear) 0f else 30f,
-                animationSpec = spring(dampingRatio = 0.7f, stiffness = 400f),
-                label = "chipOffset"
-            )
-
+            // 唔再做入場放大（避免每次重入月曆重播）；
+            // animateItem 保留切換月份時嘅移動／淡入淡出
             Box(
                 modifier = Modifier
                     .height(40.dp)
-                    // ★ 靈魂所在：呢一句就會令「留低嘅 chips」自動平滑移動補位，並令「消失嘅 chips」優雅淡出
                     .animateItem(
-                        fadeInSpec = tween(300, easing = FastOutSlowInEasing),
-                        fadeOutSpec = tween(250, easing = FastOutSlowInEasing),
+                        fadeInSpec = tween(280, easing = FastOutSlowInEasing),
+                        fadeOutSpec = tween(220, easing = FastOutSlowInEasing),
                         placementSpec = spring(dampingRatio = 0.85f, stiffness = 300f)
-                    )
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationY = offsetY
-                    },
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 CalendarFilterChip(
@@ -10011,20 +9991,8 @@ fun PivotContent(
     val rowHeight = 38.dp
     val stickyHeight = 40.dp
     val colWidthPx = remember(density, colWidth) { with(density) { colWidth.roundToPx() } }
-
-    // 標題／年份：向下滾動時漸隱，滾到頂先出現
-    val headerCollapse by remember {
-        derivedStateOf {
-            val idx = listState.firstVisibleItemIndex
-            val offset = listState.firstVisibleItemScrollOffset
-            when {
-                idx > 0 -> 1f
-                else -> (offset / 120f).coerceIn(0f, 1f)
-            }
-        }
-    }
-    val headerAlpha = 1f - headerCollapse
-    val headerHeightDp = (56.dp * (1f - headerCollapse)).coerceAtLeast(0.dp)
+    // 右邊「總計」統計欄；預設隱藏
+    var showTotalColumn by rememberSaveable { mutableStateOf(false) }
 
     val categoryHeaderIndex = remember(pivotUi.rows) {
         val map = LinkedHashMap<String, Int>()
@@ -10074,47 +10042,64 @@ fun PivotContent(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            // ===== 標題 + 年份（可摺疊）=====
-            if (headerHeightDp > 0.dp) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(headerHeightDp)
-                        .graphicsLayer { alpha = headerAlpha },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "資料透視表",
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TEXT_PRIMARY,
-                        maxLines = 1,
+            // ===== 年份 + 總計欄開關（唔顯示大標題）=====
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (pivotUi.availableYears.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
-                    )
-                    if (pivotUi.availableYears.isNotEmpty()) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // 已係小→大
-                            pivotUi.availableYears.forEach { y ->
-                                val selected = y == pivotUi.selectedYear
-                                Surface(
-                                    onClick = { onYearChange(y) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
-                                    border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
-                                ) {
-                                    Text(
-                                        "$y",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (selected) Color.White else TEXT_PRIMARY,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                    )
-                                }
+                    ) {
+                        pivotUi.availableYears.forEach { y ->
+                            val selected = y == pivotUi.selectedYear
+                            Surface(
+                                onClick = { onYearChange(y) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
+                                border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
+                            ) {
+                                Text(
+                                    "$y",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) Color.White else TEXT_PRIMARY,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
                             }
                         }
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
+                // 顯示／隱藏右邊總計欄
+                Surface(
+                    onClick = { showTotalColumn = !showTotalColumn },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (showTotalColumn) BRAND_PRIMARY else SURFACE_ELEVATED,
+                    border = if (showTotalColumn) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (showTotalColumn) Icons.Default.ViewColumn else Icons.Default.ViewAgenda,
+                            contentDescription = "總計欄",
+                            tint = if (showTotalColumn) Color.White else TEXT_SECONDARY,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "總計",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (showTotalColumn) Color.White else TEXT_SECONDARY
+                        )
                     }
                 }
             }
@@ -10181,17 +10166,19 @@ fun PivotContent(
                                             )
                                         }
                                     }
-                                    Box(
-                                        Modifier.width(colWidth).fillMaxHeight()
-                                            .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.5f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "總計",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = BRAND_PRIMARY_DARK
-                                        )
+                                    if (showTotalColumn) {
+                                        Box(
+                                            Modifier.width(colWidth).fillMaxHeight()
+                                                .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.5f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                "總計",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = BRAND_PRIMARY_DARK
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -10209,6 +10196,7 @@ fun PivotContent(
                                             leftWidth = leftWidth,
                                             colWidth = colWidth,
                                             height = stickyHeight,
+                                            showTotalColumn = showTotalColumn,
                                         )
                                     }
                                 } else {
@@ -10221,6 +10209,7 @@ fun PivotContent(
                                             colWidth = colWidth,
                                             height = rowHeight,
                                             iconUrl = pivotUi.noteIconMap[row.note] ?: "",
+                                            showTotalColumn = showTotalColumn,
                                         )
                                         HorizontalDivider(
                                             color = DIVIDER_COLOR.copy(alpha = 0.5f),
@@ -10271,17 +10260,19 @@ fun PivotContent(
                                                     }
                                                 }
                                             }
-                                            Box(
-                                                Modifier.width(colWidth).fillMaxHeight(),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    formatAmountNoDecimal(pivotUi.grandTotal),
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = COLOR_EXPENSE,
-                                                    maxLines = 1
-                                                )
+                                            if (showTotalColumn) {
+                                                Box(
+                                                    Modifier.width(colWidth).fillMaxHeight(),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        formatAmountNoDecimal(pivotUi.grandTotal),
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = COLOR_EXPENSE,
+                                                        maxLines = 1
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -10437,6 +10428,7 @@ private fun PivotCategoryStickyRow(
     leftWidth: Dp,
     colWidth: Dp,
     height: Dp,
+    showTotalColumn: Boolean = false,
 ) {
     Column(Modifier.fillMaxWidth().background(SURFACE_CARD)) {
         Row(
@@ -10497,18 +10489,20 @@ private fun PivotCategoryStickyRow(
                             }
                         }
                     }
-                    Box(
-                        Modifier.width(colWidth).fillMaxHeight()
-                            .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            formatAmountNoDecimal(row.rowTotal),
-                            fontSize = 12.sp,
-                            color = BRAND_PRIMARY_DARK,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
+                    if (showTotalColumn) {
+                        Box(
+                            Modifier.width(colWidth).fillMaxHeight()
+                                .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.35f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                formatAmountNoDecimal(row.rowTotal),
+                                fontSize = 12.sp,
+                                color = BRAND_PRIMARY_DARK,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }
@@ -10526,6 +10520,7 @@ private fun PivotNoteRow(
     colWidth: Dp,
     height: Dp,
     iconUrl: String,
+    showTotalColumn: Boolean = false,
 ) {
     Row(
         Modifier
@@ -10576,18 +10571,20 @@ private fun PivotNoteRow(
                         }
                     }
                 }
-                Box(
-                    Modifier.width(colWidth).fillMaxHeight()
-                        .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        formatAmountNoDecimal(row.rowTotal),
-                        fontSize = 12.sp,
-                        color = BRAND_PRIMARY_DARK,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
+                if (showTotalColumn) {
+                    Box(
+                        Modifier.width(colWidth).fillMaxHeight()
+                            .background(BRAND_PRIMARY_LIGHT.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            formatAmountNoDecimal(row.rowTotal),
+                            fontSize = 12.sp,
+                            color = BRAND_PRIMARY_DARK,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
