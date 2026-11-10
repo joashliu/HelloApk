@@ -2100,12 +2100,23 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
  * 解析語音記帳輸入，例如：
  * 「麥當勞28」「麥當勞 28 蚊」「地鐵四個九」「咖啡十五」「28」
  */
+/** 語音項目名：首個字母默認大寫（只影響英文字母） */
+fun capitalizeNoteFirstLetter(name: String): String {
+    val t = name.trim()
+    if (t.isEmpty()) return t
+    val idx = t.indexOfFirst { it.isLetter() }
+    if (idx < 0) return t
+    val ch = t[idx]
+    if (!ch.isLowerCase()) return t
+    return t.substring(0, idx) + ch.titlecase(Locale.getDefault()) + t.substring(idx + 1)
+}
+
 fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
     val text = raw.trim()
     if (text.isEmpty()) return "" to null
 
     val (prefix, amt) = extractTrailingAmount(text)
-    val name = prefix.trim()
+    val name = capitalizeNoteFirstLetter(prefix.trim())
 
     // 整句都係金額
     if (name.isEmpty() && amt != null) return "" to amt
@@ -2114,11 +2125,11 @@ fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
     // 金額在前：28麥當勞
     Regex("""^(\d+(?:\.\d+)?)(.+)$""").find(text.replace(" ", ""))?.let { m ->
         val a = m.groupValues[1].toDoubleOrNull()
-        val n = m.groupValues[2].trim()
+        val n = capitalizeNoteFirstLetter(m.groupValues[2].trim())
         if (a != null && a > 0 && n.isNotEmpty()) return n to a
     }
     // 淨係名稱
-    return text to null
+    return capitalizeNoteFirstLetter(text) to null
 }
 fun compactAmount(value: Double): String {
     val absV = abs(value)
@@ -7326,11 +7337,9 @@ fun LedgerKeyboardPanel(
 
     LaunchedEffect(imeOpen) {
         if (!imeOpen) {
+            // 只更新本地 focus 標記；唔好 onStateChange 覆寫 noteText
+            // （撳建議項目會 clearFocus → ime 收起，用舊 state 會蓋掉剛選嘅名稱）
             noteFieldFocused = false
-            focusManager.clearFocus(force = true)
-            if (state.editingNote || state.focusedField == "note") {
-                onStateChange(state.copy(focusedField = "amount", editingNote = false))
-            }
         }
     }
 
@@ -7661,14 +7670,17 @@ fun LedgerKeyboardPanel(
                                                     .height(44.dp)
                                                     .widthIn(max = maxChipWidth),
                                                 onClick = {
+                                                    // 先寫入選中項目再收 focus，避免 IME 收起時用舊 state 蓋掉
+                                                    val picked = s
+                                                    noteFieldFocused = false
                                                     onStateChange(
                                                         state.copy(
-                                                            noteText = s,
+                                                            noteText = picked,
                                                             editingNote = false,
                                                             focusedField = "amount"
                                                         )
                                                     )
-                                                    focusManager.clearFocus()
+                                                    focusManager.clearFocus(force = true)
                                                 }
                                             )
                                         }
