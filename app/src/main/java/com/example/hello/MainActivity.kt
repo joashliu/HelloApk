@@ -736,7 +736,7 @@ val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
     "交通" to CategoryStyle(Icons.Default.DirectionsBus, Color(0xFFDBEAFE), Color(0xFF1E40AF)),
     "個人" to CategoryStyle(Icons.Default.Person, Color(0xFFFCE7F3), Color(0xFF9D174D)),
     "購物" to CategoryStyle(Icons.Default.ShoppingCart, Color(0xFFFEF3C7), Color(0xFF854D0E)),
-    "月費" to CategoryStyle(Icons.Default.Autorenew, Color(0xFFE2E8F0), Color(0xFF334155)),
+    "月費" to CategoryStyle(Icons.Default.CreditCard, Color(0xFFE2E8F0), Color(0xFF334155)),
     "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59)),
     "還錢" to CategoryStyle(Icons.Default.Payments, Color(0xFFFFE4E6), Color(0xFFBE123C))
 )
@@ -6769,6 +6769,10 @@ fun SwipeableRecordItem(
     onDelete: (Record) -> Unit,
     onChangeIcon: (Record) -> Unit,
     hideCategory: Boolean = false,
+    /** false = 月曆等頁面唔支援左右滑 */
+    enableSwipe: Boolean = true,
+    /** 長按優先：例如月曆開當日 pie；null 則用扇形選單 */
+    onLongPressOverride: ((Record) -> Unit)? = null,
     onFanMenuStart: (Record, Offset) -> Unit = { _, _ -> },
     onFanMenuDrag: (Offset) -> Unit = {},
     onFanMenuEnd: () -> Unit = {},
@@ -6850,56 +6854,66 @@ fun SwipeableRecordItem(
             )
             .background(backgroundColor)
             .onPlaced { coords -> layoutCoordsHolder[0] = coords }
-            .pointerInput(record.id) {
-                detectHorizontalDragGestures(
-                    onDragStart = {
-                        isDragging = true
-                        startOffset = targetOffset
-                        latestOnExpand(latestRecord.id)
-                    },
-                    onDragEnd = {
-                        isDragging = false
-                        val dist = targetOffset - startOffset
-                        val hasIcon = latestRecord.iconUrl.isNotBlank()
-                        var shouldTriggerIconAction = false
-                        val newOffset = when {
-                            startOffset == maxLeft && dist > 15f -> 0f
-                            startOffset == maxRight && dist < -15f -> 0f
-                            targetOffset < maxLeft * 0.65f -> maxLeft
-                            targetOffset > maxRight * 0.65f -> {
-                                if (hasIcon) maxRight
-                                else { shouldTriggerIconAction = true; 0f }
-                            }
-                            else -> 0f
-                        }
-                        targetOffset = newOffset
-                        if (newOffset == 0f) latestOnExpand(null)
-                        if (shouldTriggerIconAction) latestOnChangeIcon(latestRecord)
-                    },
-                    onDragCancel = { isDragging = false; targetOffset = 0f; latestOnExpand(null) },
-                    onHorizontalDrag = { c, d ->
-                        c.consume()
-                        val dampFactor = when {
-                            targetOffset < maxLeft && d < 0 -> 0.35f
-                            targetOffset > maxRight && d > 0 -> 0.35f
-                            else -> 1f
-                        }
-                        targetOffset += d * dampFactor
-                    })
-            }
-            .pointerInput("longPress_${record.id}") {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { localOffset ->
-                        val globalTopLeft = layoutCoordsHolder[0]?.boundsInRoot()?.topLeft ?: Offset.Zero
-                        latestOnFanStart(latestRecord, globalTopLeft + localOffset)
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        latestOnFanDrag(dragAmount)
-                    },
-                    onDragEnd = { latestOnFanEnd() },
-                    onDragCancel = { latestOnFanEnd() }
-                )
+            .then(
+                if (enableSwipe) {
+                    Modifier.pointerInput(record.id) {
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                isDragging = true
+                                startOffset = targetOffset
+                                latestOnExpand(latestRecord.id)
+                            },
+                            onDragEnd = {
+                                isDragging = false
+                                val dist = targetOffset - startOffset
+                                val hasIcon = latestRecord.iconUrl.isNotBlank()
+                                var shouldTriggerIconAction = false
+                                val newOffset = when {
+                                    startOffset == maxLeft && dist > 15f -> 0f
+                                    startOffset == maxRight && dist < -15f -> 0f
+                                    targetOffset < maxLeft * 0.65f -> maxLeft
+                                    targetOffset > maxRight * 0.65f -> {
+                                        if (hasIcon) maxRight
+                                        else { shouldTriggerIconAction = true; 0f }
+                                    }
+                                    else -> 0f
+                                }
+                                targetOffset = newOffset
+                                if (newOffset == 0f) latestOnExpand(null)
+                                if (shouldTriggerIconAction) latestOnChangeIcon(latestRecord)
+                            },
+                            onDragCancel = { isDragging = false; targetOffset = 0f; latestOnExpand(null) },
+                            onHorizontalDrag = { c, d ->
+                                c.consume()
+                                val dampFactor = when {
+                                    targetOffset < maxLeft && d < 0 -> 0.35f
+                                    targetOffset > maxRight && d > 0 -> 0.35f
+                                    else -> 1f
+                                }
+                                targetOffset += d * dampFactor
+                            })
+                    }
+                } else Modifier
+            )
+            .pointerInput("longPress_${record.id}", onLongPressOverride) {
+                if (onLongPressOverride != null) {
+                    detectTapGestures(
+                        onLongPress = { onLongPressOverride.invoke(latestRecord) }
+                    )
+                } else {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { localOffset ->
+                            val globalTopLeft = layoutCoordsHolder[0]?.boundsInRoot()?.topLeft ?: Offset.Zero
+                            latestOnFanStart(latestRecord, globalTopLeft + localOffset)
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            latestOnFanDrag(dragAmount)
+                        },
+                        onDragEnd = { latestOnFanEnd() },
+                        onDragCancel = { latestOnFanEnd() }
+                    )
+                }
             }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -7010,6 +7024,84 @@ private fun AnimatedActionButton(
 }
 
 @Composable
+@Composable
+fun DayCategoryPieDialog(
+    title: String,
+    slices: List<Pair<String, Double>>,
+    onDismiss: () -> Unit,
+) {
+    val total = slices.sumOf { it.second }.coerceAtLeast(0.0001)
+    val colors = listOf(
+        Color(0xFFB68D40), Color(0xFF3B82F6), Color(0xFF10B981),
+        Color(0xFFF59E0B), Color(0xFF8B5CF6), Color(0xFFEF4444),
+        Color(0xFF06B6D4), Color(0xFFEC4899)
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(Modifier.size(160.dp)) {
+                        var start = -90f
+                        slices.forEachIndexed { i, (_, amt) ->
+                            val sweep = (amt / total * 360.0).toFloat()
+                            drawArc(
+                                color = colors[i % colors.size],
+                                startAngle = start,
+                                sweepAngle = sweep,
+                                useCenter = true,
+                                size = size
+                            )
+                            start += sweep
+                        }
+                    }
+                }
+                slices.forEachIndexed { i, (cat, amt) ->
+                    val pct = (amt / total * 100.0)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(colors[i % colors.size])
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(cat, Modifier.weight(1f), fontSize = 13.sp, color = TEXT_PRIMARY)
+                        Text(
+                            "$${formatAmountNoDecimal(amt)}  (${String.format(Locale.US, "%.0f", pct)}%)",
+                            fontSize = 12.sp,
+                            color = TEXT_SECONDARY,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("關閉", color = BRAND_PRIMARY)
+            }
+        },
+        containerColor = SURFACE_CARD,
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@Composable
 fun DayDetailPanel(
     dateKey: String, records: List<Record>,
     expandedId: String?, onExpandChange: (String?) -> Unit,
@@ -7032,6 +7124,23 @@ fun DayDetailPanel(
         Triple(inc, exp, records.sortedByDescending { it.timestamp })
     }
     val headerText = remember(dateKey) { formatDateHeader(dateKey) }
+    var showDayPie by remember { mutableStateOf(false) }
+    val pieSlices = remember(records) {
+        records
+            .filter { it.category != INCOME_CATEGORY && it.category != "還錢" }
+            .groupBy { it.category }
+            .map { (cat, list) -> cat to list.sumOf { it.amount } }
+            .filter { it.second > 0 }
+            .sortedByDescending { it.second }
+    }
+
+    if (showDayPie) {
+        DayCategoryPieDialog(
+            title = headerText,
+            slices = pieSlices,
+            onDismiss = { showDayPie = false }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -7057,6 +7166,11 @@ fun DayDetailPanel(
                         Text("支 $${formatAmountNoDecimal(expense)}", fontSize = 12.sp,
                             color = COLOR_EXPENSE, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+            if (pieSlices.isNotEmpty()) {
+                IconButton(onClick = { showDayPie = true }) {
+                    Icon(Icons.Default.PieChart, "圓餅圖", tint = BRAND_PRIMARY)
                 }
             }
             IconButton(onClick = onDismiss) {
@@ -7086,6 +7200,10 @@ fun DayDetailPanel(
                             onFilter = { onFilter(r) },
                             onDelete = { onDelete(r) },
                             onChangeIcon = { onChangeIcon(r) },
+                            enableSwipe = false,
+                            onLongPressOverride = {
+                                if (pieSlices.isNotEmpty()) showDayPie = true
+                            },
                             onFanMenuStart = { _, offset -> onFanMenuStart(r, offset) },
                             onFanMenuDrag = onFanMenuDrag,
                             onFanMenuEnd = onFanMenuEnd,
@@ -9361,6 +9479,20 @@ fun CompareContent(
     val balanceB = compareUi.balanceB
     val histogramData = compareUi.histogramData
     val monthlyKeysThisYear = compareUi.monthlyKeysThisYear
+    // false = 只顯示上月+本月；true = 全年所有月份
+    var showAllMonths by rememberSaveable { mutableStateOf(false) }
+    val compactMonths = remember(monthlyKeysThisYear) {
+        monthlyKeysThisYear.takeLast(2)
+    }
+    val monthsForPicker = remember(showAllMonths, monthlyKeysThisYear, selectedMonthA, selectedMonthB) {
+        if (showAllMonths) monthlyKeysThisYear
+        else {
+            // 保留已選月份，避免開關後選項消失
+            (compactMonths + listOfNotNull(selectedMonthA, selectedMonthB))
+                .distinct()
+                .sorted()
+        }
+    }
 
     // ★ 高亮 + 延遲滾動控制
     var previousSums by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
@@ -9412,13 +9544,37 @@ fun CompareContent(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            Text(
-                "月份比較",
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                color = TEXT_PRIMARY,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "月份比較",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TEXT_PRIMARY,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    if (showAllMonths) "全年" else "近兩月",
+                    fontSize = 13.sp,
+                    color = TEXT_SECONDARY,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.width(6.dp))
+                Switch(
+                    checked = showAllMonths,
+                    onCheckedChange = { showAllMonths = it },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = BRAND_PRIMARY,
+                        uncheckedThumbColor = Color.White,
+                        uncheckedTrackColor = DIVIDER_COLOR
+                    )
+                )
+            }
 
             Surface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -9449,11 +9605,20 @@ fun CompareContent(
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            MonthDropdown(
-                                value = selectedMonthA,
-                                months = monthlyKeysThisYear,
-                                onChange = { onMonthAChange(it) }
-                            )
+                            AnimatedContent(
+                                targetState = monthsForPicker,
+                                transitionSpec = {
+                                    (fadeIn(tween(220)) + expandVertically(spring(0.85f, 320f))) togetherWith
+                                        (fadeOut(tween(160)) + shrinkVertically(spring(0.85f, 320f)))
+                                },
+                                label = "monthAList"
+                            ) { months ->
+                                MonthDropdown(
+                                    value = selectedMonthA,
+                                    months = months,
+                                    onChange = { onMonthAChange(it) }
+                                )
+                            }
                         }
                         Spacer(Modifier.width(6.dp))
                         Row(
@@ -9461,11 +9626,20 @@ fun CompareContent(
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            MonthDropdown(
-                                value = selectedMonthB,
-                                months = monthlyKeysThisYear,
-                                onChange = { onMonthBChange(it) }
-                            )
+                            AnimatedContent(
+                                targetState = monthsForPicker,
+                                transitionSpec = {
+                                    (fadeIn(tween(220)) + expandVertically(spring(0.85f, 320f))) togetherWith
+                                        (fadeOut(tween(160)) + shrinkVertically(spring(0.85f, 320f)))
+                                },
+                                label = "monthBList"
+                            ) { months ->
+                                MonthDropdown(
+                                    value = selectedMonthB,
+                                    months = months,
+                                    onChange = { onMonthBChange(it) }
+                                )
+                            }
                         }
                     }
 
