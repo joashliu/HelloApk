@@ -5212,7 +5212,7 @@ fun LedgerContent(
             } // Column (header measure)
             } // Box (header height expand 0→full)
 
-            Spacer(Modifier.height(sectionGap * headerP.coerceIn(0f, 1f)))
+            Spacer(Modifier.height(8.dp * headerP.coerceIn(0f, 1f)))
 
             Box(
                 Modifier.weight(1f).fillMaxWidth().clipToBounds()
