@@ -683,7 +683,7 @@ val BRAND_PRIMARY_DARK = Color(0xFF8B6A2A)  // 深泥黃色 (用於按壓或強�
 val BRAND_PRIMARY_LIGHT = Color(0xFFF5EFE6) // 淺泥黃底色 (用於淡色標籤或背景)
 
 // 頂部（TopStats／快速輸入）滑入 同 鍵盤展開：統一時長，同步完成
-const val HEADER_KEYBOARD_EXPAND_DELAY_MS = 30
+const val HEADER_KEYBOARD_EXPAND_DELAY_MS = 30L
 const val HEADER_KEYBOARD_EXPAND_MS = 480
 const val HEADER_KEYBOARD_COLLAPSE_MS = 420
 
