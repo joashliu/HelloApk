@@ -4662,12 +4662,10 @@ fun LedgerContent(
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
 
     // 由其他頁撳 FAB 返記帳頁：頂部高度 0→滿（下面內容貼頂，再被一齊推落）
-    // progress 0 = 頂部唔佔位；1 = 完全展開。同鍵盤展開共用時長。
+    // layout 先完整量度子項，再只報告 progress 比例高度（唔會被父高度夾壞）
     val headerExpandProgress = remember {
         Animatable(if (headerEnterFromHidden) 0f else 1f)
     }
-    var headerMeasuredPx by remember { mutableFloatStateOf(0f) }
-    val estimatedHeaderPx = with(density) { 150.dp.toPx() }
     LaunchedEffect(headerEnterFromHidden) {
         if (!headerEnterFromHidden) return@LaunchedEffect
         if (headerExpandProgress.value > 0.01f) {
@@ -4681,8 +4679,6 @@ fun LedgerContent(
         onHeaderEnterConsumed()
     }
     val headerP = headerExpandProgress.value
-    val headerFullPx = if (headerMeasuredPx > 1f) headerMeasuredPx else estimatedHeaderPx
-    val headerVisibleHeightDp = with(density) { (headerFullPx * headerP).toDp() }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
 
@@ -5003,28 +4999,31 @@ fun LedgerContent(
                 animationSpec = tween(350, easing = FastOutSlowInEasing)
             )
 
-            // 頂部區塊：高度跟 headerP 由 0→滿；下面列表／棒形圖會貼頂再被推落
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(
-                        if (headerP < 0.999f) {
-                            Modifier
-                                .height(headerVisibleHeightDp)
-                                .clipToBounds()
-                        } else {
-                            Modifier
-                        }
-                    )
-            ) {
+            // 頂部區塊：layout 完整量度後按 headerP 展開高度；內容由上滑入，下面被推落
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .onSizeChanged { sz ->
-                        if (sz.height > 0) headerMeasuredPx = sz.height.toFloat()
+                    .graphicsLayer { alpha = 0.35f + 0.65f * headerP.coerceIn(0f, 1f) }
+                    .layout { measurable, constraints ->
+                        // 用無限高量度真實全高，避免被「動畫中嘅矮高度」反餵
+                        val loose = constraints.copy(
+                            minHeight = 0,
+                            maxHeight = Constraints.Infinity
+                        )
+                        val placeable = measurable.measure(loose)
+                        val fullH = placeable.height
+                        val animatedH = (fullH * headerP.coerceIn(0f, 1f))
+                            .roundToInt()
+                            .coerceIn(0, fullH)
+                        layout(
+                            width = placeable.width.coerceIn(constraints.minWidth, constraints.maxWidth),
+                            height = animatedH
+                        ) {
+                            // 對齊底部 → 由上方滑入，同時把下面列表推落
+                            placeable.placeRelative(0, animatedH - fullH)
+                        }
                     }
-                    .graphicsLayer { alpha = headerP.coerceIn(0f, 1f) }
+                    .clipToBounds()
             ) {
             BoxWithConstraints(
                 modifier = Modifier
@@ -5209,8 +5208,7 @@ fun LedgerContent(
                     }
                 }
             }
-            } // Column (header measure)
-            } // Box (header height expand 0→full)
+            } // Column (header expand-from-top)
 
             Spacer(Modifier.height(8.dp * headerP.coerceIn(0f, 1f)))
 
