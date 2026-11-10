@@ -3993,6 +3993,12 @@ private fun AnimatedFabLayer(
     var voiceBubbleVisible by remember { mutableStateOf(false) }
     // 錄音／其他 App 佔用咪高風時，重試一次
     var audioRetryUsed by remember { mutableStateOf(false) }
+    // 卡在「準備中」時自動重連
+    var prepRetryUsed by remember { mutableStateOf(false) }
+    // 已收到 onReadyForSpeech
+    var speechReady by remember { mutableStateOf(false) }
+    // 每次 start 遞增，用嚟取消過期 watchdog
+    var voiceSessionGen by remember { mutableIntStateOf(0) }
     var audioFocusRequest by remember {
         mutableStateOf<android.media.AudioFocusRequest?>(null)
     }
@@ -4052,9 +4058,11 @@ private fun AnimatedFabLayer(
     }
 
     fun stopListening() {
+        voiceSessionGen += 1
         try { recognizer?.stopListening() } catch (_: Exception) {}
         try { recognizer?.cancel() } catch (_: Exception) {}
         listening = false
+        speechReady = false
         releaseMicFocus()
     }
 
@@ -4103,20 +4111,72 @@ private fun AnimatedFabLayer(
                 putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                // 優先語音識別音源（若引擎支援）
+                putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
+                // 加快結束／減少假死等待
                 putExtra(
-                    android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE,
-                    false
+                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                    1500
+                )
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
+                    1000
+                )
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
+                    800
                 )
             }
             partialText = ""
+            speechReady = false
             statusHint = "準備中…"
             listening = true
+            voiceSessionGen += 1
             r.startListening(intent)
         } catch (e: Exception) {
             listening = false
+            speechReady = false
             releaseMicFocus()
             statusHint = "無法啟動"
+        }
+    }
+
+    // 卡在「準備中」超過 2.5 秒 → 自動 cancel 再重連一次；再唔得就結束
+    LaunchedEffect(listening, voiceSessionGen, statusHint) {
+        if (!listening) return@LaunchedEffect
+        if (statusHint != "準備中…" && statusHint != "重連中…") return@LaunchedEffect
+        val gen = voiceSessionGen
+        delay(2500)
+        if (!listening || gen != voiceSessionGen) return@LaunchedEffect
+        if (speechReady) return@LaunchedEffect
+        if (statusHint != "準備中…" && statusHint != "重連中…") return@LaunchedEffect
+        try { recognizer?.cancel() } catch (_: Exception) {}
+        if (!prepRetryUsed) {
+            prepRetryUsed = true
+            statusHint = "重連中…"
+            delay(350)
+            if (!listening || gen != voiceSessionGen) return@LaunchedEffect
+            startInAppListening()
+        } else {
+            listening = false
+            speechReady = false
+            releaseMicFocus()
+            statusHint = "無法啟動"
+            prepRetryUsed = false
+        }
+    }
+
+    // 單次聆聽最長 12 秒，避免永遠卡住
+    LaunchedEffect(listening, voiceSessionGen) {
+        if (!listening) return@LaunchedEffect
+        val gen = voiceSessionGen
+        delay(12_000)
+        if (listening && gen == voiceSessionGen) {
+            try { recognizer?.stopListening() } catch (_: Exception) {}
+            delay(600)
+            if (listening && gen == voiceSessionGen) {
+                stopListening()
+                statusHint = "聽唔到，再試一次"
+            }
         }
     }
 
@@ -4127,11 +4187,14 @@ private fun AnimatedFabLayer(
         } else {
             val listener = object : android.speech.RecognitionListener {
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
+                    speechReady = true
+                    prepRetryUsed = false
                     statusHint = "請開始講…"
                     partialText = ""
                     audioRetryUsed = false
                 }
                 override fun onBeginningOfSpeech() {
+                    speechReady = true
                     statusHint = "聽緊…"
                 }
                 override fun onRmsChanged(rmsdB: Float) {}
