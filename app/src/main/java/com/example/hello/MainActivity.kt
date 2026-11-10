@@ -4661,28 +4661,28 @@ fun LedgerContent(
     val density = LocalDensity.current
     val maxCollapsePx = remember(density) { with(density) { 120.dp.toPx() } }
 
-    // 由其他頁撳 FAB 返記帳頁：remember 初值已係隱藏，首幀唔會閃現
-    val fromHeaderY = with(density) { (-72).dp.toPx() }
-    val headerSlideY = remember {
-        Animatable(if (headerEnterFromHidden) fromHeaderY else 0f)
-    }
-    val headerSlideAlpha = remember {
+    // 由其他頁撳 FAB 返記帳頁：頂部高度 0→滿（下面內容貼頂，再被一齊推落）
+    // progress 0 = 頂部唔佔位；1 = 完全展開。同鍵盤展開共用時長。
+    val headerExpandProgress = remember {
         Animatable(if (headerEnterFromHidden) 0f else 1f)
     }
+    var headerMeasuredPx by remember { mutableFloatStateOf(0f) }
+    val estimatedHeaderPx = with(density) { 150.dp.toPx() }
     LaunchedEffect(headerEnterFromHidden) {
         if (!headerEnterFromHidden) return@LaunchedEffect
-        // 若 composition 重用（未 dispose），補一次 snap 再播動畫
-        if (headerSlideAlpha.value > 0.01f) {
-            headerSlideY.snapTo(fromHeaderY)
-            headerSlideAlpha.snapTo(0f)
+        if (headerExpandProgress.value > 0.01f) {
+            headerExpandProgress.snapTo(0f)
         }
-        // 同鍵盤展開：相同 delay + duration + easing，同一時間完成
         delay(HEADER_KEYBOARD_EXPAND_DELAY_MS)
-        val spec = tween<Float>(HEADER_KEYBOARD_EXPAND_MS, easing = FastOutSlowInEasing)
-        launch { headerSlideY.animateTo(0f, spec) }
-        headerSlideAlpha.animateTo(1f, spec)
+        headerExpandProgress.animateTo(
+            1f,
+            tween(HEADER_KEYBOARD_EXPAND_MS, easing = FastOutSlowInEasing)
+        )
         onHeaderEnterConsumed()
     }
+    val headerP = headerExpandProgress.value
+    val headerFullPx = if (headerMeasuredPx > 1f) headerMeasuredPx else estimatedHeaderPx
+    val headerVisibleHeightDp = with(density) { (headerFullPx * headerP).toDp() }
     var quickInputCollapseOffset by remember { mutableFloatStateOf(0f) }
     var isAutoAnimating by remember { mutableStateOf(false) }
 
@@ -5003,15 +5003,34 @@ fun LedgerContent(
                 animationSpec = tween(350, easing = FastOutSlowInEasing)
             )
 
+            // 頂部區塊：高度跟 headerP 由 0→滿；下面列表／棒形圖會貼頂再被推落
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (headerP < 0.999f) {
+                            Modifier
+                                .height(headerVisibleHeightDp)
+                                .clipToBounds()
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .onSizeChanged { sz ->
+                        if (sz.height > 0) headerMeasuredPx = sz.height.toFloat()
+                    }
+                    .graphicsLayer { alpha = headerP.coerceIn(0f, 1f) }
+            ) {
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .padding(top = 8.dp, bottom = 0.dp)
-                    .graphicsLayer {
-                        translationY = headerSlideY.value
-                        alpha = headerSlideAlpha.value
-                    }
                     .clip(RoundedCornerShape(12.dp))
                     .background(topBarBgColor)
                     .pointerInput(Unit) {
@@ -5092,15 +5111,10 @@ fun LedgerContent(
             val sectionGap = 8.dp
             Spacer(Modifier.height(sectionGap))
 
-            // [2] 內容區塊（快速輸入／篩選區）— 同 TopStats 一齊由上滑入
+            // [2] 內容區塊（快速輸入／篩選區）— 同 TopStats 一齊隨高度展開
             AnimatedContent(
                 targetState = filterMode,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        translationY = headerSlideY.value
-                        alpha = headerSlideAlpha.value
-                    },
+                modifier = Modifier.fillMaxWidth(),
                 transitionSpec = {
                     ((fadeIn(tween(220, delayMillis = 90)) + expandVertically(spring(0.85f, 300f), expandFrom = Alignment.Top)) togetherWith 
                     (fadeOut(tween(150)) + shrinkVertically(spring(0.85f, 300f), shrinkTowards = Alignment.Top))).using(SizeTransform(clip = true) { _, _ -> spring(0.85f, 300f) })
@@ -5195,8 +5209,10 @@ fun LedgerContent(
                     }
                 }
             }
+            } // Column (header measure)
+            } // Box (header height expand 0→full)
 
-            Spacer(Modifier.height(sectionGap))
+            Spacer(Modifier.height(sectionGap * headerP.coerceIn(0f, 1f)))
 
             Box(
                 Modifier.weight(1f).fillMaxWidth().clipToBounds()
