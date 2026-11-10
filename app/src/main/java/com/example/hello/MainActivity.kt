@@ -6130,6 +6130,68 @@ fun CalendarContent(
     var selectedColIdx by remember { mutableStateOf<Int?>(null) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
 
+    // 月曆明細：長按扇形選單（同記帳頁）
+    var activeFanRecord by remember { mutableStateOf<Record?>(null) }
+    val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
+    val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
+    val densityCal = LocalDensity.current
+    val configurationCal = LocalConfiguration.current
+    val screenWidthPxCal = with(densityCal) { configurationCal.screenWidthDp.dp.toPx() }
+    val fanRadiusPxCal = remember(densityCal) { with(densityCal) { 105.dp.toPx() } }
+    val fanHalfBtnPxCal = remember(densityCal) { with(densityCal) { 24.dp.toPx() } }
+    val fanEdgeThresholdCal = fanRadiusPxCal + fanHalfBtnPxCal
+    val fanMenuProgressCal = animateFloatAsState(
+        if (activeFanRecord != null) 1f else 0f,
+        spring(0.65f, Spring.StiffnessMediumLow),
+        label = "calFan"
+    )
+    val minFanRadiusPxCal = remember(densityCal) { with(densityCal) { 16.dp.toPx() } }
+    val scopeCal = rememberCoroutineScope()
+    val latestOnCopyCal by rememberUpdatedState(onCopyClick)
+    val latestOnEditCal by rememberUpdatedState(onEditClick)
+    val latestOnFilterCal by rememberUpdatedState(onFilterClick)
+    val latestOnDeleteCal by rememberUpdatedState(onDeleteClick)
+    val handleFanStartCal = remember {
+        { r: Record, offset: Offset ->
+            activeFanRecord = r
+            fanMenuCenterState.value = offset
+            fanMenuTouchState.value = offset
+        }
+    }
+    val handleFanDragCal = remember {
+        { dragAmount: Offset -> fanMenuTouchState.value += dragAmount }
+    }
+    val handleFanEndCal = remember {
+        {
+            val center = fanMenuCenterState.value
+            val leftSpace = center.x
+            val rightSpace = screenWidthPxCal - center.x
+            val rotation = when {
+                leftSpace < fanEdgeThresholdCal -> (1f - leftSpace / fanEdgeThresholdCal).coerceIn(0f, 1f) * 80f
+                rightSpace < fanEdgeThresholdCal -> -(1f - rightSpace / fanEdgeThresholdCal).coerceIn(0f, 1f) * 80f
+                else -> 0f
+            }
+            val arcCenterAngle = -90f + rotation
+            val hovered = getHoveredActionIndexWithCenter(
+                center, fanMenuTouchState.value, minFanRadiusPxCal,
+                arcCenterAngle, fanRadiusPxCal, with(densityCal) { 40.dp.toPx() }
+            )
+            val targetRecord = activeFanRecord
+            activeFanRecord = null
+            if (targetRecord != null && hovered != null) {
+                scopeCal.launch {
+                    delay(120)
+                    when (hovered) {
+                        0 -> latestOnCopyCal(targetRecord)
+                        1 -> latestOnEditCal(targetRecord)
+                        2 -> latestOnFilterCal(targetRecord)
+                        3 -> latestOnDeleteCal(targetRecord)
+                    }
+                }
+            }
+        }
+    }
+
     var cachedSelectedDay by remember { mutableIntStateOf(1) }
     var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
@@ -6704,7 +6766,11 @@ fun CalendarContent(
                                                 }
                                             },
                                             deletingIds = deletingIds,
-                                            justAddedIds = justAddedIds
+                                            justAddedIds = justAddedIds,
+                                            onFanMenuStart = handleFanStartCal,
+                                            onFanMenuDrag = handleFanDragCal,
+                                            onFanMenuEnd = handleFanEndCal,
+                                            activeFanRecord = activeFanRecord
                                         )
                                     }
                                 }
@@ -6714,6 +6780,12 @@ fun CalendarContent(
                 }
             }
         }
+
+        FanMenuOverlay(
+            progressProvider = { fanMenuProgressCal.value },
+            centerProvider = { fanMenuCenterState.value },
+            touchProvider = { fanMenuTouchState.value }
+        )
 
         FloatingActionButton(
             onClick = onAddClick, shape = CircleShape, containerColor = BRAND_PRIMARY, contentColor = Color.White,
@@ -7024,83 +7096,6 @@ private fun AnimatedActionButton(
 }
 
 @Composable
-fun DayCategoryPieDialog(
-    title: String,
-    slices: List<Pair<String, Double>>,
-    onDismiss: () -> Unit,
-) {
-    val total = slices.sumOf { it.second }.coerceAtLeast(0.0001)
-    val colors = listOf(
-        Color(0xFFB68D40), Color(0xFF3B82F6), Color(0xFF10B981),
-        Color(0xFFF59E0B), Color(0xFF8B5CF6), Color(0xFFEF4444),
-        Color(0xFF06B6D4), Color(0xFFEC4899)
-    )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        },
-        text = {
-            Column(Modifier.fillMaxWidth()) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(Modifier.size(160.dp)) {
-                        var start = -90f
-                        slices.forEachIndexed { i, (_, amt) ->
-                            val sweep = (amt / total * 360.0).toFloat()
-                            drawArc(
-                                color = colors[i % colors.size],
-                                startAngle = start,
-                                sweepAngle = sweep,
-                                useCenter = true,
-                                size = size
-                            )
-                            start += sweep
-                        }
-                    }
-                }
-                slices.forEachIndexed { i, (cat, amt) ->
-                    val pct = (amt / total * 100.0)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(colors[i % colors.size])
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(cat, Modifier.weight(1f), fontSize = 13.sp, color = TEXT_PRIMARY)
-                        Text(
-                            "$${formatAmountNoDecimal(amt)}  (${String.format(Locale.US, "%.0f", pct)}%)",
-                            fontSize = 12.sp,
-                            color = TEXT_SECONDARY,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("關閉", color = BRAND_PRIMARY)
-            }
-        },
-        containerColor = SURFACE_CARD,
-        shape = RoundedCornerShape(16.dp)
-    )
-}
-
-@Composable
 fun DayDetailPanel(
     dateKey: String, records: List<Record>,
     expandedId: String?, onExpandChange: (String?) -> Unit,
@@ -7123,23 +7118,6 @@ fun DayDetailPanel(
         Triple(inc, exp, records.sortedByDescending { it.timestamp })
     }
     val headerText = remember(dateKey) { formatDateHeader(dateKey) }
-    var showDayPie by remember { mutableStateOf(false) }
-    val pieSlices = remember(records) {
-        records
-            .filter { it.category != INCOME_CATEGORY && it.category != "還錢" }
-            .groupBy { it.category }
-            .map { (cat, list) -> cat to list.sumOf { it.amount } }
-            .filter { it.second > 0 }
-            .sortedByDescending { it.second }
-    }
-
-    if (showDayPie) {
-        DayCategoryPieDialog(
-            title = headerText,
-            slices = pieSlices,
-            onDismiss = { showDayPie = false }
-        )
-    }
 
     Column(
         modifier = Modifier
@@ -7165,11 +7143,6 @@ fun DayDetailPanel(
                         Text("支 $${formatAmountNoDecimal(expense)}", fontSize = 12.sp,
                             color = COLOR_EXPENSE, fontWeight = FontWeight.Bold)
                     }
-                }
-            }
-            if (pieSlices.isNotEmpty()) {
-                IconButton(onClick = { showDayPie = true }) {
-                    Icon(Icons.Default.PieChart, "圓餅圖", tint = BRAND_PRIMARY)
                 }
             }
             IconButton(onClick = onDismiss) {
@@ -7200,9 +7173,6 @@ fun DayDetailPanel(
                             onDelete = { onDelete(r) },
                             onChangeIcon = { onChangeIcon(r) },
                             enableSwipe = false,
-                            onLongPressOverride = {
-                                if (pieSlices.isNotEmpty()) showDayPie = true
-                            },
                             onFanMenuStart = { _, offset -> onFanMenuStart(r, offset) },
                             onFanMenuDrag = onFanMenuDrag,
                             onFanMenuEnd = onFanMenuEnd,
@@ -9478,20 +9448,8 @@ fun CompareContent(
     val balanceB = compareUi.balanceB
     val histogramData = compareUi.histogramData
     val monthlyKeysThisYear = compareUi.monthlyKeysThisYear
-    // false = 只顯示上月+本月；true = 全年所有月份
+    // false = 兩個月對比；true = 一次顯示全年各月欄
     var showAllMonths by rememberSaveable { mutableStateOf(false) }
-    val compactMonths = remember(monthlyKeysThisYear) {
-        monthlyKeysThisYear.takeLast(2)
-    }
-    val monthsForPicker = remember(showAllMonths, monthlyKeysThisYear, selectedMonthA, selectedMonthB) {
-        if (showAllMonths) monthlyKeysThisYear
-        else {
-            // 保留已選月份，避免開關後選項消失
-            (compactMonths + listOfNotNull(selectedMonthA, selectedMonthB))
-                .distinct()
-                .sorted()
-        }
-    }
 
     // ★ 高亮 + 延遲滾動控制
     var previousSums by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
@@ -9581,251 +9539,318 @@ fun CompareContent(
                 color = SURFACE_CARD,
                 border = BorderStroke(0.5.dp, DIVIDER_COLOR)
             ) {
-                Column(Modifier.fillMaxSize()) {
-                    // ===== Header =====
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(SURFACE_CARD)
-                            .padding(horizontal = 10.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "類別",
-                            Modifier.weight(1.0f),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = TEXT_SECONDARY
-                        )
-                        Spacer(Modifier.weight(0.65f))
-
-                        Row(
-                            Modifier.weight(1.55f),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AnimatedContent(
-                                targetState = monthsForPicker,
-                                transitionSpec = {
-                                    (fadeIn(tween(220)) + expandVertically(spring(0.85f, 320f))) togetherWith
-                                        (fadeOut(tween(160)) + shrinkVertically(spring(0.85f, 320f)))
-                                },
-                                label = "monthAList"
-                            ) { months ->
-                                MonthDropdown(
-                                    value = selectedMonthA,
-                                    months = months,
-                                    onChange = { onMonthAChange(it) }
+                AnimatedContent(
+                    targetState = showAllMonths,
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        (fadeIn(tween(240)) + expandHorizontally(
+                            animationSpec = spring(0.88f, 280f),
+                            expandFrom = Alignment.Start
+                        )) togetherWith (fadeOut(tween(180)) + shrinkHorizontally(
+                            animationSpec = spring(0.88f, 280f),
+                            shrinkTowards = Alignment.Start
+                        ))
+                    },
+                    label = "compareMode"
+                ) { allMonthsMode ->
+                    if (!allMonthsMode) {
+                        // ===== 兩個月對比（原有） =====
+                        Column(Modifier.fillMaxSize()) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(SURFACE_CARD)
+                                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "類別",
+                                    Modifier.weight(1.0f),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = TEXT_SECONDARY
                                 )
-                            }
-                        }
-                        Spacer(Modifier.width(6.dp))
-                        Row(
-                            Modifier.weight(1.55f),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AnimatedContent(
-                                targetState = monthsForPicker,
-                                transitionSpec = {
-                                    (fadeIn(tween(220)) + expandVertically(spring(0.85f, 320f))) togetherWith
-                                        (fadeOut(tween(160)) + shrinkVertically(spring(0.85f, 320f)))
-                                },
-                                label = "monthBList"
-                            ) { months ->
-                                MonthDropdown(
-                                    value = selectedMonthB,
-                                    months = months,
-                                    onChange = { onMonthBChange(it) }
-                                )
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
-
-                    // ===== 內容 =====
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        if (displayCategories.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
-                            }
-                        } else {
-                            BoxWithConstraints(Modifier.fillMaxSize()) {
-                                val rowCount = displayCategories.size
-                                val dividerThickness = 0.5.dp
-                                val totalDividerHeight =
-                                    dividerThickness * (rowCount - 1).coerceAtLeast(0)
-                                val calculatedHeight =
-                                    (maxHeight - totalDividerHeight) / rowCount
-                                val rowHeight = calculatedHeight.coerceAtLeast(44.dp)
-
-                                LazyColumn(
-                                    Modifier.fillMaxSize(),
-                                    userScrollEnabled = false
+                                Spacer(Modifier.weight(0.65f))
+                                Row(
+                                    Modifier.weight(1.55f),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    itemsIndexed(
-                                        items = displayCategories,
-                                        key = { _, cat -> cat }
-                                    ) { idx, cat ->
-                                        val amtA = sumLocal(cat, selectedMonthA)
-                                        val amtB = sumLocal(cat, selectedMonthB)
-                                        val style = CATEGORY_STYLES[cat]
-                                        val isIncome = cat == INCOME_CATEGORY
-
-                                        val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0)
-                                            (amtA / incomeA * 100.0) else null
-                                        val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0)
-                                            (amtB / incomeB * 100.0) else null
-
-                                        val isHighlighted = cat in highlightedCategories
-
-                                        val highlightBg by animateColorAsState(
-                                            targetValue = if (isHighlighted) Color(0xFFDBEAFE) else SURFACE_CARD,
-                                            animationSpec = tween(600, easing = FastOutSlowInEasing),
-                                            label = "highlightBg_$cat"
-                                        )
-
-                                        Column(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .animateItem(
-                                                    fadeInSpec = tween(220, easing = FastOutSlowInEasing),
-                                                    fadeOutSpec = tween(180, easing = FastOutSlowInEasing),
-                                                    placementSpec = spring(
-                                                        stiffness = Spring.StiffnessMediumLow,
-                                                        dampingRatio = Spring.DampingRatioLowBouncy
-                                                    )
+                                    MonthDropdown(
+                                        value = selectedMonthA,
+                                        months = monthlyKeysThisYear,
+                                        onChange = { onMonthAChange(it) }
+                                    )
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Row(
+                                    Modifier.weight(1.55f),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    MonthDropdown(
+                                        value = selectedMonthB,
+                                        months = monthlyKeysThisYear,
+                                        onChange = { onMonthBChange(it) }
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                            Box(Modifier.weight(1f).fillMaxWidth()) {
+                                if (displayCategories.isEmpty()) {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("此兩月份皆無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
+                                    }
+                                } else {
+                                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                                        val rowCount = displayCategories.size
+                                        val dividerThickness = 0.5.dp
+                                        val totalDividerHeight =
+                                            dividerThickness * (rowCount - 1).coerceAtLeast(0)
+                                        val rowHeight =
+                                            ((maxHeight - totalDividerHeight) / rowCount).coerceAtLeast(44.dp)
+                                        LazyColumn(Modifier.fillMaxSize(), userScrollEnabled = false) {
+                                            itemsIndexed(displayCategories, key = { _, c -> c }) { idx, cat ->
+                                                val amtA = sumLocal(cat, selectedMonthA)
+                                                val amtB = sumLocal(cat, selectedMonthB)
+                                                val style = CATEGORY_STYLES[cat]
+                                                val isIncome = cat == INCOME_CATEGORY
+                                                val pctA = if (incomeA > 0.0 && !isIncome && amtA > 0.0) amtA / incomeA * 100.0 else null
+                                                val pctB = if (incomeB > 0.0 && !isIncome && amtB > 0.0) amtB / incomeB * 100.0 else null
+                                                val isHighlighted = cat in highlightedCategories
+                                                val highlightBg by animateColorAsState(
+                                                    if (isHighlighted) Color(0xFFDBEAFE) else SURFACE_CARD,
+                                                    tween(600, easing = FastOutSlowInEasing),
+                                                    label = "hl_$cat"
                                                 )
-                                        ) {
-                                            Row(
-                                                Modifier
-                                                    .fillMaxWidth()
-                                                    .height(rowHeight)
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(highlightBg)
-                                                    .padding(horizontal = 4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                // 類別名稱
-                                                Row(
-                                                    Modifier.weight(1.0f),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    if (style != null) {
-                                                        Box(
-                                                            Modifier
-                                                                .size(26.dp)
-                                                                .clip(RoundedCornerShape(7.dp))
-                                                                .background(style.bgColor),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Icon(
-                                                                style.icon, null,
-                                                                tint = style.fgColor,
-                                                                modifier = Modifier.size(15.dp)
-                                                            )
+                                                Column(Modifier.fillMaxWidth()) {
+                                                    Row(
+                                                        Modifier
+                                                            .fillMaxWidth()
+                                                            .height(rowHeight)
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                            .clip(RoundedCornerShape(10.dp))
+                                                            .background(highlightBg)
+                                                            .padding(horizontal = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                                            if (style != null) {
+                                                                Box(
+                                                                    Modifier.size(26.dp).clip(RoundedCornerShape(7.dp)).background(style.bgColor),
+                                                                    contentAlignment = Alignment.Center
+                                                                ) {
+                                                                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(15.dp))
+                                                                }
+                                                                Spacer(Modifier.width(7.dp))
+                                                            }
+                                                            Text(cat, fontSize = 15.sp, color = TEXT_PRIMARY, fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium)
                                                         }
-                                                        Spacer(Modifier.width(7.dp))
+                                                        Box(Modifier.weight(0.65f).fillMaxHeight().padding(start = 12.dp, end = 16.dp), contentAlignment = Alignment.Center) {
+                                                            if (!isIncome) {
+                                                                MiniHistogram(
+                                                                    values = histogramData[cat].orEmpty(),
+                                                                    color = style?.fgColor ?: TEXT_TERTIARY,
+                                                                    modifier = Modifier.fillMaxWidth().height((rowHeight - 16.dp).coerceAtLeast(20.dp))
+                                                                )
+                                                            }
+                                                        }
+                                                        CompareValueCell(amtA, isIncome, pctA, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                                                        Spacer(Modifier.width(6.dp))
+                                                        CompareValueCell(amtB, isIncome, pctB, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
                                                     }
-                                                    Text(
-                                                        cat,
-                                                        fontSize = 15.sp,
-                                                        color = TEXT_PRIMARY,
-                                                        fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium
-                                                    )
-                                                }
-
-                                                // 迷你直方圖
-                                                Box(
-                                                    Modifier
-                                                        .weight(0.65f)
-                                                        .fillMaxHeight()
-                                                        .padding(start = 12.dp, end = 16.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (!isIncome) {
-                                                        val values = histogramData[cat].orEmpty()
-                                                        val histHeight =
-                                                            (rowHeight - 16.dp).coerceAtLeast(20.dp)
-                                                        MiniHistogram(
-                                                            values = values,
-                                                            color = style?.fgColor ?: TEXT_TERTIARY,
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .height(histHeight)
-                                                        )
+                                                    if (idx < displayCategories.lastIndex) {
+                                                        HorizontalDivider(Modifier.padding(horizontal = 10.dp), color = DIVIDER_COLOR, thickness = dividerThickness)
                                                     }
                                                 }
-
-                                                // 金額 A
-                                                CompareValueCell(
-                                                    amount = amtA,
-                                                    isIncome = isIncome,
-                                                    pct = pctA,
-                                                    animateValues = animateValues && allowNumberAnimate,
-                                                    modifier = Modifier.weight(1.55f)
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                // 金額 B
-                                                CompareValueCell(
-                                                    amount = amtB,
-                                                    isIncome = isIncome,
-                                                    pct = pctB,
-                                                    animateValues = animateValues && allowNumberAnimate,
-                                                    modifier = Modifier.weight(1.55f)
-                                                )
-                                            }
-
-                                            if (idx < displayCategories.lastIndex) {
-                                                HorizontalDivider(
-                                                    modifier = Modifier.padding(horizontal = 10.dp),
-                                                    color = DIVIDER_COLOR,
-                                                    thickness = dividerThickness
-                                                )
                                             }
                                         }
                                     }
                                 }
                             }
+                            HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                            Row(
+                                Modifier.fillMaxWidth().background(SURFACE_CARD).padding(horizontal = 10.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("餘額", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = BRAND_PRIMARY_DARK)
+                                Spacer(Modifier.weight(0.65f))
+                                CompareValueCell(balanceA, balanceA >= 0, null, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                                Spacer(Modifier.width(6.dp))
+                                CompareValueCell(balanceB, balanceB >= 0, null, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                            }
                         }
-                    }
-
-                    HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
-
-                    // ===== 餘額 =====
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(SURFACE_CARD)
-                            .padding(horizontal = 10.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "餘額",
-                            Modifier.weight(1.0f),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = BRAND_PRIMARY_DARK
-                        )
-                        Spacer(Modifier.weight(0.65f))
-
-                        CompareValueCell(
-                            amount = balanceA,
-                            isIncome = balanceA >= 0,
-                            pct = null,
-                            animateValues = animateValues && allowNumberAnimate,
-                            modifier = Modifier.weight(1.55f)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        CompareValueCell(
-                            amount = balanceB,
-                            isIncome = balanceB >= 0,
-                            pct = null,
-                            animateValues = animateValues && allowNumberAnimate,
-                            modifier = Modifier.weight(1.55f)
-                        )
+                    } else {
+                        // ===== 全年：一次顯示所有月份欄 =====
+                        val hScroll = rememberScrollState()
+                        val monthColW = 64.dp
+                        val catColW = 88.dp
+                        Column(Modifier.fillMaxSize()) {
+                            // Header
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(SURFACE_CARD)
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "類別",
+                                    Modifier.width(catColW).padding(start = 10.dp),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = TEXT_SECONDARY
+                                )
+                                Row(
+                                    Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(hScroll)
+                                        .padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    monthlyKeysThisYear.forEach { mk ->
+                                        Text(
+                                            text = mk.substringAfter("-").toIntOrNull()?.toString()?.plus("月") ?: mk,
+                                            modifier = Modifier.width(monthColW),
+                                            textAlign = TextAlign.End,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = BRAND_PRIMARY
+                                        )
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                            Box(Modifier.weight(1f).fillMaxWidth()) {
+                                if (displayCategories.isEmpty()) {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("今年暫無紀錄", color = TEXT_SECONDARY, fontSize = 15.sp)
+                                    }
+                                } else {
+                                    BoxWithConstraints(Modifier.fillMaxSize()) {
+                                        val rowCount = displayCategories.size
+                                        val dividerThickness = 0.5.dp
+                                        val rowHeight =
+                                            ((maxHeight - dividerThickness * (rowCount - 1).coerceAtLeast(0)) / rowCount)
+                                                .coerceAtLeast(40.dp)
+                                        LazyColumn(Modifier.fillMaxSize(), userScrollEnabled = false) {
+                                            itemsIndexed(displayCategories, key = { _, c -> "y_$c" }) { idx, cat ->
+                                                val style = CATEGORY_STYLES[cat]
+                                                val isIncome = cat == INCOME_CATEGORY
+                                                Column(Modifier.fillMaxWidth()) {
+                                                    Row(
+                                                        Modifier
+                                                            .fillMaxWidth()
+                                                            .height(rowHeight)
+                                                            .padding(vertical = 1.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Row(
+                                                            Modifier.width(catColW).padding(start = 10.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            if (style != null) {
+                                                                Box(
+                                                                    Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).background(style.bgColor),
+                                                                    contentAlignment = Alignment.Center
+                                                                ) {
+                                                                    Icon(style.icon, null, tint = style.fgColor, modifier = Modifier.size(13.dp))
+                                                                }
+                                                                Spacer(Modifier.width(5.dp))
+                                                            }
+                                                            Text(
+                                                                cat,
+                                                                fontSize = 12.sp,
+                                                                color = TEXT_PRIMARY,
+                                                                fontWeight = if (isIncome) FontWeight.Bold else FontWeight.Medium,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                        Row(
+                                                            Modifier
+                                                                .weight(1f)
+                                                                .horizontalScroll(hScroll)
+                                                                .padding(end = 8.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            monthlyKeysThisYear.forEach { mk ->
+                                                                val amt = sumLocal(cat, mk)
+                                                                Text(
+                                                                    text = if (amt == 0.0) "—" else formatAmountNoDecimal(amt),
+                                                                    modifier = Modifier.width(monthColW),
+                                                                    textAlign = TextAlign.End,
+                                                                    fontSize = 12.sp,
+                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    color = when {
+                                                                        amt == 0.0 -> TEXT_TERTIARY
+                                                                        isIncome -> COLOR_INCOME
+                                                                        else -> COLOR_EXPENSE
+                                                                    },
+                                                                    maxLines = 1
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    if (idx < displayCategories.lastIndex) {
+                                                        HorizontalDivider(
+                                                            Modifier.padding(start = 10.dp),
+                                                            color = DIVIDER_COLOR,
+                                                            thickness = dividerThickness
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
+                            // 全年餘額列
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(SURFACE_CARD)
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "餘額",
+                                    Modifier.width(catColW).padding(start = 10.dp),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = BRAND_PRIMARY_DARK
+                                )
+                                Row(
+                                    Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(hScroll)
+                                        .padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    monthlyKeysThisYear.forEach { mk ->
+                                        val inc = sumLocal(INCOME_CATEGORY, mk)
+                                        val exp = displayCategories
+                                            .filter { it != INCOME_CATEGORY }
+                                            .sumOf { sumLocal(it, mk) }
+                                        val bal = inc - exp
+                                        Text(
+                                            text = if (bal == 0.0 && inc == 0.0) "—" else formatAmountNoDecimal(bal),
+                                            modifier = Modifier.width(monthColW),
+                                            textAlign = TextAlign.End,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = when {
+                                                bal > 0 -> COLOR_INCOME
+                                                bal < 0 -> COLOR_EXPENSE
+                                                else -> TEXT_TERTIARY
+                                            },
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
