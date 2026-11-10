@@ -60,6 +60,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -4198,7 +4199,8 @@ private fun AnimatedFabLayer(
             return
         }
         try {
-            // 先搶咪高風焦點（對抗系統錄屏開咗「錄製音訊」）
+            // 先停舊 session，避免 ERROR_CLIENT / BUSY
+            try { r.cancel() } catch (_: Exception) {}
             requestMicFocus()
 
             val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -4212,18 +4214,17 @@ private fun AnimatedFabLayer(
                 putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
                 putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
-                // 加快結束／減少假死等待
                 putExtra(
                     android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                    1500
+                    1800
                 )
                 putExtra(
                     android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-                    1000
+                    1200
                 )
                 putExtra(
                     android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
-                    800
+                    600
                 )
             }
             partialText = ""
@@ -4231,7 +4232,17 @@ private fun AnimatedFabLayer(
             statusHint = "準備中…"
             listening = true
             voiceSessionGen += 1
-            r.startListening(intent)
+            // 稍後再 start，等 cancel 完成
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try {
+                    if (listening) r.startListening(intent)
+                } catch (_: Exception) {
+                    listening = false
+                    speechReady = false
+                    releaseMicFocus()
+                    statusHint = "無法啟動"
+                }
+            }
         } catch (e: Exception) {
             listening = false
             speechReady = false
@@ -4240,12 +4251,12 @@ private fun AnimatedFabLayer(
         }
     }
 
-    // 卡在「準備中」超過 2.5 秒 → 自動 cancel 再重連一次；再唔得就結束
+    // 卡在「準備中」超過 4 秒 → 重試一次
     LaunchedEffect(listening, voiceSessionGen, statusHint) {
         if (!listening) return@LaunchedEffect
         if (statusHint != "準備中…" && statusHint != "重連中…") return@LaunchedEffect
         val gen = voiceSessionGen
-        delay(2500)
+        delay(4000)
         if (!listening || gen != voiceSessionGen) return@LaunchedEffect
         if (speechReady) return@LaunchedEffect
         if (statusHint != "準備中…" && statusHint != "重連中…") return@LaunchedEffect
@@ -4253,7 +4264,7 @@ private fun AnimatedFabLayer(
         if (!prepRetryUsed) {
             prepRetryUsed = true
             statusHint = "重連中…"
-            delay(350)
+            delay(400)
             if (!listening || gen != voiceSessionGen) return@LaunchedEffect
             startInAppListening()
         } else {
@@ -4303,27 +4314,31 @@ private fun AnimatedFabLayer(
                     statusHint = "識別中…"
                 }
                 override fun onError(error: Int) {
-                    // 咪被佔用／忙線：自動搶焦點再試一次
+                    // cancel 後常見 ERROR_CLIENT：唔好當致命重試，避免死循環
+                    if (error == android.speech.SpeechRecognizer.ERROR_CLIENT) {
+                        if (!listening) return
+                        if (!speechReady) return
+                    }
                     val micBusy = error == android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
-                        error == android.speech.SpeechRecognizer.ERROR_AUDIO ||
-                        error == android.speech.SpeechRecognizer.ERROR_CLIENT ||
-                        error == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                        error == android.speech.SpeechRecognizer.ERROR_AUDIO
                     if (micBusy && !audioRetryUsed) {
                         audioRetryUsed = true
                         statusHint = "咪忙碌，重試中…"
                         try { r.cancel() } catch (_: Exception) {}
                         releaseMicFocus()
-                        // 喺主線程稍後重試
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            requestMicFocus()
-                            startInAppListening()
-                        }, 350)
+                            if (listening) {
+                                requestMicFocus()
+                                startInAppListening()
+                            }
+                        }, 450)
                         return
                     }
 
                     listening = false
+                    speechReady = false
                     releaseMicFocus()
-                    val msg = when (error) {
+                    statusHint = when (error) {
                         android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "聽唔到，再試一次"
                         android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "冇聽到聲"
                         android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "冇麥克風權限"
@@ -4332,9 +4347,9 @@ private fun AnimatedFabLayer(
                             "咪高風被佔用（錄屏可試關「錄製音訊」）"
                         android.speech.SpeechRecognizer.ERROR_NETWORK,
                         android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "網絡問題"
+                        android.speech.SpeechRecognizer.ERROR_CLIENT -> "無法啟動"
                         else -> "語音識別失敗"
                     }
-                    statusHint = msg
                     audioRetryUsed = false
                 }
                 override fun onResults(results: android.os.Bundle?) {
@@ -7323,7 +7338,8 @@ fun LedgerKeyboardPanel(
         if (state.noteText.isNotBlank()) {
             val lastCat = noteCategoryMap[state.noteText]
             if (lastCat != null && lastCat != state.category) {
-                onStateChange(state.copy(category = lastCat))
+                // 只改 category，保留當前 noteText
+                onStateChange(state.copy(noteText = state.noteText, category = lastCat))
             }
         }
     }
@@ -7335,13 +7351,9 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    LaunchedEffect(imeOpen) {
-        if (!imeOpen) {
-            // 只更新本地 focus 標記；唔好 onStateChange 覆寫 noteText
-            // （撳建議項目會 clearFocus → ime 收起，用舊 state 會蓋掉剛選嘅名稱）
-            noteFieldFocused = false
-        }
-    }
+    // 建議列表顯示條件：唔單靠 focus（IME 收起瞬間 focus 會丟，唔好即刻拆掉建議）
+    val showNoteSuggestions =
+        noteFieldFocused || state.editingNote || state.focusedField == "note"
 
     val panelScrollState = rememberScrollState()
     LaunchedEffect(state.editingNote, state.noteText, noteFieldFocused) {
@@ -7632,14 +7644,14 @@ fun LedgerKeyboardPanel(
 
             Box(Modifier.fillMaxWidth().height(190.dp)) {
                 androidx.compose.animation.AnimatedContent(
-                    targetState = noteFieldFocused,
+                    targetState = showNoteSuggestions,
                     transitionSpec = {
-                        (fadeIn(tween(220, delayMillis = 90)) + scaleIn(initialScale = 0.92f, animationSpec = tween(220)))
-                            .togetherWith(fadeOut(tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150)))
+                        (fadeIn(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+                            .togetherWith(fadeOut(tween(120)) + scaleOut(targetScale = 0.96f, animationSpec = tween(120)))
                     },
                     label = "keyboard_or_suggestions"
-                ) { isNoteFocused ->
-                    if (isNoteFocused) {
+                ) { showSuggestions ->
+                    if (showSuggestions) {
                         if (noteSuggestions.isEmpty()) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text(
@@ -7649,7 +7661,6 @@ fun LedgerKeyboardPanel(
                                 )
                             }
                         } else {
-                            // 同快速輸入區：按文字實際闊度排，盡量完整顯示；只用盡頁闊時先 ellipsis
                             BoxWithConstraints(Modifier.fillMaxSize()) {
                                 val maxChipWidth = maxWidth
                                 val suggestScroll = rememberScrollState()
@@ -7663,26 +7674,52 @@ fun LedgerKeyboardPanel(
                                 ) {
                                     noteSuggestions.forEach { s ->
                                         key(s) {
-                                            QuickInputChip(
-                                                name = s,
-                                                iconUrl = noteIconMap[s] ?: "",
+                                            // 用 pointerInput consume down，避免第一次點擊只被系統用來收 IME
+                                            Surface(
                                                 modifier = Modifier
                                                     .height(44.dp)
-                                                    .widthIn(max = maxChipWidth),
-                                                onClick = {
-                                                    // 先寫入選中項目再收 focus，避免 IME 收起時用舊 state 蓋掉
-                                                    val picked = s
-                                                    noteFieldFocused = false
-                                                    onStateChange(
-                                                        state.copy(
-                                                            noteText = picked,
-                                                            editingNote = false,
-                                                            focusedField = "amount"
-                                                        )
+                                                    .widthIn(max = maxChipWidth)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .pointerInput(s) {
+                                                        awaitEachGesture {
+                                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                                            down.consume()
+                                                            val up = waitForUpOrCancellation()
+                                                            if (up != null) {
+                                                                val picked = s
+                                                                val cat = noteCategoryMap[picked]
+                                                                onStateChange(
+                                                                    state.copy(
+                                                                        noteText = picked,
+                                                                        category = cat ?: state.category,
+                                                                        editingNote = false,
+                                                                        focusedField = "amount"
+                                                                    )
+                                                                )
+                                                                noteFieldFocused = false
+                                                                focusManager.clearFocus(force = true)
+                                                            }
+                                                        }
+                                                    },
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = SURFACE_ELEVATED
+                                            ) {
+                                                Row(
+                                                    Modifier.padding(horizontal = 10.dp).fillMaxHeight(),
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    IconView(noteIconMap[s] ?: "", s, size = 18.dp)
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text(
+                                                        s,
+                                                        fontSize = 13.sp,
+                                                        color = TEXT_PRIMARY,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
                                                     )
-                                                    focusManager.clearFocus(force = true)
                                                 }
-                                            )
+                                            }
                                         }
                                     }
                                 }
