@@ -3989,6 +3989,8 @@ private fun AnimatedFabLayer(
     var partialText by remember { mutableStateOf("") }
     var statusHint by remember { mutableStateOf("聽緊…") }
     var pendingVoiceStart by remember { mutableStateOf(false) }
+    // 錯誤提示氣泡（最多顯示 5 秒）
+    var voiceBubbleVisible by remember { mutableStateOf(false) }
     // 錄音／其他 App 佔用咪高風時，重試一次
     var audioRetryUsed by remember { mutableStateOf(false) }
     var audioFocusRequest by remember {
@@ -4233,7 +4235,39 @@ private fun AnimatedFabLayer(
         if (!listening) requestVoiceInput()
     }
 
-    if (alpha <= 0.01f && !listening) return
+    fun isVoiceErrorHint(s: String): Boolean {
+        if (s.isBlank()) return false
+        return s == "聽唔明" ||
+            s.startsWith("聽唔到") ||
+            s == "冇聽到聲" ||
+            s == "未識別到" ||
+            s == "唔支援語音" ||
+            s == "無法啟動" ||
+            s.contains("麥克風") ||
+            s.contains("咪高風") ||
+            s.contains("咪忙碌") ||
+            s.contains("網絡") ||
+            s.contains("語音識別失敗")
+    }
+
+    // 聽緊時常駐；錯誤提示最多 5 秒後淡出
+    LaunchedEffect(listening, statusHint) {
+        if (listening) {
+            voiceBubbleVisible = true
+            return@LaunchedEffect
+        }
+        if (isVoiceErrorHint(statusHint)) {
+            voiceBubbleVisible = true
+            delay(5000)
+            voiceBubbleVisible = false
+        } else {
+            // 成功／閒置：短延遲後收埋
+            delay(200)
+            voiceBubbleVisible = false
+        }
+    }
+
+    if (alpha <= 0.01f && !listening && !voiceBubbleVisible) return
 
     Row(
         modifier = modifier
@@ -4247,11 +4281,11 @@ private fun AnimatedFabLayer(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
-        // 語音中：FAB 左邊半透明模糊提示條，顯示即時文字
+        // 語音中／錯誤提示：FAB 左邊提示條（錯誤最多 5 秒，帶進出動畫）
         androidx.compose.animation.AnimatedVisibility(
-            visible = listening || statusHint == "聽唔明" || statusHint.startsWith("聽唔到"),
-            enter = fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 3 },
-            exit = fadeOut(tween(160)) + slideOutHorizontally(tween(180)) { it / 3 }
+            visible = listening || voiceBubbleVisible,
+            enter = fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 3 },
+            exit = fadeOut(tween(280)) + slideOutHorizontally(tween(280)) { it / 3 }
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
