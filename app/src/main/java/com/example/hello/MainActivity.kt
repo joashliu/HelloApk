@@ -4064,7 +4064,6 @@ private fun AnimatedFabLayer(
         val (note, amount) = parseVoiceLedgerInput(spoken)
         if (note.isBlank() && (amount == null || amount <= 0.0)) {
             statusHint = "聽唔明"
-            Toast.makeText(context, "聽唔明：「$spoken」", Toast.LENGTH_SHORT).show()
             return
         }
         statusHint = buildString {
@@ -4084,7 +4083,8 @@ private fun AnimatedFabLayer(
     fun startInAppListening() {
         val r = recognizer
         if (r == null) {
-            Toast.makeText(context, "呢部機唔支援語音識別", Toast.LENGTH_SHORT).show()
+            statusHint = "唔支援語音"
+            listening = false
             return
         }
         try {
@@ -4114,7 +4114,7 @@ private fun AnimatedFabLayer(
         } catch (e: Exception) {
             listening = false
             releaseMicFocus()
-            Toast.makeText(context, "無法啟動語音識別", Toast.LENGTH_SHORT).show()
+            statusHint = "無法啟動"
         }
     }
 
@@ -4170,9 +4170,6 @@ private fun AnimatedFabLayer(
                         else -> "語音識別失敗"
                     }
                     statusHint = msg
-                    if (error != android.speech.SpeechRecognizer.ERROR_CLIENT) {
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                    }
                     audioRetryUsed = false
                 }
                 override fun onResults(results: android.os.Bundle?) {
@@ -4212,7 +4209,7 @@ private fun AnimatedFabLayer(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) startInAppListening()
-        else Toast.makeText(context, "需要麥克風權限先可以用語音記帳", Toast.LENGTH_SHORT).show()
+        else statusHint = "需要麥克風權限"
     }
 
     fun requestVoiceInput() {
