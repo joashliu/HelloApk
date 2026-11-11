@@ -116,7 +116,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.positionChange
+import android.view.MotionEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -4086,123 +4088,48 @@ private fun AnimatedFabLayer(
     val alpha = (1f - currentP * 2.5f).coerceIn(0f, 1f)
     val scale = 1f - (0.5f * currentP)
 
-    var listening by remember { mutableStateOf(false) }
-    var partialText by remember { mutableStateOf("") }
-    var statusHint by remember { mutableStateOf("聽緊…") }
-    var pendingVoiceStart by remember { mutableStateOf(false) }
-    // 錯誤提示氣泡（最多顯示 5 秒）
+    // Google 系統語音彈窗
+    var statusHint by remember { mutableStateOf("") }
     var voiceBubbleVisible by remember { mutableStateOf(false) }
-    // 錄音／其他 App 佔用咪高風時，重試一次
-    var audioRetryUsed by remember { mutableStateOf(false) }
-    // 卡在「準備中」時自動重連
-    var prepRetryUsed by remember { mutableStateOf(false) }
-    // 已收到 onReadyForSpeech
-    var speechReady by remember { mutableStateOf(false) }
-    // 每次 start 遞增，用嚟取消過期 watchdog
-    var voiceSessionGen by remember { mutableIntStateOf(0) }
-    var audioFocusRequest by remember {
-        mutableStateOf<android.media.AudioFocusRequest?>(null)
+
+    val googleVoiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+            if (!spoken.isNullOrBlank()) {
+                val (note, amount) = parseVoiceLedgerInput(spoken)
+                if (note.isBlank() && (amount == null || amount <= 0.0)) {
+                    statusHint = "聽唔明"
+                    voiceBubbleVisible = true
+                } else {
+                    statusHint = buildString {
+                        if (note.isNotBlank()) append(note)
+                        if (amount != null) {
+                            if (isNotEmpty()) append(" · ")
+                            append("$")
+                            append(
+                                if (amount % 1.0 == 0.0) amount.toInt().toString()
+                                else String.format(Locale.US, "%.1f", amount)
+                            )
+                        }
+                    }
+                    voiceBubbleVisible = true
+                    onVoiceResult(note, amount)
+                }
+            } else {
+                statusHint = "未識別到"
+                voiceBubbleVisible = true
+            }
+        }
     }
 
-    val audioManager = remember {
-        context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-    }
-
-    val recognizer = remember {
-        if (android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
-            android.speech.SpeechRecognizer.createSpeechRecognizer(context)
-        } else null
-    }
-
-    fun releaseMicFocus() {
+    fun requestVoiceInput() {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         try {
-            val req = audioFocusRequest
-            if (req != null) {
-                audioManager.abandonAudioFocusRequest(req)
-            }
-        } catch (_: Exception) {}
-        audioFocusRequest = null
-    }
-
-    /** 搶 transient exclusive 音訊焦點，盡量令錄屏／其他收音暫時讓路 */
-    fun requestMicFocus(): Boolean {
-        return try {
-            val attrs = android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
-                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build()
-            val req = android.media.AudioFocusRequest.Builder(
-                android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
-            )
-                .setAudioAttributes(attrs)
-                .setAcceptsDelayedFocusGain(true)
-                .setOnAudioFocusChangeListener { }
-                .build()
-            val result = audioManager.requestAudioFocus(req)
-            audioFocusRequest = req
-            result == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED ||
-                result == android.media.AudioManager.AUDIOFOCUS_REQUEST_DELAYED
-        } catch (_: Exception) {
-            // API 降級：舊式 requestAudioFocus
-            try {
-                @Suppress("DEPRECATION")
-                val result = audioManager.requestAudioFocus(
-                    null,
-                    android.media.AudioManager.STREAM_MUSIC,
-                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
-                )
-                result == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            } catch (_: Exception) {
-                false
-            }
-        }
-    }
-
-    fun stopListening() {
-        voiceSessionGen += 1
-        try { recognizer?.stopListening() } catch (_: Exception) {}
-        try { recognizer?.cancel() } catch (_: Exception) {}
-        listening = false
-        speechReady = false
-        releaseMicFocus()
-    }
-
-    fun handleFinalText(spoken: String) {
-        listening = false
-        releaseMicFocus()
-        audioRetryUsed = false
-        partialText = spoken
-        val (note, amount) = parseVoiceLedgerInput(spoken)
-        if (note.isBlank() && (amount == null || amount <= 0.0)) {
-            statusHint = "聽唔明"
-            return
-        }
-        statusHint = buildString {
-            if (note.isNotBlank()) append(note)
-            if (amount != null) {
-                if (isNotEmpty()) append(" · ")
-                append("$")
-                append(
-                    if (amount % 1.0 == 0.0) amount.toInt().toString()
-                    else String.format(Locale.US, "%.1f", amount)
-                )
-            }
-        }
-        onVoiceResult(note, amount)
-    }
-
-    fun startInAppListening() {
-        val r = recognizer
-        if (r == null) {
-            statusHint = "唔支援語音"
-            listening = false
-            return
-        }
-        try {
-            // 先停舊 session，避免 ERROR_CLIENT / BUSY
-            try { r.cancel() } catch (_: Exception) {}
-            requestMicFocus()
-
             val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(
                     android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
@@ -4210,242 +4137,30 @@ private fun AnimatedFabLayer(
                 )
                 putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-HK")
                 putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-HK")
-                putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "講出項目同金額")
                 putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
-                putExtra(
-                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                    1800
-                )
-                putExtra(
-                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-                    1200
-                )
-                putExtra(
-                    android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
-                    600
-                )
             }
-            partialText = ""
-            speechReady = false
-            statusHint = "準備中…"
-            listening = true
-            voiceSessionGen += 1
-            // 稍後再 start，等 cancel 完成
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                try {
-                    if (listening) r.startListening(intent)
-                } catch (_: Exception) {
-                    listening = false
-                    speechReady = false
-                    releaseMicFocus()
-                    statusHint = "無法啟動"
-                }
-            }
-        } catch (e: Exception) {
-            listening = false
-            speechReady = false
-            releaseMicFocus()
-            statusHint = "無法啟動"
+            googleVoiceLauncher.launch(intent)
+        } catch (_: Exception) {
+            statusHint = "唔支援語音"
+            voiceBubbleVisible = true
         }
     }
 
-    // 卡在「準備中」超過 4 秒 → 重試一次
-    LaunchedEffect(listening, voiceSessionGen, statusHint) {
-        if (!listening) return@LaunchedEffect
-        if (statusHint != "準備中…" && statusHint != "重連中…") return@LaunchedEffect
-        val gen = voiceSessionGen
-        delay(4000)
-        if (!listening || gen != voiceSessionGen) return@LaunchedEffect
-        if (speechReady) return@LaunchedEffect
-        if (statusHint != "準備中…" && statusHint != "重連中…") return@LaunchedEffect
-        try { recognizer?.cancel() } catch (_: Exception) {}
-        if (!prepRetryUsed) {
-            prepRetryUsed = true
-            statusHint = "重連中…"
-            delay(400)
-            if (!listening || gen != voiceSessionGen) return@LaunchedEffect
-            startInAppListening()
-        } else {
-            listening = false
-            speechReady = false
-            releaseMicFocus()
-            statusHint = "無法啟動"
-            prepRetryUsed = false
-        }
-    }
-
-    // 單次聆聽最長 12 秒，避免永遠卡住
-    LaunchedEffect(listening, voiceSessionGen) {
-        if (!listening) return@LaunchedEffect
-        val gen = voiceSessionGen
-        delay(12_000)
-        if (listening && gen == voiceSessionGen) {
-            try { recognizer?.stopListening() } catch (_: Exception) {}
-            delay(600)
-            if (listening && gen == voiceSessionGen) {
-                stopListening()
-                statusHint = "聽唔到，再試一次"
-            }
-        }
-    }
-
-    DisposableEffect(recognizer) {
-        val r = recognizer
-        if (r == null) {
-            onDispose { }
-        } else {
-            val listener = object : android.speech.RecognitionListener {
-                override fun onReadyForSpeech(params: android.os.Bundle?) {
-                    speechReady = true
-                    prepRetryUsed = false
-                    statusHint = "請開始講…"
-                    partialText = ""
-                    audioRetryUsed = false
-                }
-                override fun onBeginningOfSpeech() {
-                    speechReady = true
-                    statusHint = "聽緊…"
-                }
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    statusHint = "識別中…"
-                }
-                override fun onError(error: Int) {
-                    // cancel 後常見 ERROR_CLIENT：唔好當致命重試，避免死循環
-                    if (error == android.speech.SpeechRecognizer.ERROR_CLIENT) {
-                        if (!listening) return
-                        if (!speechReady) return
-                    }
-                    val micBusy = error == android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY ||
-                        error == android.speech.SpeechRecognizer.ERROR_AUDIO
-                    if (micBusy && !audioRetryUsed) {
-                        audioRetryUsed = true
-                        statusHint = "咪忙碌，重試中…"
-                        try { r.cancel() } catch (_: Exception) {}
-                        releaseMicFocus()
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            if (listening) {
-                                requestMicFocus()
-                                startInAppListening()
-                            }
-                        }, 450)
-                        return
-                    }
-
-                    listening = false
-                    speechReady = false
-                    releaseMicFocus()
-                    statusHint = when (error) {
-                        android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "聽唔到，再試一次"
-                        android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "冇聽到聲"
-                        android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "冇麥克風權限"
-                        android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-                        android.speech.SpeechRecognizer.ERROR_AUDIO ->
-                            "咪高風被佔用（錄屏可試關「錄製音訊」）"
-                        android.speech.SpeechRecognizer.ERROR_NETWORK,
-                        android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "網絡問題"
-                        android.speech.SpeechRecognizer.ERROR_CLIENT -> "無法啟動"
-                        else -> "語音識別失敗"
-                    }
-                    audioRetryUsed = false
-                }
-                override fun onResults(results: android.os.Bundle?) {
-                    val spoken = results
-                        ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?.trim()
-                    if (!spoken.isNullOrBlank()) handleFinalText(spoken)
-                    else {
-                        listening = false
-                        releaseMicFocus()
-                        statusHint = "未識別到"
-                    }
-                }
-                override fun onPartialResults(partialResults: android.os.Bundle?) {
-                    val p = partialResults
-                        ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?.trim()
-                    if (!p.isNullOrBlank()) {
-                        partialText = p
-                        statusHint = p
-                    }
-                }
-                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-            }
-            r.setRecognitionListener(listener)
-            onDispose {
-                try { r.cancel() } catch (_: Exception) {}
-                try { r.destroy() } catch (_: Exception) {}
-                releaseMicFocus()
-            }
-        }
-    }
-
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) startInAppListening()
-        else statusHint = "需要麥克風權限"
-    }
-
-    fun requestVoiceInput() {
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        if (listening) {
-            stopListening()
-            return
-        }
-        val granted = ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) startInAppListening()
-        else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-    }
-
-    // 🟢 桌面 Shortcut / DeepLink 觸發：進 App 後自動開始語音
     LaunchedEffect(voiceLaunchToken) {
         if (voiceLaunchToken <= 0) return@LaunchedEffect
-        // 等 UI 同權限就緒
         delay(450)
-        if (!listening) requestVoiceInput()
+        requestVoiceInput()
     }
 
-    fun isVoiceErrorHint(s: String): Boolean {
-        if (s.isBlank()) return false
-        return s == "聽唔明" ||
-            s.startsWith("聽唔到") ||
-            s == "冇聽到聲" ||
-            s == "未識別到" ||
-            s == "唔支援語音" ||
-            s == "無法啟動" ||
-            s.contains("麥克風") ||
-            s.contains("咪高風") ||
-            s.contains("咪忙碌") ||
-            s.contains("網絡") ||
-            s.contains("語音識別失敗")
-    }
-
-    // 聽緊時常駐；錯誤提示最多 5 秒後淡出
-    LaunchedEffect(listening, statusHint) {
-        if (listening) {
-            voiceBubbleVisible = true
-            return@LaunchedEffect
-        }
-        if (isVoiceErrorHint(statusHint)) {
-            voiceBubbleVisible = true
-            delay(5000)
-            voiceBubbleVisible = false
-        } else {
-            // 成功／閒置：短延遲後收埋
-            delay(200)
+    LaunchedEffect(voiceBubbleVisible, statusHint) {
+        if (voiceBubbleVisible && statusHint.isNotBlank()) {
+            delay(3000)
             voiceBubbleVisible = false
         }
     }
 
-    if (alpha <= 0.01f && !listening && !voiceBubbleVisible) return
+    if (alpha <= 0.01f && !voiceBubbleVisible) return
 
     Row(
         modifier = modifier
@@ -4459,60 +4174,28 @@ private fun AnimatedFabLayer(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
-        // 語音中／錯誤提示：FAB 左邊提示條（錯誤最多 5 秒，帶進出動畫）
         androidx.compose.animation.AnimatedVisibility(
-            visible = listening || voiceBubbleVisible,
+            visible = voiceBubbleVisible && statusHint.isNotBlank(),
             enter = fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 3 },
             exit = fadeOut(tween(280)) + slideOutHorizontally(tween(280)) { it / 3 }
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(end = 10.dp)
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xE6111827),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .padding(end = 10.dp)
+                    .widthIn(min = 80.dp, max = 220.dp)
             ) {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color(0xE6111827),
-                    shadowElevation = 6.dp,
-                    modifier = Modifier
-                        .widthIn(min = 120.dp, max = 220.dp)
-                        .heightIn(min = 40.dp)
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 聲波動畫點
-                        if (listening) {
-                            val infinite = rememberInfiniteTransition(label = "voiceDots")
-                            val d1 by infinite.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "d1")
-                            val d2 by infinite.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500, delayMillis = 120), RepeatMode.Reverse), label = "d2")
-                            val d3 by infinite.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500, delayMillis = 240), RepeatMode.Reverse), label = "d3")
-                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                listOf(d1, d2, d3).forEach { a ->
-                                    Box(
-                                        Modifier
-                                            .size(5.dp)
-                                            .graphicsLayer { this.alpha = a }
-                                            .clip(CircleShape)
-                                            .background(Color.White)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(
-                            text = when {
-                                partialText.isNotBlank() -> partialText
-                                else -> statusHint
-                            },
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+                Text(
+                    text = statusHint,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                )
             }
         }
 
@@ -4521,25 +4204,22 @@ private fun AnimatedFabLayer(
                 .size(56.dp)
                 .shadow(4.dp, CircleShape)
                 .clip(CircleShape)
-                .background(if (listening) Color(0xFFDC2626) else BRAND_PRIMARY)
+                .background(BRAND_PRIMARY)
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {
-                        if (listening) stopListening()
-                        else onFabTap()
-                    },
+                    onClick = { onFabTap() },
                     onLongClick = { requestVoiceInput() }
                 ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                if (listening) Icons.Default.Mic else Icons.Default.Add,
-                contentDescription = if (listening) "語音輸入中（再撳停止）" else "新增（長按語音）",
+                Icons.Default.Add,
+                contentDescription = "新增（長按語音）",
                 tint = Color.White,
                 modifier = Modifier
                     .size(24.dp)
-                    .graphicsLayer { rotationZ = if (listening) 0f else currentP * 90f }
+                    .graphicsLayer { rotationZ = currentP * 90f }
             )
         }
     }
@@ -7674,35 +7354,46 @@ fun LedgerKeyboardPanel(
                                 ) {
                                     noteSuggestions.forEach { s ->
                                         key(s) {
-                                            // 用 pointerInput consume down，避免第一次點擊只被系統用來收 IME
+                                            // pointerInteropFilter：系統 IME 開啟時仍收到原生 touch，唔會第一下只收鍵盤
+                                            var pressed by remember { mutableStateOf(false) }
                                             Surface(
                                                 modifier = Modifier
                                                     .height(44.dp)
                                                     .widthIn(max = maxChipWidth)
                                                     .clip(RoundedCornerShape(12.dp))
-                                                    .pointerInput(s) {
-                                                        awaitEachGesture {
-                                                            val down = awaitFirstDown(requireUnconsumed = false)
-                                                            down.consume()
-                                                            val up = waitForUpOrCancellation()
-                                                            if (up != null) {
-                                                                val picked = s
-                                                                val cat = noteCategoryMap[picked]
-                                                                onStateChange(
-                                                                    state.copy(
-                                                                        noteText = picked,
-                                                                        category = cat ?: state.category,
-                                                                        editingNote = false,
-                                                                        focusedField = "amount"
-                                                                    )
-                                                                )
-                                                                noteFieldFocused = false
-                                                                focusManager.clearFocus(force = true)
+                                                    .pointerInteropFilter { ev ->
+                                                        when (ev.actionMasked) {
+                                                            MotionEvent.ACTION_DOWN -> {
+                                                                pressed = true
+                                                                true
                                                             }
+                                                            MotionEvent.ACTION_UP -> {
+                                                                if (pressed) {
+                                                                    pressed = false
+                                                                    val picked = s
+                                                                    val cat = noteCategoryMap[picked]
+                                                                    onStateChange(
+                                                                        state.copy(
+                                                                            noteText = picked,
+                                                                            category = cat ?: state.category,
+                                                                            editingNote = false,
+                                                                            focusedField = "amount"
+                                                                        )
+                                                                    )
+                                                                    noteFieldFocused = false
+                                                                    focusManager.clearFocus(force = true)
+                                                                }
+                                                                true
+                                                            }
+                                                            MotionEvent.ACTION_CANCEL -> {
+                                                                pressed = false
+                                                                true
+                                                            }
+                                                            else -> true
                                                         }
                                                     },
                                                 shape = RoundedCornerShape(12.dp),
-                                                color = SURFACE_ELEVATED
+                                                color = if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED
                                             ) {
                                                 Row(
                                                     Modifier.padding(horizontal = 10.dp).fillMaxHeight(),
