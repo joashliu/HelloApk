@@ -1781,7 +1781,7 @@ private fun computePivotUiState(records: List<Record>, selectedYear: Int): Pivot
     val noteIconMap = HashMap<String, String>()
 
     for (r in records) {
-        if (r.category == "還錢") continue
+        // ★ 透視表包含「還錢」分類
         val meta = getTimestampMeta(r.timestamp)
         yearsSet.add(meta.year)
         if (r.note.isNotBlank() && r.iconUrl.isNotBlank() && !noteIconMap.containsKey(r.note)) {
@@ -3482,7 +3482,13 @@ fun MainApp(
             FloatingNavBar(
                 items = MAIN_NAV_ITEMS,
                 selectedIndex = currentPage,
-                onIndexChange = { currentPage = it },
+                onIndexChange = { idx ->
+                    // 已在記帳頁再撳「記帳」→ 滾到最頂
+                    if (idx == 0 && currentPage == 0) {
+                        scrollToTopTrigger++
+                    }
+                    currentPage = idx
+                },
                 modifier = Modifier
             )
         }
@@ -4369,7 +4375,8 @@ fun FloatingNavBar(
                         if (c == null || !c.pressed) {
                             if (!dragged) {
                                 val i = (downX / tabWidthPx).toInt().coerceIn(0, latestSize - 1)
-                                if (i != latestSel) latestOnChange(i)
+                                // 再撳同一個 Tab 都要通知（記帳頁用嚟滾到頂）
+                                latestOnChange(i)
                                 bubbleOffset = i * tabWidthPx
                             } else {
                                 val i = (bubbleOffset / tabWidthPx).roundToInt().coerceIn(0, latestSize - 1)
