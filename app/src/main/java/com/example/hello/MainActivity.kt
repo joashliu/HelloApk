@@ -6190,12 +6190,12 @@ fun CalendarContent(
         if (collapseP >= 0.45f) animateCollapseTo(1f) else animateCollapseTo(0f)
     }
 
+    /** 換月份時先完全收起（含清選取） */
     val handleDismiss: () -> Unit = {
         if (selectedDay != null || collapseP > 0.01f || chromeP > 0.01f) {
             scope.launch {
                 isSettling = true
                 try {
-                    // 先退 chrome 再退 collapse
                     val c0 = chromeP
                     if (c0 > 0.01f) {
                         Animatable(c0).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) {
@@ -6220,8 +6220,39 @@ fun CalendarContent(
         }
     }
 
+    /**
+     * 系統返回：好似手動下拉，逐步退，唔一次過清走明細。
+     * 1) chrome 展開中 → 退返 chrome，保持「只顯示一行 + 明細」
+     * 2) 已係一行 → 展開全日曆，但保留選取同明細框
+     * 3) 已全日曆 + 仍有選取 → 先清選取（真正離開明細）
+     */
+    val handleBackStep: () -> Unit = {
+        scope.launch {
+            if (isSettling) return@launch
+            when {
+                chromeP > 0.05f -> {
+                    // 階段2 → 階段1：保持一行同明細
+                    animateChromeTo(0f)
+                    if (collapseP < 0.99f) animateCollapseTo(1f)
+                }
+                collapseP > 0.05f -> {
+                    // 階段1 → 全日曆，但唔清 selectedDay（明細框仍在）
+                    animateCollapseTo(0f)
+                }
+                selectedDay != null -> {
+                    selectedDay = null
+                    selectedRowIdx = null
+                    selectedColIdx = null
+                    detailExpandedId = null
+                }
+            }
+        }
+    }
+
     LaunchedEffect(currentMonthKey) { handleDismiss() }
-    BackHandler(enabled = selectedDay != null) { handleDismiss() }
+    BackHandler(
+        enabled = selectedDay != null || collapseP > 0.01f || chromeP > 0.01f
+    ) { handleBackStep() }
 
     // ★ 兩段式 nested scroll：上滑先收日曆，再推 chrome；下滑相反
     val detailNestedConnection = object : NestedScrollConnection {
