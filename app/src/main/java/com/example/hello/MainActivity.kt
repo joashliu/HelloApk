@@ -3897,7 +3897,7 @@ private fun BoxScope.KeyboardAndFabLayer(
         onVoiceResult(note, amount)
     }
     val voiceLiftPad by animateDpAsState(
-        targetValue = if (voiceLiftKeyboard && showKeyboard) 260.dp else 0.dp,
+        targetValue = if (voiceLiftKeyboard && showKeyboard) 200.dp else 0.dp,
         animationSpec = spring(dampingRatio = 0.9f, stiffness = 280f),
         label = "voiceKbLift"
     )
