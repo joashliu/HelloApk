@@ -3882,6 +3882,25 @@ private fun BoxScope.KeyboardAndFabLayer(
     nameFlashTrigger: Int,
 ) {
     val density = LocalDensity.current
+    // 語音完成後短暫抬高鍵盤，避開系統 Toast／結果提示
+    var voiceLiftKeyboard by remember { mutableStateOf(false) }
+    LaunchedEffect(voiceLiftKeyboard) {
+        if (!voiceLiftKeyboard) return@LaunchedEffect
+        delay(3500)
+        voiceLiftKeyboard = false
+    }
+    LaunchedEffect(showKeyboard) {
+        if (!showKeyboard) voiceLiftKeyboard = false
+    }
+    val wrappedOnVoiceResult: (String, Double?) -> Unit = { note, amount ->
+        voiceLiftKeyboard = true
+        onVoiceResult(note, amount)
+    }
+    val voiceLiftPad by animateDpAsState(
+        targetValue = if (voiceLiftKeyboard && showKeyboard) 52.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 280f),
+        label = "voiceKbLift"
+    )
     val focusManager = LocalFocusManager.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
     val navBottomPx = WindowInsets.navigationBars.getBottom(density)
@@ -4004,6 +4023,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             noteIconMap = noteIconMap,
             nameFlashTrigger = nameFlashTrigger,
             imeOpen = imeOpen,
+            extraBottomPadding = voiceLiftPad,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
 
@@ -4019,7 +4039,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
             onFabTap = onFabTap,
-            onVoiceResult = onVoiceResult,
+            onVoiceResult = wrappedOnVoiceResult,
             voiceLaunchToken = voiceLaunchToken,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
@@ -4242,6 +4262,7 @@ private fun AnimatedKeyboardLayer(
     noteIconMap: Map<String, String>,
     nameFlashTrigger: Int,
     imeOpen: Boolean = false,
+    extraBottomPadding: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
     val currentP = progressProvider()
@@ -4253,11 +4274,12 @@ private fun AnimatedKeyboardLayer(
     // 咁樣當系統鍵盤推上嚟時，自訂鍵盤會保持完整高度並自然遮蓋上方嘅 Top Stat，
     // 跌落嚟嘅時候亦會完整平滑過渡，唔會再出現被裁切嘅情況。
 
+    val baseBottom = if (imeOpen) 8.dp else 20.dp
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(
-                bottom = if (imeOpen) 8.dp else 20.dp,
+                bottom = baseBottom + extraBottomPadding,
                 end = 16.dp,
                 start = 16.dp
             )
