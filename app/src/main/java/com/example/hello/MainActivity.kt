@@ -4736,6 +4736,8 @@ fun LedgerContent(
     }
 
     val collapseProgress = if (maxCollapsePx > 0f) (quickInputCollapseOffset / maxCollapsePx).coerceIn(0f, 1f) else 0f
+    // ★ 第一下向下滾動（快速輸入開始收）就摺 Top Stats，唔使等快速輸入完全消失
+    val effectiveCompact = !isExitingFilter && (collapseProgress > 0.05f || effectiveScrolledAway)
 
     val weeklyIntroProgress = remember { Animatable(1f) }
     var weeklyIntroTriggered by remember { mutableStateOf(false) }
@@ -4916,7 +4918,7 @@ fun LedgerContent(
 
             // 頂部背景色動畫：使用 SURFACE_BG 避免陰影
             val topBarBgColor by animateColorAsState(
-                targetValue = if (effectiveScrolledAway) SURFACE_BG else SURFACE_CARD,
+                targetValue = if (effectiveCompact) SURFACE_BG else SURFACE_CARD,
                 animationSpec = tween(350, easing = FastOutSlowInEasing)
             )
 
@@ -4951,7 +4953,7 @@ fun LedgerContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     // 收合變 Chips 後減少頂距，貼近頂邊框
-                    .padding(top = if (effectiveScrolledAway) 2.dp else 8.dp, bottom = 0.dp)
+                    .padding(top = if (effectiveCompact) 2.dp else 8.dp, bottom = 0.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(topBarBgColor)
                     .pointerInput(Unit) {
@@ -4983,9 +4985,9 @@ fun LedgerContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(
-                            horizontal = if (effectiveScrolledAway) 0.dp else 8.dp,
+                            horizontal = if (effectiveCompact) 0.dp else 8.dp,
                             // 收合後再減垂直內距
-                            vertical = if (effectiveScrolledAway) 2.dp else 4.dp
+                            vertical = if (effectiveCompact) 2.dp else 4.dp
                         ),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -5001,7 +5003,7 @@ fun LedgerContent(
                             avgMorningLabel = avgMorningLabel,
                             avgAfternoonLabel = avgAfternoonLabel,
                             animateValues = animateTopStats,
-                            isCompact = effectiveScrolledAway
+                            isCompact = effectiveCompact
                         )
                     }
 
@@ -8550,23 +8552,19 @@ fun QuickInputSection(
                     .fillMaxWidth()
                     .height(finalHeight)
                     .graphicsLayer {
-                        // 整區漸變淡出 + 輕微縮小，營造消失喺 Top Stats 後便嘅朦朧感
-                        alpha = (1f - collapseProgress).coerceIn(0f, 1f)
-                        scaleY = 1f - (collapseProgress * 0.12f)
+                        // ★ 棒型圖式純高度壓縮（由上往下收），唔用蒙糊／淡出
                         transformOrigin = TransformOrigin(0.5f, 0f)
-                        if (collapseProgress > 0.05f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            val blurPx = (collapseProgress * 18f).roundToInt().coerceIn(1, 24)
-                            renderEffect = getCachedBlurEffect(blurPx)
-                        } else {
-                            renderEffect = null
-                        }
+                        renderEffect = null
+                        alpha = 1f
+                        scaleY = 1f
                     }
                     .clip(RoundedCornerShape(12.dp))
                     .background(SURFACE_CARD)
                     .nestedScroll(nestedScrollConnection)
             ) {
-                val mainAlpha = (1f - collapseProgress * 1.2f).coerceIn(0f, 1f)
-                val mainScale = 1f - (collapseProgress * 0.06f)
+                // 內容保持清晰；高度由 finalHeight 統一壓縮
+                val mainAlpha = 1f
+                val mainScale = 1f
                 val revealPx = manageRevealProgress * manageButtonWidthPx
 
                 // ★ 從左側拉出嘅選單（包含旅遊與管理）
@@ -9829,8 +9827,8 @@ fun CompareContent(
                                                                     text = amtText,
                                                                     modifier = Modifier.width(monthColW),
                                                                     textAlign = TextAlign.End,
-                                                                    fontSize = 12.sp,
-                                                                    fontWeight = FontWeight.SemiBold,
+                                                                    fontSize = 14.sp,
+                                                                    fontWeight = FontWeight.Bold,
                                                                     color = when {
                                                                         amt == 0.0 -> TEXT_TERTIARY
                                                                         isIncome -> COLOR_INCOME
@@ -9893,8 +9891,8 @@ fun CompareContent(
                                             text = balText,
                                             modifier = Modifier.width(monthColW),
                                             textAlign = TextAlign.End,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.ExtraBold,
                                             color = when {
                                                 bal > 0 -> COLOR_INCOME
                                                 bal < 0 -> COLOR_EXPENSE
