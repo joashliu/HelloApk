@@ -4088,303 +4088,81 @@ private fun AnimatedFabLayer(
     val currentP = progressProvider()
     val alpha = (1f - currentP * 2.5f).coerceIn(0f, 1f)
     val scale = 1f - (0.5f * currentP)
-    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
 
-    var listening by remember { mutableStateOf(false) }
-    var partialText by remember { mutableStateOf("") }
+    // Google 系統語音彈窗
     var statusHint by remember { mutableStateOf("") }
     var voiceBubbleVisible by remember { mutableStateOf(false) }
-    var speechReady by remember { mutableStateOf(false) }
-    var sessionGen by remember { mutableIntStateOf(0) }
-    var audioFocusRequest by remember { mutableStateOf<android.media.AudioFocusRequest?>(null) }
 
-    val audioManager = remember {
-        context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-    }
-
-    // 優先 on-device；唔得先用一般 SpeechRecognizer（仍然無 Google 全屏 UI）
-    val recognizer = remember {
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= 31) {
-                try {
-                    android.speech.SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-                } catch (_: Exception) {
-                    if (android.speech.SpeechRecognizer.isRecognitionAvailable(context))
-                        android.speech.SpeechRecognizer.createSpeechRecognizer(context)
-                    else null
-                }
-            } else if (android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
-                android.speech.SpeechRecognizer.createSpeechRecognizer(context)
-            } else null
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun releaseMicFocus() {
-        try {
-            val req = audioFocusRequest
-            if (req != null && android.os.Build.VERSION.SDK_INT >= 26) {
-                audioManager.abandonAudioFocusRequest(req)
-            }
-        } catch (_: Exception) {}
-        audioFocusRequest = null
-    }
-
-    fun requestMicFocus(): Boolean {
-        return try {
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
-                val attrs = android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_ASSISTANT)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-                val req = android.media.AudioFocusRequest.Builder(
-                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
-                )
-                    .setAudioAttributes(attrs)
-                    .setAcceptsDelayedFocusGain(false)
-                    .setOnAudioFocusChangeListener { }
-                    .build()
-                val ok = audioManager.requestAudioFocus(req) ==
-                    android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-                if (ok) audioFocusRequest = req
-                ok
-            } else {
-                @Suppress("DEPRECATION")
-                audioManager.requestAudioFocus(
-                    null,
-                    android.media.AudioManager.STREAM_MUSIC,
-                    android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
-                ) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun stopListening(clearHint: Boolean = false) {
-        sessionGen += 1
-        try { recognizer?.stopListening() } catch (_: Exception) {}
-        listening = false
-        speechReady = false
-        releaseMicFocus()
-        if (clearHint) {
-            partialText = ""
-            statusHint = ""
-            voiceBubbleVisible = false
-        }
-    }
-
-    fun handleFinalText(spoken: String) {
-        listening = false
-        speechReady = false
-        releaseMicFocus()
-        partialText = spoken
-        val (note, amount) = parseVoiceLedgerInput(spoken)
-        if (note.isBlank() && (amount == null || amount <= 0.0)) {
-            statusHint = "聽唔明"
-            voiceBubbleVisible = true
-            return
-        }
-        statusHint = buildString {
-            if (note.isNotBlank()) append(note)
-            if (amount != null) {
-                if (isNotEmpty()) append(" · ")
-                append("$")
-                append(
-                    if (amount % 1.0 == 0.0) amount.toInt().toString()
-                    else String.format(Locale.US, "%.1f", amount)
-                )
-            }
-        }
-        voiceBubbleVisible = true
-        onVoiceResult(note, amount)
-    }
-
-    fun startInAppListening() {
-        val r = recognizer
-        if (r == null) {
-            statusHint = "唔支援語音"
-            voiceBubbleVisible = true
-            listening = false
-            return
-        }
-        requestMicFocus()
-        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-HK")
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-HK")
-            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(
-                android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                1600
-            )
-            putExtra(
-                android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-                1200
-            )
-        }
-        partialText = ""
-        speechReady = false
-        statusHint = "請開始講…"
-        voiceBubbleVisible = true
-        listening = true
-        val gen = sessionGen + 1
-        sessionGen = gen
-        // 唔 cancel 舊 session，直接 start（減少 ERROR_CLIENT）
-        mainHandler.post {
-            if (!listening || sessionGen != gen) return@post
-            try {
-                r.startListening(intent)
-            } catch (_: Exception) {
-                listening = false
-                speechReady = false
-                releaseMicFocus()
-                statusHint = "無法啟動"
-                voiceBubbleVisible = true
-            }
-        }
-    }
-
-    DisposableEffect(recognizer) {
-        val r = recognizer
-        if (r == null) {
-            onDispose { }
-        } else {
-            val listener = object : android.speech.RecognitionListener {
-                override fun onReadyForSpeech(params: android.os.Bundle?) {
-                    speechReady = true
-                    statusHint = "請開始講…"
-                    partialText = ""
-                }
-                override fun onBeginningOfSpeech() {
-                    speechReady = true
-                    statusHint = "聽緊…"
-                }
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {
-                    statusHint = "識別中…"
-                }
-                override fun onError(error: Int) {
-                    // 停止後／取消後嘅 CLIENT 錯誤忽略
-                    if (error == android.speech.SpeechRecognizer.ERROR_CLIENT && !listening) return
-                    listening = false
-                    speechReady = false
-                    releaseMicFocus()
-                    statusHint = when (error) {
-                        android.speech.SpeechRecognizer.ERROR_NO_MATCH -> "聽唔到，再試一次"
-                        android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "冇聽到聲"
-                        android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "冇麥克風權限"
-                        android.speech.SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
-                        android.speech.SpeechRecognizer.ERROR_AUDIO ->
-                            "咪高風被佔用"
-                        android.speech.SpeechRecognizer.ERROR_NETWORK,
-                        android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "網絡問題"
-                        else -> "語音識別失敗"
+    val googleVoiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+            if (!spoken.isNullOrBlank()) {
+                val (note, amount) = parseVoiceLedgerInput(spoken)
+                if (note.isBlank() && (amount == null || amount <= 0.0)) {
+                    statusHint = "聽唔明"
+                    voiceBubbleVisible = true
+                } else {
+                    statusHint = buildString {
+                        if (note.isNotBlank()) append(note)
+                        if (amount != null) {
+                            if (isNotEmpty()) append(" · ")
+                            append("$")
+                            append(
+                                if (amount % 1.0 == 0.0) amount.toInt().toString()
+                                else String.format(Locale.US, "%.1f", amount)
+                            )
+                        }
                     }
                     voiceBubbleVisible = true
-                    partialText = ""
+                    onVoiceResult(note, amount)
                 }
-                override fun onResults(results: android.os.Bundle?) {
-                    val spoken = results
-                        ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?.trim()
-                    if (!spoken.isNullOrBlank()) handleFinalText(spoken)
-                    else {
-                        listening = false
-                        speechReady = false
-                        releaseMicFocus()
-                        statusHint = "未識別到"
-                        voiceBubbleVisible = true
-                    }
-                }
-                override fun onPartialResults(partialResults: android.os.Bundle?) {
-                    val p = partialResults
-                        ?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                        ?.firstOrNull()
-                        ?.trim()
-                    if (!p.isNullOrBlank()) {
-                        partialText = p
-                        statusHint = p
-                    }
-                }
-                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-            }
-            r.setRecognitionListener(listener)
-            onDispose {
-                try { r.cancel() } catch (_: Exception) {}
-                try { r.destroy() } catch (_: Exception) {}
-                releaseMicFocus()
-            }
-        }
-    }
-
-    // 最長 15 秒自動停，避免卡死
-    LaunchedEffect(listening, sessionGen) {
-        if (!listening) return@LaunchedEffect
-        val gen = sessionGen
-        delay(15_000)
-        if (listening && sessionGen == gen) {
-            try { recognizer?.stopListening() } catch (_: Exception) {}
-            delay(700)
-            if (listening && sessionGen == gen) {
-                stopListening()
-                statusHint = "聽唔到，再試一次"
+            } else {
+                statusHint = "未識別到"
                 voiceBubbleVisible = true
             }
-        }
-    }
-
-    val micPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) startInAppListening()
-        else {
-            statusHint = "需要麥克風權限"
-            voiceBubbleVisible = true
         }
     }
 
     fun requestVoiceInput() {
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        if (listening) {
-            stopListening(clearHint = true)
-            return
+        try {
+            val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "zh-HK")
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "zh-HK")
+                putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+                putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "講出項目同金額")
+            }
+            googleVoiceLauncher.launch(intent)
+        } catch (_: Exception) {
+            statusHint = "唔支援語音"
+            voiceBubbleVisible = true
         }
-        val granted = ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) startInAppListening()
-        else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
 
     LaunchedEffect(voiceLaunchToken) {
         if (voiceLaunchToken <= 0) return@LaunchedEffect
         delay(450)
-        if (!listening) requestVoiceInput()
+        requestVoiceInput()
     }
 
-    // 錯誤／結果提示最多 5 秒
-    LaunchedEffect(listening, statusHint, voiceBubbleVisible) {
-        if (listening) {
-            voiceBubbleVisible = true
-            return@LaunchedEffect
-        }
+    LaunchedEffect(voiceBubbleVisible, statusHint) {
         if (voiceBubbleVisible && statusHint.isNotBlank()) {
-            delay(5000)
+            delay(3000)
             voiceBubbleVisible = false
         }
     }
 
-    if (alpha <= 0.01f && !listening && !voiceBubbleVisible) return
+    if (alpha <= 0.01f && !voiceBubbleVisible) return
 
     Row(
         modifier = modifier
@@ -4399,7 +4177,7 @@ private fun AnimatedFabLayer(
         horizontalArrangement = Arrangement.End
     ) {
         androidx.compose.animation.AnimatedVisibility(
-            visible = listening || voiceBubbleVisible,
+            visible = voiceBubbleVisible && statusHint.isNotBlank(),
             enter = fadeIn(tween(220)) + slideInHorizontally(tween(260)) { it / 3 },
             exit = fadeOut(tween(280)) + slideOutHorizontally(tween(280)) { it / 3 }
         ) {
@@ -4409,55 +4187,17 @@ private fun AnimatedFabLayer(
                 shadowElevation = 6.dp,
                 modifier = Modifier
                     .padding(end = 10.dp)
-                    .widthIn(min = 100.dp, max = 220.dp)
+                    .widthIn(min = 80.dp, max = 220.dp)
             ) {
-                Row(
-                    Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (listening) {
-                        val infinite = rememberInfiniteTransition(label = "voiceDots")
-                        val d1 by infinite.animateFloat(
-                            0.3f, 1f,
-                            infiniteRepeatable(tween(500), RepeatMode.Reverse),
-                            label = "d1"
-                        )
-                        val d2 by infinite.animateFloat(
-                            0.3f, 1f,
-                            infiniteRepeatable(tween(500, delayMillis = 120), RepeatMode.Reverse),
-                            label = "d2"
-                        )
-                        val d3 by infinite.animateFloat(
-                            0.3f, 1f,
-                            infiniteRepeatable(tween(500, delayMillis = 240), RepeatMode.Reverse),
-                            label = "d3"
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            listOf(d1, d2, d3).forEach { a ->
-                                Box(
-                                    Modifier
-                                        .size(5.dp)
-                                        .graphicsLayer { this.alpha = a }
-                                        .clip(CircleShape)
-                                        .background(Color.White)
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(
-                        text = when {
-                            partialText.isNotBlank() -> partialText
-                            statusHint.isNotBlank() -> statusHint
-                            else -> "聽緊…"
-                        },
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = statusHint,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                )
             }
         }
 
@@ -4466,25 +4206,22 @@ private fun AnimatedFabLayer(
                 .size(56.dp)
                 .shadow(4.dp, CircleShape)
                 .clip(CircleShape)
-                .background(if (listening) Color(0xFFDC2626) else BRAND_PRIMARY)
+                .background(BRAND_PRIMARY)
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {
-                        if (listening) stopListening(clearHint = true)
-                        else onFabTap()
-                    },
+                    onClick = { onFabTap() },
                     onLongClick = { requestVoiceInput() }
                 ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                if (listening) Icons.Default.Mic else Icons.Default.Add,
-                contentDescription = if (listening) "語音輸入中（再撳停止）" else "新增（長按語音）",
+                Icons.Default.Add,
+                contentDescription = "新增（長按語音）",
                 tint = Color.White,
                 modifier = Modifier
                     .size(24.dp)
-                    .graphicsLayer { rotationZ = if (listening) 0f else currentP * 90f }
+                    .graphicsLayer { rotationZ = currentP * 90f }
             )
         }
     }
