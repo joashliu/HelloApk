@@ -7011,7 +7011,6 @@ fun LedgerKeyboardPanel(
     val ctx = LocalContext.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var noteFieldFocused by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     // 🟢 已固定為 34.dp
     val panelShape = RoundedCornerShape(34.dp)
@@ -7363,45 +7362,37 @@ fun LedgerKeyboardPanel(
                                                     .height(44.dp)
                                                     .widthIn(max = maxChipWidth)
                                                     .clip(RoundedCornerShape(12.dp))
-                                                    pointerInteropFilter { ev ->
-    when (ev.actionMasked) {
-        MotionEvent.ACTION_DOWN -> {
-            pressed = true
-            true
-        }
-        MotionEvent.ACTION_UP -> {
-            if (pressed) {
-                pressed = false
-                val picked = s
-                val cat = noteCategoryMap[picked]
-                
-                // 1. 先清除焦點，令系統輸入法立即結算正在輸入嘅拼音/字碼
-                // (呢個動作會觸發 TextField 嘅 onValueChange)
-                noteFieldFocused = false
-                focusManager.clearFocus(force = true)
-                
-                // 2. 延遲極短時間再套用建議項目，避開系統鍵盤自動 commit 嘅覆蓋
-                scope.launch {
-                    kotlinx.coroutines.delay(100)
-                    onStateChange(
-                        state.copy(
-                            noteText = picked,
-                            category = cat ?: state.category,
-                            editingNote = false,
-                            focusedField = "amount"
-                        )
-                    )
-                }
-            }
-            true
-        }
-        MotionEvent.ACTION_CANCEL -> {
-            pressed = false
-            true
-        }
-        else -> true
-    }
-},
+                                                    .pointerInteropFilter { ev ->
+                                                        when (ev.actionMasked) {
+                                                            MotionEvent.ACTION_DOWN -> {
+                                                                pressed = true
+                                                                true
+                                                            }
+                                                            MotionEvent.ACTION_UP -> {
+                                                                if (pressed) {
+                                                                    pressed = false
+                                                                    val picked = s
+                                                                    val cat = noteCategoryMap[picked]
+                                                                    onStateChange(
+                                                                        state.copy(
+                                                                            noteText = picked,
+                                                                            category = cat ?: state.category,
+                                                                            editingNote = false,
+                                                                            focusedField = "amount"
+                                                                        )
+                                                                    )
+                                                                    noteFieldFocused = false
+                                                                    focusManager.clearFocus(force = true)
+                                                                }
+                                                                true
+                                                            }
+                                                            MotionEvent.ACTION_CANCEL -> {
+                                                                pressed = false
+                                                                true
+                                                            }
+                                                            else -> true
+                                                        }
+                                                    },
                                                 shape = RoundedCornerShape(12.dp),
                                                 color = if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED
                                             ) {
