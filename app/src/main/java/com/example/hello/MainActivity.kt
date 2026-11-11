@@ -4943,7 +4943,8 @@ fun LedgerContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .padding(top = 8.dp, bottom = 0.dp)
+                    // 收合變 Chips 後減少頂距，貼近頂邊框
+                    .padding(top = if (effectiveScrolledAway) 2.dp else 8.dp, bottom = 0.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(topBarBgColor)
                     .pointerInput(Unit) {
@@ -4962,15 +4963,23 @@ fun LedgerContent(
             ) {
                 val p = futureBtnProgress.value
                 val gap = 6.dp
-                val totalW = maxWidth - 16.dp
                 val btnCount = if (isNotificationGranted) 2 else 1
+                // 有按鈕展開時預留右方空間；完全收合則用滿寬，避免右闊左窄
+                val reservedForBtns = if (p > 0.001f) 16.dp else 0.dp
+                val totalW = maxWidth - reservedForBtns
                 val slotCount = 3f + btnCount * p
                 val slotW = if (slotCount > 0f) (totalW - gap * (slotCount - 1f)) / slotCount else totalW
-                val statsWidth = slotW * 3f + gap * 2f
+                val statsWidth = if (p > 0.001f) slotW * 3f + gap * 2f else totalW
                 val singleBtnWidth = slotW * p
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = if (effectiveScrolledAway) 0.dp else 8.dp, vertical = 4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            horizontal = if (effectiveScrolledAway) 0.dp else 8.dp,
+                            // 收合後再減垂直內距
+                            vertical = if (effectiveScrolledAway) 2.dp else 4.dp
+                        ),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(modifier = Modifier.width(statsWidth)) {
@@ -5226,7 +5235,12 @@ fun TopStats(
         list
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            // 收合 Chips 模式減少上下 padding，令頂距更緊
+            .padding(top = if (isCompact) 0.dp else 4.dp, bottom = if (isCompact) 2.dp else 4.dp)
+    ) {
         val totalW = maxWidth
         
         val geoMapPair = remember(activeBlocks, totalW) {
@@ -5260,9 +5274,12 @@ fun TopStats(
             val chunked = activeBlocks.chunked(3)
             chunked.forEachIndexed { rIdx, rowBlocks ->
                 val cy = (cRowH + cGapY) * rIdx
-                val itemW = (totalW - cGapX * (rowBlocks.size - 1).coerceAtLeast(0)) / rowBlocks.size
+                // 每行用相同欄寬（以最多 3 欄計），未滿行置中，避免左窄右闊
+                val itemW = (totalW - cGapX * 2) / 3
+                val rowContentW = itemW * rowBlocks.size + cGapX * (rowBlocks.size - 1).coerceAtLeast(0)
+                val startX = ((totalW - rowContentW) / 2).coerceAtLeast(0.dp)
                 rowBlocks.forEachIndexed { cIdx, block ->
-                    val cx = (itemW + cGapX) * cIdx
+                    val cx = startX + (itemW + cGapX) * cIdx
                     cMap[block] = BlockGeometry(cx, cy, itemW, cRowH)
                 }
             }
@@ -9315,7 +9332,8 @@ fun FilterResultsBarChart(
         ordered.maxOf { it.amount }.coerceAtLeast(0.0001)
     }
     val count = ordered.size
-    val chartBarAreaHeight = 48.dp
+    // 篩選頁棒形圖略矮
+    val chartBarAreaHeight = 36.dp
 
     BoxWithConstraints(
         modifier = modifier
@@ -9340,10 +9358,20 @@ fun FilterResultsBarChart(
                 val isIncome = r.category == INCOME_CATEGORY
                 val style = CATEGORY_STYLES[r.category]
                 val fillColor = (style?.fgColor ?: if (isIncome) COLOR_INCOME else COLOR_EXPENSE)
-                drawRect(
-                    color = fillColor.copy(alpha = 0.9f),
-                    topLeft = Offset(x, y),
-                    size = androidx.compose.ui.geometry.Size(barPx, h)
+                // 頂部圓弧（湖頂），底部保持直邊貼底
+                val cornerR = minOf(barPx / 2f, h / 2f, 5f)
+                val path = Path().apply {
+                    moveTo(x, y + h)
+                    lineTo(x, y + cornerR)
+                    quadraticBezierTo(x, y, x + cornerR, y)
+                    lineTo(x + barPx - cornerR, y)
+                    quadraticBezierTo(x + barPx, y, x + barPx, y + cornerR)
+                    lineTo(x + barPx, y + h)
+                    close()
+                }
+                drawPath(
+                    path = path,
+                    color = fillColor.copy(alpha = 0.9f)
                 )
             }
         }
