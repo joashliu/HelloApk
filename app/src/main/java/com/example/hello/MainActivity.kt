@@ -9724,7 +9724,7 @@ fun CompareContent(
                     } else {
                         // ===== 全年：一次顯示所有月份欄 =====
                         val hScroll = rememberScrollState()
-                        val monthColW = 64.dp
+                        val monthColW = 84.dp
                         val catColW = 88.dp
                         Column(Modifier.fillMaxSize()) {
                             // Header
