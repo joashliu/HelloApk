@@ -9358,21 +9358,32 @@ fun FilterResultsBarChart(
                 val isIncome = r.category == INCOME_CATEGORY
                 val style = CATEGORY_STYLES[r.category]
                 val fillColor = (style?.fgColor ?: if (isIncome) COLOR_INCOME else COLOR_EXPENSE)
-                // 頂部圓弧（湖頂），底部保持直邊貼底
-                val cornerR = minOf(barPx / 2f, h / 2f, 5f)
-                val path = Path().apply {
-                    moveTo(x, y + h)
-                    lineTo(x, y + cornerR)
-                    quadraticBezierTo(x, y, x + cornerR, y)
-                    lineTo(x + barPx - cornerR, y)
-                    quadraticBezierTo(x + barPx, y, x + barPx, y + cornerR)
-                    lineTo(x + barPx, y + h)
-                    close()
+                // 頂部明顯圓頂（半圓拱），底部直邊貼底
+                val color = fillColor.copy(alpha = 0.9f)
+                val r = minOf(barPx / 2f, h) // 圓頂半徑：棒半寬，最多等於高度
+                if (r <= 0.5f) {
+                    // 太矮／太窄就畫直棒
+                    drawRect(
+                        color = color,
+                        topLeft = Offset(x, y),
+                        size = androidx.compose.ui.geometry.Size(barPx, h)
+                    )
+                } else {
+                    val path = Path().apply {
+                        // 左下 → 左上圓頂起點 → 半圓拱頂 → 右上 → 右下 → 封閉
+                        moveTo(x, y + h)
+                        lineTo(x, y + r)
+                        // 半圓頂：由左到右，控制點向上拱
+                        cubicTo(
+                            x, y,                    // 左控制點（頂）
+                            x + barPx, y,            // 右控制點（頂）
+                            x + barPx, y + r         // 右端
+                        )
+                        lineTo(x + barPx, y + h)
+                        close()
+                    }
+                    drawPath(path = path, color = color)
                 }
-                drawPath(
-                    path = path,
-                    color = fillColor.copy(alpha = 0.9f)
-                )
             }
         }
     }
