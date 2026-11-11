@@ -7010,10 +7010,53 @@ fun LedgerKeyboardPanel(
 ) {
     val ctx = LocalContext.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val panelScope = rememberCoroutineScope()
     var noteFieldFocused by remember { mutableStateOf(false) }
+    // 揀建議後短暫忽略 TextField onValueChange（IME composing 強制 commit 會蓋掉）
+    var suppressNoteInputUntil by remember { mutableLongStateOf(0L) }
+    var pendingSuggestionNote by remember { mutableStateOf<String?>(null) }
 
     // 🟢 已固定為 34.dp
     val panelShape = RoundedCornerShape(34.dp)
+
+    fun applySuggestionNote(picked: String) {
+        val cat = noteCategoryMap[picked]
+        val now = android.os.SystemClock.uptimeMillis()
+        suppressNoteInputUntil = now + 400L
+        pendingSuggestionNote = picked
+        onStateChange(
+            state.copy(
+                noteText = picked,
+                category = cat ?: state.category,
+                editingNote = false,
+                focusedField = "amount"
+            )
+        )
+        noteFieldFocused = false
+        focusManager.clearFocus(force = true)
+        // 等 IME 強制 commit「SU」完成後，再寫一次真正選中嘅名稱
+        panelScope.launch {
+            delay(100)
+            onStateChange(
+                state.copy(
+                    noteText = picked,
+                    category = cat ?: state.category,
+                    editingNote = false,
+                    focusedField = "amount"
+                )
+            )
+            delay(120)
+            onStateChange(
+                state.copy(
+                    noteText = picked,
+                    category = cat ?: state.category,
+                    editingNote = false,
+                    focusedField = "amount"
+                )
+            )
+            pendingSuggestionNote = null
+        }
+    }
 
     LaunchedEffect(state.noteText) {
         if (state.noteText.isNotBlank()) {
@@ -7371,18 +7414,7 @@ fun LedgerKeyboardPanel(
                                                             MotionEvent.ACTION_UP -> {
                                                                 if (pressed) {
                                                                     pressed = false
-                                                                    val picked = s
-                                                                    val cat = noteCategoryMap[picked]
-                                                                    onStateChange(
-                                                                        state.copy(
-                                                                            noteText = picked,
-                                                                            category = cat ?: state.category,
-                                                                            editingNote = false,
-                                                                            focusedField = "amount"
-                                                                        )
-                                                                    )
-                                                                    noteFieldFocused = false
-                                                                    focusManager.clearFocus(force = true)
+                                                                    applySuggestionNote(s)
                                                                 }
                                                                 true
                                                             }
@@ -7553,6 +7585,18 @@ fun LedgerKeyboardPanel(
                         TextField(
                             value = tfValue,
                             onValueChange = { nv ->
+                                val now = android.os.SystemClock.uptimeMillis()
+                                // IME composing 強制 commit：忽略，並保持建議名稱
+                                if (now < suppressNoteInputUntil) {
+                                    val keep = pendingSuggestionNote ?: state.noteText
+                                    if (nv.text != keep) {
+                                        tfValue = TextFieldValue(
+                                            text = keep,
+                                            selection = TextRange(keep.length, keep.length)
+                                        )
+                                    }
+                                    return@TextField
+                                }
                                 tfValue = nv
                                 onStateChange(state.copy(noteText = nv.text, editingNote = true))
                             },
