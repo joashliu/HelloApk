@@ -2235,6 +2235,48 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     return DateHeaderInfo(y, mo, d, weekdayChar, isWeekend, tag)
 }
 
+/**
+ * 項目名稱相似度（0~1）：完全相同 / 前綴 / 包含 / 字元重疊。
+ * 用於「從其他項目選擇圖標」排序，最接近當前名稱排最前。
+ */
+fun noteNameSimilarity(query: String, candidate: String): Double {
+    val q = query.trim().lowercase()
+    val c = candidate.trim().lowercase()
+    if (q.isEmpty() || c.isEmpty()) return 0.0
+    if (q == c) return 1.0
+    if (c.startsWith(q) || q.startsWith(c)) {
+        val shorter = minOf(q.length, c.length).toDouble()
+        val longer = maxOf(q.length, c.length).toDouble()
+        return 0.85 + 0.1 * (shorter / longer)
+    }
+    if (c.contains(q) || q.contains(c)) {
+        val shorter = minOf(q.length, c.length).toDouble()
+        val longer = maxOf(q.length, c.length).toDouble()
+        return 0.55 + 0.2 * (shorter / longer)
+    }
+    // 字元 Jaccard
+    val qs = q.toSet()
+    val cs = c.toSet()
+    val inter = qs.intersect(cs).size.toDouble()
+    val union = qs.union(cs).size.toDouble().coerceAtLeast(1.0)
+    val jaccard = inter / union
+    // 連續共同子字串加分（簡化）
+    var bestRun = 0
+    var i = 0
+    while (i < q.length) {
+        var j = 0
+        while (j < c.length) {
+            var k = 0
+            while (i + k < q.length && j + k < c.length && q[i + k] == c[j + k]) k++
+            if (k > bestRun) bestRun = k
+            j++
+        }
+        i++
+    }
+    val runBonus = (bestRun.toDouble() / maxOf(q.length, c.length)).coerceIn(0.0, 1.0) * 0.35
+    return (jaccard * 0.65 + runBonus).coerceIn(0.0, 0.54)
+}
+
 fun filterNoteSuggestions(query: String, all: List<String>): List<String> {
     if (query.isBlank()) return emptyList()
     val q = query.trim()
@@ -2900,6 +2942,7 @@ fun MainApp(
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var webSearchTarget by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
+    var showPickIconFromOtherDialog by remember { mutableStateOf(false) }
     var showUrlInputDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
@@ -3611,6 +3654,10 @@ fun MainApp(
                             cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                         }
                     }
+                    IconSourceOption(Icons.Default.ContentCopy, "從其他項目選擇") {
+                        showIconSourceDialog = false
+                        showPickIconFromOtherDialog = true
+                    }
                     IconSourceOption(Icons.Default.Link, "貼上網址") {
                         showIconSourceDialog = false; urlInput = ""; showUrlInputDialog = true
                     }
@@ -3633,6 +3680,118 @@ fun MainApp(
             },
             confirmButton = {
                 TextButton(onClick = { showIconSourceDialog = false; iconTargetRecord = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // ★ 從其他項目選擇圖標（按名稱相似度排序）
+    if (showPickIconFromOtherDialog) {
+        val target = iconTargetRecord
+        val currentNote = target?.note?.trim().orEmpty()
+        val candidates = remember(ui.noteIconMap, currentNote) {
+            ui.noteIconMap
+                .filter { (name, url) ->
+                    name.isNotBlank() &&
+                        url.isNotBlank() &&
+                        !name.equals(currentNote, ignoreCase = true)
+                }
+                .map { (name, url) ->
+                    Triple(name, url, noteNameSimilarity(currentNote, name))
+                }
+                .sortedByDescending { it.third }
+        }
+        AlertDialog(
+            onDismissRequest = {
+                showPickIconFromOtherDialog = false
+                iconTargetRecord = null
+            },
+            title = {
+                Column {
+                    Text("從其他項目選擇圖標")
+                    if (currentNote.isNotBlank()) {
+                        Text(
+                            "接近「$currentNote」優先顯示",
+                            fontSize = 13.sp,
+                            color = TEXT_SECONDARY,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            },
+            text = {
+                if (candidates.isEmpty()) {
+                    Text("暫時未有其他帶圖標的項目", color = TEXT_SECONDARY, fontSize = 14.sp)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(candidates.size) { idx ->
+                            val (name, url, score) = candidates[idx]
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        showPickIconFromOtherDialog = false
+                                        val t = iconTargetRecord
+                                        if (t != null && t.note.isNotBlank() && url.isNotBlank()) {
+                                            scope.launch {
+                                                uploading = true
+                                                val db = withContext(Dispatchers.IO) { Firebase.firestore }
+                                                applyUrlToSameName(context, db, t.note, url)
+                                                uploading = false
+                                            }
+                                        }
+                                        iconTargetRecord = null
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconView(iconUrl = url, name = name, size = 40.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        name,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TEXT_PRIMARY,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (score >= 0.35) {
+                                        Text(
+                                            "名稱接近",
+                                            fontSize = 11.sp,
+                                            color = BRAND_PRIMARY,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = TEXT_TERTIARY,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            if (idx < candidates.lastIndex) {
+                                HorizontalDivider(
+                                    color = DIVIDER_COLOR.copy(alpha = 0.5f),
+                                    thickness = 0.5.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPickIconFromOtherDialog = false
+                    iconTargetRecord = null
+                }) { Text("取消") }
             }
         )
     }
