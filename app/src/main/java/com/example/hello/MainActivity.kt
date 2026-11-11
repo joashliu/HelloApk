@@ -3896,8 +3896,12 @@ private fun BoxScope.KeyboardAndFabLayer(
         voiceLiftKeyboard = true
         onVoiceResult(note, amount)
     }
+
+    // 🟡 臨時 debug：可即時調節的語音抬升高度（試啱之後連同下面 [5] debug 面板一齊刪）
+    var voiceLiftDp by rememberSaveable { mutableStateOf(200f) }
+
     val voiceLiftPad by animateDpAsState(
-        targetValue = if (voiceLiftKeyboard && showKeyboard) 200.dp else 0.dp,
+        targetValue = if (voiceLiftKeyboard && showKeyboard) voiceLiftDp.dp else 0.dp,
         animationSpec = spring(dampingRatio = 0.9f, stiffness = 280f),
         label = "voiceKbLift"
     )
@@ -4034,7 +4038,7 @@ private fun BoxScope.KeyboardAndFabLayer(
         if (isTransport) extraHeight += 48.dp
         if (isTravel) extraHeight += 48.dp
 
-                // [3] FAB 按鈕層 (頂層)
+        // [3] FAB 按鈕層 (頂層)
         AnimatedFabLayer(
             progressProvider = progressProvider,
             bottomPadding = bottomChromePad,
@@ -4089,6 +4093,57 @@ private fun BoxScope.KeyboardAndFabLayer(
                         }
                     }
                 }
+            }
+        }
+
+        // [5] 🟡 臨時 debug：語音抬升高度即時調節（試啱之後刪走呢個 block + voiceLiftDp）
+        if (showKeyboard) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-52).dp)
+                    .zIndex(50f)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xE6111827))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("lift", color = Color(0xFF9CA3AF), fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium)
+                Text("${voiceLiftDp.toInt()}", color = Color.White,
+                    fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.widthIn(min = 34.dp))
+                Box(
+                    modifier = Modifier.size(28.dp).clip(CircleShape)
+                        .background(Color(0xFFEF4444))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { voiceLiftDp = (voiceLiftDp - 10f).coerceAtLeast(0f) },
+                    contentAlignment = Alignment.Center
+                ) { Text("−", color = Color.White, fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold) }
+                Box(
+                    modifier = Modifier.size(28.dp).clip(CircleShape)
+                        .background(Color(0xFF10B981))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { voiceLiftDp = (voiceLiftDp + 10f).coerceAtMost(600f) },
+                    contentAlignment = Alignment.Center
+                ) { Text("+", color = Color.White, fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold) }
+                Box(
+                    modifier = Modifier.size(28.dp).clip(CircleShape)
+                        .background(Color(0xFF3B82F6))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { voiceLiftDp = 200f },
+                    contentAlignment = Alignment.Center
+                ) { Text("↺", color = Color.White, fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold) }
             }
         }
     }
