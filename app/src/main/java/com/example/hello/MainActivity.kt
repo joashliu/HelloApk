@@ -118,6 +118,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.ExperimentalComposeUiApi
 import android.view.MotionEvent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -6996,7 +6997,7 @@ private val KEYBOARD_ROWS = listOf(
 )
 private val CHUNKED_CATEGORIES = CATEGORIES.chunked(2)
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
 fun LedgerKeyboardPanel(
     state: KeyboardState, onStateChange: (KeyboardState) -> Unit,
