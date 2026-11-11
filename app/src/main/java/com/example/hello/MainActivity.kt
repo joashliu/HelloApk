@@ -9819,8 +9819,14 @@ fun CompareContent(
                                                         ) {
                                                             monthlyKeysThisYear.forEach { mk ->
                                                                 val amt = sumLocal(cat, mk)
+                                                                // 全年模式：支出類別用括號顯示（同兩月模式一致）
+                                                                val amtText = when {
+                                                                    amt == 0.0 -> "—"
+                                                                    isIncome -> formatAmountNoDecimal(amt)
+                                                                    else -> "(${formatAmountNoDecimal(amt)})"
+                                                                }
                                                                 Text(
-                                                                    text = if (amt == 0.0) "—" else formatAmountNoDecimal(amt),
+                                                                    text = amtText,
                                                                     modifier = Modifier.width(monthColW),
                                                                     textAlign = TextAlign.End,
                                                                     fontSize = 12.sp,
@@ -9877,8 +9883,14 @@ fun CompareContent(
                                             .filter { it != INCOME_CATEGORY }
                                             .sumOf { sumLocal(it, mk) }
                                         val bal = inc - exp
+                                        // 全年餘額：負數用括號（同兩月模式）
+                                        val balText = when {
+                                            bal == 0.0 && inc == 0.0 -> "—"
+                                            bal >= 0 -> formatAmountNoDecimal(bal)
+                                            else -> "(${formatAmountNoDecimal(abs(bal))})"
+                                        }
                                         Text(
-                                            text = if (bal == 0.0 && inc == 0.0) "—" else formatAmountNoDecimal(bal),
+                                            text = balText,
                                             modifier = Modifier.width(monthColW),
                                             textAlign = TextAlign.End,
                                             fontSize = 12.sp,
@@ -10007,6 +10019,26 @@ fun PivotContent(
             }
             vertical.join()
         }
+    }
+
+    // ★ 每次進入透視表（或切換到今年）：若唔喺當前月份欄位，先滾過去；已在位就唔播動畫
+    LaunchedEffect(pivotUi.selectedYear, pivotUi.months, colWidthPx) {
+        val nowMeta = getTimestampMeta(System.currentTimeMillis())
+        if (pivotUi.selectedYear != nowMeta.year) return@LaunchedEffect
+        val months = pivotUi.months
+        if (months.isEmpty()) return@LaunchedEffect
+        val monthKey = "${pivotUi.selectedYear}-${pad2(nowMeta.month)}"
+        val monthIdx = months.indexOf(monthKey)
+        if (monthIdx < 0) return@LaunchedEffect
+        // 等 layout 量度好 maxValue
+        kotlinx.coroutines.delay(48)
+        val target = (monthIdx * colWidthPx).coerceIn(0, hState.maxValue.coerceAtLeast(0))
+        // 已經喺當前月份（誤差 2px 內）→ 唔刻意再播滾動動畫
+        if (kotlin.math.abs(hState.value - target) <= 2) return@LaunchedEffect
+        hState.animateScrollTo(
+            value = target,
+            animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)
+        )
     }
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
