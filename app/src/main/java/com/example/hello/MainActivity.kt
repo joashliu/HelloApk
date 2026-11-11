@@ -96,6 +96,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -7545,6 +7546,28 @@ fun LedgerKeyboardPanel(
                 }
                 val glowShape = RoundedCornerShape(14.dp)
 
+                // 完全匹配已有項目時顯示圖標：無圖標唔佔位；有就動畫讓位 + 由中心向外揭示
+                val matchedIconUrl = remember(state.noteText, noteIconMap) {
+                    val key = state.noteText.trim()
+                    if (key.isEmpty()) "" else (noteIconMap[key] ?: "")
+                }
+                val hasMatchedIcon = matchedIconUrl.isNotBlank()
+                val iconReveal by animateFloatAsState(
+                    targetValue = if (hasMatchedIcon) 1f else 0f,
+                    animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
+                    label = "noteIconReveal"
+                )
+                val iconSlotWidth by animateDpAsState(
+                    targetValue = if (hasMatchedIcon) 30.dp else 0.dp,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 320f),
+                    label = "noteIconSlot"
+                )
+                val iconGlow by animateFloatAsState(
+                    targetValue = if (hasMatchedIcon) 1f else 0f,
+                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    label = "noteIconGlow"
+                )
+
                 Box(
                     Modifier.weight(1f).fillMaxHeight()
                         .clip(glowShape)
@@ -7583,66 +7606,110 @@ fun LedgerKeyboardPanel(
                             }
                         }
 
-                        TextField(
-                            value = tfValue,
-                            onValueChange = { nv ->
-                                val now = android.os.SystemClock.uptimeMillis()
-                                // IME composing 強制 commit：忽略，並保持建議名稱
-                                if (now < suppressNoteInputUntil) {
-                                    val keep = pendingSuggestionNote ?: state.noteText
-                                    if (nv.text != keep) {
-                                        tfValue = TextFieldValue(
-                                            text = keep,
-                                            selection = TextRange(keep.length, keep.length)
+                        Row(
+                            Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(SURFACE_ELEVATED)
+                                .padding(start = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 圖標槽：闊度 0→30dp 推開文字；圓形視窗由中心向外揭示（非放大圖標）
+                            Box(
+                                modifier = Modifier
+                                    .width(iconSlotWidth)
+                                    .fillMaxHeight(),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (iconReveal > 0.01f && matchedIconUrl.isNotBlank()) {
+                                    val iconFull = 24.dp
+                                    Box(
+                                        modifier = Modifier
+                                            .size(iconFull * iconReveal)
+                                            .clip(CircleShape)
+                                            .drawBehind {
+                                                // 輕微光暈，增強「magic」感
+                                                if (iconGlow > 0.05f) {
+                                                    drawCircle(
+                                                        color = BRAND_PRIMARY.copy(alpha = 0.22f * iconGlow),
+                                                        radius = size.minDimension * 0.72f
+                                                    )
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        // 固定尺寸；外層圓形裁切由小變大 → 由中心見到完整圖標
+                                        IconView(
+                                            iconUrl = matchedIconUrl,
+                                            name = state.noteText,
+                                            size = iconFull
                                         )
                                     }
-                                    return@TextField
                                 }
-                                tfValue = nv
-                                onStateChange(state.copy(noteText = nv.text, editingNote = true))
-                            },
-                            placeholder = { Text("名稱") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = SURFACE_ELEVATED,
-                                unfocusedContainerColor = SURFACE_ELEVATED,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent
-                            ),
-                            trailingIcon = {
-                                if (state.noteText.isNotEmpty()) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "清除",
-                                        tint = TEXT_SECONDARY,
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clickable(
-                                                interactionSource = remember { MutableInteractionSource() },
-                                                indication = null
-                                            ) {
-                                                tfValue = TextFieldValue("")
-                                                onStateChange(state.copy(noteText = "", editingNote = true))
-                                                focusReq.requestFocus()
-                                                keyboardController?.show()
-                                            }
-                                    )
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { onConfirm() }),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .focusRequester(focusReq)
-                                .onFocusChanged { fi ->
-                                    noteFieldFocused = fi.isFocused
-                                    if (fi.isFocused) {
-                                        onStateChange(state.copy(editingNote = true, focusedField = "note"))
+                            }
+
+                            TextField(
+                                value = tfValue,
+                                onValueChange = { nv ->
+                                    val now = android.os.SystemClock.uptimeMillis()
+                                    // IME composing 強制 commit：忽略，並保持建議名稱
+                                    if (now < suppressNoteInputUntil) {
+                                        val keep = pendingSuggestionNote ?: state.noteText
+                                        if (nv.text != keep) {
+                                            tfValue = TextFieldValue(
+                                                text = keep,
+                                                selection = TextRange(keep.length, keep.length)
+                                            )
+                                        }
+                                        return@TextField
                                     }
-                                }
-                        )
+                                    tfValue = nv
+                                    onStateChange(state.copy(noteText = nv.text, editingNote = true))
+                                },
+                                placeholder = { Text("名稱") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    disabledIndicatorColor = Color.Transparent
+                                ),
+                                trailingIcon = {
+                                    if (state.noteText.isNotEmpty()) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "清除",
+                                            tint = TEXT_SECONDARY,
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) {
+                                                    tfValue = TextFieldValue("")
+                                                    onStateChange(state.copy(noteText = "", editingNote = true))
+                                                    focusReq.requestFocus()
+                                                    keyboardController?.show()
+                                                }
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .focusRequester(focusReq)
+                                    .onFocusChanged { fi ->
+                                        noteFieldFocused = fi.isFocused
+                                        if (fi.isFocused) {
+                                            onStateChange(state.copy(editingNote = true, focusedField = "note"))
+                                        }
+                                    }
+                            )
+                        }
 
                     } else {
                         Button(
@@ -7650,13 +7717,35 @@ fun LedgerKeyboardPanel(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxSize(),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = SURFACE_ELEVATED, contentColor = TEXT_PRIMARY)
+                                containerColor = SURFACE_ELEVATED, contentColor = TEXT_PRIMARY),
+                            contentPadding = PaddingValues(horizontal = 12.dp)
                         ) {
-                            Text(
-                                if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
-                                maxLines = 1, fontSize = 15.sp,
-                                color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Box(
+                                    modifier = Modifier.width(iconSlotWidth),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    if (iconReveal > 0.01f && matchedIconUrl.isNotBlank()) {
+                                        val iconFull = 22.dp
+                                        Box(
+                                            modifier = Modifier
+                                                .size(iconFull * iconReveal)
+                                                .clip(CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            IconView(matchedIconUrl, state.noteText, size = iconFull)
+                                        }
+                                    }
+                                }
+                                Text(
+                                    if (state.noteText.isBlank()) "輸入名稱" else state.noteText,
+                                    maxLines = 1, fontSize = 15.sp,
+                                    color = if (state.noteText.isBlank()) TEXT_TERTIARY else TEXT_PRIMARY
+                                )
+                            }
                         }
                     }
                 }
