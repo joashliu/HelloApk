@@ -6262,12 +6262,12 @@ fun CalendarContent(
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
     // 階段 1：collapseP 0→1 日曆收到剩選中一行，明細停喺該日期格下
-    // 階段 2：chromeOffsetPx 推走 chips/stats（半速補償 layout+touch 約 2x 疊加）
+    // 階段 2：chromeOffsetPx 推走 chips/stats
     var collapseP by remember { mutableFloatStateOf(0f) }
     var chromeOffsetPx by remember { mutableFloatStateOf(0f) }
     var isSettling by remember { mutableStateOf(false) }
     var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
-    // 唔用 local property getter（Composable 入面會 compile 失敗）
+    
     fun currentChromeP(): Float {
         val range = topSectionHeightPx.coerceAtLeast(1f)
         return (chromeOffsetPx / range).coerceIn(0f, 1f)
@@ -6501,9 +6501,6 @@ fun CalendarContent(
 
     /**
      * 系統返回：好似手動下拉，逐步退，唔一次過清走明細。
-     * 1) chrome 展開中 → 退返 chrome，保持「只顯示一行 + 明細」
-     * 2) 已係一行 → 展開全日曆，但保留選取同明細框
-     * 3) 已全日曆 + 仍有選取 → 先清選取（真正離開明細）
      */
     val handleBackStep: () -> Unit = {
         scope.launch {
@@ -6533,7 +6530,7 @@ fun CalendarContent(
         enabled = selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f
     ) { handleBackStep() }
 
-    // ★ 兩段式 nested scroll：上滑先收日曆，再推 chrome；下滑相反
+    // ★ 兩段式 nested scroll
     val detailNestedConnection = object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             if (selectedDay == null || isSettling) return Offset.Zero
@@ -6630,8 +6627,6 @@ fun CalendarContent(
             }
 
             // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
-            // ★ 未選日期時用自然高度完整顯示 chips + 3 個 Stat box，唔 clip
-            // ★ 選日期收合：直接用 chromeOffsetPx（已半速補償）
             val topTranslatePx = if (selectedDay != null) {
                 chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
             } else 0f
@@ -6640,9 +6635,7 @@ fun CalendarContent(
                 (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
             else -1f
 
-            // chips 行數／篩選變咗要重新量度，避免 Stat box 被舊高度裁切
             LaunchedEffect(visibleCategories, filterCategory) {
-                // 等一幀等 chips 高度動畫起步後再接受新量度
                 kotlinx.coroutines.delay(16)
             }
 
@@ -6659,7 +6652,6 @@ fun CalendarContent(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        // 收合動畫中固定為已量度高度；平時跟內容自然高度，確保 3 個 Stat 完整顯示
                         .then(
                             if (isChromeCollapsing)
                                 Modifier.requiredHeight(with(density) { topSectionHeightPx.toDp() })
@@ -6667,8 +6659,6 @@ fun CalendarContent(
                         )
                         .onSizeChanged { sz ->
                             if (sz.height <= 0) return@onSizeChanged
-                            // 未收合：永遠跟最新內容高度
-                            // 正在推走 chrome：鎖死高度
                             if (chromeOffsetPx > 0.5f) return@onSizeChanged
                             if (!isChromeCollapsing || sz.height > topSectionHeightPx + 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
@@ -6717,10 +6707,9 @@ fun CalendarContent(
                 }
             }
 
-            // ===== 日曆 + 當日明細（滑動以明細為主：只改日曆可視窗）=====
+            // ===== 日曆 + 當日明細 =====
             Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
                 val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
-                // ★ 用日期反算行，唔依賴可能過期嘅 selectedRowIdx
                 val selRow = if (selectedDay != null) {
                     ((firstDayOffset + selectedDay!! - 1) / 7).coerceIn(0, (totalRows - 1).coerceAtLeast(0))
                 } else {
@@ -6728,13 +6717,11 @@ fun CalendarContent(
                 }
                 val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
                 val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
-                // 可視高度：全日曆 → 只剩選中行
                 val visibleGridH = if (selectedDay != null) {
                     (fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)
                 } else {
                     fullGridHeightPx
                 }
-                // 上移量：令選中行頂部對齊可視窗頂部
                 val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
                     rowOffsetsPx[selRow] * p
                 } else 0f
@@ -6771,7 +6758,7 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆：完整格仔 + clip 遮擋；unbounded 量度避免被父層壓扁
+                    // 日曆
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -6830,13 +6817,12 @@ fun CalendarContent(
                         }
                     }
 
-                    // 當日明細：永遠喺日曆下面；底部預留 FAB + 導航高度，唔會被 FAB 遮住
+                    // 當日明細
                     if (selectedDay != null) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                                // FAB 喺 BottomEnd：nav + FAB(56) + 間距，明細最底唔超過 FAB 頂
                                 .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp)
                         ) {
                             TrianglePointer(
@@ -6864,7 +6850,6 @@ fun CalendarContent(
                                                     onVerticalDrag = { change, dragAmount ->
                                                         change.consume()
                                                         if (isSettling) return@detectVerticalDragGestures
-                                                        // dragAmount>0 向下；<0 向上
                                                         if (dragAmount < 0f) applyDragUp(-dragAmount)
                                                         else applyDragDown(dragAmount)
                                                     }
@@ -6896,7 +6881,6 @@ fun CalendarContent(
                                             onFilter = onFilterClick,
                                             onDelete = onDeleteClick,
                                             onChangeIcon = onChangeIconClick,
-                                            // 交叉：退回階段2再階段1，保留選取同明細
                                             onDismiss = {
                                                 scope.launch {
                                                     isSettling = true
