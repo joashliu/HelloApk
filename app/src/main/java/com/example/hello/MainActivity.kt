@@ -6262,17 +6262,16 @@ fun CalendarContent(
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
     // 階段 1：collapseP 0→1 日曆收到剩選中一行，明細停喺該日期格下
-    // 階段 2：chromeOffsetPx（只喺 collapseP≈1 之後）推走 chips/stats
-    // ★ 用像素位移；nested scroll 路徑會做 0.5 補償（layout 上移 + touch delta 疊加約 2x）
+    // 階段 2：chromeOffsetPx 推走 chips/stats（半速補償 layout+touch 約 2x 疊加）
     var collapseP by remember { mutableFloatStateOf(0f) }
     var chromeOffsetPx by remember { mutableFloatStateOf(0f) }
     var isSettling by remember { mutableStateOf(false) }
     var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
-    val chromeP: Float
-        get() {
-            val range = topSectionHeightPx.coerceAtLeast(1f)
-            return (chromeOffsetPx / range).coerceIn(0f, 1f)
-        }
+    // 唔用 local property getter（Composable 入面會 compile 失敗）
+    fun currentChromeP(): Float {
+        val range = topSectionHeightPx.coerceAtLeast(1f)
+        return (chromeOffsetPx / range).coerceIn(0f, 1f)
+    }
 
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -6377,13 +6376,13 @@ fun CalendarContent(
 
     /**
      * 手指向上（px>0）→ 先階段1再階段2；回傳實際消耗 px。
-     * ★ 階段2：layout 上移 + touch delta 會疊加約 2x，故只寫入一半位移。
+     * 階段2 半速寫入：layout 上移 + touch delta 疊加約 2x，補償後同日期格幅度一致。
      */
     fun applyDragUp(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
         var left = px
         var consumed = 0f
-        // 階段 1：收日曆（高度減少 = 手指，1:1）
+        // 階段 1：收日曆
         if (collapseP < 0.999f && left > 0f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP + left / range).coerceIn(0f, 1f)
@@ -6392,7 +6391,7 @@ fun CalendarContent(
             consumed += used
             left -= used
         }
-        // 階段 2：推走 chips/stats（半速補償 2x 疊加）
+        // 階段 2：推走 chips/stats（半速補償）
         if (collapseP >= 0.999f && left > 0f) {
             val range = chromeRangePx()
             val visualDelta = left * 0.5f
@@ -6464,7 +6463,7 @@ fun CalendarContent(
 
     fun snapAfterDrag() {
         if (chromeOffsetPx > 0.01f || collapseP >= 0.99f) {
-            if (chromeP >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
+            if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
             if (collapseP < 0.99f) animateCollapseTo(1f)
             return
         }
@@ -6511,7 +6510,7 @@ fun CalendarContent(
         scope.launch {
             if (isSettling) return@launch
             when {
-                chromeP > 0.05f -> {
+                chromeOffsetPx > 0.05f -> {
                     // 階段2 → 階段1：保持一行同明細
                     animateChromeTo(0f)
                     if (collapseP < 0.99f) animateCollapseTo(1f)
@@ -6532,7 +6531,7 @@ fun CalendarContent(
 
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(
-        enabled = selectedDay != null || collapseP > 0.01f || chromeP > 0.01f
+        enabled = selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f
     ) { handleBackStep() }
 
     // ★ 兩段式 nested scroll：上滑先收日曆，再推 chrome；下滑相反
@@ -6571,7 +6570,7 @@ fun CalendarContent(
                     else animateChromeTo(1f)
                 }
                 available.y > 400f -> {
-                    if (chromeP > 0.01f) animateChromeTo(0f)
+                    if (chromeOffsetPx > 0.01f) animateChromeTo(0f)
                     else animateCollapseTo(0f)
                 }
                 else -> snapAfterDrag()
@@ -6633,7 +6632,7 @@ fun CalendarContent(
 
             // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
             // ★ 未選日期時用自然高度完整顯示 chips + 3 個 Stat box，唔 clip
-            // ★ 選日期收合：位移直接用 chromeOffsetPx（已做 0.5 補償，對齊日期格幅度）
+            // ★ 選日期收合：直接用 chromeOffsetPx（已半速補償）
             val topTranslatePx = if (selectedDay != null) {
                 chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
             } else 0f
@@ -6670,7 +6669,7 @@ fun CalendarContent(
                         .onSizeChanged { sz ->
                             if (sz.height <= 0) return@onSizeChanged
                             // 未收合：永遠跟最新內容高度
-                            // 正在推走 chrome：鎖死高度，避免量度漂移
+                            // 正在推走 chrome：鎖死高度
                             if (chromeOffsetPx > 0.5f) return@onSizeChanged
                             if (!isChromeCollapsing || sz.height > topSectionHeightPx + 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
