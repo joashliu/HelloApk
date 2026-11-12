@@ -375,6 +375,18 @@ fun setOverlayCapturePrefEnabled(context: Context, enabled: Boolean) {
         .edit().putBoolean(PREF_OVERLAY_CAPTURE_ENABLED, enabled).apply()
 }
 
+// ===== 全螢幕懸浮讀屏（Accessibility，唔截圖）=====
+private const val PREF_SCREEN_READ_FAB_ENABLED = "screen_read_fab_enabled"
+
+fun isScreenReadFabPrefEnabled(context: Context): Boolean =
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .getBoolean(PREF_SCREEN_READ_FAB_ENABLED, false)
+
+fun setScreenReadFabPrefEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .edit().putBoolean(PREF_SCREEN_READ_FAB_ENABLED, enabled).apply()
+}
+
 fun canDrawCaptureOverlay(context: Context): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(context) else true
 
@@ -2562,8 +2574,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             NotificationCaptureBridge.init(applicationContext)
             CaptureOverlayController.init(applicationContext)
+            ScreenReadFabController.init(applicationContext)
             ensureNotificationChannels(applicationContext)
             cleanupStaleConfirmNotifications(applicationContext)
+            try { ScreenReadFabController.refresh(applicationContext) } catch (_: Exception) {}
         }
 
         setContent {
@@ -5057,6 +5071,7 @@ fun LedgerContent(
             val context = LocalContext.current
             var isNotificationGranted by remember { mutableStateOf(false) }
             var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
+            var screenReadFabEnabled by remember { mutableStateOf(isScreenReadFabPrefEnabled(context)) }
 
             LaunchedEffect(Unit) {
                 isNotificationGranted = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -5131,7 +5146,8 @@ fun LedgerContent(
             ) {
                 val p = futureBtnProgress.value
                 val gap = 6.dp
-                val btnCount = if (isNotificationGranted) 2 else 1
+                // 未來項目 + OCR 讀屏（常駐）+ 可選通知浮窗
+                val btnCount = if (isNotificationGranted) 3 else 2
                 // 有按鈕展開時預留右方空間；完全收合則用滿寬，避免右闊左窄
                 val reservedForBtns = if (p > 0.001f) 16.dp else 0.dp
                 val totalW = maxWidth - reservedForBtns
@@ -5192,6 +5208,50 @@ fun LedgerContent(
                                 ) {
                                     Icon(Icons.Default.Layers, "消費浮窗提示", tint = when { !canDrawCaptureOverlay(context) -> Color(0xFFF59E0B); overlayCaptureEnabled -> BRAND_PRIMARY; else -> TEXT_TERTIARY })
                                 }
+                            }
+                        }
+
+                        // ★ 全螢幕 OCR 懸浮掣開關（系統級，其他 App 都見）
+                        Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
+                        Box(Modifier.width(singleBtnWidth.coerceAtLeast(0.dp)).graphicsLayer { alpha = p }, contentAlignment = Alignment.Center) {
+                            IconButton(
+                                onClick = {
+                                    if (!canDrawCaptureOverlay(context)) {
+                                        try {
+                                            context.startActivity(
+                                                Intent(
+                                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
+                                            )
+                                        } catch (_: Exception) {
+                                            try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {}
+                                        }
+                                        return@IconButton
+                                    }
+                                    if (!ScreenReadBridge.isAccessibilityEnabled(context)) {
+                                        Toast.makeText(context, "請開啟「Ledger 讀屏」無障礙服務", Toast.LENGTH_LONG).show()
+                                        ScreenReadBridge.openAccessibilitySettings(context)
+                                        return@IconButton
+                                    }
+                                    screenReadFabEnabled = !screenReadFabEnabled
+                                    setScreenReadFabPrefEnabled(context, screenReadFabEnabled)
+                                    try {
+                                        if (screenReadFabEnabled) ScreenReadFabController.refresh(context)
+                                        else ScreenReadFabController.dismiss()
+                                    } catch (_: Exception) {}
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.CropFree,
+                                    "全螢幕讀金額",
+                                    tint = when {
+                                        !canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context) -> Color(0xFFF59E0B)
+                                        screenReadFabEnabled -> BRAND_PRIMARY
+                                        else -> TEXT_TERTIARY
+                                    }
+                                )
                             }
                         }
                     }
@@ -11900,6 +11960,364 @@ fun AnimatedAmount(
                     }
                 }
             }
+        }
+    }
+}
+
+
+// =========================================================
+//  ★ 全螢幕懸浮讀屏：系統級 FAB + Accessibility（唔截圖、唔寫相簿）
+// =========================================================
+
+/**
+ * 從畫面文字中抽出「金額 + 可選項目名」。
+ * 優先認 HKD / HK$ / 港幣 前方標記；金額可為 12、12.5、4.9。
+ */
+fun parseScreenTextForLedger(texts: List<String>): Pair<String?, Double?> {
+    if (texts.isEmpty()) return null to null
+
+    val amountPatterns = listOf(
+        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)"""),
+        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*(\d+(?:\.\d{1,2})?)"""),
+        Regex("""[￥¥\$]\s*(\d+(?:\.\d{1,2})?)"""),
+        Regex("""(\d+\.\d{1,2})\s*(?:HKD|HK\$|港幣)?""", RegexOption.IGNORE_CASE),
+    )
+
+    var bestAmount: Double? = null
+    var bestIdx = -1
+    var bestScore = -1
+
+    for ((idx, raw) in texts.withIndex()) {
+        val line = raw.trim()
+        if (line.isBlank() || line.length > 80) continue
+        for ((pi, pat) in amountPatterns.withIndex()) {
+            val m = pat.find(line) ?: continue
+            val amt = m.groupValues.lastOrNull { it.isNotBlank() }?.toDoubleOrNull() ?: continue
+            if (amt <= 0.0 || amt > 1_000_000.0) continue
+            // 有 HKD 標記分數更高；較前出現略加分
+            val score = (100 - pi) * 10 + if (line.contains("HKD", true) || line.contains("HK$", true) || line.contains("港")) 50 else 0
+            if (score > bestScore) {
+                bestScore = score
+                bestAmount = amt
+                bestIdx = idx
+            }
+            break
+        }
+    }
+
+    if (bestAmount == null) return null to null
+
+    // 項目名：優先同一行去掉金額後剩餘；否則睇上一行短文字
+    fun cleanNote(s: String): String {
+        var t = s
+        t = t.replace(Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""[￥¥\$]\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""\d+\.\d{1,2}"""), "")
+        t = t.replace(Regex("""\d{2,}"""), "")
+        return t.replace(Regex("""[\s|·•\-_/\\]+"""), " ").trim()
+    }
+
+    var note: String? = null
+    if (bestIdx in texts.indices) {
+        val same = cleanNote(texts[bestIdx])
+        if (same.length in 1..24) note = same
+    }
+    if (note.isNullOrBlank() && bestIdx > 0) {
+        val prev = cleanNote(texts[bestIdx - 1])
+        if (prev.length in 1..24 && !prev.matches(Regex("""^\d+(\.\d+)?$"""))) note = prev
+    }
+    if (note.isNullOrBlank() && bestIdx + 1 < texts.size) {
+        val next = cleanNote(texts[bestIdx + 1])
+        if (next.length in 1..24 && !next.matches(Regex("""^\d+(\.\d+)?$"""))) note = next
+    }
+    note = note?.let { capitalizeNoteFirstLetter(it) }?.ifBlank { null }
+
+    return note to bestAmount
+}
+
+object ScreenReadBridge {
+    @Volatile var service: LedgerAccessibilityService? = null
+
+    fun isAccessibilityEnabled(context: Context): Boolean {
+        return try {
+            val expected = "${context.packageName}/${LedgerAccessibilityService::class.java.canonicalName}"
+            val enabled = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: return false
+            enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun openAccessibilitySettings(context: Context) {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (_: Exception) {}
+    }
+
+    /** 由懸浮掣觸發：背後讀屏 → 解析 → 顯示確認浮窗（唔截圖） */
+    fun requestReadAndFill(context: Context) {
+        val svc = service
+        if (svc == null) {
+            Toast.makeText(context, "請先開啟「Ledger 讀屏」無障礙服務", Toast.LENGTH_LONG).show()
+            openAccessibilitySettings(context)
+            return
+        }
+        svc.performScreenTextHarvest { texts ->
+            val (note, amount) = parseScreenTextForLedger(texts)
+            val ctx = context.applicationContext
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (amount == null || amount <= 0.0) {
+                    Toast.makeText(ctx, "未識別到金額（試下有 HKD 字樣嘅畫面）", Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                val captured = CapturedNotification(
+                    note = note?.ifBlank { "" } ?: "",
+                    amount = amount,
+                    category = "飲食",
+                    timestamp = System.currentTimeMillis()
+                )
+                // 用現有輕量浮窗確認，唔搶全螢幕、唔強制跳 App
+                try {
+                    CaptureOverlayController.show(ctx, captured)
+                } catch (_: Exception) {
+                    try {
+                        val intent = buildLaunchIntentForMain(
+                            ctx, captured.note.ifBlank { null }, captured.amount, captured.category, null
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        ctx.startActivity(intent)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+}
+
+/**
+ * AccessibilityService：只喺用戶撳懸浮掣時遍歷視窗文字節點，
+ * 唔截圖、唔寫入媒體庫、唔持續監聽內容。
+ */
+class LedgerAccessibilityService : android.accessibilityservice.AccessibilityService() {
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        ScreenReadBridge.service = this
+        // 預設唔主動接收事件，節省電同避免干擾
+        serviceInfo = serviceInfo?.apply {
+            eventTypes = 0
+            feedbackType = android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_GENERIC
+            flags = android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+            notificationTimeout = 0
+        }
+    }
+
+    override fun onAccessibilityEvent(event: android.view.accessibility.AccessibilityEvent?) {
+        // 刻意留空：唔持續監聽，避免幹預其他 App
+    }
+
+    override fun onInterrupt() {}
+
+    override fun onDestroy() {
+        if (ScreenReadBridge.service === this) ScreenReadBridge.service = null
+        super.onDestroy()
+    }
+
+    fun performScreenTextHarvest(onResult: (List<String>) -> Unit) {
+        Thread {
+            val out = ArrayList<String>(128)
+            try {
+                val roots = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
+                // 盡量攞所有互動視窗（狀態列、其他 App、浮層）
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    windows?.forEach { w ->
+                        try {
+                            w.root?.let { roots.add(it) }
+                        } catch (_: Exception) {}
+                    }
+                }
+                rootInActiveWindow?.let { roots.add(it) }
+
+                val seen = HashSet<String>()
+                for (root in roots) {
+                    try {
+                        collectTexts(root, out, seen, 0)
+                    } catch (_: Exception) {
+                    } finally {
+                        try { root.recycle() } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+            onResult(out)
+        }.start()
+    }
+
+    private fun collectTexts(
+        node: android.view.accessibility.AccessibilityNodeInfo?,
+        out: ArrayList<String>,
+        seen: HashSet<String>,
+        depth: Int
+    ) {
+        if (node == null || depth > 40) return
+        try {
+            val t = node.text?.toString()?.trim()
+            if (!t.isNullOrBlank() && t.length <= 80 && seen.add(t)) {
+                out.add(t)
+            }
+            val d = node.contentDescription?.toString()?.trim()
+            if (!d.isNullOrBlank() && d.length <= 80 && seen.add("d:$d")) {
+                // contentDescription 較嘈，只喺似金額時加入
+                if (d.contains("HKD", true) || d.contains(Regex("""\d+\.\d+"""))) {
+                    out.add(d)
+                }
+            }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Exception) { null }
+                if (child != null) {
+                    try {
+                        collectTexts(child, out, seen, depth + 1)
+                    } finally {
+                        try { child.recycle() } catch (_: Exception) {}
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+}
+
+/** 系統級可拖動懸浮掣（顯示在其他 App 之上） */
+object ScreenReadFabController {
+    private var appContext: Context? = null
+    private var overlayView: android.view.View? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    fun isShowing(): Boolean = overlayView != null
+
+    fun dismiss() {
+        val ctx = appContext ?: return
+        val view = overlayView ?: return
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        try { wm?.removeView(view) } catch (_: Exception) {}
+        overlayView = null
+    }
+
+    fun refresh(context: Context) {
+        val ctx = context.applicationContext
+        appContext = ctx
+        if (!isScreenReadFabPrefEnabled(ctx) || !canDrawCaptureOverlay(ctx)) {
+            dismiss()
+            return
+        }
+        show(ctx)
+    }
+
+    fun show(context: Context) {
+        val ctx = context.applicationContext
+        appContext = ctx
+        if (!canDrawCaptureOverlay(ctx)) return
+        if (overlayView != null) return
+
+        val density = ctx.resources.displayMetrics.density
+        fun dp(v: Int) = (v * density + 0.5f).toInt()
+
+        val size = dp(52)
+        val btn = android.widget.TextView(ctx).apply {
+            text = "OCR"
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 12f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(0xFFB68D40.toInt()) // BRAND_PRIMARY
+            }
+            elevation = dp(6).toFloat()
+            isClickable = true
+            isFocusable = true
+        }
+
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else
+            @Suppress("DEPRECATION")
+            android.view.WindowManager.LayoutParams.TYPE_PHONE
+
+        val params = android.view.WindowManager.LayoutParams(
+            size, size, type,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.END
+            x = dp(12)
+            y = dp(160)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+
+        var downX = 0f
+        var downY = 0f
+        var startX = 0
+        var startY = 0
+        var dragged = false
+        btn.setOnTouchListener { v, ev ->
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    downX = ev.rawX
+                    downY = ev.rawY
+                    startX = params.x
+                    startY = params.y
+                    dragged = false
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = (ev.rawX - downX).toInt()
+                    val dy = (ev.rawY - downY).toInt()
+                    if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) dragged = true
+                    // gravity TOP|END：x 向左為正
+                    params.x = (startX - dx).coerceAtLeast(0)
+                    params.y = (startY + dy).coerceAtLeast(0)
+                    try {
+                        (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                            ?.updateViewLayout(v, params)
+                    } catch (_: Exception) {}
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    if (!dragged) {
+                        v.performClick()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+        btn.setOnClickListener {
+            // 輕觸回饋
+            try {
+                @Suppress("DEPRECATION")
+                btn.announceForAccessibility("讀取畫面金額")
+            } catch (_: Exception) {}
+            ScreenReadBridge.requestReadAndFill(ctx)
+        }
+
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager ?: return
+        try {
+            wm.addView(btn, params)
+            overlayView = btn
+        } catch (_: Exception) {
+            overlayView = null
         }
     }
 }
