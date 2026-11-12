@@ -6376,7 +6376,6 @@ fun CalendarContent(
 
     /**
      * 手指向上（px>0）→ 先階段1再階段2；回傳實際消耗 px。
-     * 階段2 半速寫入：layout 上移 + touch delta 疊加約 2x，補償後同日期格幅度一致。
      */
     fun applyDragUp(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
@@ -6391,15 +6390,14 @@ fun CalendarContent(
             consumed += used
             left -= used
         }
-        // 階段 2：推走 chips/stats（半速補償）
+        // 階段 2：推走 chips/stats（移除 0.5f，改為 1:1 移動幅度）
         if (collapseP >= 0.999f && left > 0f) {
             val range = chromeRangePx()
-            val visualDelta = left * 0.5f
+            val visualDelta = left
             val newOffset = (chromeOffsetPx + visualDelta).coerceIn(0f, range)
             val visualUsed = newOffset - chromeOffsetPx
             chromeOffsetPx = newOffset
-            val used = if (visualDelta > 0.0001f) left * (visualUsed / visualDelta) else 0f
-            consumed += used.coerceAtMost(left)
+            consumed += visualUsed.coerceAtMost(left)
         }
         return consumed
     }
@@ -6409,15 +6407,16 @@ fun CalendarContent(
         if (px <= 0f || selectedDay == null) return 0f
         var left = px
         var consumed = 0f
+        // 退階段 2（移除 0.5f，改為 1:1 移動幅度）
         if (chromeOffsetPx > 0.001f && left > 0f) {
-            val visualDelta = left * 0.5f
+            val visualDelta = left
             val newOffset = (chromeOffsetPx - visualDelta).coerceAtLeast(0f)
             val visualUsed = chromeOffsetPx - newOffset
             chromeOffsetPx = newOffset
-            val used = if (visualDelta > 0.0001f) left * (visualUsed / visualDelta) else 0f
-            consumed += used.coerceAtMost(left)
-            left -= used.coerceAtMost(left)
+            consumed += visualUsed.coerceAtMost(left)
+            left -= visualUsed.coerceAtMost(left)
         }
+        // 退階段 1
         if (chromeOffsetPx <= 0.001f && left > 0f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP - left / range).coerceIn(0f, 1f)
