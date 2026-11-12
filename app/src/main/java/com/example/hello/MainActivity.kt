@@ -568,6 +568,132 @@ object CaptureOverlayController {
             overlayView = null
         }
     }
+
+    /**
+     * OCR 專用緊湊彈窗：一行顯示「名稱 · HKD 金額 + 記帳」，支援多候選。
+     * 無標題、無忽略按鈕；點擊即記帳並關閉。
+     */
+    fun showOcrChoices(context: Context, candidates: List<OcrCandidate>) {
+        if (candidates.isEmpty()) return
+        val ctx = context.applicationContext
+        appContext = ctx
+        if (!canDrawCaptureOverlay(ctx)) return
+
+        dismiss(fade = false)
+
+        val density = ctx.resources.displayMetrics.density
+        fun dp(v: Int) = (v * density + 0.5f).toInt()
+
+        val panelBg = GradientDrawable().apply {
+            setColor(0xF5FFFFFF.toInt())
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), 0x22000000)
+        }
+        val primaryBtnBg = GradientDrawable().apply {
+            setColor(0xFF2563EB.toInt())
+            cornerRadius = dp(8).toFloat()
+        }
+
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = panelBg
+            elevation = dp(6).toFloat()
+        }
+
+        candidates.forEachIndexed { index, cand ->
+            val amountStr = NotificationCaptureBridge.formatAmountForLabel(cand.amount)
+            val label = if (cand.note.isNotBlank()) {
+                "${cand.note} · HKD $amountStr"
+            } else {
+                "HKD $amountStr"
+            }
+
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                if (index > 0) setPadding(0, dp(6), 0, 0)
+            }
+            val text = TextView(ctx).apply {
+                text = label
+                setTextColor(0xFF0F172A.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val addBtn = TextView(ctx).apply {
+                this.text = "記帳"
+                gravity = Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                background = primaryBtnBg
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                isClickable = true
+                isFocusable = true
+            }
+            addBtn.setOnClickListener {
+                dismiss(fade = false)
+                try {
+                    val intent = buildLaunchIntentForMain(
+                        ctx, cand.note.ifBlank { null }, cand.amount, "飲食", null
+                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                    ctx.startActivity(intent)
+                } catch (_: Exception) {}
+            }
+            row.addView(text)
+            row.addView(addBtn)
+            root.addView(row)
+        }
+
+        val container = FrameLayout(ctx).apply {
+            setPadding(dp(16), 0, dp(16), dp(24))
+            addView(
+                root,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM
+            y = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
+        try {
+            wm.addView(container, params)
+            overlayView = container
+            val fadeIn = AlphaAnimation(0f, 1f).apply { duration = 160 }
+            container.startAnimation(fadeIn)
+            val r = Runnable { dismiss(fade = true) }
+            dismissRunnable = r
+            mainHandler.postDelayed(r, OVERLAY_AUTO_DISMISS_MS)
+        } catch (_: Exception) {
+            overlayView = null
+        }
+    }
 }
 
 // 🟢 升級 Channel ID，強制系統重置橫幅權限
@@ -4086,6 +4212,12 @@ private fun BoxScope.KeyboardAndFabLayer(
     val imeLiftDp = with(density) { (imeBottomPx - navBottomPx).coerceAtLeast(0).toDp() }
     val imeOpen = imeLiftDp > 0.dp
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
+
+    // OCR 懸浮掣避開鍵盤
+    LaunchedEffect(imeBottomPx) {
+        val lift = (imeBottomPx - navBottomPx).coerceAtLeast(0)
+        try { ScreenReadFabController.setKeyboardLift(lift) } catch (_: Exception) {}
+    }
 
     Box(
         modifier = Modifier
@@ -11967,70 +12099,103 @@ fun AnimatedAmount(
 //  ★ 全螢幕懸浮讀屏：系統級 FAB + Accessibility（唔截圖、唔寫相簿）
 // =========================================================
 
+/** OCR 候選結果（支援多金額供用戶選擇） */
+@Immutable
+data class OcrCandidate(
+    val note: String,
+    val amount: Double,
+    val score: Int,
+    val sourceLine: String = ""
+)
+
 /**
- * 從畫面文字中抽出「金額 + 可選項目名」。
- * 優先認 HKD / HK$ / 港幣 前方標記；金額可為 12、12.5、4.9。
+ * 從畫面文字中抽出多個「金額 + 可選項目名」候選。
+ * HKD / HK$ / 港幣 優先；其次 $ / ￥ 符號；再係純小數金額。
+ * 回傳最多 4 個不重複金額，按分數降序。
  */
-fun parseScreenTextForLedger(texts: List<String>): Pair<String?, Double?> {
-    if (texts.isEmpty()) return null to null
+fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
+    if (texts.isEmpty()) return emptyList()
 
     val amountPatterns = listOf(
-        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)"""),
-        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*(\d+(?:\.\d{1,2})?)"""),
-        Regex("""[￥¥\$]\s*(\d+(?:\.\d{1,2})?)"""),
-        Regex("""(\d+\.\d{1,2})\s*(?:HKD|HK\$|港幣)?""", RegexOption.IGNORE_CASE),
+        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 100,
+        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*(\d+(?:\.\d{1,2})?)""") to 95,
+        Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE) to 90,
+        Regex("""[￥¥\$]\s*(\d+(?:\.\d{1,2})?)""") to 70,
+        Regex("""(\d+(?:\.\d{1,2})?)\s*[￥¥\$]""") to 65,
+        Regex("""(?<![.\d])(\d+\.\d{1,2})(?![.\d])""") to 40,
+        Regex("""(?<![.\d])(\d{2,5})(?![.\d])""") to 25,
     )
 
-    var bestAmount: Double? = null
-    var bestIdx = -1
-    var bestScore = -1
-
-    for ((idx, raw) in texts.withIndex()) {
-        val line = raw.trim()
-        if (line.isBlank() || line.length > 80) continue
-        for ((pi, pat) in amountPatterns.withIndex()) {
-            val m = pat.find(line) ?: continue
-            val amt = m.groupValues.lastOrNull { it.isNotBlank() }?.toDoubleOrNull() ?: continue
-            if (amt <= 0.0 || amt > 1_000_000.0) continue
-            // 有 HKD 標記分數更高；較前出現略加分
-            val score = (100 - pi) * 10 + if (line.contains("HKD", true) || line.contains("HK$", true) || line.contains("港")) 50 else 0
-            if (score > bestScore) {
-                bestScore = score
-                bestAmount = amt
-                bestIdx = idx
-            }
-            break
-        }
-    }
-
-    if (bestAmount == null) return null to null
-
-    // 項目名：優先同一行去掉金額後剩餘；否則睇上一行短文字
     fun cleanNote(s: String): String {
         var t = s
         t = t.replace(Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("""[￥¥\$]\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""\d+(?:\.\d{1,2})?\s*[￥¥\$]"""), "")
         t = t.replace(Regex("""\d+\.\d{1,2}"""), "")
         t = t.replace(Regex("""\d{2,}"""), "")
         return t.replace(Regex("""[\s|·•\-_/\\]+"""), " ").trim()
     }
 
-    var note: String? = null
-    if (bestIdx in texts.indices) {
-        val same = cleanNote(texts[bestIdx])
-        if (same.length in 1..24) note = same
-    }
-    if (note.isNullOrBlank() && bestIdx > 0) {
-        val prev = cleanNote(texts[bestIdx - 1])
-        if (prev.length in 1..24 && !prev.matches(Regex("""^\d+(\.\d+)?$"""))) note = prev
-    }
-    if (note.isNullOrBlank() && bestIdx + 1 < texts.size) {
-        val next = cleanNote(texts[bestIdx + 1])
-        if (next.length in 1..24 && !next.matches(Regex("""^\d+(\.\d+)?$"""))) note = next
-    }
-    note = note?.let { capitalizeNoteFirstLetter(it) }?.ifBlank { null }
+    data class RawHit(val amount: Double, val idx: Int, val score: Int, val line: String)
 
-    return note to bestAmount
+    val hits = ArrayList<RawHit>()
+    for ((idx, raw) in texts.withIndex()) {
+        val line = raw.trim()
+        if (line.isBlank() || line.length > 100) continue
+        if (line.matches(Regex("""^\d+(\.\d+)?\s*[kKmMgG]?[bB]/sS]?$""")) ||
+            line.matches(Regex("""^\d{1,2}:\d{2}$""")) ||
+            line.matches(Regex("""^\d{1,3}%$""")) ||
+            line.contains("KB/s", true) || line.contains("MB/s", true) ||
+            line.contains("kb/s", true) || line.contains("mb/s", true)
+        ) continue
+
+        for ((pat, baseScore) in amountPatterns) {
+            val m = pat.find(line) ?: continue
+            val amtStr = m.groupValues.lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } } ?: continue
+            val amt = amtStr.toDoubleOrNull() ?: continue
+            if (amt <= 0.0 || amt > 1_000_000.0) continue
+            if (amt < 10.0 && baseScore < 60 &&
+                !line.contains("HKD", true) && !line.contains("HK$", true) &&
+                !line.contains("港") && !line.contains("$") &&
+                !line.contains("￥") && !line.contains("¥")
+            ) continue
+
+            var score = baseScore
+            if (line.contains("HKD", true) || line.contains("HK$", true) || line.contains("港")) score += 30
+            score += (texts.size - idx).coerceAtMost(8)
+            hits.add(RawHit(amt, idx, score, line))
+            break
+        }
+    }
+
+    if (hits.isEmpty()) return emptyList()
+
+    val sorted = hits.sortedByDescending { it.score }
+    val result = ArrayList<OcrCandidate>(4)
+    val seenAmounts = HashSet<Double>()
+    for (hit in sorted) {
+        val rounded = (hit.amount * 100).roundToInt() / 100.0
+        if (rounded in seenAmounts) continue
+        seenAmounts.add(rounded)
+
+        var note = ""
+        val same = cleanNote(hit.line)
+        if (same.length in 1..28) note = same
+        if (note.isBlank() && hit.idx > 0) {
+            val prev = cleanNote(texts[hit.idx - 1])
+            if (prev.length in 1..28 && !prev.matches(Regex("""^\d+(\.\d+)?$"""))) note = prev
+        }
+        if (note.isBlank() && hit.idx + 1 < texts.size) {
+            val next = cleanNote(texts[hit.idx + 1])
+            if (next.length in 1..28 && !next.matches(Regex("""^\d+(\.\d+)?$"""))) note = next
+        }
+        note = capitalizeNoteFirstLetter(note).trim()
+
+        result.add(OcrCandidate(note = note, amount = hit.amount, score = hit.score, sourceLine = hit.line))
+        if (result.size >= 4) break
+    }
+    return result
 }
 
 object ScreenReadBridge {
@@ -12066,26 +12231,20 @@ object ScreenReadBridge {
             return
         }
         svc.performScreenTextHarvest { texts ->
-            val (note, amount) = parseScreenTextForLedger(texts)
+            val candidates = parseScreenTextForLedger(texts)
             val ctx = context.applicationContext
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                if (amount == null || amount <= 0.0) {
-                    Toast.makeText(ctx, "未識別到金額（試下有 HKD 字樣嘅畫面）", Toast.LENGTH_SHORT).show()
+                if (candidates.isEmpty()) {
+                    Toast.makeText(ctx, "未識別到金額（試下有 HKD / $ 字樣嘅畫面）", Toast.LENGTH_SHORT).show()
                     return@post
                 }
-                val captured = CapturedNotification(
-                    note = note?.ifBlank { "" } ?: "",
-                    amount = amount,
-                    category = "飲食",
-                    timestamp = System.currentTimeMillis()
-                )
-                // 用現有輕量浮窗確認，唔搶全螢幕、唔強制跳 App
                 try {
-                    CaptureOverlayController.show(ctx, captured)
+                    CaptureOverlayController.showOcrChoices(ctx, candidates)
                 } catch (_: Exception) {
+                    val best = candidates.first()
                     try {
                         val intent = buildLaunchIntentForMain(
-                            ctx, captured.note.ifBlank { null }, captured.amount, captured.category, null
+                            ctx, best.note.ifBlank { null }, best.amount, "飲食", null
                         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ctx.startActivity(intent)
                     } catch (_: Exception) {}
@@ -12129,11 +12288,26 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
         Thread {
             val out = ArrayList<String>(128)
             try {
+                val statusBarHeight = try {
+                    val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+                    if (resId > 0) resources.getDimensionPixelSize(resId)
+                    else (24 * resources.displayMetrics.density).toInt()
+                } catch (_: Exception) {
+                    (24 * resources.displayMetrics.density).toInt()
+                }
+                val topSkipPx = statusBarHeight + (12 * resources.displayMetrics.density).toInt()
+
                 val roots = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-                // 盡量攞所有互動視窗（狀態列、其他 App、浮層）
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     windows?.forEach { w ->
                         try {
+                            // 跳過狀態列 / 導航列 / 輸入法視窗
+                            val wType = w.type
+                            if (wType == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM ||
+                                wType == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD
+                            ) {
+                                return@forEach
+                            }
                             w.root?.let { roots.add(it) }
                         } catch (_: Exception) {}
                     }
@@ -12143,7 +12317,7 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
                 val seen = HashSet<String>()
                 for (root in roots) {
                     try {
-                        collectTexts(root, out, seen, 0)
+                        collectTexts(root, out, seen, 0, topSkipPx)
                     } catch (_: Exception) {
                     } finally {
                         try { root.recycle() } catch (_: Exception) {}
@@ -12158,26 +12332,33 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
         node: android.view.accessibility.AccessibilityNodeInfo?,
         out: ArrayList<String>,
         seen: HashSet<String>,
-        depth: Int
+        depth: Int,
+        topSkipPx: Int
     ) {
         if (node == null || depth > 40) return
         try {
-            val t = node.text?.toString()?.trim()
-            if (!t.isNullOrBlank() && t.length <= 80 && seen.add(t)) {
-                out.add(t)
-            }
-            val d = node.contentDescription?.toString()?.trim()
-            if (!d.isNullOrBlank() && d.length <= 80 && seen.add("d:$d")) {
-                // contentDescription 較嘈，只喺似金額時加入
-                if (d.contains("HKD", true) || d.contains(Regex("""\d+\.\d+"""))) {
-                    out.add(d)
+            val rect = android.graphics.Rect()
+            node.getBoundsInScreen(rect)
+            val inStatusBar = (rect.bottom > 0 && rect.bottom <= topSkipPx) ||
+                (rect.top < topSkipPx && rect.height() > 0 && rect.height() < topSkipPx * 1.8)
+
+            if (!inStatusBar) {
+                val t = node.text?.toString()?.trim()
+                if (!t.isNullOrBlank() && t.length <= 80 && seen.add(t)) {
+                    out.add(t)
+                }
+                val d = node.contentDescription?.toString()?.trim()
+                if (!d.isNullOrBlank() && d.length <= 80 && seen.add("d:$d")) {
+                    if (d.contains("HKD", true) || d.contains(Regex("""\d+\.\d+"""))) {
+                        out.add(d)
+                    }
                 }
             }
             for (i in 0 until node.childCount) {
                 val child = try { node.getChild(i) } catch (_: Exception) { null }
                 if (child != null) {
                     try {
-                        collectTexts(child, out, seen, depth + 1)
+                        collectTexts(child, out, seen, depth + 1, topSkipPx)
                     } finally {
                         try { child.recycle() } catch (_: Exception) {}
                     }
@@ -12187,11 +12368,25 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
     }
 }
 
-/** 系統級可拖動懸浮掣（顯示在其他 App 之上） */
+/** 系統級可拖動懸浮掣（顯示在其他 App 之上）
+ * - 5 秒無操作自動貼邊（蝕一半入邊框）+ 半透明
+ * - 鍵盤彈出時自動上移避讓
+ */
 object ScreenReadFabController {
     private var appContext: Context? = null
     private var overlayView: android.view.View? = null
+    private var layoutParams: android.view.WindowManager.LayoutParams? = null
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var dockRunnable: Runnable? = null
+    private var isDocked = false
+    private var baseY = 0
+    private var keyboardLiftPx = 0
+    private var buttonSizePx = 0
+    private var btnView: android.widget.TextView? = null
+
+    private const val DOCK_IDLE_MS = 5_000L
+    private const val DOCKED_ALPHA = 0.45f
+    private const val NORMAL_ALPHA = 1.0f
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -12200,11 +12395,16 @@ object ScreenReadFabController {
     fun isShowing(): Boolean = overlayView != null
 
     fun dismiss() {
+        cancelDockTimer()
         val ctx = appContext ?: return
         val view = overlayView ?: return
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
         try { wm?.removeView(view) } catch (_: Exception) {}
         overlayView = null
+        layoutParams = null
+        btnView = null
+        isDocked = false
+        keyboardLiftPx = 0
     }
 
     fun refresh(context: Context) {
@@ -12217,6 +12417,95 @@ object ScreenReadFabController {
         show(ctx)
     }
 
+    /** 由 App 端呼叫：鍵盤高度（px）。>0 時上移避讓；0 時還原。 */
+    fun setKeyboardLift(liftPx: Int) {
+        val lp = layoutParams ?: return
+        val view = overlayView ?: return
+        val ctx = appContext ?: return
+        val newLift = liftPx.coerceAtLeast(0)
+        if (newLift == keyboardLiftPx) return
+        keyboardLiftPx = newLift
+        val targetY = (baseY - keyboardLiftPx).coerceAtLeast(0)
+        if (lp.y == targetY) return
+        lp.y = targetY
+        try {
+            (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                ?.updateViewLayout(view, lp)
+        } catch (_: Exception) {}
+    }
+
+    private fun cancelDockTimer() {
+        dockRunnable?.let { mainHandler.removeCallbacks(it) }
+        dockRunnable = null
+    }
+
+    private fun scheduleDock() {
+        cancelDockTimer()
+        if (isDocked) return
+        val r = Runnable {
+            dockRunnable = null
+            performDock()
+        }
+        dockRunnable = r
+        mainHandler.postDelayed(r, DOCK_IDLE_MS)
+    }
+
+    private fun applyAlpha(alpha: Float) {
+        btnView?.alpha = alpha
+    }
+
+    /** 貼右邊，蝕一半入邊框 + 半透明 */
+    private fun performDock() {
+        val lp = layoutParams ?: return
+        val view = overlayView ?: return
+        val ctx = appContext ?: return
+        if (buttonSizePx <= 0) return
+        val half = buttonSizePx / 2
+        if (lp.x <= -half + 2) {
+            isDocked = true
+            applyAlpha(DOCKED_ALPHA)
+            return
+        }
+        isDocked = true
+        val startX = lp.x
+        val targetX = -half
+        val anim = android.animation.ValueAnimator.ofInt(startX, targetX).apply {
+            duration = 280
+            interpolator = android.view.animation.DecelerateInterpolator()
+            addUpdateListener { va ->
+                lp.x = va.animatedValue as Int
+                try {
+                    (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                        ?.updateViewLayout(view, lp)
+                } catch (_: Exception) {}
+            }
+        }
+        anim.start()
+        // 同步變半透明
+        btnView?.animate()?.alpha(DOCKED_ALPHA)?.setDuration(280)?.start()
+    }
+
+    private fun undockIfNeeded() {
+        if (!isDocked) {
+            applyAlpha(NORMAL_ALPHA)
+            return
+        }
+        isDocked = false
+        applyAlpha(NORMAL_ALPHA)
+        val lp = layoutParams ?: return
+        val view = overlayView ?: return
+        val ctx = appContext ?: return
+        val density = ctx.resources.displayMetrics.density
+        val inset = (12 * density + 0.5f).toInt()
+        if (lp.x < inset) {
+            lp.x = inset
+            try {
+                (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                    ?.updateViewLayout(view, lp)
+            } catch (_: Exception) {}
+        }
+    }
+
     fun show(context: Context) {
         val ctx = context.applicationContext
         appContext = ctx
@@ -12227,6 +12516,7 @@ object ScreenReadFabController {
         fun dp(v: Int) = (v * density + 0.5f).toInt()
 
         val size = dp(52)
+        buttonSizePx = size
         val btn = android.widget.TextView(ctx).apply {
             text = "OCR"
             gravity = android.view.Gravity.CENTER
@@ -12235,12 +12525,14 @@ object ScreenReadFabController {
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(0xFFB68D40.toInt()) // BRAND_PRIMARY
+                setColor(0xFFB68D40.toInt())
             }
             elevation = dp(6).toFloat()
             isClickable = true
             isFocusable = true
+            alpha = NORMAL_ALPHA
         }
+        btnView = btn
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -12263,6 +12555,10 @@ object ScreenReadFabController {
                     android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
         }
+        layoutParams = params
+        baseY = params.y
+        isDocked = false
+        keyboardLiftPx = 0
 
         var downX = 0f
         var downY = 0f
@@ -12272,6 +12568,8 @@ object ScreenReadFabController {
         btn.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
+                    cancelDockTimer()
+                    undockIfNeeded()
                     downX = ev.rawX
                     downY = ev.rawY
                     startX = params.x
@@ -12283,9 +12581,10 @@ object ScreenReadFabController {
                     val dx = (ev.rawX - downX).toInt()
                     val dy = (ev.rawY - downY).toInt()
                     if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) dragged = true
-                    // gravity TOP|END：x 向左為正
-                    params.x = (startX - dx).coerceAtLeast(0)
-                    params.y = (startY + dy).coerceAtLeast(0)
+                    params.x = startX - dx
+                    val newY = (startY + dy).coerceAtLeast(0)
+                    params.y = newY
+                    baseY = newY + keyboardLiftPx
                     try {
                         (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
                             ?.updateViewLayout(v, params)
@@ -12296,26 +12595,32 @@ object ScreenReadFabController {
                     if (!dragged) {
                         v.performClick()
                     }
+                    scheduleDock()
                     true
                 }
                 else -> false
             }
         }
         btn.setOnClickListener {
-            // 輕觸回饋
             try {
                 @Suppress("DEPRECATION")
                 btn.announceForAccessibility("讀取畫面金額")
             } catch (_: Exception) {}
+            cancelDockTimer()
+            undockIfNeeded()
             ScreenReadBridge.requestReadAndFill(ctx)
+            scheduleDock()
         }
 
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager ?: return
         try {
             wm.addView(btn, params)
             overlayView = btn
+            scheduleDock()
         } catch (_: Exception) {
             overlayView = null
+            layoutParams = null
+            btnView = null
         }
     }
 }
