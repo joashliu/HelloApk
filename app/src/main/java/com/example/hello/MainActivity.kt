@@ -635,8 +635,9 @@ object CaptureOverlayController {
             addBtn.setOnClickListener {
                 dismiss(fade = false)
                 try {
+                    // 唔傳 category：由 MainApp 跟 noteCategoryMap（上一次同名項目）決定
                     val intent = buildLaunchIntentForMain(
-                        ctx, cand.note.ifBlank { null }, cand.amount, "飲食", null
+                        ctx, cand.note.ifBlank { null }, cand.amount, null, null
                     ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                     ctx.startActivity(intent)
                 } catch (_: Exception) {}
@@ -3287,7 +3288,10 @@ fun MainApp(
         val amtText = if (keepManualAmount) keyboardState.amountText else {
             amount?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: ""
         }
-        val defaultCategory = forceCategory ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
+        // ★ 永遠跟返上一次同名項目嘅分類（同手動快速輸入一致）；無紀錄先用 force / 旅遊 / 飲食
+        val defaultCategory = forceCategory
+            ?: note.takeIf { it.isNotBlank() }?.let { ui.noteCategoryMap[it] }
+            ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
         if (!showKeyboard) {
             keyboardState = KeyboardState(
@@ -12117,10 +12121,14 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
     if (texts.isEmpty()) return emptyList()
 
     val amountPatterns = listOf(
-        Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 100,
+        // 微信／常見：-HK $8.19、HK $8.19、HK$8.19、HKD 8.19
+        Regex("""(?i)-?\s*HK\s*\$\s*(\d+(?:\.\d{1,2})?)""") to 110,
+        Regex("""(?i)-?\s*(?:HKD|港幣|港元)\s*[\$]?\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 105,
+        Regex("""(?i)-?\s*(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 100,
         Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*(\d+(?:\.\d{1,2})?)""") to 95,
         Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE) to 90,
-        Regex("""[￥¥\$]\s*(\d+(?:\.\d{1,2})?)""") to 70,
+        // 純貨幣符號（可選負號）
+        Regex("""-?\s*[￥¥\$]\s*(\d+(?:\.\d{1,2})?)""") to 70,
         Regex("""(\d+(?:\.\d{1,2})?)\s*[￥¥\$]""") to 65,
         Regex("""(?<![.\d])(\d+\.\d{1,2})(?![.\d])""") to 40,
         Regex("""(?<![.\d])(\d{2,5})(?![.\d])""") to 25,
@@ -12128,9 +12136,11 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
 
     fun cleanNote(s: String): String {
         var t = s
+        t = t.replace(Regex("""(?i)-?\s*HK\s*\$\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""(?i)-?\s*(?:HKD|港幣|港元)\s*[\$]?\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE), "")
-        t = t.replace(Regex("""[￥¥\$]\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""-?\s*[￥¥\$]\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""\d+(?:\.\d{1,2})?\s*[￥¥\$]"""), "")
         t = t.replace(Regex("""\d+\.\d{1,2}"""), "")
         t = t.replace(Regex("""\d{2,}"""), "")
@@ -12153,16 +12163,18 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
         for ((pat, baseScore) in amountPatterns) {
             val m = pat.find(line) ?: continue
             val amtStr = m.groupValues.lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } } ?: continue
-            val amt = amtStr.toDoubleOrNull() ?: continue
+            val amtRaw = amtStr.toDoubleOrNull() ?: continue
+            val amt = kotlin.math.abs(amtRaw) // 支出顯示常有負號，入帳用正數
             if (amt <= 0.0 || amt > 1_000_000.0) continue
-            if (amt < 10.0 && baseScore < 60 &&
-                !line.contains("HKD", true) && !line.contains("HK$", true) &&
-                !line.contains("港") && !line.contains("$") &&
-                !line.contains("￥") && !line.contains("¥")
-            ) continue
+            val hasCurrencyHint = line.contains("HKD", true) || line.contains("HK$", true) ||
+                line.contains("HK $", true) || line.contains("HK \$", true) ||
+                Regex("""(?i)HK\s*\$""").containsMatchIn(line) ||
+                line.contains("港") || line.contains("$") ||
+                line.contains("￥") || line.contains("¥")
+            if (amt < 10.0 && baseScore < 60 && !hasCurrencyHint) continue
 
             var score = baseScore
-            if (line.contains("HKD", true) || line.contains("HK$", true) || line.contains("港")) score += 30
+            if (hasCurrencyHint) score += 30
             score += (texts.size - idx).coerceAtMost(8)
             hits.add(RawHit(amt, idx, score, line))
             break
@@ -12244,7 +12256,7 @@ object ScreenReadBridge {
                     val best = candidates.first()
                     try {
                         val intent = buildLaunchIntentForMain(
-                            ctx, best.note.ifBlank { null }, best.amount, "飲食", null
+                            ctx, best.note.ifBlank { null }, best.amount, null, null
                         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ctx.startActivity(intent)
                     } catch (_: Exception) {}
@@ -12263,24 +12275,58 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
     override fun onServiceConnected() {
         super.onServiceConnected()
         ScreenReadBridge.service = this
-        // 預設唔主動接收事件，節省電同避免干擾
+        // 只聽視窗變化：用嚟偵測輸入法（鍵盤）出現／消失，令 OCR 懸浮掣避讓
         serviceInfo = serviceInfo?.apply {
-            eventTypes = 0
+            eventTypes = android.view.accessibility.AccessibilityEvent.TYPE_WINDOWS_CHANGED or
+                android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
             feedbackType = android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_GENERIC
             flags = android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
                 android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-            notificationTimeout = 0
+            notificationTimeout = 100
         }
     }
 
     override fun onAccessibilityEvent(event: android.view.accessibility.AccessibilityEvent?) {
-        // 刻意留空：唔持續監聽，避免幹預其他 App
+        if (event == null) return
+        // 輕量：只更新 OCR 懸浮掣避鍵盤，唔做其他事
+        if (!ScreenReadFabController.isShowing()) return
+        try {
+            updateFabKeyboardLift()
+        } catch (_: Exception) {}
+    }
+
+    private fun updateFabKeyboardLift() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            ScreenReadFabController.setKeyboardLift(0)
+            return
+        }
+        var imeTop = Int.MAX_VALUE
+        var screenH = resources.displayMetrics.heightPixels
+        try {
+            windows?.forEach { w ->
+                try {
+                    if (w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD) {
+                        val r = android.graphics.Rect()
+                        w.getBoundsInScreen(r)
+                        if (r.height() > 80) {
+                            imeTop = minOf(imeTop, r.top)
+                            screenH = maxOf(screenH, r.bottom)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+        val lift = if (imeTop < Int.MAX_VALUE && imeTop < screenH) {
+            (screenH - imeTop).coerceAtLeast(0).coerceAtMost(screenH / 2)
+        } else 0
+        ScreenReadFabController.setKeyboardLift(lift)
     }
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         if (ScreenReadBridge.service === this) ScreenReadBridge.service = null
+        try { ScreenReadFabController.setKeyboardLift(0) } catch (_: Exception) {}
         super.onDestroy()
     }
 
