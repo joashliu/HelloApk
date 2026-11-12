@@ -377,6 +377,13 @@ fun setOverlayCapturePrefEnabled(context: Context, enabled: Boolean) {
 
 // ===== 全螢幕懸浮讀屏（Accessibility，唔截圖）=====
 private const val PREF_SCREEN_READ_FAB_ENABLED = "screen_read_fab_enabled"
+// FAB 細節設定
+private const val PREF_FAB_EDGE_MARGIN_DP = "fab_edge_margin_dp"       // 邊緣安全距離（dp），預設 12
+private const val PREF_FAB_IDLE_TIMEOUT_MS = "fab_idle_timeout_ms"     // 閒置變透時長（ms），預設 5000
+private const val PREF_FAB_IDLE_ALPHA = "fab_idle_alpha"               // 閒置透明度 0~100，預設 35
+private const val PREF_FAB_SIZE_DP = "fab_size_dp"                     // 按鈕大小（dp），預設 52
+private const val PREF_FAB_POS_X = "fab_pos_x"                         // 上次 X（gravity END 偏移）
+private const val PREF_FAB_POS_Y = "fab_pos_y"                         // 上次 Y
 
 fun isScreenReadFabPrefEnabled(context: Context): Boolean =
     context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
@@ -385,6 +392,43 @@ fun isScreenReadFabPrefEnabled(context: Context): Boolean =
 fun setScreenReadFabPrefEnabled(context: Context, enabled: Boolean) {
     context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
         .edit().putBoolean(PREF_SCREEN_READ_FAB_ENABLED, enabled).apply()
+}
+
+fun getFabEdgeMarginDp(context: Context): Int =
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .getInt(PREF_FAB_EDGE_MARGIN_DP, 12).coerceIn(4, 48)
+
+fun setFabEdgeMarginDp(context: Context, dp: Int) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .edit().putInt(PREF_FAB_EDGE_MARGIN_DP, dp.coerceIn(4, 48)).apply()
+}
+
+fun getFabIdleTimeoutMs(context: Context): Long =
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .getLong(PREF_FAB_IDLE_TIMEOUT_MS, 5_000L).coerceIn(1_000L, 60_000L)
+
+fun setFabIdleTimeoutMs(context: Context, ms: Long) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .edit().putLong(PREF_FAB_IDLE_TIMEOUT_MS, ms.coerceIn(1_000L, 60_000L)).apply()
+}
+
+/** 0~100 → alpha 0f~1f */
+fun getFabIdleAlphaPercent(context: Context): Int =
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .getInt(PREF_FAB_IDLE_ALPHA, 35).coerceIn(10, 90)
+
+fun setFabIdleAlphaPercent(context: Context, percent: Int) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .edit().putInt(PREF_FAB_IDLE_ALPHA, percent.coerceIn(10, 90)).apply()
+}
+
+fun getFabSizeDp(context: Context): Int =
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .getInt(PREF_FAB_SIZE_DP, 52).coerceIn(40, 72)
+
+fun setFabSizeDp(context: Context, dp: Int) {
+    context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        .edit().putInt(PREF_FAB_SIZE_DP, dp.coerceIn(40, 72)).apply()
 }
 
 fun canDrawCaptureOverlay(context: Context): Boolean =
@@ -4603,6 +4647,166 @@ fun FloatingNavBar(
 }
 
 // =========================================================
+//  ★ FAB 設定對話框（長按頂部 OCR 掣開啟）
+// =========================================================
+@Composable
+fun FabSettingsDialog(
+    onDismiss: () -> Unit,
+    onApplied: () -> Unit,
+) {
+    val context = LocalContext.current
+    var edgeMargin by remember { mutableIntStateOf(getFabEdgeMarginDp(context)) }
+    var idleSec by remember {
+        mutableIntStateOf((getFabIdleTimeoutMs(context) / 1000L).toInt().coerceIn(1, 60))
+    }
+    var idleAlphaPct by remember { mutableIntStateOf(getFabIdleAlphaPercent(context)) }
+    var sizeDp by remember { mutableIntStateOf(getFabSizeDp(context)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(20.dp),
+        containerColor = SURFACE_CARD,
+        title = {
+            Column {
+                Text("OCR 懸浮掣設定", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TEXT_PRIMARY)
+                Text("長按頂部讀屏掣可再開此頁", fontSize = 12.sp, color = TEXT_SECONDARY)
+            }
+        },
+        text = {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("邊緣安全距離", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TEXT_PRIMARY)
+                        Text("${edgeMargin} dp", fontSize = 13.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                    }
+                    Text("越大越唔易拖去角落卡住", fontSize = 11.sp, color = TEXT_SECONDARY)
+                    Slider(
+                        value = edgeMargin.toFloat(),
+                        onValueChange = { edgeMargin = it.roundToInt().coerceIn(4, 48) },
+                        valueRange = 4f..48f,
+                        steps = 10,
+                        colors = SliderDefaults.colors(
+                            thumbColor = BRAND_PRIMARY,
+                            activeTrackColor = BRAND_PRIMARY
+                        )
+                    )
+                }
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("閒置變透時間", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TEXT_PRIMARY)
+                        Text("${idleSec} 秒", fontSize = 13.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                    }
+                    Text("唔掂掣幾耐之後變半透", fontSize = 11.sp, color = TEXT_SECONDARY)
+                    Slider(
+                        value = idleSec.toFloat(),
+                        onValueChange = { idleSec = it.roundToInt().coerceIn(1, 30) },
+                        valueRange = 1f..30f,
+                        steps = 28,
+                        colors = SliderDefaults.colors(
+                            thumbColor = BRAND_PRIMARY,
+                            activeTrackColor = BRAND_PRIMARY
+                        )
+                    )
+                }
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("閒置透明度", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TEXT_PRIMARY)
+                        Text("${idleAlphaPct}%", fontSize = 13.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                    }
+                    Text("數字越低越透（10–90）", fontSize = 11.sp, color = TEXT_SECONDARY)
+                    Slider(
+                        value = idleAlphaPct.toFloat(),
+                        onValueChange = { idleAlphaPct = it.roundToInt().coerceIn(10, 90) },
+                        valueRange = 10f..90f,
+                        steps = 15,
+                        colors = SliderDefaults.colors(
+                            thumbColor = BRAND_PRIMARY,
+                            activeTrackColor = BRAND_PRIMARY
+                        )
+                    )
+                }
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("按鈕大小", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = TEXT_PRIMARY)
+                        Text("${sizeDp} dp", fontSize = 13.sp, color = BRAND_PRIMARY, fontWeight = FontWeight.Bold)
+                    }
+                    Slider(
+                        value = sizeDp.toFloat(),
+                        onValueChange = { sizeDp = it.roundToInt().coerceIn(40, 72) },
+                        valueRange = 40f..72f,
+                        steps = 7,
+                        colors = SliderDefaults.colors(
+                            thumbColor = BRAND_PRIMARY,
+                            activeTrackColor = BRAND_PRIMARY
+                        )
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE).edit()
+                                .remove(PREF_FAB_POS_X)
+                                .remove(PREF_FAB_POS_Y)
+                                .apply()
+                            Toast.makeText(context, "已重設位置（下次顯示會用預設）", Toast.LENGTH_SHORT).show()
+                            onApplied()
+                        } catch (_: Exception) {}
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TEXT_PRIMARY)
+                ) {
+                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("重設懸浮掣位置", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    setFabEdgeMarginDp(context, edgeMargin)
+                    setFabIdleTimeoutMs(context, idleSec * 1000L)
+                    setFabIdleAlphaPercent(context, idleAlphaPct)
+                    setFabSizeDp(context, sizeDp)
+                    onApplied()
+                    onDismiss()
+                    Toast.makeText(context, "設定已套用", Toast.LENGTH_SHORT).show()
+                }
+            ) {
+                Text("套用", fontWeight = FontWeight.Bold, color = BRAND_PRIMARY)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", color = TEXT_SECONDARY)
+            }
+        }
+    )
+}
+
+// =========================================================
 //  ★ NotificationAccessGuide
 // =========================================================
 @Composable
@@ -5072,6 +5276,7 @@ fun LedgerContent(
             var isNotificationGranted by remember { mutableStateOf(false) }
             var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
             var screenReadFabEnabled by remember { mutableStateOf(isScreenReadFabPrefEnabled(context)) }
+            var showFabSettingsDialog by remember { mutableStateOf(false) }
 
             LaunchedEffect(Unit) {
                 isNotificationGranted = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -5212,50 +5417,74 @@ fun LedgerContent(
                         }
 
                         // ★ 全螢幕 OCR 懸浮掣開關（系統級，其他 App 都見）
+                        // 短按開關；長按開設定（邊緣距離／閒置透明度／大小）
                         Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
-                        Box(Modifier.width(singleBtnWidth.coerceAtLeast(0.dp)).graphicsLayer { alpha = p }, contentAlignment = Alignment.Center) {
-                            IconButton(
-                                onClick = {
-                                    if (!canDrawCaptureOverlay(context)) {
-                                        try {
-                                            context.startActivity(
-                                                Intent(
-                                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                    Uri.parse("package:${context.packageName}")
-                                                )
-                                            )
-                                        } catch (_: Exception) {
-                                            try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {}
+                        Box(
+                            Modifier
+                                .width(singleBtnWidth.coerceAtLeast(0.dp))
+                                .graphicsLayer { alpha = p },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val fabIconTint = when {
+                                !canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context) -> Color(0xFFF59E0B)
+                                screenReadFabEnabled -> BRAND_PRIMARY
+                                else -> TEXT_TERTIARY
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (!canDrawCaptureOverlay(context)) {
+                                                try {
+                                                    context.startActivity(
+                                                        Intent(
+                                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                            Uri.parse("package:${context.packageName}")
+                                                        )
+                                                    )
+                                                } catch (_: Exception) {
+                                                    try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {}
+                                                }
+                                                return@combinedClickable
+                                            }
+                                            if (!ScreenReadBridge.isAccessibilityEnabled(context)) {
+                                                Toast.makeText(context, "請開啟「Ledger 讀屏」無障礙服務", Toast.LENGTH_LONG).show()
+                                                ScreenReadBridge.openAccessibilitySettings(context)
+                                                return@combinedClickable
+                                            }
+                                            screenReadFabEnabled = !screenReadFabEnabled
+                                            setScreenReadFabPrefEnabled(context, screenReadFabEnabled)
+                                            try {
+                                                if (screenReadFabEnabled) ScreenReadFabController.refresh(context)
+                                                else ScreenReadFabController.dismiss()
+                                            } catch (_: Exception) {}
+                                        },
+                                        onLongClick = {
+                                            showFabSettingsDialog = true
                                         }
-                                        return@IconButton
-                                    }
-                                    if (!ScreenReadBridge.isAccessibilityEnabled(context)) {
-                                        Toast.makeText(context, "請開啟「Ledger 讀屏」無障礙服務", Toast.LENGTH_LONG).show()
-                                        ScreenReadBridge.openAccessibilitySettings(context)
-                                        return@IconButton
-                                    }
-                                    screenReadFabEnabled = !screenReadFabEnabled
-                                    setScreenReadFabPrefEnabled(context, screenReadFabEnabled)
-                                    try {
-                                        if (screenReadFabEnabled) ScreenReadFabController.refresh(context)
-                                        else ScreenReadFabController.dismiss()
-                                    } catch (_: Exception) {}
-                                },
-                                modifier = Modifier.size(40.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.CropFree,
-                                    "全螢幕讀金額",
-                                    tint = when {
-                                        !canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context) -> Color(0xFFF59E0B)
-                                        screenReadFabEnabled -> BRAND_PRIMARY
-                                        else -> TEXT_TERTIARY
-                                    }
+                                    "全螢幕讀金額（長按設定）",
+                                    tint = fabIconTint
                                 )
                             }
                         }
                     }
                 }
+            }
+
+            if (showFabSettingsDialog) {
+                FabSettingsDialog(
+                    onDismiss = { showFabSettingsDialog = false },
+                    onApplied = {
+                        try { ScreenReadFabController.applySettings(context) } catch (_: Exception) {}
+                    }
+                )
             }
 
             val sectionGap = 8.dp
@@ -12189,11 +12418,17 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
     }
 }
 
-/** 系統級可拖動懸浮掣（顯示在其他 App 之上） */
+/** 系統級可拖動懸浮掣（顯示在其他 App 之上）
+ *  - 拖動範圍限制：唔可以貼邊／去角落
+ *  - 閒置 N 秒後自動降透明度
+ *  - 記住上次位置；設定可喺 App 內調整
+ */
 object ScreenReadFabController {
     private var appContext: Context? = null
     private var overlayView: android.view.View? = null
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var idleRunnable: Runnable? = null
+    private var fadeAnimator: android.animation.ValueAnimator? = null
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -12202,6 +12437,9 @@ object ScreenReadFabController {
     fun isShowing(): Boolean = overlayView != null
 
     fun dismiss() {
+        cancelIdleTimer()
+        fadeAnimator?.cancel()
+        fadeAnimator = null
         val ctx = appContext ?: return
         val view = overlayView ?: return
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
@@ -12216,7 +12454,85 @@ object ScreenReadFabController {
             dismiss()
             return
         }
+        dismiss()
         show(ctx)
+    }
+
+    /** 套用最新設定（大小／邊緣等改動後重建） */
+    fun applySettings(context: Context) {
+        val ctx = context.applicationContext
+        appContext = ctx
+        if (!isScreenReadFabPrefEnabled(ctx) || !canDrawCaptureOverlay(ctx)) {
+            dismiss()
+            return
+        }
+        dismiss()
+        show(ctx)
+    }
+
+    private fun cancelIdleTimer() {
+        idleRunnable?.let { mainHandler.removeCallbacks(it) }
+        idleRunnable = null
+    }
+
+    private fun scheduleIdleFade(btn: android.view.View, ctx: Context) {
+        cancelIdleTimer()
+        fadeAnimator?.cancel()
+        val timeout = getFabIdleTimeoutMs(ctx)
+        val idleAlpha = getFabIdleAlphaPercent(ctx) / 100f
+        val r = Runnable {
+            idleRunnable = null
+            fadeAnimator?.cancel()
+            val start = btn.alpha
+            if (start <= idleAlpha + 0.02f) {
+                btn.alpha = idleAlpha
+                return@Runnable
+            }
+            val anim = android.animation.ValueAnimator.ofFloat(start, idleAlpha).apply {
+                duration = 420
+                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+                addUpdateListener { btn.alpha = it.animatedValue as Float }
+            }
+            fadeAnimator = anim
+            anim.start()
+        }
+        idleRunnable = r
+        mainHandler.postDelayed(r, timeout)
+    }
+
+    private fun restoreFullAlpha(btn: android.view.View) {
+        fadeAnimator?.cancel()
+        fadeAnimator = null
+        if (btn.alpha < 0.98f) {
+            val anim = android.animation.ValueAnimator.ofFloat(btn.alpha, 1f).apply {
+                duration = 160
+                addUpdateListener { btn.alpha = it.animatedValue as Float }
+            }
+            fadeAnimator = anim
+            anim.start()
+        } else {
+            btn.alpha = 1f
+        }
+    }
+
+    private fun clampPosition(
+        x: Int, y: Int, size: Int, edgeMargin: Int, screenW: Int, screenH: Int
+    ): Pair<Int, Int> {
+        // gravity TOP|END：x 由右邊計，越大越向左
+        val maxX = (screenW - size - edgeMargin).coerceAtLeast(edgeMargin)
+        val maxY = (screenH - size - edgeMargin).coerceAtLeast(edgeMargin)
+        val cx = x.coerceIn(edgeMargin, maxX)
+        val cy = y.coerceIn(edgeMargin, maxY)
+        return cx to cy
+    }
+
+    private fun savePosition(ctx: Context, x: Int, y: Int) {
+        try {
+            ctx.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE).edit()
+                .putInt(PREF_FAB_POS_X, x)
+                .putInt(PREF_FAB_POS_Y, y)
+                .apply()
+        } catch (_: Exception) {}
     }
 
     fun show(context: Context) {
@@ -12225,15 +12541,25 @@ object ScreenReadFabController {
         if (!canDrawCaptureOverlay(ctx)) return
         if (overlayView != null) return
 
-        val density = ctx.resources.displayMetrics.density
+        val dm = ctx.resources.displayMetrics
+        val density = dm.density
         fun dp(v: Int) = (v * density + 0.5f).toInt()
 
-        val size = dp(52)
+        val sizeDp = getFabSizeDp(ctx)
+        val size = dp(sizeDp)
+        val edgeMargin = dp(getFabEdgeMarginDp(ctx))
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+
         val btn = android.widget.TextView(ctx).apply {
             text = "OCR"
             gravity = android.view.Gravity.CENTER
             setTextColor(0xFFFFFFFF.toInt())
-            textSize = 12f
+            textSize = when {
+                sizeDp <= 44 -> 10f
+                sizeDp >= 64 -> 14f
+                else -> 12f
+            }
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             background = android.graphics.drawable.GradientDrawable().apply {
                 shape = android.graphics.drawable.GradientDrawable.OVAL
@@ -12242,6 +12568,7 @@ object ScreenReadFabController {
             elevation = dp(6).toFloat()
             isClickable = true
             isFocusable = true
+            alpha = 1f
         }
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -12249,6 +12576,17 @@ object ScreenReadFabController {
         else
             @Suppress("DEPRECATION")
             android.view.WindowManager.LayoutParams.TYPE_PHONE
+
+        val prefs = ctx.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+        val savedX = prefs.getInt(PREF_FAB_POS_X, -1)
+        val savedY = prefs.getInt(PREF_FAB_POS_Y, -1)
+        val defaultX = dp(12)
+        val defaultY = dp(160)
+        val (initX, initY) = if (savedX >= 0 && savedY >= 0) {
+            clampPosition(savedX, savedY, size, edgeMargin, screenW, screenH)
+        } else {
+            clampPosition(defaultX, defaultY, size, edgeMargin, screenW, screenH)
+        }
 
         val params = android.view.WindowManager.LayoutParams(
             size, size, type,
@@ -12258,8 +12596,8 @@ object ScreenReadFabController {
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = android.view.Gravity.TOP or android.view.Gravity.END
-            x = dp(12)
-            y = dp(160)
+            x = initX
+            y = initY
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
                     android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -12271,6 +12609,7 @@ object ScreenReadFabController {
         var startX = 0
         var startY = 0
         var dragged = false
+
         btn.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
@@ -12279,6 +12618,8 @@ object ScreenReadFabController {
                     startX = params.x
                     startY = params.y
                     dragged = false
+                    cancelIdleTimer()
+                    restoreFullAlpha(btn)
                     true
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
@@ -12286,8 +12627,11 @@ object ScreenReadFabController {
                     val dy = (ev.rawY - downY).toInt()
                     if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) dragged = true
                     // gravity TOP|END：x 向左為正
-                    params.x = (startX - dx).coerceAtLeast(0)
-                    params.y = (startY + dy).coerceAtLeast(0)
+                    val (nx, ny) = clampPosition(
+                        startX - dx, startY + dy, size, edgeMargin, screenW, screenH
+                    )
+                    params.x = nx
+                    params.y = ny
                     try {
                         (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
                             ?.updateViewLayout(v, params)
@@ -12295,20 +12639,24 @@ object ScreenReadFabController {
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    if (!dragged) {
+                    if (dragged) {
+                        savePosition(ctx, params.x, params.y)
+                    } else if (ev.actionMasked == android.view.MotionEvent.ACTION_UP) {
                         v.performClick()
                     }
+                    scheduleIdleFade(btn, ctx)
                     true
                 }
                 else -> false
             }
         }
         btn.setOnClickListener {
-            // 輕觸回饋
             try {
                 @Suppress("DEPRECATION")
                 btn.announceForAccessibility("讀取畫面金額")
             } catch (_: Exception) {}
+            restoreFullAlpha(btn)
+            scheduleIdleFade(btn, ctx)
             ScreenReadBridge.requestReadAndFill(ctx)
         }
 
@@ -12316,6 +12664,7 @@ object ScreenReadFabController {
         try {
             wm.addView(btn, params)
             overlayView = btn
+            scheduleIdleFade(btn, ctx)
         } catch (_: Exception) {
             overlayView = null
         }
