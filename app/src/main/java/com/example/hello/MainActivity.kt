@@ -6262,13 +6262,12 @@ fun CalendarContent(
     var cachedSelectedCol by remember { mutableIntStateOf(0) }
 
     // 階段 1：collapseP 0→1 日曆收到剩選中一行，明細停喺該日期格下
-    // 階段 2：chromeOffsetPx（只喺 collapseP≈1 之後）跟手指 1:1 推走 chips/stats
-    // ★ chrome 用「像素位移」而非 progress×高度，避免同日期格幅度不一致
+    // 階段 2：chromeOffsetPx（只喺 collapseP≈1 之後）推走 chips/stats
+    // ★ 用像素位移；nested scroll 路徑會做 0.5 補償（layout 上移 + touch delta 疊加約 2x）
     var collapseP by remember { mutableFloatStateOf(0f) }
     var chromeOffsetPx by remember { mutableFloatStateOf(0f) }
     var isSettling by remember { mutableStateOf(false) }
     var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
-    // 由 chromeOffsetPx 衍生，供 snap／返回等邏輯用
     val chromeP: Float
         get() {
             val range = topSectionHeightPx.coerceAtLeast(1f)
@@ -6376,13 +6375,15 @@ fun CalendarContent(
 
     fun chromeRangePx(): Float = topSectionHeightPx.coerceAtLeast(1f)
 
-    /** 手指向上（px>0）→ 先階段1再階段2；回傳實際消耗 px
-     *  ★ 兩階段都係手指 px 同畫面位移 1:1，唔會放大 */
+    /**
+     * 手指向上（px>0）→ 先階段1再階段2；回傳實際消耗 px。
+     * ★ 階段2：layout 上移 + touch delta 會疊加約 2x，故只寫入一半位移。
+     */
     fun applyDragUp(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
         var left = px
         var consumed = 0f
-        // 階段 1：收日曆（visibleGridH 減少量 = 手指位移）
+        // 階段 1：收日曆（高度減少 = 手指，1:1）
         if (collapseP < 0.999f && left > 0f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP + left / range).coerceIn(0f, 1f)
@@ -6391,13 +6392,15 @@ fun CalendarContent(
             consumed += used
             left -= used
         }
-        // 階段 2：推走 chips/stats（chromeOffsetPx 增加量 = 手指位移，1:1）
+        // 階段 2：推走 chips/stats（半速補償 2x 疊加）
         if (collapseP >= 0.999f && left > 0f) {
             val range = chromeRangePx()
-            val newOffset = (chromeOffsetPx + left).coerceIn(0f, range)
-            val used = newOffset - chromeOffsetPx
+            val visualDelta = left * 0.5f
+            val newOffset = (chromeOffsetPx + visualDelta).coerceIn(0f, range)
+            val visualUsed = newOffset - chromeOffsetPx
             chromeOffsetPx = newOffset
-            consumed += used
+            val used = if (visualDelta > 0.0001f) left * (visualUsed / visualDelta) else 0f
+            consumed += used.coerceAtMost(left)
         }
         return consumed
     }
@@ -6408,11 +6411,13 @@ fun CalendarContent(
         var left = px
         var consumed = 0f
         if (chromeOffsetPx > 0.001f && left > 0f) {
-            val newOffset = (chromeOffsetPx - left).coerceAtLeast(0f)
-            val used = chromeOffsetPx - newOffset
+            val visualDelta = left * 0.5f
+            val newOffset = (chromeOffsetPx - visualDelta).coerceAtLeast(0f)
+            val visualUsed = chromeOffsetPx - newOffset
             chromeOffsetPx = newOffset
-            consumed += used
-            left -= used
+            val used = if (visualDelta > 0.0001f) left * (visualUsed / visualDelta) else 0f
+            consumed += used.coerceAtMost(left)
+            left -= used.coerceAtMost(left)
         }
         if (chromeOffsetPx <= 0.001f && left > 0f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
@@ -6439,12 +6444,12 @@ fun CalendarContent(
         }
     }
 
-    /** target: 0f = 完全展開 chrome，1f = 完全收起 */
+    /** target: 0f = 完全展開，1f = 完全收起 */
     fun animateChromeTo(target: Float) {
         isSettling = true
         val range = chromeRangePx()
         val start = chromeOffsetPx
-        val end = (target.coerceIn(0f, 1f) * range)
+        val end = target.coerceIn(0f, 1f) * range
         scope.launch {
             try {
                 Animatable(start).animateTo(
@@ -6458,7 +6463,6 @@ fun CalendarContent(
     }
 
     fun snapAfterDrag() {
-        // 階段2優先吸附
         if (chromeOffsetPx > 0.01f || collapseP >= 0.99f) {
             if (chromeP >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
             if (collapseP < 0.99f) animateCollapseTo(1f)
@@ -6629,7 +6633,7 @@ fun CalendarContent(
 
             // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
             // ★ 未選日期時用自然高度完整顯示 chips + 3 個 Stat box，唔 clip
-            // ★ 選日期收合時：位移同手指 1:1（chromeOffsetPx），同日期格仔幅度一致
+            // ★ 選日期收合：位移直接用 chromeOffsetPx（已做 0.5 補償，對齊日期格幅度）
             val topTranslatePx = if (selectedDay != null) {
                 chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
             } else 0f
@@ -6666,14 +6670,13 @@ fun CalendarContent(
                         .onSizeChanged { sz ->
                             if (sz.height <= 0) return@onSizeChanged
                             // 未收合：永遠跟最新內容高度
-                            // 收合中（有 chrome 位移）：鎖死高度，避免量度變化令位移幅度漂移
+                            // 正在推走 chrome：鎖死高度，避免量度漂移
                             if (chromeOffsetPx > 0.5f) return@onSizeChanged
                             if (!isChromeCollapsing || sz.height > topSectionHeightPx + 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
                             }
                         }
                         .offset {
-                            // ★ 只跟 chromeOffsetPx（手指 1:1），唔再乘其他係數
                             IntOffset(
                                 0,
                                 if (isChromeCollapsing) (-topTranslatePx).roundToInt() else 0
