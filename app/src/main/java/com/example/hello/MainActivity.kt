@@ -8246,11 +8246,11 @@ fun CalendarFilterChip(
         color = bgColor,
         interactionSource = src
     ) {
-        Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
             Text(
                 label,
                 textAlign = TextAlign.Center,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 maxLines = 1,
                 color = textColor,
                 fontWeight = fontWeight,
@@ -8268,9 +8268,10 @@ fun AnimatedCalendarCategoryChips(
 ) {
     val targetKeys = remember(visibleCategories) { listOf<String?>(null) + visibleCategories }
 
-    // 1. 計算 Grid 需要的動態總高度 (每行 4 個)
-    val rowCount = (targetKeys.size + 3) / 4
-    // +2.dp 避免第三行 chips 底部被裁少少
+    // 1. 計算 Grid 需要的動態總高度（每行最少 5 個）
+    val cols = 5
+    val rowCount = (targetKeys.size + cols - 1) / cols
+    // +2.dp 避免末行 chips 底部被裁少少
     val targetHeight = if (rowCount == 0) 0.dp else (40.dp * rowCount) + (6.dp * (rowCount - 1)) + 2.dp
 
     val animatedHeight by animateDpAsState(
@@ -8279,13 +8280,13 @@ fun AnimatedCalendarCategoryChips(
         label = "calChipsGridHeight"
     )
 
-    // 2. 使用 LazyVerticalGrid，佢天生就識得處理行列佈局同等分寬度
+    // 2. 使用 LazyVerticalGrid，等分寬度，一行 5 個
     LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
+        columns = GridCells.Fixed(cols),
         modifier = Modifier
             .fillMaxWidth()
             .height(animatedHeight),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
         userScrollEnabled = false
     ) {
