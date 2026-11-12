@@ -6558,10 +6558,20 @@ fun CalendarContent(
             }
 
             // ===== 統計區：只喺階段2（chromeP）先跟手推走；階段1 保持不動 =====
+            // ★ 未選日期時用自然高度完整顯示 chips + 3 個 Stat box，唔 clip
+            // ★ 選日期收合時先用量度高度做推走動畫
             val chrome = if (selectedDay != null) chromeP.coerceIn(0f, 1f) else 0f
             val topTranslatePx = topSectionHeightPx * chrome
-            val topVisibleH = if (topSectionHeightPx <= 0f) -1f
-            else (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+            val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
+            val topVisibleH = if (isChromeCollapsing)
+                (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+            else -1f
+
+            // chips 行數／篩選變咗要重新量度，避免 Stat box 被舊高度裁切
+            LaunchedEffect(visibleCategories, filterCategory) {
+                // 等一幀等 chips 高度動畫起步後再接受新量度
+                kotlinx.coroutines.delay(16)
+            }
 
             Box(
                 Modifier
@@ -6576,18 +6586,25 @@ fun CalendarContent(
                 Column(
                     Modifier
                         .fillMaxWidth()
+                        // 收合動畫中固定為已量度高度；平時跟內容自然高度，確保 3 個 Stat 完整顯示
                         .then(
-                            if (topSectionHeightPx > 0f)
+                            if (isChromeCollapsing)
                                 Modifier.requiredHeight(with(density) { topSectionHeightPx.toDp() })
-                            else Modifier
+                            else Modifier.wrapContentHeight()
                         )
                         .onSizeChanged { sz ->
-                            if (sz.height > topSectionHeightPx + 1f) {
+                            if (sz.height <= 0) return@onSizeChanged
+                            // 未收合：永遠跟最新內容高度
+                            // 收合中：只允許增高，避免抖動
+                            if (!isChromeCollapsing || sz.height > topSectionHeightPx + 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
                             }
                         }
                         .offset {
-                            IntOffset(0, if (topSectionHeightPx > 0f) (-topTranslatePx).roundToInt() else 0)
+                            IntOffset(
+                                0,
+                                if (isChromeCollapsing) (-topTranslatePx).roundToInt() else 0
+                            )
                         }
                         .padding(horizontal = 10.dp)
                 ) {
@@ -6598,12 +6615,31 @@ fun CalendarContent(
                         onFilterCategoryChange = onFilterCategoryChange
                     )
                     Spacer(Modifier.height(14.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AnimatedInfoChip(label = "總計", valueText = "$${formatAmountNoDecimal(totalNet)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp, valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE)
-                        AnimatedInfoChip(label = "平均每項", valueText = "$${formatAmountNoDecimal(avgPerItem)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
-                        AnimatedInfoChip(label = "日均支出", valueText = "$${formatAmountNoDecimal(avgPerDay)}", modifier = Modifier.weight(1f), valueFontSize = 16.sp)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AnimatedInfoChip(
+                            label = "總計",
+                            valueText = "$${formatAmountNoDecimal(totalNet)}",
+                            modifier = Modifier.weight(1f),
+                            valueFontSize = 16.sp,
+                            valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                        )
+                        AnimatedInfoChip(
+                            label = "平均每項",
+                            valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                            modifier = Modifier.weight(1f),
+                            valueFontSize = 16.sp
+                        )
+                        AnimatedInfoChip(
+                            label = "日均支出",
+                            valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                            modifier = Modifier.weight(1f),
+                            valueFontSize = 16.sp
+                        )
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                 }
             }
 
