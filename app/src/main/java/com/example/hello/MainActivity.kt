@@ -387,6 +387,83 @@ fun setScreenReadFabPrefEnabled(context: Context, enabled: Boolean) {
         .edit().putBoolean(PREF_SCREEN_READ_FAB_ENABLED, enabled).apply()
 }
 
+// ===== 名稱別名：識別到 A → 統一記為 B（例如 港鐵 → 地鐵）=====
+private const val PREF_NOTE_ALIASES = "note_aliases_json"
+
+fun loadNoteAliases(context: Context): Map<String, String> {
+    return try {
+        val raw = context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+            .getString(PREF_NOTE_ALIASES, null) ?: return emptyMap()
+        val obj = org.json.JSONObject(raw)
+        val map = LinkedHashMap<String, String>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val v = obj.optString(k, "").trim()
+            if (k.isNotBlank() && v.isNotBlank()) map[k.trim()] = v
+        }
+        map
+    } catch (_: Exception) {
+        emptyMap()
+    }
+}
+
+fun saveNoteAliases(context: Context, map: Map<String, String>) {
+    try {
+        val obj = org.json.JSONObject()
+        map.forEach { (k, v) ->
+            val key = k.trim()
+            val value = v.trim()
+            if (key.isNotBlank() && value.isNotBlank() && key != value) obj.put(key, value)
+        }
+        context.getSharedPreferences("ledger_prefs", Context.MODE_PRIVATE)
+            .edit().putString(PREF_NOTE_ALIASES, obj.toString()).apply()
+    } catch (_: Exception) {}
+}
+
+fun setNoteAlias(context: Context, alias: String, canonical: String) {
+    val a = alias.trim()
+    val c = canonical.trim()
+    if (a.isBlank() || c.isBlank() || a == c) return
+    val map = loadNoteAliases(context).toMutableMap()
+    map[a] = c
+    map.entries.removeAll { it.key == c && it.value == a }
+    saveNoteAliases(context, map)
+}
+
+fun removeNoteAlias(context: Context, alias: String) {
+    val map = loadNoteAliases(context).toMutableMap()
+    map.remove(alias.trim())
+    saveNoteAliases(context, map)
+}
+
+fun removeAliasesForCanonical(context: Context, canonical: String) {
+    val c = canonical.trim()
+    saveNoteAliases(context, loadNoteAliases(context).filterValues { it != c })
+}
+
+fun resolveNoteAlias(context: Context, note: String): String {
+    if (note.isBlank()) return note
+    val map = loadNoteAliases(context)
+    if (map.isEmpty()) return note
+    var cur = note.trim()
+    repeat(3) {
+        val next = map[cur] ?: return cur
+        if (next == cur) return cur
+        cur = next
+    }
+    return cur
+}
+
+fun groupNoteAliases(map: Map<String, String>): Map<String, List<String>> {
+    val groups = LinkedHashMap<String, MutableList<String>>()
+    map.forEach { (alias, canonical) ->
+        groups.getOrPut(canonical) { mutableListOf() }.add(alias)
+    }
+    groups.values.forEach { it.sort() }
+    return groups.toList().sortedBy { it.first }.toMap()
+}
+
 fun canDrawCaptureOverlay(context: Context): Boolean =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(context) else true
 
@@ -637,7 +714,7 @@ object CaptureOverlayController {
                 try {
                     // 唔傳 category：由 MainApp 跟 noteCategoryMap（上一次同名項目）決定
                     val intent = buildLaunchIntentForMain(
-                        ctx, cand.note.ifBlank { null }, cand.amount, null, null
+                        ctx, resolveNoteAlias(ctx, cand.note).ifBlank { null }, cand.amount, null, null
                     ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                     ctx.startActivity(intent)
                 } catch (_: Exception) {}
@@ -3288,14 +3365,15 @@ fun MainApp(
         val amtText = if (keepManualAmount) keyboardState.amountText else {
             amount?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: ""
         }
-        // ★ 永遠跟返上一次同名項目嘅分類（同手動快速輸入一致）；無紀錄先用 force / 旅遊 / 飲食
+        // ★ 別名：港鐵 → 地鐵；分類跟返「解析後」同名項目
+        val resolvedNote = if (note.isNotBlank()) resolveNoteAlias(context, note) else note
         val defaultCategory = forceCategory
-            ?: note.takeIf { it.isNotBlank() }?.let { ui.noteCategoryMap[it] }
+            ?: resolvedNote.takeIf { it.isNotBlank() }?.let { ui.noteCategoryMap[it] }
             ?: if (lastSavedCategory == "旅遊") "旅遊" else "飲食"
         val defaultCurrency = if (defaultCategory == "旅遊") "JPY" else "HKD"
         if (!showKeyboard) {
             keyboardState = KeyboardState(
-                noteText = note, amountText = amtText,
+                noteText = resolvedNote, amountText = amtText,
                 category = defaultCategory, currency = defaultCurrency,
                 selectAmountOnInput = amount != null && !keepManualAmount,
                 editingNote = false,
@@ -3304,7 +3382,7 @@ fun MainApp(
             showKeyboard = true
         } else {
             keyboardState = keyboardState.copy(
-                noteText = note,
+                noteText = resolvedNote,
                 amountText = amtText.ifBlank { keyboardState.amountText },
                 category = defaultCategory, currency = defaultCurrency,
                 selectAmountOnInput = if (keepManualAmount) false else (amount != null),
@@ -3312,7 +3390,7 @@ fun MainApp(
                 focusedField = "amount"
             )
         }
-        if (note.isNotBlank()) nameFlashTrigger++
+        if (resolvedNote.isNotBlank()) nameFlashTrigger++
     }
 
     fun openKeyboardForCopy(r: Record) {
@@ -5208,6 +5286,11 @@ fun LedgerContent(
             var isNotificationGranted by remember { mutableStateOf(false) }
             var overlayCaptureEnabled by remember { mutableStateOf(isOverlayCapturePrefEnabled(context)) }
             var screenReadFabEnabled by remember { mutableStateOf(isScreenReadFabPrefEnabled(context)) }
+            var showTopSettingsSheet by remember { mutableStateOf(false) }
+            var showOcrSettingsSheet by remember { mutableStateOf(false) }
+            var noteAliasMap by remember { mutableStateOf(loadNoteAliases(context)) }
+            var aliasDraftFrom by remember { mutableStateOf("") }
+            var aliasDraftTo by remember { mutableStateOf("") }
 
             LaunchedEffect(Unit) {
                 isNotificationGranted = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -5282,9 +5365,8 @@ fun LedgerContent(
             ) {
                 val p = futureBtnProgress.value
                 val gap = 6.dp
-                // 未來項目 + OCR 讀屏（常駐）+ 可選通知浮窗
-                val btnCount = if (isNotificationGranted) 3 else 2
-                // 有按鈕展開時預留右方空間；完全收合則用滿寬，避免右闊左窄
+                // 左滑只露出兩個掣：隱藏未來 + 設定
+                val btnCount = 2
                 val reservedForBtns = if (p > 0.001f) 16.dp else 0.dp
                 val totalW = maxWidth - reservedForBtns
                 val slotCount = 3f + btnCount * p
@@ -5297,13 +5379,11 @@ fun LedgerContent(
                         .fillMaxWidth()
                         .padding(
                             horizontal = if (effectiveCompact) 0.dp else 8.dp,
-                            // 收合後再減垂直內距
                             vertical = if (effectiveCompact) 2.dp else 4.dp
                         ),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(modifier = Modifier.width(statsWidth)) {
-                        // ★ 完美版 TopStats (原生變形、0值自動消失)
                         TopStats(
                             hasIncome = hasIncome, hasExpense = hasExpense,
                             income = totalIncome, expense = totalExpense,
@@ -5322,76 +5402,278 @@ fun LedgerContent(
                         Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
                         Box(Modifier.width(singleBtnWidth.coerceAtLeast(0.dp)).graphicsLayer { alpha = p }, contentAlignment = Alignment.Center) {
                             IconButton(onClick = { onShowFutureChange(!showFuture) }, modifier = Modifier.size(40.dp)) {
-                                Icon(if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff, "顯示未來項目", tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY)
+                                Icon(
+                                    if (showFuture) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    "顯示未來項目",
+                                    tint = if (showFuture) BRAND_PRIMARY else TEXT_TERTIARY
+                                )
                             }
                         }
+                        Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
+                        Box(Modifier.width(singleBtnWidth.coerceAtLeast(0.dp)).graphicsLayer { alpha = p }, contentAlignment = Alignment.Center) {
+                            IconButton(onClick = { showTopSettingsSheet = true }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Default.Settings, "設定", tint = TEXT_SECONDARY)
+                            }
+                        }
+                    }
+                }
+            }
 
-                        if (isNotificationGranted) {
-                            Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
-                            Box(Modifier.width(singleBtnWidth.coerceAtLeast(0.dp)).graphicsLayer { alpha = p }, contentAlignment = Alignment.Center) {
-                                IconButton(
-                                    onClick = {
+            // ===== 頂部設定彈窗 =====
+            if (showTopSettingsSheet) {
+                AlertDialog(
+                    onDismissRequest = { showTopSettingsSheet = false },
+                    title = { Text("設定", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (isNotificationGranted) {
+                                ListItem(
+                                    headlineContent = { Text("消費浮窗提示", fontSize = 15.sp) },
+                                    supportingContent = {
+                                        Text(
+                                            when {
+                                                !canDrawCaptureOverlay(context) -> "需要「顯示在其他應用之上」權限"
+                                                overlayCaptureEnabled -> "已開啟"
+                                                else -> "已關閉"
+                                            },
+                                            fontSize = 12.sp, color = TEXT_SECONDARY
+                                        )
+                                    },
+                                    leadingContent = {
+                                        Icon(
+                                            Icons.Default.Layers, null,
+                                            tint = when {
+                                                !canDrawCaptureOverlay(context) -> Color(0xFFF59E0B)
+                                                overlayCaptureEnabled -> BRAND_PRIMARY
+                                                else -> TEXT_TERTIARY
+                                            }
+                                        )
+                                    },
+                                    modifier = Modifier.clickable {
                                         if (!canDrawCaptureOverlay(context)) {
-                                            try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))) } 
-                                            catch (_: Exception) { try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {} }
+                                            try {
+                                                context.startActivity(
+                                                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                                )
+                                            } catch (_: Exception) {
+                                                try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {}
+                                            }
                                         } else {
                                             overlayCaptureEnabled = !overlayCaptureEnabled
                                             setOverlayCapturePrefEnabled(context, overlayCaptureEnabled)
                                             if (!overlayCaptureEnabled) CaptureOverlayController.dismiss()
                                         }
-                                    },
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Icon(Icons.Default.Layers, "消費浮窗提示", tint = when { !canDrawCaptureOverlay(context) -> Color(0xFFF59E0B); overlayCaptureEnabled -> BRAND_PRIMARY; else -> TEXT_TERTIARY })
-                                }
-                            }
-                        }
-
-                        // ★ 全螢幕 OCR 懸浮掣開關（系統級，其他 App 都見）
-                        Spacer(Modifier.width(gap * p.coerceIn(0f, 1f)))
-                        Box(Modifier.width(singleBtnWidth.coerceAtLeast(0.dp)).graphicsLayer { alpha = p }, contentAlignment = Alignment.Center) {
-                            IconButton(
-                                onClick = {
-                                    if (!canDrawCaptureOverlay(context)) {
-                                        try {
-                                            context.startActivity(
-                                                Intent(
-                                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                    Uri.parse("package:${context.packageName}")
-                                                )
-                                            )
-                                        } catch (_: Exception) {
-                                            try { context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)) } catch (_: Exception) {}
-                                        }
-                                        return@IconButton
-                                    }
-                                    if (!ScreenReadBridge.isAccessibilityEnabled(context)) {
-                                        Toast.makeText(context, "請開啟「Ledger 讀屏」無障礙服務", Toast.LENGTH_LONG).show()
-                                        ScreenReadBridge.openAccessibilitySettings(context)
-                                        return@IconButton
-                                    }
-                                    screenReadFabEnabled = !screenReadFabEnabled
-                                    setScreenReadFabPrefEnabled(context, screenReadFabEnabled)
-                                    try {
-                                        if (screenReadFabEnabled) ScreenReadFabController.refresh(context)
-                                        else ScreenReadFabController.dismiss()
-                                    } catch (_: Exception) {}
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.CropFree,
-                                    "全螢幕讀金額",
-                                    tint = when {
-                                        !canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context) -> Color(0xFFF59E0B)
-                                        screenReadFabEnabled -> BRAND_PRIMARY
-                                        else -> TEXT_TERTIARY
                                     }
                                 )
                             }
+                            ListItem(
+                                headlineContent = { Text("OCR 讀屏設定", fontSize = 15.sp) },
+                                supportingContent = {
+                                    Text(
+                                        when {
+                                            !canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context) -> "權限未齊"
+                                            screenReadFabEnabled -> "懸浮掣已開 · 別名 ${noteAliasMap.size} 組"
+                                            else -> "懸浮掣已關 · 別名 ${noteAliasMap.size} 組"
+                                        },
+                                        fontSize = 12.sp, color = TEXT_SECONDARY
+                                    )
+                                },
+                                leadingContent = {
+                                    Icon(
+                                        Icons.Default.CropFree, null,
+                                        tint = when {
+                                            !canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context) -> Color(0xFFF59E0B)
+                                            screenReadFabEnabled -> BRAND_PRIMARY
+                                            else -> TEXT_TERTIARY
+                                        }
+                                    )
+                                },
+                                trailingContent = { Icon(Icons.Default.ChevronRight, null, tint = TEXT_TERTIARY) },
+                                modifier = Modifier.clickable {
+                                    showTopSettingsSheet = false
+                                    noteAliasMap = loadNoteAliases(context)
+                                    showOcrSettingsSheet = true
+                                }
+                            )
                         }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showTopSettingsSheet = false }) { Text("關閉") }
                     }
-                }
+                )
+            }
+
+            // ===== OCR 設定（含名稱合併）=====
+            if (showOcrSettingsSheet) {
+                AlertDialog(
+                    onDismissRequest = { showOcrSettingsSheet = false },
+                    title = { Text("OCR 讀屏設定", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("OCR 懸浮掣", fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        if (!canDrawCaptureOverlay(context) || !ScreenReadBridge.isAccessibilityEnabled(context))
+                                            "請先開 overlay 權限 + 無障礙服務"
+                                        else "顯示喺其他 App 上面，撳掣讀金額",
+                                        fontSize = 12.sp, color = TEXT_SECONDARY
+                                    )
+                                }
+                                Switch(
+                                    checked = screenReadFabEnabled && canDrawCaptureOverlay(context) && ScreenReadBridge.isAccessibilityEnabled(context),
+                                    onCheckedChange = { on ->
+                                        if (on) {
+                                            if (!canDrawCaptureOverlay(context)) {
+                                                try {
+                                                    context.startActivity(
+                                                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                                    )
+                                                } catch (_: Exception) {}
+                                                return@Switch
+                                            }
+                                            if (!ScreenReadBridge.isAccessibilityEnabled(context)) {
+                                                Toast.makeText(context, "請開啟「Ledger 讀屏」無障礙服務", Toast.LENGTH_LONG).show()
+                                                ScreenReadBridge.openAccessibilitySettings(context)
+                                                return@Switch
+                                            }
+                                        }
+                                        screenReadFabEnabled = on
+                                        setScreenReadFabPrefEnabled(context, on)
+                                        try {
+                                            if (on) ScreenReadFabController.refresh(context)
+                                            else ScreenReadFabController.dismiss()
+                                        } catch (_: Exception) {}
+                                    }
+                                )
+                            }
+
+                            HorizontalDivider(color = DIVIDER_COLOR)
+
+                            Text("名稱合併", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY)
+                            Text("識別到別名時，自動改成統一名稱（例如 港鐵 → 地鐵）", fontSize = 12.sp, color = TEXT_SECONDARY)
+
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = aliasDraftFrom,
+                                    onValueChange = { aliasDraftFrom = it },
+                                    label = { Text("識別到", fontSize = 12.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    textStyle = TextStyle(fontSize = 14.sp)
+                                )
+                                Text("→", color = TEXT_SECONDARY, fontWeight = FontWeight.Bold)
+                                OutlinedTextField(
+                                    value = aliasDraftTo,
+                                    onValueChange = { aliasDraftTo = it },
+                                    label = { Text("記錄為", fontSize = 12.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    textStyle = TextStyle(fontSize = 14.sp)
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    val from = aliasDraftFrom.trim()
+                                    val to = aliasDraftTo.trim()
+                                    if (from.isBlank() || to.isBlank()) {
+                                        Toast.makeText(context, "請填兩邊名稱", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    if (from == to) {
+                                        Toast.makeText(context, "兩邊唔可以相同", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    setNoteAlias(context, from, to)
+                                    noteAliasMap = loadNoteAliases(context)
+                                    aliasDraftFrom = ""
+                                    aliasDraftTo = ""
+                                    Toast.makeText(context, "已加入：$from → $to", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = BRAND_PRIMARY)
+                            ) {
+                                Text("新增對應", fontWeight = FontWeight.Bold)
+                            }
+
+                            val groups = groupNoteAliases(noteAliasMap)
+                            if (groups.isEmpty()) {
+                                Text("未有別名", fontSize = 13.sp, color = TEXT_TERTIARY, modifier = Modifier.padding(vertical = 8.dp))
+                            } else {
+                                groups.forEach { (canonical, aliases) ->
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = SURFACE_ELEVATED,
+                                        border = BorderStroke(0.5.dp, DIVIDER_COLOR),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(Modifier.padding(12.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Link, null, tint = BRAND_PRIMARY, modifier = Modifier.size(18.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    "統一為「$canonical」",
+                                                    fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TEXT_PRIMARY,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        removeAliasesForCanonical(context, canonical)
+                                                        noteAliasMap = loadNoteAliases(context)
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, "刪除整組", tint = COLOR_EXPENSE, modifier = Modifier.size(18.dp))
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                modifier = Modifier.horizontalScroll(rememberScrollState())
+                                            ) {
+                                                aliases.forEach { alias ->
+                                                    Surface(
+                                                        shape = RoundedCornerShape(20.dp),
+                                                        color = BRAND_PRIMARY_LIGHT,
+                                                        border = BorderStroke(0.5.dp, BRAND_PRIMARY.copy(alpha = 0.35f)),
+                                                        onClick = {
+                                                            removeNoteAlias(context, alias)
+                                                            noteAliasMap = loadNoteAliases(context)
+                                                            Toast.makeText(context, "已移除別名「$alias」", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    ) {
+                                                        Row(
+                                                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(alias, fontSize = 13.sp, color = BRAND_PRIMARY_DARK, fontWeight = FontWeight.Medium)
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Icon(Icons.Default.Close, null, tint = BRAND_PRIMARY_DARK, modifier = Modifier.size(14.dp))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Text("撳別名可移除", fontSize = 11.sp, color = TEXT_TERTIARY, modifier = Modifier.padding(top = 6.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showOcrSettingsSheet = false }) { Text("完成") }
+                    }
+                )
             }
 
             val sectionGap = 8.dp
@@ -12256,7 +12538,7 @@ object ScreenReadBridge {
                     val best = candidates.first()
                     try {
                         val intent = buildLaunchIntentForMain(
-                            ctx, best.note.ifBlank { null }, best.amount, null, null
+                            ctx, resolveNoteAlias(ctx, best.note).ifBlank { null }, best.amount, null, null
                         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ctx.startActivity(intent)
                     } catch (_: Exception) {}
