@@ -678,32 +678,56 @@ object CaptureOverlayController {
             elevation = dp(6).toFloat()
         }
 
-        candidates.forEachIndexed { index, cand ->
+        candidates.take(4).forEachIndexed { index, cand ->
             val amountStr = NotificationCaptureBridge.formatAmountForLabel(cand.amount)
-            val label = if (cand.note.isNotBlank()) {
-                "${cand.note} · HKD $amountStr"
-            } else {
-                "HKD $amountStr"
-            }
 
             val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                if (index > 0) setPadding(0, dp(6), 0, 0)
+                if (index > 0) setPadding(0, dp(8), 0, 0)
             }
-            val text = TextView(ctx).apply {
-                text = label
+
+            // 項目名：粗體、可省略，佔用剩餘空間
+            val nameTv = TextView(ctx).apply {
+                text = cand.note.ifBlank { "消費" }
                 setTextColor(0xFF0F172A.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = dp(8)
+                }
             }
+
+            // 金額：等寬偏數字體、更粗、靠右，固定喺記帳掣左邊
+            val amountTv = TextView(ctx).apply {
+                text = "HKD $amountStr"
+                setTextColor(0xFF0F172A.toInt())
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                typeface = android.graphics.Typeface.create(
+                    android.graphics.Typeface.MONOSPACE,
+                    android.graphics.Typeface.BOLD
+                )
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                maxLines = 1
+                // 預留固定寬，避免被長名稱擠走
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginEnd = dp(10)
+                }
+                // 最低寬度約可容納 HKD 9999.99
+                minWidth = dp(96)
+            }
+
             val addBtn = TextView(ctx).apply {
                 this.text = "記帳"
                 gravity = Gravity.CENTER
                 setTextColor(0xFFFFFFFF.toInt())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
                 background = primaryBtnBg
                 setPadding(dp(14), dp(8), dp(14), dp(8))
                 isClickable = true
@@ -712,14 +736,14 @@ object CaptureOverlayController {
             addBtn.setOnClickListener {
                 dismiss(fade = false)
                 try {
-                    // 唔傳 category：由 MainApp 跟 noteCategoryMap（上一次同名項目）決定
                     val intent = buildLaunchIntentForMain(
                         ctx, resolveNoteAlias(ctx, cand.note).ifBlank { null }, cand.amount, null, null
                     ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                     ctx.startActivity(intent)
                 } catch (_: Exception) {}
             }
-            row.addView(text)
+            row.addView(nameTv)
+            row.addView(amountTv)
             row.addView(addBtn)
             root.addView(row)
         }
@@ -12397,7 +12421,7 @@ data class OcrCandidate(
 /**
  * 從畫面文字中抽出多個「金額 + 可選項目名」候選。
  * HKD / HK$ / 港幣 優先；其次 $ / ￥ 符號；再係純小數金額。
- * 回傳最多 8 個不重複金額：由上至下，有貨幣標記優先，無 HK/$ 亦會抽出純數字。
+ * 回傳最多 4 個不重複金額：由上至下，有貨幣標記優先，無 HK/$ 亦會抽出純數字。
  */
 fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
     if (texts.isEmpty()) return emptyList()
@@ -12545,7 +12569,7 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
         note = capitalizeNoteFirstLetter(note).trim()
 
         result.add(OcrCandidate(note = note, amount = hit.amount, score = hit.score, sourceLine = hit.line))
-        if (result.size >= 8) break // 多啲候選畀用戶揀
+        if (result.size >= 4) break
     }
     return result
 }
