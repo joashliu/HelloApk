@@ -12397,38 +12397,38 @@ data class OcrCandidate(
 /**
  * 從畫面文字中抽出多個「金額 + 可選項目名」候選。
  * HKD / HK$ / 港幣 優先；其次 $ / ￥ 符號；再係純小數金額。
- * 回傳最多 4 個不重複金額，按分數降序。
+ * 回傳最多 8 個不重複金額：由上至下，有貨幣標記優先，無 HK/$ 亦會抽出純數字。
  */
 fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
     if (texts.isEmpty()) return emptyList()
 
-    /** 統一負號／全形貨幣／空白，方便認 -HK$8.19、−HK＄8.19 */
+    /** 統一負號／全形貨幣／空白 */
     fun normalizeMoneyText(s: String): String {
         return s
-            .replace('\u2212', '-') // −
-            .replace('\u2013', '-') // –
-            .replace('\u2014', '-') // —
-            .replace('\uFF0D', '-') // －
-            .replace('\uFF04', '$') // ＄
+            .replace('\u2212', '-')
+            .replace('\u2013', '-')
+            .replace('\u2014', '-')
+            .replace('\uFF0D', '-')
+            .replace('\uFF04', '$')
             .replace('\uFE69', '$')
             .replace('\u00A0', ' ')
             .replace('\u3000', ' ')
             .trim()
     }
 
+    // baseScore：有貨幣標記高分；純數字低分但仍會收錄
     val amountPatterns = listOf(
-        // 最高優先：-HK$8.19 / -HK $8.19 / HK$8.19
         Regex("""(?i)-?\s*HK\s*\$\s*(\d+(?:\.\d{1,2})?)""") to 120,
         Regex("""(?i)-?\s*HKD\s*\$?\s*(\d+(?:\.\d{1,2})?)""") to 115,
         Regex("""(?i)-?\s*(?:港幣|港元)\s*[\$]?\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 110,
         Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 100,
         Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE) to 90,
-        // 純 $ / ￥（可負號）
         Regex("""-?\s*\$\s*(\d+(?:\.\d{1,2})?)""") to 80,
         Regex("""-?\s*[￥¥]\s*(\d+(?:\.\d{1,2})?)""") to 75,
         Regex("""(\d+(?:\.\d{1,2})?)\s*[\$￥¥]""") to 70,
-        Regex("""(?<![.\d])(\d+\.\d{1,2})(?![.\d])""") to 40,
-        Regex("""(?<![.\d])(\d{2,5})(?![.\d])""") to 25,
+        // 純小數／整數：無貨幣都照收，之後由上至下畀用戶揀
+        Regex("""(?<![.\d])(\d+\.\d{1,2})(?![.\d])""") to 50,
+        Regex("""(?<![.\d])(\d{1,6})(?![.\d])""") to 30,
     )
 
     fun cleanNote(s: String): String {
@@ -12441,19 +12441,35 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
         t = t.replace(Regex("""-?\s*[\$￥¥]\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""\d+(?:\.\d{1,2})?\s*[\$￥¥]"""), "")
         t = t.replace(Regex("""\d+\.\d{1,2}"""), "")
-        t = t.replace(Regex("""\d{2,}"""), "")
+        t = t.replace(Regex("""\d{1,6}"""), "")
         return t.replace(Regex("""[\s|·•\-_/\\]+"""), " ").trim()
+    }
+
+    fun isNoiseLine(line: String): Boolean {
+        if (line.isBlank() || line.length > 120) return true
+        if (line.contains("KB/s", true) || line.contains("MB/s", true)) return true
+        if (line.contains("kb/s", true) || line.contains("mb/s", true)) return true
+        if (line.matches(Regex("""^\d{1,2}:\d{2}(:\d{2})?$"""))) return true
+        if (line.matches(Regex("""^\d{1,3}%$"""))) return true
+        if (line.matches(Regex("""^\d+(\.\d+)?\s*[kKmMgG][bB]/sS]?$"""))) return true
+        return false
+    }
+
+    /** 明顯唔係金額：年份、電話開頭等 */
+    fun isUnlikelyAmount(amt: Double, raw: String): Boolean {
+        if (amt <= 0.0 || amt > 1_000_000.0) return true
+        // 常見年份
+        if (amt in 1990.0..2100.0 && !raw.contains('.') && raw.length == 4) return true
+        return false
     }
 
     data class RawHit(val amount: Double, val idx: Int, val score: Int, val line: String)
 
-    // 無障礙常把 "-HK$8.19" 拆成多段：合併相鄰短行再掃一次
     val normalized = texts.map { normalizeMoneyText(it) }
-    val scanLines = ArrayList<Pair<Int, String>>(normalized.size * 3 + 2)
+    val scanLines = ArrayList<Pair<Int, String>>(normalized.size * 3 + 4)
     for (i in normalized.indices) {
         val line = normalized[i]
         if (line.isNotBlank()) scanLines.add(i to line)
-        // 與下一行／下兩行拼接：無空格同有空格各試一次（HK$15.17 / HK$ 15.17）
         if (i + 1 < normalized.size) {
             val a = normalized[i + 1]
             val j1 = (line + a).trim()
@@ -12468,59 +12484,47 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
             if (j2.length in 2..72 && j2 != j1) scanLines.add(i to j2)
         }
     }
-    // 最後再掃一次「成屏拼埋」（只取含 $ / HK / 港 的片段，避免太嘈）
     val blob = normalized.joinToString(" ")
-    if (blob.length in 3..400) scanLines.add(0 to blob)
-    Regex("""(?i)[^\n]{0,20}(?:HK\s*\$|HKD|港幣|\$)[^\n]{0,20}""").findAll(blob).forEach { mm ->
-        val frag = mm.value.trim()
-        if (frag.length in 3..48) scanLines.add(0 to frag)
-    }
+    if (blob.length in 3..500) scanLines.add(0 to blob)
 
     val hits = ArrayList<RawHit>()
+    val seenKey = HashSet<String>() // amount@approxIdx 去重
+
     for ((idx, line) in scanLines) {
-        if (line.isBlank() || line.length > 120) continue
-        if (line.matches(Regex("""^\d+(\.\d+)?\s*[kKmMgG]?[bB]/sS]?$""")) ||
-            line.matches(Regex("""^\d{1,2}:\d{2}$""")) ||
-            line.matches(Regex("""^\d{1,3}%$""")) ||
-            line.contains("KB/s", true) || line.contains("MB/s", true) ||
-            line.contains("kb/s", true) || line.contains("mb/s", true)
-        ) continue
-
+        if (isNoiseLine(line)) continue
         for ((pat, baseScore) in amountPatterns) {
-            val m = pat.find(line) ?: continue
-            // groupValues[0]=全文；[1]=第一個 capture（金額）。避免誤用整段 "HK$ 15.17" 去 toDouble
-            val amtStr = m.groupValues.drop(1).lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } }
-                ?: m.groupValues.getOrNull(1)
-                ?: continue
-            val amtRaw = amtStr.toDoubleOrNull() ?: continue
-            val amt = kotlin.math.abs(amtRaw)
-            if (amt <= 0.0 || amt > 1_000_000.0) continue
-            val hasCurrencyHint = line.contains("HKD", true) ||
-                Regex("""(?i)HK\s*\$""").containsMatchIn(line) ||
-                line.contains("港") || line.contains("$") ||
-                line.contains("￥") || line.contains("¥")
-            // 鄰近原文亦可能有 HK
-            val nearby = buildString {
-                for (j in (idx - 1).coerceAtLeast(0)..(idx + 1).coerceAtMost(normalized.lastIndex)) {
-                    append(normalized[j]); append(' ')
-                }
-            }
-            val nearbyHint = hasCurrencyHint || nearby.contains("HK", true) || nearby.contains("港") || nearby.contains("$")
-            if (amt < 10.0 && baseScore < 60 && !nearbyHint) continue
+            // 同一行可有多個數字：全部抽出
+            for (m in pat.findAll(line)) {
+                val amtStr = m.groupValues.drop(1).lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } }
+                    ?: m.groupValues.getOrNull(1)
+                    ?: continue
+                val amtRaw = amtStr.toDoubleOrNull() ?: continue
+                val amt = kotlin.math.abs(amtRaw)
+                if (isUnlikelyAmount(amt, amtStr)) continue
 
-            var score = baseScore
-            if (nearbyHint) score += 30
-            // 完整匹配 -HK$xx 再加分
-            if (Regex("""(?i)-?\s*HK\s*\$""").containsMatchIn(line)) score += 20
-            score += (texts.size - idx).coerceAtMost(8)
-            hits.add(RawHit(amt, idx, score, line))
-            break
+                val hasCurrencyHint = line.contains("HKD", true) ||
+                    Regex("""(?i)HK\s*\$""").containsMatchIn(line) ||
+                    line.contains("港") || line.contains("$") ||
+                    line.contains("￥") || line.contains("¥")
+                var score = baseScore
+                if (hasCurrencyHint) score += 25
+                if (Regex("""(?i)-?\s*HK\s*\$""").containsMatchIn(line)) score += 15
+                // 畫面越上（idx 越小）略加分，最終排序仍以「上→下」為主、貨幣為輔
+                score += (normalized.size - idx).coerceIn(0, 12)
+
+                val key = "${(amt * 100).toInt()}@$idx"
+                if (!seenKey.add(key)) continue
+                hits.add(RawHit(amt, idx, score, line))
+            }
         }
     }
+
     if (hits.isEmpty()) return emptyList()
 
-    val sorted = hits.sortedByDescending { it.score }
-    val result = ArrayList<OcrCandidate>(4)
+    // ★ 排序：主要由上至下（idx 升序），同位置先高分（有貨幣優先）
+    val sorted = hits.sortedWith(compareBy<RawHit> { it.idx }.thenByDescending { it.score })
+
+    val result = ArrayList<OcrCandidate>(8)
     val seenAmounts = HashSet<Double>()
     for (hit in sorted) {
         val rounded = (hit.amount * 100).roundToInt() / 100.0
@@ -12530,7 +12534,7 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
         var note = ""
         val same = cleanNote(hit.line)
         if (same.length in 1..28) note = same
-        if (note.isBlank() && hit.idx > 0) {
+        if (note.isBlank() && hit.idx > 0 && hit.idx < texts.size) {
             val prev = cleanNote(texts[hit.idx - 1])
             if (prev.length in 1..28 && !prev.matches(Regex("""^\d+(\.\d+)?$"""))) note = prev
         }
@@ -12541,10 +12545,11 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
         note = capitalizeNoteFirstLetter(note).trim()
 
         result.add(OcrCandidate(note = note, amount = hit.amount, score = hit.score, sourceLine = hit.line))
-        if (result.size >= 4) break
+        if (result.size >= 8) break // 多啲候選畀用戶揀
     }
     return result
 }
+
 
 object ScreenReadBridge {
     @Volatile var service: LedgerAccessibilityService? = null
@@ -12583,7 +12588,7 @@ object ScreenReadBridge {
             val ctx = context.applicationContext
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (candidates.isEmpty()) {
-                    Toast.makeText(ctx, "未識別到金額（試下有 HKD / $ 字樣嘅畫面）", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "畫面上未讀到可用數字", Toast.LENGTH_SHORT).show()
                     return@post
                 }
                 try {
