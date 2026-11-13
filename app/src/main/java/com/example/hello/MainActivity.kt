@@ -12449,19 +12449,31 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
 
     // 無障礙常把 "-HK$8.19" 拆成多段：合併相鄰短行再掃一次
     val normalized = texts.map { normalizeMoneyText(it) }
-    val scanLines = ArrayList<Pair<Int, String>>(normalized.size * 2)
+    val scanLines = ArrayList<Pair<Int, String>>(normalized.size * 3 + 2)
     for (i in normalized.indices) {
         val line = normalized[i]
         if (line.isNotBlank()) scanLines.add(i to line)
-        // 與下一行／下兩行拼接（中間唔加空格，保留 HK$8.19）
+        // 與下一行／下兩行拼接：無空格同有空格各試一次（HK$15.17 / HK$ 15.17）
         if (i + 1 < normalized.size) {
-            val joined = (line + normalized[i + 1]).trim()
-            if (joined.length in 2..40) scanLines.add(i to joined)
+            val a = normalized[i + 1]
+            val j1 = (line + a).trim()
+            val j2 = (line + " " + a).trim()
+            if (j1.length in 2..60) scanLines.add(i to j1)
+            if (j2.length in 2..60 && j2 != j1) scanLines.add(i to j2)
         }
         if (i + 2 < normalized.size) {
-            val joined = (line + normalized[i + 1] + normalized[i + 2]).trim()
-            if (joined.length in 2..48) scanLines.add(i to joined)
+            val j1 = (line + normalized[i + 1] + normalized[i + 2]).trim()
+            val j2 = (line + " " + normalized[i + 1] + " " + normalized[i + 2]).trim()
+            if (j1.length in 2..72) scanLines.add(i to j1)
+            if (j2.length in 2..72 && j2 != j1) scanLines.add(i to j2)
         }
+    }
+    // 最後再掃一次「成屏拼埋」（只取含 $ / HK / 港 的片段，避免太嘈）
+    val blob = normalized.joinToString(" ")
+    if (blob.length in 3..400) scanLines.add(0 to blob)
+    Regex("""(?i)[^\n]{0,20}(?:HK\s*\$|HKD|港幣|\$)[^\n]{0,20}""").findAll(blob).forEach { mm ->
+        val frag = mm.value.trim()
+        if (frag.length in 3..48) scanLines.add(0 to frag)
     }
 
     val hits = ArrayList<RawHit>()
@@ -12476,7 +12488,10 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
 
         for ((pat, baseScore) in amountPatterns) {
             val m = pat.find(line) ?: continue
-            val amtStr = m.groupValues.lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } } ?: continue
+            // groupValues[0]=全文；[1]=第一個 capture（金額）。避免誤用整段 "HK$ 15.17" 去 toDouble
+            val amtStr = m.groupValues.drop(1).lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } }
+                ?: m.groupValues.getOrNull(1)
+                ?: continue
             val amtRaw = amtStr.toDoubleOrNull() ?: continue
             val amt = kotlin.math.abs(amtRaw)
             if (amt <= 0.0 || amt > 1_000_000.0) continue
