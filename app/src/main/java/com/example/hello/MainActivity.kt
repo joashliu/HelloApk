@@ -12420,13 +12420,13 @@ data class OcrCandidate(
 
 /**
  * 從畫面文字中抽出多個「金額 + 可選項目名」候選。
- * HKD / HK$ / 港幣 優先；其次 $ / ￥ 符號；再係純小數金額。
- * 回傳最多 4 個不重複金額：由上至下，有貨幣標記優先，無 HK/$ 亦會抽出純數字。
+ * ★ 只認有貨幣標記嘅金額：HK$ / HKD / $ / 港幣 / 港元 / ￥
+ * 唔再抽無標記嘅純數字，避免 Alipay 等頁面誤認雜訊。
+ * 回傳最多 4 個不重複金額，由上至下。
  */
 fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
     if (texts.isEmpty()) return emptyList()
 
-    /** 統一負號／全形貨幣／空白 */
     fun normalizeMoneyText(s: String): String {
         return s
             .replace('\u2212', '-')
@@ -12440,33 +12440,51 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
             .trim()
     }
 
-    // baseScore：有貨幣標記高分；純數字低分但仍會收錄
+    // 只保留「帶貨幣標記」嘅 pattern（必須 match 到標記本身）
     val amountPatterns = listOf(
         Regex("""(?i)-?\s*HK\s*\$\s*(\d+(?:\.\d{1,2})?)""") to 120,
-        Regex("""(?i)-?\s*HKD\s*\$?\s*(\d+(?:\.\d{1,2})?)""") to 115,
+        Regex("""(?i)-?\s*HKD\s*\$?\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 115,
         Regex("""(?i)-?\s*(?:港幣|港元)\s*[\$]?\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 110,
         Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*(\d+(?:\.\d{1,2})?)""") to 100,
         Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE) to 90,
         Regex("""-?\s*\$\s*(\d+(?:\.\d{1,2})?)""") to 80,
         Regex("""-?\s*[￥¥]\s*(\d+(?:\.\d{1,2})?)""") to 75,
         Regex("""(\d+(?:\.\d{1,2})?)\s*[\$￥¥]""") to 70,
-        // 純小數／整數：無貨幣都照收，之後由上至下畀用戶揀
-        Regex("""(?<![.\d])(\d+\.\d{1,2})(?![.\d])""") to 50,
-        Regex("""(?<![.\d])(\d{1,6})(?![.\d])""") to 30,
     )
+
+    fun hasCurrencyMarker(s: String): Boolean {
+        if (s.contains('$') || s.contains('￥') || s.contains('¥')) return true
+        if (s.contains("港幣") || s.contains("港元")) return true
+        if (Regex("""(?i)HK\s*\$""").containsMatchIn(s)) return true
+        if (Regex("""(?i)\bHKD\b""").containsMatchIn(s)) return true
+        return false
+    }
 
     fun cleanNote(s: String): String {
         var t = normalizeMoneyText(s)
         t = t.replace(Regex("""(?i)-?\s*HK\s*\$\s*\d+(?:\.\d{1,2})?"""), "")
-        t = t.replace(Regex("""(?i)-?\s*HKD\s*\$?\s*\d+(?:\.\d{1,2})?"""), "")
+        t = t.replace(Regex("""(?i)-?\s*HKD\s*\$?\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""(?i)-?\s*(?:港幣|港元)\s*[\$]?\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""(?i)(?:HKD|HK\$|港幣|港元)\s*[\:：]?\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""(\d+(?:\.\d{1,2})?)\s*(?:HKD|HK\$|港幣|港元)""", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("""-?\s*[\$￥¥]\s*\d+(?:\.\d{1,2})?"""), "")
         t = t.replace(Regex("""\d+(?:\.\d{1,2})?\s*[\$￥¥]"""), "")
         t = t.replace(Regex("""\d+\.\d{1,2}"""), "")
-        t = t.replace(Regex("""\d{1,6}"""), "")
+        t = t.replace(Regex("""\d{2,}"""), "")
         return t.replace(Regex("""[\s|·•\-_/\\]+"""), " ").trim()
+    }
+
+    /** 過濾無障礙雜訊當 note（ba / adb / abb / tram 等） */
+    fun isValidNote(note: String): Boolean {
+        if (note.length !in 1..28) return false
+        if (note.matches(Regex("""^\d+(\.\d+)?$"""))) return false
+        // 全係好短嘅拉丁碎片（常見無障礙垃圾）
+        val parts = note.split(Regex("""\s+""")).filter { it.isNotBlank() }
+        if (parts.isEmpty()) return false
+        if (parts.all { it.matches(Regex("""^[A-Za-z]{1,4}$""")) && it.length <= 3 }) return false
+        // 單一 1–3 個字母
+        if (note.matches(Regex("""^[A-Za-z]{1,3}$"""))) return false
+        return true
     }
 
     fun isNoiseLine(line: String): Boolean {
@@ -12475,68 +12493,52 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
         if (line.contains("kb/s", true) || line.contains("mb/s", true)) return true
         if (line.matches(Regex("""^\d{1,2}:\d{2}(:\d{2})?$"""))) return true
         if (line.matches(Regex("""^\d{1,3}%$"""))) return true
-        if (line.matches(Regex("""^\d+(\.\d+)?\s*[kKmMgG][bB]/sS]?$"""))) return true
-        return false
-    }
-
-    /** 明顯唔係金額：年份、電話開頭等 */
-    fun isUnlikelyAmount(amt: Double, raw: String): Boolean {
-        if (amt <= 0.0 || amt > 1_000_000.0) return true
-        // 常見年份
-        if (amt in 1990.0..2100.0 && !raw.contains('.') && raw.length == 4) return true
         return false
     }
 
     data class RawHit(val amount: Double, val idx: Int, val score: Int, val line: String)
 
     val normalized = texts.map { normalizeMoneyText(it) }
-    val scanLines = ArrayList<Pair<Int, String>>(normalized.size * 3 + 4)
+
+    // 只掃單行 + 相鄰拼接；唔再成屏 blob，減少誤拼雜訊
+    val scanLines = ArrayList<Pair<Int, String>>(normalized.size * 3)
     for (i in normalized.indices) {
         val line = normalized[i]
         if (line.isNotBlank()) scanLines.add(i to line)
         if (i + 1 < normalized.size) {
             val a = normalized[i + 1]
-            val j1 = (line + a).trim()
-            val j2 = (line + " " + a).trim()
-            if (j1.length in 2..60) scanLines.add(i to j1)
-            if (j2.length in 2..60 && j2 != j1) scanLines.add(i to j2)
-        }
-        if (i + 2 < normalized.size) {
-            val j1 = (line + normalized[i + 1] + normalized[i + 2]).trim()
-            val j2 = (line + " " + normalized[i + 1] + " " + normalized[i + 2]).trim()
-            if (j1.length in 2..72) scanLines.add(i to j1)
-            if (j2.length in 2..72 && j2 != j1) scanLines.add(i to j2)
+            // 只拼接「其中一邊有貨幣標記」嘅相鄰行，避免亂拼
+            if (hasCurrencyMarker(line) || hasCurrencyMarker(a)) {
+                val j1 = (line + a).trim()
+                val j2 = (line + " " + a).trim()
+                if (j1.length in 2..64) scanLines.add(i to j1)
+                if (j2.length in 2..64 && j2 != j1) scanLines.add(i to j2)
+            }
         }
     }
-    val blob = normalized.joinToString(" ")
-    if (blob.length in 3..500) scanLines.add(0 to blob)
 
     val hits = ArrayList<RawHit>()
-    val seenKey = HashSet<String>() // amount@approxIdx 去重
+    val seenKey = HashSet<String>()
 
     for ((idx, line) in scanLines) {
         if (isNoiseLine(line)) continue
+        // ★ 硬性：該行必須有貨幣標記，先進入匹配
+        if (!hasCurrencyMarker(line)) continue
+
         for ((pat, baseScore) in amountPatterns) {
-            // 同一行可有多個數字：全部抽出
             for (m in pat.findAll(line)) {
                 val amtStr = m.groupValues.drop(1).lastOrNull { it.isNotBlank() && it.any { c -> c.isDigit() } }
                     ?: m.groupValues.getOrNull(1)
                     ?: continue
                 val amtRaw = amtStr.toDoubleOrNull() ?: continue
                 val amt = kotlin.math.abs(amtRaw)
-                if (isUnlikelyAmount(amt, amtStr)) continue
+                if (amt <= 0.0 || amt > 1_000_000.0) continue
 
-                val hasCurrencyHint = line.contains("HKD", true) ||
-                    Regex("""(?i)HK\s*\$""").containsMatchIn(line) ||
-                    line.contains("港") || line.contains("$") ||
-                    line.contains("￥") || line.contains("¥")
                 var score = baseScore
-                if (hasCurrencyHint) score += 25
-                if (Regex("""(?i)-?\s*HK\s*\$""").containsMatchIn(line)) score += 15
-                // 畫面越上（idx 越小）略加分，最終排序仍以「上→下」為主、貨幣為輔
+                if (Regex("""(?i)HK\s*\$|\bHKD\b|港""").containsMatchIn(line)) score += 20
                 score += (normalized.size - idx).coerceIn(0, 12)
 
-                val key = "${(amt * 100).toInt()}@$idx"
+                val key = "${(amt * 100).toInt()}"
                 if (!seenKey.add(key)) continue
                 hits.add(RawHit(amt, idx, score, line))
             }
@@ -12545,10 +12547,10 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
 
     if (hits.isEmpty()) return emptyList()
 
-    // ★ 排序：主要由上至下（idx 升序），同位置先高分（有貨幣優先）
+    // 由上至下，同位置高分優先
     val sorted = hits.sortedWith(compareBy<RawHit> { it.idx }.thenByDescending { it.score })
 
-    val result = ArrayList<OcrCandidate>(8)
+    val result = ArrayList<OcrCandidate>(4)
     val seenAmounts = HashSet<Double>()
     for (hit in sorted) {
         val rounded = (hit.amount * 100).roundToInt() / 100.0
@@ -12557,14 +12559,14 @@ fun parseScreenTextForLedger(texts: List<String>): List<OcrCandidate> {
 
         var note = ""
         val same = cleanNote(hit.line)
-        if (same.length in 1..28) note = same
+        if (isValidNote(same)) note = same
         if (note.isBlank() && hit.idx > 0 && hit.idx < texts.size) {
-            val prev = cleanNote(texts[hit.idx - 1])
-            if (prev.length in 1..28 && !prev.matches(Regex("""^\d+(\.\d+)?$"""))) note = prev
+            val prev = cleanNote(normalized.getOrElse(hit.idx - 1) { "" })
+            if (isValidNote(prev)) note = prev
         }
-        if (note.isBlank() && hit.idx + 1 < texts.size) {
-            val next = cleanNote(texts[hit.idx + 1])
-            if (next.length in 1..28 && !next.matches(Regex("""^\d+(\.\d+)?$"""))) note = next
+        if (note.isBlank() && hit.idx + 1 < normalized.size) {
+            val next = cleanNote(normalized[hit.idx + 1])
+            if (isValidNote(next)) note = next
         }
         note = capitalizeNoteFirstLetter(note).trim()
 
@@ -12612,7 +12614,7 @@ object ScreenReadBridge {
             val ctx = context.applicationContext
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (candidates.isEmpty()) {
-                    Toast.makeText(ctx, "畫面上未讀到可用數字", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "未識別到金額（需要 HKD / HK$ / $ 等字樣）", Toast.LENGTH_SHORT).show()
                     return@post
                 }
                 try {
