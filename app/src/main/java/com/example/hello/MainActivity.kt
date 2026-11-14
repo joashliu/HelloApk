@@ -4267,6 +4267,7 @@ fun MainApp(
 // =========================================================
 //  ★ KeyboardAndFabLayer
 // =========================================================
+@OptIn(ExperimentalLayoutApi::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun BoxScope.KeyboardAndFabLayer(
     showKeyboard: Boolean,
@@ -4470,38 +4471,85 @@ private fun BoxScope.KeyboardAndFabLayer(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(start = 16.dp, bottom = bottomChromePad + 56.dp + 4.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = bottomChromePad + 56.dp + 4.dp)
                         .zIndex(20f)
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = SURFACE_CARD,
                         border = BorderStroke(0.5.dp, DIVIDER_COLOR),
                         modifier = Modifier
-                            .width(260.dp)
+                            .fillMaxWidth()
                             .heightIn(max = 260.dp)
                             .animateContentSize(
                                 animationSpec = spring(dampingRatio = 0.85f, stiffness = 350f),
                                 alignment = Alignment.BottomCenter
                             )
                     ) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            filterSuggestions.forEach { s ->
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .clickable {
-                                            // 填入建議後即收起下拉（含完全相同字串）
-                                            onFilterSearchChange(TextFieldValue(s))
-                                            onFilterSearchFocusChange(false)
-                                            focusManager.clearFocus(force = true)
+                        BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp)) {
+                            val maxChipWidth = maxWidth
+                            val suggestScroll = rememberScrollState()
+                            FlowRow(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(suggestScroll)
+                                    .padding(bottom = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                filterSuggestions.forEach { s ->
+                                    key(s) {
+                                        var pressed by remember { mutableStateOf(false) }
+                                        Surface(
+                                            modifier = Modifier
+                                                .height(44.dp)
+                                                .widthIn(max = maxChipWidth)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .pointerInteropFilter { ev ->
+                                                    when (ev.actionMasked) {
+                                                        android.view.MotionEvent.ACTION_DOWN -> {
+                                                            pressed = true
+                                                            true
+                                                        }
+                                                        android.view.MotionEvent.ACTION_UP -> {
+                                                            if (pressed) {
+                                                                pressed = false
+                                                                onFilterSearchChange(TextFieldValue(s))
+                                                                onFilterSearchFocusChange(false)
+                                                                focusManager.clearFocus(force = true)
+                                                            }
+                                                            true
+                                                        }
+                                                        android.view.MotionEvent.ACTION_CANCEL -> {
+                                                            pressed = false
+                                                            true
+                                                        }
+                                                        else -> true
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED
+                                        ) {
+                                            Row(
+                                                Modifier.padding(horizontal = 10.dp).fillMaxHeight(),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                IconView(noteIconMap[s] ?: "", s, size = 18.dp)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    s,
+                                                    fontSize = 13.sp,
+                                                    color = TEXT_PRIMARY,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(s, fontSize = 14.sp, color = TEXT_PRIMARY,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
-                                HorizontalDivider(color = DIVIDER_COLOR, thickness = 0.5.dp)
                             }
                         }
                     }
@@ -4510,7 +4558,6 @@ private fun BoxScope.KeyboardAndFabLayer(
         }
     }
 }
-
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun AnimatedFabLayer(
