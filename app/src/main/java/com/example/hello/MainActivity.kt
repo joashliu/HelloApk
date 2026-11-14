@@ -4488,12 +4488,12 @@ private fun BoxScope.KeyboardAndFabLayer(
                                 alignment = Alignment.BottomCenter
                             )
                     ) {
-                        BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp)) {
+                        BoxWithConstraints(Modifier.fillMaxWidth().padding(12.dp)) {
                             val maxChipWidth = maxWidth
                             val suggestScroll = rememberScrollState()
                             FlowRow(
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxWidth()
                                     .verticalScroll(suggestScroll)
                                     .padding(bottom = 4.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
