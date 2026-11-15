@@ -7189,7 +7189,7 @@ fun CalendarContent(
                 chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
             } else 0f
             val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
-            val topVisibleH = if (isChromeCollapsing)
+            val topVisibleH = if (isChromeCollapsing && chromeOffsetPx > 0.5f)
                 (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
             else -1f
 
