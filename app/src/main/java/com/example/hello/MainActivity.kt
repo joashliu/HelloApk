@@ -1,3 +1,4 @@
+
 package com.example.hello
 
 import androidx.compose.foundation.layout.WindowInsets
@@ -6679,9 +6680,29 @@ fun CalendarContent(
     var monthDirection by remember { mutableIntStateOf(1) }
     var displayMode by remember { mutableIntStateOf(0) }
 
-    var selectedDay by remember { mutableStateOf<Int?>(null) }
-    var selectedRowIdx by remember { mutableStateOf<Int?>(null) }
-    var selectedColIdx by remember { mutableStateOf<Int?>(null) }
+    // ★ 默認選中今日（如果係當月），確保當日明細一開始就 ready
+    val todayCal = remember { Calendar.getInstance() }
+    val initSelDay = remember { if (currentMonthKey == todayKey) todayCal.get(Calendar.DAY_OF_MONTH) else null }
+    val initFirstOff = remember {
+        val c = Calendar.getInstance()
+        val p = currentMonthKey.split("-")
+        if (p.size == 2) c.set(p[0].toInt(), p[1].toInt() - 1, 1)
+        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+        c.get(Calendar.DAY_OF_WEEK) - 1
+    }
+    val initTotalRows = if (initSelDay != null) {
+        val p = currentMonthKey.split("-")
+        val c2 = Calendar.getInstance()
+        if (p.size == 2) c2.set(p[0].toInt(), p[1].toInt() - 1, 1)
+        val dim = c2.getActualMaximum(Calendar.DAY_OF_MONTH)
+        (initFirstOff + dim + 6) / 7
+    } else 0
+    val initRow = if (initSelDay != null) ((initFirstOff + initSelDay!! - 1) / 7).coerceIn(0, (initTotalRows - 1).coerceAtLeast(0)) else null
+    val initCol = if (initSelDay != null) ((initFirstOff + initSelDay!! - 1) % 7) else null
+
+    var selectedDay by remember { mutableStateOf(initSelDay) }
+    var selectedRowIdx by remember { mutableStateOf(initRow) }
+    var selectedColIdx by remember { mutableStateOf(initCol) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
 
     // 月曆明細：長按扇形選單（同記帳頁）
@@ -6746,9 +6767,9 @@ fun CalendarContent(
         }
     }
 
-    var cachedSelectedDay by remember { mutableIntStateOf(1) }
-    var cachedSelectedRowIdx by remember { mutableIntStateOf(0) }
-    var cachedSelectedCol by remember { mutableIntStateOf(0) }
+    var cachedSelectedDay by remember { mutableIntStateOf(initSelDay ?: 1) }
+    var cachedSelectedRowIdx by remember { mutableIntStateOf(initRow ?: 0) }
+    var cachedSelectedCol by remember { mutableIntStateOf(initCol ?: 0) }
 
     // 階段 1：collapseP 0→1 日曆收到剩選中一行，明細停喺該日期格下
     // 階段 2：chromeOffsetPx 推走 chips/stats
@@ -6891,27 +6912,27 @@ fun CalendarContent(
         return consumed
     }
 
-    /** 手指向下（px>0）→ 先退階段2再退階段1 */
+    /** 手指向下（px>0）→ ★ 先退階段1（收返明細），完成後先退階段2 */
     fun applyDragDown(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
         var left = px
         var consumed = 0f
-        // 退階段 2（移除 0.5f，改為 1:1 移動幅度）
-        if (chromeOffsetPx > 0.001f && left > 0f) {
-            val visualDelta = left
-            val newOffset = (chromeOffsetPx - visualDelta).coerceAtLeast(0f)
-            val visualUsed = chromeOffsetPx - newOffset
-            chromeOffsetPx = newOffset
-            consumed += visualUsed.coerceAtMost(left)
-            left -= visualUsed.coerceAtMost(left)
-        }
-        // 退階段 1
-        if (chromeOffsetPx <= 0.001f && left > 0f) {
+        // 先退階段 1
+        if (collapseP > 0.001f && left > 0f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP - left / range).coerceIn(0f, 1f)
             val used = (collapseP - newP) * range
             collapseP = newP
             consumed += used
+            left -= used
+        }
+        // 再退階段 2
+        if (collapseP <= 0.001f && chromeOffsetPx > 0.001f && left > 0f) {
+            val range = chromeRangePx()
+            val newOffset = (chromeOffsetPx - left).coerceAtLeast(0f)
+            val used = chromeOffsetPx - newOffset
+            chromeOffsetPx = newOffset
+            consumed += used.coerceAtMost(left)
         }
         return consumed
     }
@@ -6950,12 +6971,13 @@ fun CalendarContent(
     }
 
     fun snapAfterDrag() {
-        if (chromeOffsetPx > 0.01f || collapseP >= 0.99f) {
-            if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
-            if (collapseP < 0.99f) animateCollapseTo(1f)
+        if (collapseP > 0.01f && collapseP < 0.99f) {
+            if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
             return
         }
-        if (collapseP >= 0.45f) animateCollapseTo(1f) else animateCollapseTo(0f)
+        if (chromeOffsetPx > 0.01f && chromeOffsetPx < chromeRangePx() - 1f) {
+            if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
+        }
     }
 
     /** 換月份時先完全收起（含清選取） */
@@ -6979,10 +7001,28 @@ fun CalendarContent(
                     isSettling = false
                     collapseP = 0f
                     chromeOffsetPx = 0f
-                    selectedDay = null
-                    selectedRowIdx = null
-                    selectedColIdx = null
                     detailExpandedId = null
+                    val newMonthToday = if (currentMonthKey == todayKey) todayCal.get(Calendar.DAY_OF_MONTH) else null
+                    if (newMonthToday != null) {
+                        val parts = currentMonthKey.split("-")
+                        val cal = Calendar.getInstance()
+                        if (parts.size == 2) cal.set(parts[0].toInt(), parts[1].toInt() - 1, 1)
+                        val fdOff = cal.get(Calendar.DAY_OF_WEEK) - 1
+                        val dim = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+                        val tRows = (fdOff + dim + 6) / 7
+                        val newRow = ((fdOff + newMonthToday - 1) / 7).coerceIn(0, (tRows - 1).coerceAtLeast(0))
+                        val newCol = ((fdOff + newMonthToday - 1) % 7)
+                        selectedDay = newMonthToday
+                        selectedRowIdx = newRow
+                        selectedColIdx = newCol
+                        cachedSelectedDay = newMonthToday
+                        cachedSelectedRowIdx = newRow
+                        cachedSelectedCol = newCol
+                    } else {
+                        selectedDay = null
+                        selectedRowIdx = null
+                        selectedColIdx = null
+                    }
                 }
             }
         }
@@ -7019,14 +7059,23 @@ fun CalendarContent(
         enabled = selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f
     ) { handleBackStep() }
 
-    // ★ 兩段式 nested scroll
+    // ★ 兩段式 nested scroll（chips完全收起後先允許明細滾動；向下一開始只收明細）
     val detailNestedConnection = object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             if (selectedDay == null || isSettling) return Offset.Zero
-            // 手指向上 available.y < 0
-            if (available.y < 0f && detailScrollState.value <= 0) {
-                val used = applyDragUp(-available.y)
-                return Offset(0f, -used)
+            val chromeMax = chromeRangePx()
+            if (available.y < 0f) {
+                // chips 未完全收起 → 全部用嚟收 chips，唔畀明細滾動
+                if (chromeOffsetPx < chromeMax - 0.5f) {
+                    val used = applyDragUp(-available.y)
+                    return Offset(0f, -used)
+                }
+                // chips 已完全收起 + 明細到頂
+                if (detailScrollState.value <= 0) {
+                    val used = applyDragUp(-available.y)
+                    return Offset(0f, -used)
+                }
+                return Offset.Zero
             }
             return Offset.Zero
         }
@@ -7037,7 +7086,6 @@ fun CalendarContent(
             source: NestedScrollSource
         ): Offset {
             if (selectedDay == null || isSettling) return Offset.Zero
-            // 明細到頂後向下 → 展開
             if (available.y > 0f && detailScrollState.value <= 0) {
                 val used = applyDragDown(available.y)
                 return Offset(0f, used)
@@ -7047,16 +7095,23 @@ fun CalendarContent(
 
         override suspend fun onPreFling(available: Velocity): Velocity {
             if (selectedDay == null) return Velocity.Zero
-            if (detailScrollState.value > 0) return Velocity.Zero
+            val chromeMax = chromeRangePx()
             when {
                 available.y < -400f -> {
-                    // 快速向上
+                    if (chromeOffsetPx >= chromeMax - 1f && detailScrollState.value > 0) {
+                        return Velocity.Zero
+                    }
                     if (collapseP < 0.99f) animateCollapseTo(1f)
-                    else animateChromeTo(1f)
+                    else if (chromeOffsetPx < chromeMax - 1f) animateChromeTo(1f)
+                    else return Velocity.Zero
                 }
                 available.y > 400f -> {
-                    if (chromeOffsetPx > 0.01f) animateChromeTo(0f)
-                    else animateCollapseTo(0f)
+                    if (detailScrollState.value > 0) return Velocity.Zero
+                    if (collapseP > 0.05f) {
+                        animateCollapseTo(0f)
+                    } else if (chromeOffsetPx > 0.01f) {
+                        animateChromeTo(0f)
+                    }
                 }
                 else -> snapAfterDrag()
             }
@@ -7206,10 +7261,12 @@ fun CalendarContent(
                 }
                 val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
                 val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
+                val minDetailPeekH = with(density) { 100.dp.toPx() }
+                val maxGridForDetail = (containerHeightPx - headerHeightPx - minDetailPeekH - fabTopPaddingPx).coerceAtLeast(selRowH)
                 val visibleGridH = if (selectedDay != null) {
-                    (fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)
+                    ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
                 } else {
-                    fullGridHeightPx
+                    fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
                 }
                 val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
                     rowOffsetsPx[selRow] * p
@@ -7281,9 +7338,12 @@ fun CalendarContent(
                                             .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
                                         if (selectedDay == day) {
                                             when {
-                                                chromeOffsetPx > 0.05f -> animateChromeTo(0f)
-                                                collapseP < 0.95f -> animateCollapseTo(1f)
-                                                else -> animateCollapseTo(0f)
+                                                collapseP > 0.05f && collapseP < 0.95f -> {
+                                                    if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
+                                                }
+                                                collapseP >= 0.95f && chromeOffsetPx > 0.05f -> animateChromeTo(0f)
+                                                collapseP >= 0.95f -> animateCollapseTo(0f)
+                                                else -> animateCollapseTo(1f)
                                             }
                                         } else {
                                             selectedDay = day
