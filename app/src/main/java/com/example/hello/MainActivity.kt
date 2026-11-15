@@ -13354,6 +13354,10 @@ object ScreenReadFabController {
         var startX = 0
         var startY = 0
         var dragged = false
+        var longPressFired = false
+        val longPressTimeout = android.view.ViewConfiguration.get(ctx).longPressTimeout.toLong() // ~500ms
+        var longPressRunnable: Runnable? = null
+
         btn.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
@@ -13364,12 +13368,44 @@ object ScreenReadFabController {
                     startX = params.x
                     startY = params.y
                     dragged = false
+                    longPressFired = false
+                    // 長按 500ms → 直接開啟語音記帳
+                    longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                    longPressRunnable = Runnable {
+                        if (!dragged) {
+                            longPressFired = true
+                            // 觸發語音記帳（透過 voiceLaunchToken 讓 Compose 端啟動語音）
+                            voiceLaunchToken.value += 1
+                            // 震動回饋
+                            try {
+                                val vib = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                                if (vib != null && vib.hasVibrator()) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        vib.vibrate(android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        vib.vibrate(40)
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                            // 視覺回饋：瞬間縮細再彈返
+                            btn.animate()?.scaleX(0.82f)?.scaleY(0.82f)?.setDuration(80)?.withEndAction {
+                                btn.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
+                            }?.start()
+                        }
+                    }
+                    mainHandler.postDelayed(longPressRunnable, longPressTimeout)
                     true
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val dx = (ev.rawX - downX).toInt()
                     val dy = (ev.rawY - downY).toInt()
-                    if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) dragged = true
+                    if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) {
+                        dragged = true
+                        // 拖動時取消長按計時
+                        longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                        longPressRunnable = null
+                    }
                     // x 以右邊為原點：0 = 貼右，screenW - size = 貼右以左最遠（貼左）
                     val maxX = (screenWidthPx() - size).coerceAtLeast(0)
                     params.x = (startX - dx).coerceIn(0, maxX)
@@ -13383,7 +13419,10 @@ object ScreenReadFabController {
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    if (!dragged) {
+                    // 清除長按計時
+                    longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                    longPressRunnable = null
+                    if (!dragged && !longPressFired) {
                         v.performClick()
                     }
                     scheduleDock()
@@ -13402,7 +13441,6 @@ object ScreenReadFabController {
             ScreenReadBridge.requestReadAndFill(ctx)
             scheduleDock()
         }
-
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager ?: return
         try {
             wm.addView(btn, params)
