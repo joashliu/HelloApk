@@ -481,6 +481,48 @@ object CaptureOverlayController {
 
     fun isShowing(): Boolean = overlayView != null
 
+    /** 重新排程自動關閉（拖返上嚟之後用） */
+    private fun scheduleAutoDismiss() {
+        dismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        val r = Runnable { dismiss(fade = true) }
+        dismissRunnable = r
+        mainHandler.postDelayed(r, OVERLAY_AUTO_DISMISS_MS)
+    }
+
+    /** 取消自動關閉倒數（手指拖緊彈窗時用） */
+    private fun cancelAutoDismiss() {
+        dismissRunnable?.let { mainHandler.removeCallbacks(it) }
+    }
+
+    /**
+     * 向下拖走關閉：由手指拖曳嘅位置繼續向下滑出 + 淡出，動畫跟住拖動方向。
+     * 用於 OCR 彈窗「向下滑隱藏」。
+     */
+    fun dismissSlidingDown() {
+        val ctx = appContext ?: return
+        val view = overlayView ?: return
+        dismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        dismissRunnable = null
+        val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        val density = ctx.resources.displayMetrics.density
+        val fallback = (260 * density).toInt()
+        val travel = (view.height.takeIf { it > 0 } ?: fallback) +
+            view.translationY.toInt() + (28 * density).toInt()
+        try {
+            view.animate().translationY(travel.toFloat()).alpha(0f)
+                .setDuration(190)
+                .setInterpolator(android.view.animation.AccelerateInterpolator())
+                .withEndAction {
+                    try { wm?.removeView(view) } catch (_: Exception) {}
+                    if (overlayView === view) overlayView = null
+                }
+                .start()
+        } catch (_: Exception) {
+            try { wm?.removeView(view) } catch (_: Exception) {}
+            if (overlayView === view) overlayView = null
+        }
+    }
+
     fun dismiss(fade: Boolean = false) {
         val ctx = appContext ?: return
         val view = overlayView ?: return
@@ -749,7 +791,86 @@ object CaptureOverlayController {
             root.addView(row)
         }
 
-        val container = FrameLayout(ctx).apply {
+        // ★ 支援向下滑動隱藏：跟手拖曳 + 松手跟住方向滑走（唔夠距離就彈返上）
+        val swipeSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
+        var swipeDownX = 0f
+        var swipeDownY = 0f
+        var swipeIntercepting = false
+        var swipeTracker: android.view.VelocityTracker? = null
+        val container = object : FrameLayout(ctx) {
+            @Suppress("DEPRECATION")
+            override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        swipeDownX = ev.rawX
+                        swipeDownY = ev.rawY
+                        swipeIntercepting = false
+                        swipeTracker?.recycle()
+                        swipeTracker = android.view.VelocityTracker.obtain()
+                        swipeTracker?.addMovement(ev)
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        swipeTracker?.addMovement(ev)
+                        val dy = ev.rawY - swipeDownY
+                        val dx = kotlin.math.abs(ev.rawX - swipeDownX)
+                        if (!swipeIntercepting && dy > swipeSlop * 1.2f && dy > dx * 0.8f) {
+                            swipeIntercepting = true
+                            // 拖緊嘅時候唔好自動收埋
+                            cancelAutoDismiss()
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP,
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        swipeTracker?.recycle()
+                        swipeTracker = null
+                        swipeIntercepting = false
+                    }
+                }
+                return swipeIntercepting
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onTouchEvent(ev: android.view.MotionEvent): Boolean {
+                when (ev.actionMasked) {
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        swipeTracker?.addMovement(ev)
+                        val dy = ev.rawY - swipeDownY
+                        swipeDownY = ev.rawY
+                        if (dy > 0f) {
+                            translationY = (translationY + dy).coerceAtLeast(0f)
+                            val h = (height.takeIf { it > 0 } ?: (200 * resources.displayMetrics.density).toInt())
+                            alpha = (1f - translationY / (h * 1.4f)).coerceAtLeast(0.25f)
+                        }
+                        return true
+                    }
+                    android.view.MotionEvent.ACTION_UP,
+                    android.view.MotionEvent.ACTION_CANCEL -> {
+                        val tracker = swipeTracker
+                        var vy = 0f
+                        if (tracker != null) {
+                            tracker.computeCurrentVelocity(1000)
+                            vy = tracker.yVelocity
+                        }
+                        tracker?.recycle()
+                        swipeTracker = null
+                        swipeIntercepting = false
+                        val h = height.takeIf { it > 0 } ?: (200 * resources.displayMetrics.density).toInt()
+                        val shouldDismiss = translationY > h * 0.28f || vy > 800f
+                        if (shouldDismiss) {
+                            CaptureOverlayController.dismissSlidingDown()
+                        } else {
+                            animate().translationY(0f).alpha(1f)
+                                .setDuration(220)
+                                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                                .start()
+                            scheduleAutoDismiss()
+                        }
+                        return true
+                    }
+                }
+                return super.onTouchEvent(ev)
+            }
+        }.apply {
             setPadding(dp(16), 0, dp(16), dp(24))
             addView(
                 root,
@@ -788,8 +909,14 @@ object CaptureOverlayController {
         try {
             wm.addView(container, params)
             overlayView = container
-            val fadeIn = AlphaAnimation(0f, 1f).apply { duration = 160 }
-            container.startAnimation(fadeIn)
+            // 入場：淡入 + 微微向上滑入（用 view.alpha／translationY，
+            // 方便之後手指拖曳可以直接接管呢兩個屬性）
+            container.alpha = 0f
+            container.translationY = 24f * ctx.resources.displayMetrics.density
+            container.animate().alpha(1f).translationY(0f)
+                .setDuration(180)
+                .setInterpolator(android.view.animation.DecelerateInterpolator())
+                .start()
             val r = Runnable { dismiss(fade = true) }
             dismissRunnable = r
             mainHandler.postDelayed(r, OVERLAY_AUTO_DISMISS_MS)
@@ -4321,10 +4448,10 @@ private fun BoxScope.KeyboardAndFabLayer(
     val imeOpen = imeLiftDp > 0.dp
     val bottomChromePad = if (imeOpen) 8.dp else NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp
 
-    // OCR 懸浮掣避開鍵盤
+    // OCR 懸浮掣避讓鍵盤：由 Controller 判斷「掣本身有冇喺鍵盤區域內」
+    // —— 喺先抬升（啱啱好離開鍵盤頂邊）；唔喺就唔會刻意升高
     LaunchedEffect(imeBottomPx) {
-        val lift = (imeBottomPx - navBottomPx).coerceAtLeast(0)
-        try { ScreenReadFabController.setKeyboardLift(lift) } catch (_: Exception) {}
+        try { ScreenReadFabController.setKeyboardLiftFromImeBottom(imeBottomPx) } catch (_: Exception) {}
     }
 
     Box(
@@ -4687,28 +4814,57 @@ private fun AnimatedFabLayer(
             }
         }
 
+        // ★ 按壓回饋：撳落去 → FAB 縮細 + 變深色 + 陰影收成「笠落去」；
+        //    icon 由加號 Crossfade 變做語音 mic，鬆手即變返加號。
+        val fabInteractionSource = remember { MutableInteractionSource() }
+        val fabPressed by fabInteractionSource.collectIsPressedAsState()
+        val fabPressScale by animateFloatAsState(
+            targetValue = if (fabPressed) 0.85f else 1f,
+            animationSpec = spring(dampingRatio = 0.42f, stiffness = 560f),
+            label = "fabPressScale"
+        )
+        val fabPressElevation by animateDpAsState(
+            targetValue = if (fabPressed) 1.dp else 4.dp,
+            animationSpec = spring(dampingRatio = 0.7f, stiffness = 520f),
+            label = "fabPressElevation"
+        )
+        LaunchedEffect(fabPressed) {
+            if (fabPressed) {
+                try { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) } catch (_: Exception) {}
+            }
+        }
         Box(
             modifier = Modifier
                 .size(56.dp)
-                .shadow(4.dp, CircleShape)
+                .graphicsLayer {
+                    scaleX = fabPressScale
+                    scaleY = fabPressScale
+                }
+                .shadow(fabPressElevation, CircleShape)
                 .clip(CircleShape)
-                .background(BRAND_PRIMARY)
+                .background(if (fabPressed) BRAND_PRIMARY_DARK else BRAND_PRIMARY)
                 .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
+                    interactionSource = fabInteractionSource,
                     indication = null,
                     onClick = { onFabTap() },
                     onLongClick = { requestVoiceInput() }
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = "新增（長按語音）",
-                tint = Color.White,
-                modifier = Modifier
-                    .size(24.dp)
-                    .graphicsLayer { rotationZ = currentP * 90f }
-            )
+            androidx.compose.animation.Crossfade(
+                targetState = fabPressed,
+                animationSpec = tween(110),
+                label = "fabIcon"
+            ) { pressed ->
+                Icon(
+                    if (pressed) Icons.Default.Mic else Icons.Default.Add,
+                    contentDescription = if (pressed) "語音記帳（放開手指取消）" else "新增（長按語音）",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .graphicsLayer { rotationZ = currentP * 90f }
+                )
+            }
         }
     }
 }
@@ -12804,7 +12960,8 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
         val lift = if (imeTop < Int.MAX_VALUE && imeTop < screenH) {
             (screenH - imeTop).coerceAtLeast(0).coerceAtMost(screenH / 2)
         } else 0
-        ScreenReadFabController.setKeyboardLift(lift)
+        // 同時俾埋鍵盤頂邊 y：懸浮掣淨係喺鍵盤區域內先至抬升
+        ScreenReadFabController.setKeyboardLift(lift, if (lift > 0) imeTop else Int.MAX_VALUE)
     }
 
     override fun onInterrupt() {}
@@ -12900,8 +13057,8 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
 }
 
 /** 系統級可拖動懸浮掣（顯示在其他 App 之上）
- * - 5 秒無操作自動貼邊（蝕一半入邊框）+ 半透明
- * - 鍵盤彈出時自動上移避讓
+ * - 5 秒無操作自動貼邊：邊近貼邊（左／右都得），蝕一半入邊框 + 半透明
+ * - 鍵盤彈出時：只有本身喺鍵盤區域內先至抬升避讓（剛剛好離開鍵盤頂邊）
  */
 object ScreenReadFabController {
     private var appContext: Context? = null
@@ -12910,6 +13067,7 @@ object ScreenReadFabController {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var dockRunnable: Runnable? = null
     private var isDocked = false
+    private var dockedOnLeft = false
     private var baseY = 0
     private var keyboardLiftPx = 0
     private var buttonSizePx = 0
@@ -12935,7 +13093,46 @@ object ScreenReadFabController {
         layoutParams = null
         btnView = null
         isDocked = false
+        dockedOnLeft = false
         keyboardLiftPx = 0
+    }
+
+    /** 螢幕寬度（px）：用嚟判斷懸浮掣貼邊應該貼左定貼右 */
+    private fun screenWidthPx(): Int {
+        val ctx = appContext ?: return android.content.res.Resources.getSystem().displayMetrics.widthPixels
+        return try {
+            val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
+                wm.currentWindowMetrics.bounds.width()
+            } else {
+                @Suppress("DEPRECATION")
+                val p = android.graphics.Point()
+                @Suppress("DEPRECATION")
+                wm?.defaultDisplay?.getRealSize(p)
+                if (p.x > 0) p.x else ctx.resources.displayMetrics.widthPixels
+            }
+        } catch (_: Exception) {
+            ctx.resources.displayMetrics.widthPixels
+        }
+    }
+
+    /** 螢幕高度（px）：用嚟由 IME 高度換算鍵盤頂邊 y */
+    private fun screenHeightPx(): Int {
+        val ctx = appContext ?: return android.content.res.Resources.getSystem().displayMetrics.heightPixels
+        return try {
+            val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
+                wm.currentWindowMetrics.bounds.height()
+            } else {
+                @Suppress("DEPRECATION")
+                val p = android.graphics.Point()
+                @Suppress("DEPRECATION")
+                wm?.defaultDisplay?.getRealSize(p)
+                if (p.y > 0) p.y else ctx.resources.displayMetrics.heightPixels
+            }
+        } catch (_: Exception) {
+            ctx.resources.displayMetrics.heightPixels
+        }
     }
 
     fun refresh(context: Context) {
@@ -12948,21 +13145,62 @@ object ScreenReadFabController {
         show(ctx)
     }
 
-    /** 由 App 端呼叫：鍵盤高度（px）。>0 時上移避讓；0 時還原。 */
-    fun setKeyboardLift(liftPx: Int) {
+    /** 由 App 端呼叫：輸入法底部高度（px）→ 自己換算鍵盤頂邊 y。 */
+    fun setKeyboardLiftFromImeBottom(imeBottomPx: Int) {
+        val kbH = imeBottomPx.coerceAtLeast(0)
+        val top = if (kbH <= 0) Int.MAX_VALUE else (screenHeightPx() - kbH)
+        setKeyboardLift(kbH, top)
+    }
+
+    /**
+     * 鍵盤避讓。
+     * ★ 重點：唔再「一有鍵盤就刻意升高」——
+     *   只有懸浮掣本身（未抬升時嘅位置）真係跌入咗鍵盤區域先至抬升，
+     *   而且只抬升到「剛剛好離開鍵盤頂邊」，唔會刻意升多。
+     * @param keyboardHeightPx 鍵盤高度（px）
+     * @param imeTopPx         鍵盤頂邊嘅螢幕 y（未知時傳 Int.MAX_VALUE → 視為唔抬升）
+     */
+    fun setKeyboardLift(keyboardHeightPx: Int, imeTopPx: Int = Int.MAX_VALUE) {
         val lp = layoutParams ?: return
         val view = overlayView ?: return
         val ctx = appContext ?: return
-        val newLift = liftPx.coerceAtLeast(0)
+        val kbH = keyboardHeightPx.coerceAtLeast(0)
+        val density = ctx.resources.displayMetrics.density
+        val gap = (10 * density + 0.5f).toInt()
+
+        // 未抬升時嘅按鈕底邊
+        val restingBottom = baseY + if (buttonSizePx > 0) buttonSizePx else (52 * density).toInt()
+        val overlapsIme = kbH > 0 && imeTopPx < Int.MAX_VALUE && restingBottom > imeTopPx
+
+        val newLift = if (overlapsIme) {
+            // 淨係升到剛剛好離開鍵盤頂邊（加少少縫隙），唔超過鍵盤本身高度
+            ((restingBottom - imeTopPx) + gap).coerceAtMost(kbH)
+        } else 0
+
         if (newLift == keyboardLiftPx) return
         keyboardLiftPx = newLift
         val targetY = (baseY - keyboardLiftPx).coerceAtLeast(0)
         if (lp.y == targetY) return
-        lp.y = targetY
+        val startY = lp.y
         try {
-            (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
-                ?.updateViewLayout(view, lp)
-        } catch (_: Exception) {}
+            android.animation.ValueAnimator.ofInt(startY, targetY).apply {
+                duration = 170
+                interpolator = android.view.animation.DecelerateInterpolator()
+                addUpdateListener { va ->
+                    lp.y = va.animatedValue as Int
+                    try {
+                        (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                            ?.updateViewLayout(view, lp)
+                    } catch (_: Exception) {}
+                }
+            }.start()
+        } catch (_: Exception) {
+            lp.y = targetY
+            try {
+                (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                    ?.updateViewLayout(view, lp)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun cancelDockTimer() {
@@ -12985,21 +13223,34 @@ object ScreenReadFabController {
         btnView?.alpha = alpha
     }
 
-    /** 貼右邊，蝕一半入邊框 + 半透明 */
+    /** 貼近邊（左／右邊近就貼邊），蝕一半入邊框 + 半透明 */
     private fun performDock() {
         val lp = layoutParams ?: return
         val view = overlayView ?: return
         val ctx = appContext ?: return
         if (buttonSizePx <= 0) return
         val half = buttonSizePx / 2
-        if (lp.x <= -half + 2) {
+        val screenW = screenWidthPx().coerceAtLeast(buttonSizePx * 2)
+        // gravity = END，lp.x 係「距離右邊幾多」。
+        // 中心點（以左邊為原點）= screenW - lp.x - half
+        val centerX = screenW - lp.x - half
+        val nearLeft = centerX < screenW / 2f
+        // 左邊蝕一半：view.left = -half → x = screenW - size + half
+        // 右邊蝕一半：view.left = screenW - half → x = -half
+        val targetX = if (nearLeft) screenW - buttonSizePx + half else -half
+        dockedOnLeft = nearLeft
+        if (kotlin.math.abs(lp.x - targetX) <= 2) {
             isDocked = true
+            lp.x = targetX
             applyAlpha(DOCKED_ALPHA)
+            try {
+                (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                    ?.updateViewLayout(view, lp)
+            } catch (_: Exception) {}
             return
         }
         isDocked = true
         val startX = lp.x
-        val targetX = -half
         val anim = android.animation.ValueAnimator.ofInt(startX, targetX).apply {
             duration = 280
             interpolator = android.view.animation.DecelerateInterpolator()
@@ -13026,10 +13277,16 @@ object ScreenReadFabController {
         val lp = layoutParams ?: return
         val view = overlayView ?: return
         val ctx = appContext ?: return
+        if (buttonSizePx <= 0) return
         val density = ctx.resources.displayMetrics.density
         val inset = (12 * density + 0.5f).toInt()
-        if (lp.x < inset) {
-            lp.x = inset
+        val screenW = screenWidthPx().coerceAtLeast(buttonSizePx * 2)
+        val centerX = screenW - lp.x - buttonSizePx / 2
+        val nearLeft = dockedOnLeft || centerX < screenW / 2f
+        // 撳返出嚟之後，靠返原本嗰邊、留返 12dp inset
+        val targetX = if (nearLeft) (screenW - buttonSizePx - inset).coerceAtLeast(0) else inset
+        if (lp.x != targetX) {
+            lp.x = targetX
             try {
                 (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
                     ?.updateViewLayout(view, lp)
@@ -13089,6 +13346,7 @@ object ScreenReadFabController {
         layoutParams = params
         baseY = params.y
         isDocked = false
+        dockedOnLeft = false
         keyboardLiftPx = 0
 
         var downX = 0f
@@ -13112,7 +13370,9 @@ object ScreenReadFabController {
                     val dx = (ev.rawX - downX).toInt()
                     val dy = (ev.rawY - downY).toInt()
                     if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) dragged = true
-                    params.x = startX - dx
+                    // x 以右邊為原點：0 = 貼右，screenW - size = 貼右以左最遠（貼左）
+                    val maxX = (screenWidthPx() - size).coerceAtLeast(0)
+                    params.x = (startX - dx).coerceIn(0, maxX)
                     val newY = (startY + dy).coerceAtLeast(0)
                     params.y = newY
                     baseY = newY + keyboardLiftPx
