@@ -13355,7 +13355,7 @@ object ScreenReadFabController {
         var startY = 0
         var dragged = false
         var longPressFired = false
-        val longPressTimeout = android.view.ViewConfiguration.get(ctx).longPressTimeout.toLong() // ~500ms
+        val longPressTimeout = android.view.ViewConfiguration.getLongPressTimeout().toLong() // ~500ms
         var longPressRunnable: Runnable? = null
 
         btn.setOnTouchListener { v, ev ->
@@ -13371,7 +13371,7 @@ object ScreenReadFabController {
                     longPressFired = false
                     // 長按 500ms → 直接開啟語音記帳
                     longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                    longPressRunnable = Runnable {
+                    val runnable = Runnable {
                         if (!dragged) {
                             longPressFired = true
                             // 觸發語音記帳（透過 voiceLaunchToken 讓 Compose 端啟動語音）
@@ -13394,7 +13394,8 @@ object ScreenReadFabController {
                             }?.start()
                         }
                     }
-                    mainHandler.postDelayed(longPressRunnable, longPressTimeout)
+                    longPressRunnable = runnable
+                    mainHandler.postDelayed(runnable, longPressTimeout)
                     true
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
