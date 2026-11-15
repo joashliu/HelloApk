@@ -6788,6 +6788,10 @@ fun CalendarContent(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
+LaunchedEffect(currentMonthKey) {
+        gridScrollState.scrollTo(0)
+    }
+
     // Reset per-gesture flag when detail scroll finishes (finger lifted)
     LaunchedEffect(detailScrollState.isScrollInProgress) {
         if (!detailScrollState.isScrollInProgress) {
@@ -7213,8 +7217,8 @@ fun CalendarContent(
                         .onSizeChanged { sz ->
                             if (sz.height <= 0) return@onSizeChanged
                             if (chromeOffsetPx > 0.5f) return@onSizeChanged
-                            // Always grow topSectionHeightPx to accommodate animated content
-                            if (sz.height > topSectionHeightPx + 1f) {
+                            // ★ 容許高度自由放大縮細，避免留白
+                            if (kotlin.math.abs(sz.height - topSectionHeightPx) > 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
                             }
                         }
@@ -7319,14 +7323,25 @@ fun CalendarContent(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 10.dp)
-                            .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
+                            .then(
+                                // ★ 有選中日子時用固定高度；冇選中時佔用所有剩餘空間
+                                if (selectedDay != null) Modifier.height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
+                                else Modifier.weight(1f)
+                            )
                             .clipToBounds()
                     ) {
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                                .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                                .then(
+                                    // ★ 有選中日子時配合動畫 Offset；冇選中時啟用正常上下滾動並避開 NavBar
+                                    if (selectedDay != null) Modifier
+                                        .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                        .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                                    else Modifier
+                                        .verticalScroll(gridScrollState)
+                                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+                                )
                         ) {
                             for (rowIdx in 0 until totalRows) {
                                 val isSel = selectedDay != null && rowIdx == selRow
