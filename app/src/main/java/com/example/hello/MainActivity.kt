@@ -6777,6 +6777,7 @@ fun CalendarContent(
     var chromeOffsetPx by remember { mutableFloatStateOf(0f) }
     var isSettling by remember { mutableStateOf(false) }
     var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
+    var collapsedInCurrentGesture by remember { mutableStateOf(false) }
     
     fun currentChromeP(): Float {
         val range = topSectionHeightPx.coerceAtLeast(1f)
@@ -6786,6 +6787,13 @@ fun CalendarContent(
     val detailScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+
+    // Reset per-gesture flag when detail scroll finishes (finger lifted)
+    LaunchedEffect(detailScrollState.isScrollInProgress) {
+        if (!detailScrollState.isScrollInProgress) {
+            collapsedInCurrentGesture = false
+        }
+    }
 
     val headerHeightDp = 32.dp
     val headerHeightPx = remember(density) { with(density) { headerHeightDp.toPx() } }
@@ -6912,27 +6920,28 @@ fun CalendarContent(
         return consumed
     }
 
-    /** 手指向下（px>0）→ ★ 先退階段1（收返明細），完成後先退階段2 */
+    /** 手指向下（px>0）→ ★ 每次只做一個階段，絕唔會 cascade */
     fun applyDragDown(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
-        var left = px
         var consumed = 0f
-        // 先退階段 1
-        if (collapseP > 0.001f && left > 0f) {
+        // 階段 1：收返明細（收 calendar）
+        if (collapseP > 0.001f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
-            val newP = (collapseP - left / range).coerceIn(0f, 1f)
+            val newP = (collapseP - px / range).coerceIn(0f, 1f)
             val used = (collapseP - newP) * range
             collapseP = newP
             consumed += used
-            left -= used
+            if (newP <= 0.001f) collapsedInCurrentGesture = true
+            return consumed  // ★ 絕對唔 cascade 到階段 2
         }
-        // 再退階段 2
-        if (collapseP <= 0.001f && chromeOffsetPx > 0.001f && left > 0f) {
+        // 階段 2：拉返 chips/stats —— 只有本次 gesture 唔係先至完成階段1 先可以進入
+        if (collapsedInCurrentGesture) return 0f
+        if (chromeOffsetPx > 0.001f) {
             val range = chromeRangePx()
-            val newOffset = (chromeOffsetPx - left).coerceAtLeast(0f)
+            val newOffset = (chromeOffsetPx - px).coerceAtLeast(0f)
             val used = chromeOffsetPx - newOffset
             chromeOffsetPx = newOffset
-            consumed += used.coerceAtMost(left)
+            consumed += used
         }
         return consumed
     }
@@ -6973,8 +6982,11 @@ fun CalendarContent(
     fun snapAfterDrag() {
         if (collapseP > 0.01f && collapseP < 0.99f) {
             if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
+            collapsedInCurrentGesture = true
             return
         }
+        // 如果本次 gesture 做過階段 1（收明細），唔應該拉 chips
+        if (collapsedInCurrentGesture) return
         if (chromeOffsetPx > 0.01f && chromeOffsetPx < chromeRangePx() - 1f) {
             if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
         }
@@ -6982,6 +6994,7 @@ fun CalendarContent(
 
     /** 換月份時先完全收起（含清選取） */
     val handleDismiss: () -> Unit = {
+        collapsedInCurrentGesture = false
         if (selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f) {
             scope.launch {
                 isSettling = true
@@ -7109,7 +7122,8 @@ fun CalendarContent(
                     if (detailScrollState.value > 0) return Velocity.Zero
                     if (collapseP > 0.05f) {
                         animateCollapseTo(0f)
-                    } else if (chromeOffsetPx > 0.01f) {
+                        collapsedInCurrentGesture = true
+                    } else if (!collapsedInCurrentGesture && chromeOffsetPx > 0.01f) {
                         animateChromeTo(0f)
                     }
                 }
@@ -7196,15 +7210,11 @@ fun CalendarContent(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (isChromeCollapsing)
-                                Modifier.requiredHeight(with(density) { topSectionHeightPx.toDp() })
-                            else Modifier.wrapContentHeight()
-                        )
                         .onSizeChanged { sz ->
                             if (sz.height <= 0) return@onSizeChanged
                             if (chromeOffsetPx > 0.5f) return@onSizeChanged
-                            if (!isChromeCollapsing || sz.height > topSectionHeightPx + 1f) {
+                            // Always grow topSectionHeightPx to accommodate animated content
+                            if (sz.height > topSectionHeightPx + 1f) {
                                 topSectionHeightPx = sz.height.toFloat()
                             }
                         }
@@ -7395,6 +7405,7 @@ fun CalendarContent(
                                             .height(handleBarHeightDp)
                                             .pointerInput(selRow) {
                                                 detectVerticalDragGestures(
+                                                    onDragStart = { collapsedInCurrentGesture = false },
                                                     onDragEnd = { snapAfterDrag() },
                                                     onVerticalDrag = { change, dragAmount ->
                                                         change.consume()
