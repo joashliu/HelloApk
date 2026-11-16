@@ -140,7 +140,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.Capitalization
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -8453,7 +8453,7 @@ fun LedgerKeyboardPanel(
                         cursorBrush = SolidColor(Color.Transparent),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Decimal,
-                            capitalization = Capitalization.None,
+                            capitalization = KeyboardCapitalization.None,
                             imeAction = ImeAction.Done
                         ),
                         keyboardActions = KeyboardActions(
