@@ -139,8 +139,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -8064,51 +8062,6 @@ fun LedgerKeyboardPanel(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val panelScope = rememberCoroutineScope()
     var noteFieldFocused by remember { mutableStateOf(false) }
-    val imeController = LocalSoftwareKeyboardController.current
-    // ★ 數字顯示區域 → 系統數字鍵盤（Decimal 版面冇候選詞欄，唔會卡在候選詞區）
-    val amountFieldFocusReq = remember { FocusRequester() }
-    var amountImeInput by remember { mutableStateOf(false) }
-
-    /** 只保留數字 + 單一小數點；小數位數跟幣別（JPY 無小數） */
-    fun normalizeAmountInput(raw: String, currency: String): String {
-        var t = buildString { raw.forEach { c -> if (c.isDigit() || c == '.') append(c) } }
-        val firstDot = t.indexOf('.')
-        if (firstDot >= 0) {
-            val intPart = t.substring(0, firstDot)
-            val decPart = buildString {
-                t.substring(firstDot + 1).forEach { c -> if (c.isDigit()) append(c) }
-            }
-            val maxDec = if (currency == "JPY") 0 else 2
-            val dec = if (decPart.length > maxDec) decPart.substring(0, maxDec) else decPart
-            t = if (maxDec == 0) intPart else if (dec.isEmpty()) intPart + "." else "$intPart.$dec"
-        }
-        val dotIdx = t.indexOf('.')
-        val intLen = if (dotIdx >= 0) dotIdx else t.length
-        if (intLen > 9) {
-            t = if (dotIdx >= 0) t.substring(0, 9) + t.substring(dotIdx) else t.substring(0, 9)
-        }
-        return t
-    }
-
-    /** 開／收「數字鍵盤模式」 */
-    fun openAmountIme() {
-        val clearing = state.selectAmountOnInput   // 全選狀態下輸入 = 覆蓋舊金額
-        onStateChange(
-            state.copy(
-                amountText = if (clearing) "" else state.amountText,
-                selectAmountOnInput = false,
-                focusedField = "amount",
-                editingNote = false
-            )
-        )
-        amountImeInput = true
-    }
-
-    fun closeAmountIme() {
-        amountImeInput = false
-        imeController?.hide()
-        focusManager.clearFocus()
-    }
     // 揀建議後短暫忽略 TextField onValueChange（IME composing 強制 commit 會蓋掉）
     var suppressNoteInputUntil by remember { mutableLongStateOf(0L) }
     var pendingSuggestionNote by remember { mutableStateOf<String?>(null) }
@@ -8165,24 +8118,11 @@ fun LedgerKeyboardPanel(
         }
     }
 
-    LaunchedEffect(state.focusedField, amountImeInput) {
-        // 數字鍵盤模式期間唔好清 focus（否則系統數字鍵盤會即刻俾人收埋）
-        if (amountImeInput) return@LaunchedEffect
+    LaunchedEffect(state.focusedField) {
         if (state.focusedField == "amount" || state.focusedField == "rate") {
             noteFieldFocused = false
             focusManager.clearFocus(force = true)
         }
-    }
-
-    // ★ 點擊數字顯示區域 → 等 clearFocus 行完，先 requestFocus + 彈出系統數字鍵盤
-    LaunchedEffect(amountImeInput) {
-        if (!amountImeInput) return@LaunchedEffect
-        delay(160)
-        try {
-            amountFieldFocusReq.requestFocus()
-        } catch (_: Exception) {
-        }
-        imeController?.show()
     }
 
     // 建議列表顯示條件：唔單靠 focus（IME 收起瞬間 focus 會丟，唔好即刻拆掉建議）
@@ -8413,64 +8353,16 @@ fun LedgerKeyboardPanel(
                     Modifier.fillMaxSize()
                         .clip(RoundedCornerShape(16.dp))
                         .border(2.dp,
-                            if (amountImeInput ||
-                                (state.focusedField == "amount" && state.currency == "JPY")
-                            ) BRAND_PRIMARY_LIGHT
+                            if (state.focusedField == "amount" && state.currency == "JPY") BRAND_PRIMARY_LIGHT
                             else Color.Transparent,
                             RoundedCornerShape(16.dp))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) {
-                            // ★ 㩒數字顯示區域 → 彈出系統數字鍵盤（唔使再用下面嘅自訂 keypad，
-                            //    亦唔會被 IME 候選詞欄遮住而輸入唔到數字）
-                            openAmountIme()
-                        }
+                        ) { onStateChange(state.copy(focusedField = "amount")) }
                         .padding(start = 22.dp, end = 12.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    // ★ 隱形數字輸入框：專門俾系統數字鍵盤寫入金額（2dp + alpha 0，純 IME 載體）
-                    BasicTextField(
-                        value = TextFieldValue(
-                            text = state.amountText,
-                            selection = TextRange(state.amountText.length)
-                        ),
-                        onValueChange = { nv ->
-                            val cleaned = normalizeAmountInput(nv.text, state.currency)
-                            if (cleaned != state.amountText) {
-                                onStateChange(
-                                    state.copy(
-                                        amountText = cleaned,
-                                        selectAmountOnInput = false,
-                                        focusedField = "amount",
-                                        editingNote = false
-                                    )
-                                )
-                            }
-                        },
-                        singleLine = true,
-                        textStyle = TextStyle(fontSize = 1.sp, color = Color.Transparent),
-                        cursorBrush = SolidColor(Color.Transparent),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Decimal,
-                            capitalization = KeyboardCapitalization.None,
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = { closeAmountIme() },
-                            onNext = { closeAmountIme() }
-                        ),
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .size(2.dp)
-                            .graphicsLayer { alpha = 0f }
-                            .focusRequester(amountFieldFocusReq)
-                            .onFocusChanged { fi ->
-                                if (!fi.isFocused && amountImeInput) {
-                                    amountImeInput = false
-                                }
-                            }
-                    )
                     Text(
                         text = if (state.category == "旅遊" && state.currency == "JPY") "¥" else "$",
                         fontSize = 24.sp, color = TEXT_TERTIARY, fontWeight = FontWeight.Bold,
@@ -8619,8 +8511,6 @@ fun LedgerKeyboardPanel(
                                 ) {
                                     row.forEach { key ->
                                         KeyboardKey(key, {
-                                            // 用返面板自訂 keypad → 收埋系統數字鍵盤
-                                            if (amountImeInput) amountImeInput = false
                                             val editingRate = state.focusedField == "rate"
                                             if (!editingRate && state.focusedField != "amount") {
                                                 onStateChange(state.copy(focusedField = "amount", editingNote = false))
