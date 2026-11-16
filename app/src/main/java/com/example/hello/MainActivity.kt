@@ -6942,6 +6942,7 @@ fun CalendarContent(
     }
 
     val detailScrollState = rememberScrollState()
+    val gridScrollState = rememberScrollState()  // ★ 展開態(冇揀日期)網格垂直滾動
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
@@ -7171,6 +7172,7 @@ fun CalendarContent(
                     isSettling = false
                     collapseP = 0f
                     chromeOffsetPx = 0f
+                    gridScrollState.scrollTo(0)
                     detailExpandedId = null
                     val newMonthToday = if (currentMonthKey == todayKey) todayCal.get(Calendar.DAY_OF_MONTH) else null
                     if (newMonthToday != null) {
@@ -7219,6 +7221,8 @@ fun CalendarContent(
                     selectedRowIdx = null
                     selectedColIdx = null
                     detailExpandedId = null
+                    chromeOffsetPx = 0f
+                    gridScrollState.scrollTo(0)
                 }
             }
         }
@@ -7290,6 +7294,56 @@ fun CalendarContent(
         }
     }
 
+    // ★ 展開態(冇揀日期): 網格內容超出可視區 -> 向上掃先推走 chips/stats, 再輪到網格自己滾
+    val gridNestedConnection = object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            if (selectedDay != null || isSettling) return Offset.Zero
+            // available.y < 0 = 手指向上/想睇下面嘅行; 只有仲有內容未睇完先至推走 chrome
+            if (available.y < 0f && gridScrollState.maxValue > 0) {
+                val chromeMax = chromeRangePx()
+                if (chromeOffsetPx < chromeMax - 0.5f) {
+                    val used = minOf(-available.y, chromeMax - chromeOffsetPx).coerceAtLeast(0f)
+                    chromeOffsetPx += used
+                    return Offset(0f, -used)
+                }
+            }
+            return Offset.Zero
+        }
+
+        override fun onPostScroll(
+            consumed: Offset,
+            available: Offset,
+            source: NestedScrollSource
+        ): Offset {
+            if (selectedDay != null || isSettling) return Offset.Zero
+            // 網格已經喺最頂, 仲繼續向下掃 -> 拉返 chips/stats 出嚟
+            if (available.y > 0f && gridScrollState.value <= 0) {
+                val used = minOf(available.y, chromeOffsetPx).coerceAtLeast(0f)
+                chromeOffsetPx -= used
+                return Offset(0f, used)
+            }
+            return Offset.Zero
+        }
+
+        override suspend fun onPreFling(available: Velocity): Velocity {
+            if (selectedDay != null) return Velocity.Zero
+            val chromeMax = chromeRangePx()
+            when {
+                available.y < -400f -> {
+                    if (gridScrollState.maxValue > 0 && chromeOffsetPx < chromeMax - 1f) {
+                        animateChromeTo(1f); return available
+                    }
+                }
+                available.y > 400f -> {
+                    if (gridScrollState.value <= 0 && chromeOffsetPx > 0.01f) {
+                        animateChromeTo(0f); return available
+                    }
+                }
+            }
+            return Velocity.Zero
+        }
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
         val containerHeightPx = constraints.maxHeight.toFloat()
         val bottomLimitPx = containerHeightPx - fabTopPaddingPx
@@ -7342,10 +7396,8 @@ fun CalendarContent(
             }
 
             // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
-            val topTranslatePx = if (selectedDay != null) {
-                chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
-            } else 0f
-            val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
+            val topTranslatePx = chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
+            val isChromeCollapsing = topSectionHeightPx > 0f
             val topVisibleH = if (isChromeCollapsing && chromeOffsetPx > 0.5f)
                 (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
             else -1f
@@ -7471,21 +7523,9 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp)
-                            .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
-                            .clipToBounds()
-                    ) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                                .offset { IntOffset(0, (-gridScroll).roundToInt()) }
-                        ) {
-                            for (rowIdx in 0 until totalRows) {
+                    // 日曆(展開態可上下滾動; 揀咗日期就返返原本嘅摺疊/位移邏輯)
+                    val rowsContent: @Composable () -> Unit = {
+for (rowIdx in 0 until totalRows) {
                                 val isSel = selectedDay != null && rowIdx == selRow
                                 CalendarRow(
                                     rowIdx = rowIdx,
@@ -7521,7 +7561,7 @@ fun CalendarContent(
                                             cachedSelectedCol = col
                                             detailExpandedId = null
                                             chromeOffsetPx = 0f
-                                            scope.launch { detailScrollState.scrollTo(0) }
+                                            scope.launch { detailScrollState.scrollTo(0); gridScrollState.scrollTo(0) }
                                             animateCollapseTo(1f)
                                         }
                                     }
@@ -7529,6 +7569,40 @@ fun CalendarContent(
                                 if (rowIdx < totalRows - 1) {
                                     Spacer(Modifier.height(6.dp))
                                 }
+                            }
+                    }
+                    val gridBottomReserveDp = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp
+                    if (selectedDay != null) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                                .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
+                                .clipToBounds()
+                        ) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                    .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                            ) { rowsContent() }
+                        }
+                    } else {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                                .weight(1f)
+                                .clipToBounds()
+                        ) {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .nestedScroll(gridNestedConnection)
+                                    .verticalScroll(gridScrollState)
+                            ) {
+                                rowsContent()
+                                Spacer(Modifier.height(gridBottomReserveDp))
                             }
                         }
                     }
