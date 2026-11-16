@@ -10535,47 +10535,76 @@ fun CompareContent(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            // ★ 頁頂置中嘅分段式 Toggle（近兩月 / 全年），取代原本右上角嘅 Switch
+            // ★ 頁頂置中嘅分段式 Toggle（近兩月 / 全年）：膠囊指示器平滑非線性滑動
             Box(
                 Modifier
                     .fillMaxWidth()
                     .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Row(
+                val segWidth = 92.dp
+                val segHeight = 36.dp
+                val segGap = 4.dp
+                val segIndex = if (showAllMonths) 1 else 0
+                // 非線性彈簧曲線：自然加減速、輕微回彈，切換時膠囊平滑滑動
+                val indicatorOffset by animateDpAsState(
+                    targetValue = (segWidth + segGap) * segIndex,
+                    animationSpec = spring(
+                        dampingRatio = 0.62f,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "compareSegIndicator"
+                )
+                val indicatorWidth by animateDpAsState(
+                    targetValue = segWidth,
+                    animationSpec = spring(
+                        dampingRatio = 0.62f,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "compareSegWidth"
+                )
+                Box(
                     Modifier
                         .clip(RoundedCornerShape(50))
                         .background(SURFACE_ELEVATED)
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(4.dp)
                 ) {
-                    listOf(false to "近兩月", true to "全年").forEach { (allMonths, segLabel) ->
-                        val segSelected = showAllMonths == allMonths
-                        val segBg by animateColorAsState(
-                            targetValue = if (segSelected) BRAND_PRIMARY else Color.Transparent,
-                            animationSpec = tween(220),
-                            label = "segBg"
-                        )
-                        val segFg by animateColorAsState(
-                            targetValue = if (segSelected) Color.White else TEXT_SECONDARY,
-                            animationSpec = tween(220),
-                            label = "segFg"
-                        )
-                        Box(
-                            Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(segBg)
-                                .clickable { showAllMonths = allMonths }
-                                .padding(horizontal = 30.dp, vertical = 9.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                segLabel,
-                                fontSize = 14.sp,
-                                fontWeight = if (segSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                color = segFg
+                    // 滑動嘅主色膠囊（繪喺文字之下）
+                    Box(
+                        Modifier
+                            .offset(x = indicatorOffset)
+                            .width(indicatorWidth)
+                            .height(segHeight)
+                            .clip(RoundedCornerShape(50))
+                            .background(BRAND_PRIMARY)
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(segGap),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(false to "近兩月", true to "全年").forEach { (allMonths, segLabel) ->
+                            val segSelected = showAllMonths == allMonths
+                            val segFg by animateColorAsState(
+                                targetValue = if (segSelected) Color.White else TEXT_SECONDARY,
+                                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                label = "segFg"
                             )
+                            Box(
+                                Modifier
+                                    .width(segWidth)
+                                    .height(segHeight)
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable { showAllMonths = allMonths },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    segLabel,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (segSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    color = segFg,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
