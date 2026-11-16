@@ -10535,36 +10535,50 @@ fun CompareContent(
                 .padding(horizontal = 16.dp)
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
-            Row(
+            // ★ 頁頂置中嘅分段式 Toggle（近兩月 / 全年），取代原本右上角嘅 Switch
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "月份比較",
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TEXT_PRIMARY,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    if (showAllMonths) "全年" else "近兩月",
-                    fontSize = 13.sp,
-                    color = TEXT_SECONDARY,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(Modifier.width(6.dp))
-                Switch(
-                    checked = showAllMonths,
-                    onCheckedChange = { showAllMonths = it },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = BRAND_PRIMARY,
-                        uncheckedThumbColor = Color.White,
-                        uncheckedTrackColor = DIVIDER_COLOR
-                    )
-                )
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(SURFACE_ELEVATED)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf(false to "近兩月", true to "全年").forEach { (allMonths, segLabel) ->
+                        val segSelected = showAllMonths == allMonths
+                        val segBg by animateColorAsState(
+                            targetValue = if (segSelected) BRAND_PRIMARY else Color.Transparent,
+                            animationSpec = tween(220),
+                            label = "segBg"
+                        )
+                        val segFg by animateColorAsState(
+                            targetValue = if (segSelected) Color.White else TEXT_SECONDARY,
+                            animationSpec = tween(220),
+                            label = "segFg"
+                        )
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(segBg)
+                                .clickable { showAllMonths = allMonths }
+                                .padding(horizontal = 30.dp, vertical = 9.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                segLabel,
+                                fontSize = 14.sp,
+                                fontWeight = if (segSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                color = segFg
+                            )
+                        }
+                    }
+                }
             }
 
             Surface(
