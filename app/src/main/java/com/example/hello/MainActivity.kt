@@ -1,4 +1,5 @@
 
+
 package com.example.hello
 
 import androidx.compose.foundation.layout.WindowInsets
@@ -8069,6 +8070,22 @@ fun LedgerKeyboardPanel(
     // 🟢 已固定為 34.dp
     val panelShape = RoundedCornerShape(34.dp)
 
+    // 系統輸入法控制器：收返系統鍵盤時用（喺面板頂層聲明，俾數字鍵盤顯示區同 IME 監聽共用）
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // 🟢 系統輸入法（IME）隱藏後自動改返顯示數字鍵盤：
+    //   有時系統輸入法會卡喺候選詞區域，令自訂數字鍵盤一直被蓋住、無法輸入數字。
+    //   一旦偵測到系統鍵盤收埋（imeOpen: true -> false）而焦點仍停留喺名稱／匯率輸入，
+    //   就自動收起輸入法、將焦點切返金額，令數字鍵盤重新顯示出嚟。
+    LaunchedEffect(imeOpen) {
+        if (!imeOpen && (state.focusedField == "note" || state.editingNote)) {
+            keyboardController?.hide()
+            noteFieldFocused = false
+            focusManager.clearFocus(force = true)
+            onStateChange(state.copy(focusedField = "amount", editingNote = false))
+        }
+    }
+
     fun applySuggestionNote(picked: String) {
         val cat = noteCategoryMap[picked]
         val now = android.os.SystemClock.uptimeMillis()
@@ -8359,7 +8376,14 @@ fun LedgerKeyboardPanel(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { onStateChange(state.copy(focusedField = "amount")) }
+                        ) {
+                            // 🟢 點擊數字顯示區域：強制收起系統輸入法（可能有時卡喺候選詞區域），
+                            //   再將焦點切返金額、離開名稱編輯狀態，確保顯示出可用嘅數字鍵盤。
+                            keyboardController?.hide()
+                            noteFieldFocused = false
+                            focusManager.clearFocus(force = true)
+                            onStateChange(state.copy(focusedField = "amount", editingNote = false))
+                        }
                         .padding(start = 22.dp, end = 12.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
@@ -8638,7 +8662,6 @@ fun LedgerKeyboardPanel(
                                 selection = TextRange(0, state.noteText.length)))
                         }
                         val focusReq = remember { FocusRequester() }
-                        val keyboardController = LocalSoftwareKeyboardController.current
 
                         LaunchedEffect(state.editingNote) {
                             if (state.editingNote) {
