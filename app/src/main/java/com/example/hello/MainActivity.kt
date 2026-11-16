@@ -8066,6 +8066,20 @@ fun LedgerKeyboardPanel(
     var suppressNoteInputUntil by remember { mutableLongStateOf(0L) }
     var pendingSuggestionNote by remember { mutableStateOf<String?>(null) }
 
+    // 🟢 監聽系統輸入法狀態，當隱藏時自動退回數字鍵盤
+    var previousImeOpen by remember { mutableStateOf(imeOpen) }
+    LaunchedEffect(imeOpen) {
+        if (previousImeOpen && !imeOpen) {
+            // 系統鍵盤剛剛收起
+            if (state.editingNote || state.focusedField == "note") {
+                delay(100)
+                onStateChange(state.copy(editingNote = false, focusedField = "amount"))
+                focusManager.clearFocus()
+            }
+        }
+        previousImeOpen = imeOpen
+    }
+
     // 🟢 已固定為 34.dp
     val panelShape = RoundedCornerShape(34.dp)
 
@@ -8239,7 +8253,8 @@ fun LedgerKeyboardPanel(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
                                         ) { 
-                                            onStateChange(state.copy(noteText = "地鐵", category = "交通", focusedField = "amount")) 
+                                            onStateChange(state.copy(noteText = "地鐵", category = "交通", focusedField = "amount", editingNote = false)) 
+                                            focusManager.clearFocus()
                                         }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
@@ -8255,7 +8270,8 @@ fun LedgerKeyboardPanel(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
                                         ) { 
-                                            onStateChange(state.copy(noteText = "巴士", category = "交通", focusedField = "amount")) 
+                                            onStateChange(state.copy(noteText = "巴士", category = "交通", focusedField = "amount", editingNote = false)) 
+                                            focusManager.clearFocus()
                                         }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
@@ -8287,7 +8303,10 @@ fun LedgerKeyboardPanel(
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
-                                        ) { onStateChange(state.copy(currency = "HKD", focusedField = "amount")) }
+                                        ) { 
+                                            onStateChange(state.copy(currency = "HKD", focusedField = "amount", editingNote = false)) 
+                                            focusManager.clearFocus()
+                                        }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
                                     Text("HKD", fontSize = 13.sp, fontWeight = FontWeight.Bold,
@@ -8300,7 +8319,10 @@ fun LedgerKeyboardPanel(
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
-                                        ) { onStateChange(state.copy(currency = "JPY", focusedField = "amount")) }
+                                        ) { 
+                                            onStateChange(state.copy(currency = "JPY", focusedField = "amount", editingNote = false)) 
+                                            focusManager.clearFocus()
+                                        }
                                         .padding(horizontal = 16.dp, vertical = 6.dp)
                                 ) {
                                     Text("JPY", fontSize = 13.sp, fontWeight = FontWeight.Bold,
@@ -8328,7 +8350,10 @@ fun LedgerKeyboardPanel(
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null
-                                        ) { onStateChange(state.copy(focusedField = "rate")) }
+                                        ) { 
+                                            onStateChange(state.copy(focusedField = "rate", editingNote = false)) 
+                                            focusManager.clearFocus()
+                                        }
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text(state.exchangeRateText.ifEmpty { "0" },
@@ -8356,10 +8381,14 @@ fun LedgerKeyboardPanel(
                             if (state.focusedField == "amount" && state.currency == "JPY") BRAND_PRIMARY_LIGHT
                             else Color.Transparent,
                             RoundedCornerShape(16.dp))
+                        // 🟢 點擊金額區時清空系統鍵盤焦點，並設定回 amount
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { onStateChange(state.copy(focusedField = "amount")) }
+                        ) { 
+                            focusManager.clearFocus()
+                            onStateChange(state.copy(focusedField = "amount", editingNote = false)) 
+                        }
                         .padding(start = 22.dp, end = 12.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
@@ -8391,11 +8420,13 @@ fun LedgerKeyboardPanel(
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(CircleShape)
+                                // 🟢 點擊清除時，同樣回到 amount 焦點
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null
                                 ) { 
-                                    onStateChange(state.copy(amountText = "", selectAmountOnInput = false, focusedField = "amount")) 
+                                    focusManager.clearFocus()
+                                    onStateChange(state.copy(amountText = "", selectAmountOnInput = false, focusedField = "amount", editingNote = false)) 
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -8901,9 +8932,11 @@ fun LedgerKeyboardPanel(
                                                                     state.copy(
                                                                         category = cat,
                                                                         currency = "HKD",
-                                                                        focusedField = "amount"
+                                                                        focusedField = "amount",
+                                                                        editingNote = false
                                                                     )
                                                                 )
+                                                                focusManager.clearFocus()
                                                                 menuVisibleState.targetState = false
                                                             },
                                                         horizontalArrangement = Arrangement.Center,
