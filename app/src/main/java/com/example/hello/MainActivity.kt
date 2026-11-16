@@ -7487,9 +7487,15 @@ fun CalendarContent(
                 } else {
                     fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
                 }
-                val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
-                    rowOffsetsPx[selRow] * p
-                } else 0f
+                // 進入或切換選中日期時, 將折疊態網格定位返去所選嗰行頂部(保留原本定位手感)
+                LaunchedEffect(selectedDay, selRow) {
+                    if (selectedDay != null && selRow in rowOffsetsPx.indices) {
+                        val target = rowOffsetsPx[selRow].roundToInt()
+                            .coerceAtMost(gridScrollState.maxValue)
+                            .coerceAtLeast(0)
+                        gridScrollState.scrollTo(target)
+                    }
+                }
 
                 Column(Modifier.fillMaxSize()) {
                     // 星期標題
@@ -7561,7 +7567,7 @@ for (rowIdx in 0 until totalRows) {
                                             cachedSelectedCol = col
                                             detailExpandedId = null
                                             chromeOffsetPx = 0f
-                                            scope.launch { detailScrollState.scrollTo(0); gridScrollState.scrollTo(0) }
+                                            scope.launch { detailScrollState.scrollTo(0) }
                                             animateCollapseTo(1f)
                                         }
                                     }
@@ -7583,9 +7589,13 @@ for (rowIdx in 0 until totalRows) {
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                                    .offset { IntOffset(0, (-gridScroll).roundToInt()) }
-                            ) { rowsContent() }
+                                    .fillMaxHeight()
+                                    .nestedScroll(gridNestedConnection)
+                                    .verticalScroll(gridScrollState)
+                            ) {
+                                rowsContent()
+                                Spacer(Modifier.height(gridBottomReserveDp))
+                            }
                         }
                     } else {
                         Box(
@@ -7598,6 +7608,7 @@ for (rowIdx in 0 until totalRows) {
                             Column(
                                 Modifier
                                     .fillMaxWidth()
+                                    .fillMaxHeight()
                                     .nestedScroll(gridNestedConnection)
                                     .verticalScroll(gridScrollState)
                             ) {
