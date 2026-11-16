@@ -7578,6 +7578,8 @@ for (rowIdx in 0 until totalRows) {
                             }
                     }
                     val gridBottomReserveDp = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp
+                    // 金額模式(displayMode==0)行仔最矮, 成月本身睇得哂 -> 唔需要滾動, 保持固定顯示
+                    val gridScrollable = displayMode != 0
                     if (selectedDay != null) {
                         Box(
                             Modifier
@@ -7587,11 +7589,16 @@ for (rowIdx in 0 until totalRows) {
                                 .clipToBounds()
                         ) {
                             Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight()
-                                    .nestedScroll(gridNestedConnection)
-                                    .verticalScroll(gridScrollState)
+                                if (gridScrollable)
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight()
+                                        .nestedScroll(gridNestedConnection)
+                                        .verticalScroll(gridScrollState)
+                                else
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight()
                             ) {
                                 rowsContent()
                                 Spacer(Modifier.height(gridBottomReserveDp))
@@ -7606,11 +7613,16 @@ for (rowIdx in 0 until totalRows) {
                                 .clipToBounds()
                         ) {
                             Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight()
-                                    .nestedScroll(gridNestedConnection)
-                                    .verticalScroll(gridScrollState)
+                                if (gridScrollable)
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight()
+                                        .nestedScroll(gridNestedConnection)
+                                        .verticalScroll(gridScrollState)
+                                else
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight()
                             ) {
                                 rowsContent()
                                 Spacer(Modifier.height(gridBottomReserveDp))
