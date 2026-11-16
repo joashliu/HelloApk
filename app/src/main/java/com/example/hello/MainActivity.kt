@@ -7487,16 +7487,6 @@ fun CalendarContent(
                 } else {
                     fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
                 }
-                // 進入或切換選中日期時, 將折疊態網格定位返去所選嗰行頂部(保留原本定位手感)
-                LaunchedEffect(selectedDay, selRow) {
-                    if (selectedDay != null && selRow in rowOffsetsPx.indices) {
-                        val target = rowOffsetsPx[selRow].roundToInt()
-                            .coerceAtMost(gridScrollState.maxValue)
-                            .coerceAtLeast(0)
-                        gridScrollState.scrollTo(target)
-                    }
-                }
-
                 Column(Modifier.fillMaxSize()) {
                     // 星期標題
                     Box(
@@ -7588,17 +7578,17 @@ for (rowIdx in 0 until totalRows) {
                                 .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
                                 .clipToBounds()
                         ) {
+                            // 折疊態(有揀日期): 改用「死高度 + offset 手動位移」將所選嗰行推到可視區頂部,
+                            // 令當日明細啱啱顯示喺所選嗰行底。唔再用 verticalScroll: 佢會 clamp offset,
+                            // 搞到第二行開始撳唔上去(金額模式)、第4/5行推唔郁(項目模式)、第3行後睇唔到(圖標模式)。
+                            val gridTopOffsetDp = with(density) {
+                                (-(rowOffsetsPx.getOrElse(selRow) { 0f })).toDp()
+                            }
                             Column(
-                                if (gridScrollable)
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .fillMaxHeight()
-                                        .nestedScroll(gridNestedConnection)
-                                        .verticalScroll(gridScrollState)
-                                else
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .fillMaxHeight()
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(with(density) { fullGridHeightPx.toDp() })
+                                    .offset(y = gridTopOffsetDp)
                             ) {
                                 rowsContent()
                                 Spacer(Modifier.height(gridBottomReserveDp))
