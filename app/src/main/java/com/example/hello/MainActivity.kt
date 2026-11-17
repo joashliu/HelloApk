@@ -216,9 +216,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.animation.core.EaseOut
-import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.layout.onPlaced
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchToken = mutableStateOf(0)
@@ -12552,83 +12549,64 @@ fun RollingNumber(
     animateChanges: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    val textStyle = TextStyle(
-        color = color,
-        fontSize = fontSize,
-        fontWeight = fontWeight,
-        fontFeatureSettings = "tnum",
-        fontFamily = FontFamily.Monospace,
-        platformStyle = PlatformTextStyle(includeFontPadding = false),
-        lineHeightStyle = LineHeightStyle(
-            alignment = LineHeightStyle.Alignment.Center,
-            trim = LineHeightStyle.Trim.Both
+    val maxLen = remember { mutableIntStateOf(text.length.coerceAtLeast(1)) }
+    LaunchedEffect(text.length) {
+        if (text.length > maxLen.value) maxLen.value = text.length
+    }
+
+    val totalSlots = maxLen.value
+
+    val compactStyle = remember(fontSize, fontWeight) {
+        TextStyle(
+            fontSize = fontSize,
+            fontWeight = fontWeight,
+            // ★ Top Stat 等寬數字（tabular figures）
+            fontFeatureSettings = "tnum",
+            fontFamily = FontFamily.Monospace,
+            platformStyle = PlatformTextStyle(includeFontPadding = false),
+            lineHeightStyle = LineHeightStyle(
+                alignment = LineHeightStyle.Alignment.Center,
+                trim = LineHeightStyle.Trim.Both
+            )
         )
-    )
+    }
 
-    val textMeasurer = rememberTextMeasurer()
+    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
     val density = LocalDensity.current
-
-    val cellHeight: Dp = remember(fontSize, fontWeight) {
-        val layout = textMeasurer.measure("0", textStyle)
+    val cellHeight: Dp = remember(compactStyle) {
+        val layout = textMeasurer.measure("0", compactStyle)
         with(density) { layout.size.height.toDp() }
     }
 
-    val progress = remember { Animatable(1f) }
+    val currentAnimate by rememberUpdatedState(animateChanges)
+    var displayedText by remember { mutableStateOf(text) }
 
-    var slots by remember { mutableStateOf(emptyList<RollingSlot>()) }
-    var displayed by remember { mutableStateOf(text.ifEmpty { "0" }) }
-
+    // ★ 唔再 finally 強制跳字：取消時保留已顯示進度，新 effect 由當前 displayedText 繼續
     LaunchedEffect(text, animateChanges) {
-        val next = text.ifEmpty { "0" }
-        val previous = displayed
-
-        val maxLength = maxOf(previous.length, next.length)
-        val oldPadded = previous.padStart(maxLength, ' ')
-        val newPadded = next.padStart(maxLength, ' ')
-
-        val nextSlots = buildList {
-            for (index in 0 until maxLength) {
-                val from = oldPadded[index]
-                val to = newPadded[index]
-
-                val direction = when {
-                    !animateChanges -> 0
-                    from == to -> 0
-
-                    from.isDigit() && to.isDigit() -> {
-                        if (to > from) 1 else -1
-                    }
-
-                    else -> 0
-                }
-
-                add(
-                    RollingSlot(
-                        from = from,
-                        to = to,
-                        direction = direction
-                    )
-                )
+        if (!animateChanges) {
+            displayedText = text
+            return@LaunchedEffect
+        }
+        val target = text
+        val current = displayedText
+        if (target == current) return@LaunchedEffect
+        // 刪字 / 非前綴：即刻對齊，由每位動畫負責出入場
+        if (target.length <= current.length || !target.startsWith(current)) {
+            displayedText = target
+            return@LaunchedEffect
+        }
+        // 一次補多個字先做輕量打字機；中途被取消唔強制跳字
+        var shown = current
+        while (shown.length < target.length && isActive) {
+            if (!target.startsWith(shown)) {
+                displayedText = target
+                return@LaunchedEffect
             }
+            shown = target.substring(0, shown.length + 1)
+            displayedText = shown
+            if (shown.length < target.length) delay(40)
         }
-
-        slots = nextSlots
-        displayed = next
-
-        val hasDirectionalChange = nextSlots.any { it.direction != 0 }
-
-        if (!animateChanges || !hasDirectionalChange) {
-            progress.snapTo(1f)
-        } else {
-            progress.snapTo(0f)
-            progress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = 360,
-                    easing = EaseOut
-                )
-            )
-        }
+        if (isActive && displayedText != target) displayedText = target
     }
 
     Row(
@@ -12636,76 +12614,23 @@ fun RollingNumber(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start
     ) {
-        slots.forEach { slot ->
-            val slotModifier = Modifier
-                .wrapContentWidth()
-                .height(cellHeight)
-
-            if (slot.direction == 0) {
-                Text(
-                    text = slot.to.toString(),
+        for (i in 0 until totalSlots) {
+            val char = displayedText.getOrNull(i)
+            key(i) {
+                val delayMs = (totalSlots - 1 - i) * 8
+                RollingDigit(
+                    targetChar = char,
                     color = color,
-                    style = textStyle,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = slotModifier
+                    style = compactStyle,
+                    cellHeight = cellHeight,
+                    animate = currentAnimate,
+                    delayMs = delayMs,
+                    modifier = Modifier.wrapContentWidth()
                 )
-            } else {
-                val animationProgress = progress.value
-                val travelDistance = with(LocalDensity.current) {
-                    cellHeight.toPx()
-                }
-
-                val fromOffsetY = -slot.direction *
-                        animationProgress *
-                        travelDistance
-
-                val toOffsetY = slot.direction *
-                        (1f - animationProgress) *
-                        travelDistance
-
-                Box(
-                    modifier = slotModifier.clipToBounds(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = slot.from.toString(),
-                        color = color,
-                        style = textStyle,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.offset {
-                            IntOffset(
-                                x = 0,
-                                y = fromOffsetY.roundToInt()
-                            )
-                        }
-                    )
-
-                    Text(
-                        text = slot.to.toString(),
-                        color = color,
-                        style = textStyle,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.offset {
-                            IntOffset(
-                                x = 0,
-                                y = toOffsetY.roundToInt()
-                            )
-                        }
-                    )
-                }
             }
         }
     }
 }
-
-private class RollingSlot(
-    val from: Char,
-    val to: Char,
-    val direction: Int
-)
 
 @Composable
 fun RollingDigit(
