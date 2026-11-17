@@ -1729,15 +1729,25 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     fun updateRecord(id: String, amount: Double, note: String, category: String, timestamp: Long) {
         getTimestampMeta(timestamp)
         val existing = recordsById[id] ?: return
+        
+        // 🟢 加入圖標繼承邏輯：如果名稱有改，自動拉取新名稱對應嘅圖標
+        val newIconUrl = if (existing.note != note) {
+            latestIconForNote(note)
+        } else {
+            existing.iconUrl
+        }
+        
         recordsById[id] = existing.copy(
-            amount = amount, note = note, category = category, timestamp = timestamp
+            amount = amount, note = note, category = category, timestamp = timestamp, iconUrl = newIconUrl
         )
         emitSorted()
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 db.collection("records").document(id).update(mapOf(
                     "amount" to amount, "note" to note,
-                    "category" to category, "timestamp" to timestamp)).await()
+                    "category" to category, "timestamp" to timestamp,
+                    "iconUrl" to newIconUrl // 🟢 確保將新圖標網址寫入資料庫
+                )).await()
             } catch (_: Exception) {}
         }
     }
