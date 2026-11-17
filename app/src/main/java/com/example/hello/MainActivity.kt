@@ -218,8 +218,7 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.layout.onTextLayout
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.onPlaced
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
 private val keyboardLaunchToken = mutableStateOf(0)
@@ -12566,7 +12565,14 @@ fun RollingNumber(
         )
     )
 
-    var cellHeightPx by remember { mutableStateOf(0f) }
+    val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+
+    val cellHeight: Dp = remember(fontSize, fontWeight) {
+        val layout = textMeasurer.measure("0", textStyle)
+        with(density) { layout.size.height.toDp() }
+    }
+
     val progress = remember { Animatable(1f) }
 
     var slots by remember { mutableStateOf(emptyList<RollingSlot>()) }
@@ -12576,7 +12582,6 @@ fun RollingNumber(
         val next = text.ifEmpty { "0" }
         val previous = displayed
 
-        // 由右至左對齊：999 -> 1,000 時，新增位數／千分位不會令既有數字滾動錯位
         val maxLength = maxOf(previous.length, next.length)
         val oldPadded = previous.padStart(maxLength, ' ')
         val newPadded = next.padStart(maxLength, ' ')
@@ -12591,12 +12596,9 @@ fun RollingNumber(
                     from == to -> 0
 
                     from.isDigit() && to.isDigit() -> {
-                        // +1：上升，新數字由下方向上滑入
-                        // -1：下降，新數字由上方向下滑入
                         if (to > from) 1 else -1
                     }
 
-                    // 小數點、千分位逗號、負號、新增／刪除位數：直接切換，不做方向滾動
                     else -> 0
                 }
 
@@ -12635,20 +12637,11 @@ fun RollingNumber(
         horizontalArrangement = Arrangement.Start
     ) {
         slots.forEach { slot ->
-            val slotHeight = with(LocalDensity.current) {
-                (fontSize.value * 1.25f).dp
-            }
-
             val slotModifier = Modifier
                 .wrapContentWidth()
-                .height(slotHeight)
-                .onTextLayout { textLayoutResult ->
-                    if (textLayoutResult.size.height > 0) {
-                        cellHeightPx = textLayoutResult.size.height.toFloat()
-                    }
-                }
+                .height(cellHeight)
 
-            if (slot.direction == 0 || cellHeightPx <= 0f) {
+            if (slot.direction == 0) {
                 Text(
                     text = slot.to.toString(),
                     color = color,
@@ -12659,15 +12652,10 @@ fun RollingNumber(
                 )
             } else {
                 val animationProgress = progress.value
-                val travelDistance = cellHeightPx
+                val travelDistance = with(LocalDensity.current) {
+                    cellHeight.toPx()
+                }
 
-                // direction = +1，數字上升：
-                // 舊數字：0 -> -travel（向上離開）
-                // 新數字：+travel -> 0（由下方進入）
-                //
-                // direction = -1，數字下降：
-                // 舊數字：0 -> +travel（向下離開）
-                // 新數字：-travel -> 0（由上方進入）
                 val fromOffsetY = -slot.direction *
                         animationProgress *
                         travelDistance
@@ -12718,6 +12706,7 @@ private class RollingSlot(
     val to: Char,
     val direction: Int
 )
+
 @Composable
 fun RollingDigit(
     targetChar: Char?,
