@@ -7617,7 +7617,6 @@ fun CalendarContent(
                         val isCollapsing = p > 0.01f
                         
                         LaunchedEffect(isCollapsing) {
-                            // 當收起日曆時（例如撳另一格或者拉起明細），平滑將滾動重置，避免畫面跳動
                             if (isCollapsing && internalGridScrollState.value > 0) {
                                 internalGridScrollState.animateScrollTo(
                                     0, 
@@ -7629,9 +7628,9 @@ fun CalendarContent(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                // ★ 刪除咗 wrapContentHeight(unbounded = true)，解除高度衝突
                                 .offset { IntOffset(0, (-gridScroll).roundToInt()) }
-                                // ★ 2. 加上 verticalScroll，只在日曆完全展開時允許上下滑動
+                                // ★ 2. 保留 verticalScroll
                                 .verticalScroll(internalGridScrollState, enabled = !isCollapsing)
                         ) {
                             for (rowIdx in 0 until totalRows) {
