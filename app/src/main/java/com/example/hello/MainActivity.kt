@@ -6816,8 +6816,7 @@ fun CalendarContent(
     deletingIds: Set<String> = emptySet(),
     justAddedIds: Set<String> = emptySet()
 ) {
-    // ★ 核心修復：狀態鎖 (State Lock)
-    // 攔截唔匹配嘅過期數據，只有月份一致時先至放行更新網格
+    // 狀態鎖 (State Lock) 攔截唔匹配嘅過期數據
     var safeUiState by remember { mutableStateOf(calendarUi) }
     var safeMonthKey by remember { mutableStateOf(currentMonthKey) }
 
@@ -6837,7 +6836,7 @@ fun CalendarContent(
     var monthDirection by remember { mutableIntStateOf(1) }
     var displayMode by remember { mutableIntStateOf(0) }
 
-    // ★ 默認選中今日（如果係當月），確保當日明細一開始就 ready
+    // 默認選中今日（如果係當月）
     val todayCal = remember { Calendar.getInstance() }
     val initSelDay = remember { if (currentMonthKey == todayKey) todayCal.get(Calendar.DAY_OF_MONTH) else null }
     val initFirstOff = remember {
@@ -6862,7 +6861,7 @@ fun CalendarContent(
     var selectedColIdx by remember { mutableStateOf(initCol) }
     var detailExpandedId by remember { mutableStateOf<String?>(null) }
 
-    // 月曆明細：長按扇形選單（同記帳頁）
+    // 月曆明細：長按扇形選單
     var activeFanRecord by remember { mutableStateOf<Record?>(null) }
     val fanMenuCenterState = remember { mutableStateOf(Offset.Zero) }
     val fanMenuTouchState = remember { mutableStateOf(Offset.Zero) }
@@ -6928,8 +6927,6 @@ fun CalendarContent(
     var cachedSelectedRowIdx by remember { mutableIntStateOf(initRow ?: 0) }
     var cachedSelectedCol by remember { mutableIntStateOf(initCol ?: 0) }
 
-    // 階段 1：collapseP 0→1 日曆收到剩選中一行，明細停喺該日期格下
-    // 階段 2：chromeOffsetPx 推走 chips/stats
     var collapseP by remember { mutableFloatStateOf(0f) }
     var chromeOffsetPx by remember { mutableFloatStateOf(0f) }
     var isSettling by remember { mutableStateOf(false) }
@@ -6942,17 +6939,14 @@ fun CalendarContent(
     }
 
     val detailScrollState = rememberScrollState()
-    // ★ 未選日子時：項目／圖標模式可捲動整段（chips + TopStat + 格仔）
     val bodyScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
-    // 換月／換顯示模式時重置 body 捲動
     LaunchedEffect(safeMonthKey, displayMode) {
         bodyScrollState.scrollTo(0)
     }
 
-    // Reset per-gesture flag when detail scroll finishes (finger lifted)
     LaunchedEffect(detailScrollState.isScrollInProgress) {
         if (!detailScrollState.isScrollInProgress) {
             collapsedInCurrentGesture = false
@@ -6968,7 +6962,6 @@ fun CalendarContent(
         with(density) { (NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp).toPx() }
     }
 
-    // ★ 網格日期計算依賴 safeMonthKey
     val curCal = remember(safeMonthKey) {
         val parts = safeMonthKey.split("-")
         Calendar.getInstance().apply {
@@ -7056,14 +7049,10 @@ fun CalendarContent(
 
     fun chromeRangePx(): Float = topSectionHeightPx.coerceAtLeast(1f)
 
-    /**
-     * 手指向上（px>0）→ 先階段1再階段2；回傳實際消耗 px。
-     */
     fun applyDragUp(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
         var left = px
         var consumed = 0f
-        // 階段 1：收日曆
         if (collapseP < 0.999f && left > 0f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP + left / range).coerceIn(0f, 1f)
@@ -7072,7 +7061,6 @@ fun CalendarContent(
             consumed += used
             left -= used
         }
-        // 階段 2：推走 chips/stats（移除 0.5f，改為 1:1 移動幅度）
         if (collapseP >= 0.999f && left > 0f) {
             val range = chromeRangePx()
             val visualDelta = left
@@ -7084,11 +7072,9 @@ fun CalendarContent(
         return consumed
     }
 
-    /** 手指向下（px>0）→ ★ 每次只做一個階段，絕唔會 cascade */
     fun applyDragDown(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
         var consumed = 0f
-        // 階段 1：收返明細（收 calendar）
         if (collapseP > 0.001f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP - px / range).coerceIn(0f, 1f)
@@ -7096,9 +7082,8 @@ fun CalendarContent(
             collapseP = newP
             consumed += used
             if (newP <= 0.001f) collapsedInCurrentGesture = true
-            return consumed  // ★ 絕對唔 cascade 到階段 2
+            return consumed 
         }
-        // 階段 2：拉返 chips/stats —— 只有本次 gesture 唔係先至完成階段1 先可以進入
         if (collapsedInCurrentGesture) return 0f
         if (chromeOffsetPx > 0.001f) {
             val range = chromeRangePx()
@@ -7125,7 +7110,6 @@ fun CalendarContent(
         }
     }
 
-    /** target: 0f = 完全展開，1f = 完全收起 */
     fun animateChromeTo(target: Float) {
         isSettling = true
         val range = chromeRangePx()
@@ -7149,14 +7133,12 @@ fun CalendarContent(
             collapsedInCurrentGesture = true
             return
         }
-        // 如果本次 gesture 做過階段 1（收明細），唔應該拉 chips
         if (collapsedInCurrentGesture) return
         if (chromeOffsetPx > 0.01f && chromeOffsetPx < chromeRangePx() - 1f) {
             if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
         }
     }
 
-    /** 換月份時先完全收起（含清選取） */
     val handleDismiss: () -> Unit = {
         collapsedInCurrentGesture = false
         if (selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f) {
@@ -7205,20 +7187,15 @@ fun CalendarContent(
         }
     }
 
-    /**
-     * 系統返回：好似手動下拉，逐步退，唔一次過清走明細。
-     */
     val handleBackStep: () -> Unit = {
         scope.launch {
             if (isSettling) return@launch
             when {
                 chromeOffsetPx > 0.05f -> {
-                    // 階段2 → 階段1：保持一行同明細
                     animateChromeTo(0f)
                     if (collapseP < 0.99f) animateCollapseTo(1f)
                 }
                 collapseP > 0.05f -> {
-                    // 階段1 → 全日曆，但唔清 selectedDay（明細框仍在）
                     animateCollapseTo(0f)
                 }
                 selectedDay != null -> {
@@ -7236,18 +7213,15 @@ fun CalendarContent(
         enabled = selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f
     ) { handleBackStep() }
 
-    // ★ 兩段式 nested scroll（chips完全收起後先允許明細滾動；向下一開始只收明細）
     val detailNestedConnection = object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             if (selectedDay == null || isSettling) return Offset.Zero
             val chromeMax = chromeRangePx()
             if (available.y < 0f) {
-                // chips 未完全收起 → 全部用嚟收 chips，唔畀明細滾動
                 if (chromeOffsetPx < chromeMax - 0.5f) {
                     val used = applyDragUp(-available.y)
                     return Offset(0f, -used)
                 }
-                // chips 已完全收起 + 明細到頂
                 if (detailScrollState.value <= 0) {
                     val used = applyDragUp(-available.y)
                     return Offset(0f, -used)
@@ -7257,11 +7231,7 @@ fun CalendarContent(
             return Offset.Zero
         }
 
-        override fun onPostScroll(
-            consumed: Offset,
-            available: Offset,
-            source: NestedScrollSource
-        ): Offset {
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
             if (selectedDay == null || isSettling) return Offset.Zero
             if (available.y > 0f && detailScrollState.value <= 0) {
                 val used = applyDragDown(available.y)
@@ -7349,7 +7319,6 @@ fun CalendarContent(
             }
 
             // ★ 未選日子：整段可上下捲動（chips + TopStat + 星期 + 格仔）
-            //   項目／圖標模式格仔較高時可捲到下便；捲動時上方 chips／統計一齊被推走
             if (selectedDay == null) {
                 Column(
                     Modifier
@@ -7428,7 +7397,7 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆格仔：自然高度，唔再 clip 截斷
+                    // 日曆格仔：自然高度
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -7473,307 +7442,296 @@ fun CalendarContent(
                     }
                 }
             } else {
-            // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
-            val topTranslatePx = if (selectedDay != null) {
-                chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
-            } else 0f
-            val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
-            val topVisibleH = if (isChromeCollapsing && chromeOffsetPx > 0.5f)
-                (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
-            else -1f
+                // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
+                val topTranslatePx = if (selectedDay != null) {
+                    chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
+                } else 0f
+                val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
+                val topVisibleH = if (isChromeCollapsing && chromeOffsetPx > 0.5f)
+                    (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
+                else -1f
 
-            LaunchedEffect(visibleCategories, filterCategory) {
-                kotlinx.coroutines.delay(16)
-            }
+                LaunchedEffect(visibleCategories, filterCategory) {
+                    kotlinx.coroutines.delay(16)
+                }
 
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .then(
-                        if (topVisibleH < 0f) Modifier.wrapContentHeight()
-                        else Modifier
-                            .height(with(density) { topVisibleH.toDp() })
-                            .clipToBounds()
-                    )
-            ) {
-                Column(
+                Box(
                     Modifier
                         .fillMaxWidth()
-                        .onSizeChanged { sz ->
-                            if (sz.height <= 0) return@onSizeChanged
-                            if (chromeOffsetPx > 0.5f) return@onSizeChanged
-                            // Always grow topSectionHeightPx to accommodate animated content
-                            if (sz.height > topSectionHeightPx + 1f) {
-                                topSectionHeightPx = sz.height.toFloat()
-                            }
-                        }
-                        .offset {
-                            IntOffset(
-                                0,
-                                if (isChromeCollapsing) (-topTranslatePx).roundToInt() else 0
-                            )
-                        }
-                        .padding(horizontal = 10.dp)
+                        .then(
+                            if (topVisibleH < 0f) Modifier.wrapContentHeight()
+                            else Modifier
+                                .height(with(density) { topVisibleH.toDp() })
+                                .clipToBounds()
+                        )
                 ) {
-                    Spacer(Modifier.height(4.dp))
-                    AnimatedCalendarCategoryChips(
-                        visibleCategories = visibleCategories,
-                        filterCategory = filterCategory,
-                        onFilterCategoryChange = onFilterCategoryChange
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AnimatedInfoChip(
-                            label = "總計",
-                            valueText = "$${formatAmountNoDecimal(totalNet)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp,
-                            valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
-                        )
-                        AnimatedInfoChip(
-                            label = "平均每項",
-                            valueText = "$${formatAmountNoDecimal(avgPerItem)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp
-                        )
-                        AnimatedInfoChip(
-                            label = "日均支出",
-                            valueText = "$${formatAmountNoDecimal(avgPerDay)}",
-                            modifier = Modifier.weight(1f),
-                            valueFontSize = 16.sp
-                        )
-                    }
-                    Spacer(Modifier.height(10.dp))
-                }
-            }
-
-            // ===== 日曆 + 當日明細 =====
-            Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
-                val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
-                val selRow = if (selectedDay != null) {
-                    ((firstDayOffset + selectedDay!! - 1) / 7).coerceIn(0, (totalRows - 1).coerceAtLeast(0))
-                } else {
-                    0
-                }
-                val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
-                val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
-                val minDetailPeekH = with(density) { 100.dp.toPx() }
-                val maxGridForDetail = (containerHeightPx - headerHeightPx - minDetailPeekH - fabTopPaddingPx).coerceAtLeast(selRowH)
-                
-                // ★ 1. 恢復返呢度嘅 coerceAtMost，令外層 Box 知道自己邊界，啟動內部嘅 verticalScroll
-                val visibleGridH = if (selectedDay != null) {
-                    ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
-                } else {
-                    fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
-                }
-                val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
-                    rowOffsetsPx[selRow] * p
-                } else 0f
-
-                Column(Modifier.fillMaxSize()) {
-                    // 星期標題
-                    Box(
+                    Column(
                         Modifier
                             .fillMaxWidth()
-                            .height(headerHeightDp)
-                            .background(SURFACE_BG)
-                    ) {
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 13.dp)
-                                .fillMaxHeight(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CALENDAR_WEEKDAY_HEADERS.forEach { w ->
-                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = w,
-                                        fontSize = 12.sp,
-                                        color = Color.Black,
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = TextStyle(
-                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                        )
-                                    )
+                            .onSizeChanged { sz ->
+                                if (sz.height <= 0) return@onSizeChanged
+                                if (chromeOffsetPx > 0.5f) return@onSizeChanged
+                                if (sz.height > topSectionHeightPx + 1f) {
+                                    topSectionHeightPx = sz.height.toFloat()
                                 }
                             }
-                        }
-                    }
-
-                    // 日曆
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
+                            .offset {
+                                IntOffset(
+                                    0,
+                                    if (isChromeCollapsing) (-topTranslatePx).roundToInt() else 0
+                                )
+                            }
                             .padding(horizontal = 10.dp)
-                            .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
-                            .clipToBounds()
                     ) {
-                        val internalGridScrollState = rememberScrollState()
-                        val isCollapsing = p > 0.01f
-                        
-                        LaunchedEffect(isCollapsing) {
-                            if (isCollapsing && internalGridScrollState.value > 0) {
-                                internalGridScrollState.animateScrollTo(
-                                    0, 
-                                    spring(dampingRatio = 0.9f, stiffness = 380f)
-                                )
-                            }
+                        Spacer(Modifier.height(4.dp))
+                        AnimatedCalendarCategoryChips(
+                            visibleCategories = visibleCategories,
+                            filterCategory = filterCategory,
+                            onFilterCategoryChange = onFilterCategoryChange
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AnimatedInfoChip(
+                                label = "總計",
+                                valueText = "$${formatAmountNoDecimal(totalNet)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp,
+                                valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                            )
+                            AnimatedInfoChip(
+                                label = "平均每項",
+                                valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp
+                            )
+                            AnimatedInfoChip(
+                                label = "日均支出",
+                                valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp
+                            )
                         }
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
 
-                        Column(
+                // ===== 日曆 + 當日明細 =====
+                Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
+                    val p = if (selectedDay != null) collapseP.coerceIn(0f, 1f) else 0f
+                    val selRow = if (selectedDay != null) {
+                        ((firstDayOffset + selectedDay!! - 1) / 7).coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+                    } else {
+                        0
+                    }
+                    val selRowH = rowHeightsPx.getOrElse(selRow) { 0f }
+                    val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
+                    val minDetailPeekH = with(density) { 100.dp.toPx() }
+                    val maxGridForDetail = (containerHeightPx - headerHeightPx - minDetailPeekH - fabTopPaddingPx).coerceAtLeast(selRowH)
+                    
+                    // ★ 修正：確保即使日曆被壓縮到 maxGridForDetail，選中嘅嗰一行都會被自動推入可見範圍內，唔會被裁切。
+                    val requiredBaseScroll = if (selRow in rowOffsetsPx.indices) {
+                        val rowTop = rowOffsetsPx[selRow]
+                        val rowBottom = rowTop + selRowH
+                        if (rowBottom > maxGridForDetail) rowBottom - maxGridForDetail else 0f
+                    } else 0f
+
+                    val visibleGridH = ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
+                    
+                    // ★ 完美過渡：p=0 時只推高必要距離；p=1 時推到最頂
+                    val gridScroll = if (selRow in rowOffsetsPx.indices) {
+                        requiredBaseScroll * (1f - p) + rowOffsetsPx[selRow] * p
+                    } else 0f
+
+                    Column(Modifier.fillMaxSize()) {
+                        // 星期標題
+                        Box(
                             Modifier
                                 .fillMaxWidth()
-                                .offset { IntOffset(0, (-gridScroll).roundToInt()) }
-                                .verticalScroll(internalGridScrollState, enabled = !isCollapsing)
-                                // ★ 2. 喺呢度加返 padding，等你滑到最底時，可以將最後一行推高出個遮罩
-                                .padding(bottom = 60.dp)
+                                .height(headerHeightDp)
+                                .background(SURFACE_BG)
                         ) {
-                            for (rowIdx in 0 until totalRows) {
-                                val isSel = selectedDay != null && rowIdx == selRow
-                                CalendarRow(
-                                    rowIdx = rowIdx,
-                                    firstDayOffset = firstDayOffset,
-                                    daysInMonth = daysInMonth,
-                                    today = today,
-                                    isCurrentMonth = isCurrentMonth,
-                                    recordsByDay = recordsByDay,
-                                    displayMode = displayMode,
-                                    maxAbsNet = maxAbsNet,
-                                    selectedDay = selectedDay,
-                                    selectedCol = if (isSel) selectedColIdx else null,
-                                    animateValues = animateValues,
-                                    heightFraction = 1f,
-                                    onCellClick = { day, col ->
-                                        val rowOfDay = ((firstDayOffset + day - 1) / 7)
-                                            .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
-                                        if (selectedDay == day) {
-                                            when {
-                                                collapseP > 0.05f && collapseP < 0.95f -> {
-                                                    if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
-                                                }
-                                                collapseP >= 0.95f && chromeOffsetPx > 0.05f -> animateChromeTo(0f)
-                                                collapseP >= 0.95f -> animateCollapseTo(0f)
-                                                else -> animateCollapseTo(1f)
-                                            }
-                                        } else {
-                                            selectedDay = day
-                                            selectedRowIdx = rowOfDay
-                                            selectedColIdx = col
-                                            cachedSelectedDay = day
-                                            cachedSelectedRowIdx = rowOfDay
-                                            cachedSelectedCol = col
-                                            detailExpandedId = null
-                                            chromeOffsetPx = 0f
-                                            scope.launch { detailScrollState.scrollTo(0) }
-                                            animateCollapseTo(1f)
-                                        }
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 13.dp)
+                                    .fillMaxHeight(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = w,
+                                            fontSize = 12.sp,
+                                            color = Color.Black,
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = TextStyle(
+                                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                            )
+                                        )
                                     }
-                                )
-                                if (rowIdx < totalRows - 1) {
-                                    Spacer(Modifier.height(6.dp))
                                 }
                             }
                         }
-                    }
 
-                    // 當日明細
-                    if (selectedDay != null) {
-                        Column(
+                        // 日曆
+                        Box(
                             Modifier
                                 .fillMaxWidth()
-                                .weight(1f)
-                                .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp)
+                                .padding(horizontal = 10.dp)
+                                .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
+                                .clipToBounds()
                         ) {
-                            TrianglePointer(
-                                colIndex = cachedSelectedCol,
-                                color = SURFACE_CARD,
-                                triangleHeight = triangleHeightDp
-                            )
-                            Box(
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                    .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                            ) {
+                                for (rowIdx in 0 until totalRows) {
+                                    val isSel = selectedDay != null && rowIdx == selRow
+                                    CalendarRow(
+                                        rowIdx = rowIdx,
+                                        firstDayOffset = firstDayOffset,
+                                        daysInMonth = daysInMonth,
+                                        today = today,
+                                        isCurrentMonth = isCurrentMonth,
+                                        recordsByDay = recordsByDay,
+                                        displayMode = displayMode,
+                                        maxAbsNet = maxAbsNet,
+                                        selectedDay = selectedDay,
+                                        selectedCol = if (isSel) selectedColIdx else null,
+                                        animateValues = animateValues,
+                                        heightFraction = 1f,
+                                        onCellClick = { day, col ->
+                                            val rowOfDay = ((firstDayOffset + day - 1) / 7)
+                                                .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+                                            if (selectedDay == day) {
+                                                when {
+                                                    collapseP > 0.05f && collapseP < 0.95f -> {
+                                                        if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
+                                                    }
+                                                    collapseP >= 0.95f && chromeOffsetPx > 0.05f -> animateChromeTo(0f)
+                                                    collapseP >= 0.95f -> animateCollapseTo(0f)
+                                                    else -> animateCollapseTo(1f)
+                                                }
+                                            } else {
+                                                selectedDay = day
+                                                selectedRowIdx = rowOfDay
+                                                selectedColIdx = col
+                                                cachedSelectedDay = day
+                                                cachedSelectedRowIdx = rowOfDay
+                                                cachedSelectedCol = col
+                                                detailExpandedId = null
+                                                chromeOffsetPx = 0f
+                                                scope.launch { detailScrollState.scrollTo(0) }
+                                                animateCollapseTo(1f)
+                                            }
+                                        }
+                                    )
+                                    if (rowIdx < totalRows - 1) {
+                                        Spacer(Modifier.height(6.dp))
+                                    }
+                                }
+                            }
+                        }
+
+                        // 當日明細
+                        if (selectedDay != null) {
+                            Column(
                                 Modifier
                                     .fillMaxWidth()
                                     .weight(1f)
-                                    .padding(horizontal = 10.dp)
-                                    .padding(bottom = 4.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(SURFACE_CARD)
+                                    .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp)
                             ) {
-                                Column(Modifier.fillMaxSize()) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(handleBarHeightDp)
-                                            .pointerInput(selRow) {
-                                                detectVerticalDragGestures(
-                                                    onDragStart = { collapsedInCurrentGesture = false },
-                                                    onDragEnd = { snapAfterDrag() },
-                                                    onVerticalDrag = { change, dragAmount ->
-                                                        change.consume()
-                                                        if (isSettling) return@detectVerticalDragGestures
-                                                        if (dragAmount < 0f) applyDragUp(-dragAmount)
-                                                        else applyDragDown(dragAmount)
-                                                    }
-                                                )
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
+                                TrianglePointer(
+                                    colIndex = cachedSelectedCol,
+                                    color = SURFACE_CARD,
+                                    triangleHeight = triangleHeightDp
+                                )
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .padding(horizontal = 10.dp)
+                                        .padding(bottom = 4.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(SURFACE_CARD)
+                                ) {
+                                    Column(Modifier.fillMaxSize()) {
                                         Box(
                                             Modifier
-                                                .width(36.dp)
-                                                .height(4.dp)
-                                                .clip(RoundedCornerShape(2.dp))
-                                                .background(TEXT_TERTIARY.copy(alpha = 0.45f))
-                                        )
-                                    }
-                                    Column(
-                                        Modifier
-                                            .fillMaxSize()
-                                            .nestedScroll(detailNestedConnection)
-                                            .verticalScroll(detailScrollState)
-                                    ) {
-                                        DayDetailPanel(
-                                            dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
-                                            records = recordsByDay[cachedSelectedDay] ?: emptyList(),
-                                            expandedId = detailExpandedId,
-                                            onExpandChange = { detailExpandedId = it },
-                                            onCopy = onCopyClick,
-                                            onEdit = onEditClick,
-                                            onFilter = onFilterClick,
-                                            onDelete = onDeleteClick,
-                                            onChangeIcon = onChangeIconClick,
-                                            onDismiss = {
-                                                scope.launch {
-                                                    isSettling = true
-                                                    try {
-                                                        if (chromeOffsetPx > 0.01f) {
-                                                            Animatable(chromeOffsetPx).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) { chromeOffsetPx = value }
+                                                .fillMaxWidth()
+                                                .height(handleBarHeightDp)
+                                                .pointerInput(selRow) {
+                                                    detectVerticalDragGestures(
+                                                        onDragStart = { collapsedInCurrentGesture = false },
+                                                        onDragEnd = { snapAfterDrag() },
+                                                        onVerticalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            if (isSettling) return@detectVerticalDragGestures
+                                                            if (dragAmount < 0f) applyDragUp(-dragAmount)
+                                                            else applyDragDown(dragAmount)
                                                         }
-                                                        chromeOffsetPx = 0f
-                                                        Animatable(collapseP).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) { collapseP = value }
-                                                    } finally {
-                                                        isSettling = false
+                                                    )
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Box(
+                                                Modifier
+                                                    .width(36.dp)
+                                                    .height(4.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(TEXT_TERTIARY.copy(alpha = 0.45f))
+                                            )
+                                        }
+                                        Column(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .nestedScroll(detailNestedConnection)
+                                                .verticalScroll(detailScrollState)
+                                        ) {
+                                            DayDetailPanel(
+                                                dateKey = "$year-${pad2(month)}-${pad2(cachedSelectedDay)}",
+                                                records = recordsByDay[cachedSelectedDay] ?: emptyList(),
+                                                expandedId = detailExpandedId,
+                                                onExpandChange = { detailExpandedId = it },
+                                                onCopy = onCopyClick,
+                                                onEdit = onEditClick,
+                                                onFilter = onFilterClick,
+                                                onDelete = onDeleteClick,
+                                                onChangeIcon = onChangeIconClick,
+                                                onDismiss = {
+                                                    scope.launch {
+                                                        isSettling = true
+                                                        try {
+                                                            if (chromeOffsetPx > 0.01f) {
+                                                                Animatable(chromeOffsetPx).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) { chromeOffsetPx = value }
+                                                            }
+                                                            chromeOffsetPx = 0f
+                                                            Animatable(collapseP).animateTo(0f, spring(dampingRatio = 0.9f, stiffness = 380f)) { collapseP = value }
+                                                        } finally {
+                                                            isSettling = false
+                                                        }
                                                     }
-                                                }
-                                            },
-                                            deletingIds = deletingIds,
-                                            justAddedIds = justAddedIds,
-                                            onFanMenuStart = handleFanStartCal,
-                                            onFanMenuDrag = handleFanDragCal,
-                                            onFanMenuEnd = handleFanEndCal,
-                                            activeFanRecord = activeFanRecord
-                                        )
+                                                },
+                                                deletingIds = deletingIds,
+                                                justAddedIds = justAddedIds,
+                                                onFanMenuStart = handleFanStartCal,
+                                                onFanMenuDrag = handleFanDragCal,
+                                                onFanMenuEnd = handleFanEndCal,
+                                                activeFanRecord = activeFanRecord
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
             }
         }
 
@@ -7784,9 +7742,16 @@ fun CalendarContent(
         )
 
         FloatingActionButton(
-            onClick = onAddClick, shape = CircleShape, containerColor = BRAND_PRIMARY, contentColor = Color.White,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
-        ) { Icon(Icons.Default.Add, "新增") }
+            onClick = onAddClick,
+            shape = CircleShape,
+            containerColor = BRAND_PRIMARY,
+            contentColor = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 12.dp)
+        ) {
+            Icon(Icons.Default.Add, "新增")
+        }
     }
 }
 
