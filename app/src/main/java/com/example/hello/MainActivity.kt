@@ -6942,9 +6942,15 @@ fun CalendarContent(
     }
 
     val detailScrollState = rememberScrollState()
-    val gridScrollState = rememberScrollState()  // ★ 展開態(冇揀日期)網格垂直滾動
+    // ★ 未選日子時：項目／圖標模式可捲動整段（chips + TopStat + 格仔）
+    val bodyScrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+
+    // 換月／換顯示模式時重置 body 捲動
+    LaunchedEffect(safeMonthKey, displayMode) {
+        bodyScrollState.scrollTo(0)
+    }
 
     // Reset per-gesture flag when detail scroll finishes (finger lifted)
     LaunchedEffect(detailScrollState.isScrollInProgress) {
@@ -7172,7 +7178,6 @@ fun CalendarContent(
                     isSettling = false
                     collapseP = 0f
                     chromeOffsetPx = 0f
-                    gridScrollState.scrollTo(0)
                     detailExpandedId = null
                     val newMonthToday = if (currentMonthKey == todayKey) todayCal.get(Calendar.DAY_OF_MONTH) else null
                     if (newMonthToday != null) {
@@ -7221,8 +7226,6 @@ fun CalendarContent(
                     selectedRowIdx = null
                     selectedColIdx = null
                     detailExpandedId = null
-                    chromeOffsetPx = 0f
-                    gridScrollState.scrollTo(0)
                 }
             }
         }
@@ -7294,56 +7297,6 @@ fun CalendarContent(
         }
     }
 
-    // ★ 展開態(冇揀日期): 網格內容超出可視區 -> 向上掃先推走 chips/stats, 再輪到網格自己滾
-    val gridNestedConnection = object : NestedScrollConnection {
-        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-            if (selectedDay != null || isSettling) return Offset.Zero
-            // available.y < 0 = 手指向上/想睇下面嘅行; 只有仲有內容未睇完先至推走 chrome
-            if (available.y < 0f && gridScrollState.maxValue > 0) {
-                val chromeMax = chromeRangePx()
-                if (chromeOffsetPx < chromeMax - 0.5f) {
-                    val used = minOf(-available.y, chromeMax - chromeOffsetPx).coerceAtLeast(0f)
-                    chromeOffsetPx += used
-                    return Offset(0f, -used)
-                }
-            }
-            return Offset.Zero
-        }
-
-        override fun onPostScroll(
-            consumed: Offset,
-            available: Offset,
-            source: NestedScrollSource
-        ): Offset {
-            if (selectedDay != null || isSettling) return Offset.Zero
-            // 網格已經喺最頂, 仲繼續向下掃 -> 拉返 chips/stats 出嚟
-            if (available.y > 0f && gridScrollState.value <= 0) {
-                val used = minOf(available.y, chromeOffsetPx).coerceAtLeast(0f)
-                chromeOffsetPx -= used
-                return Offset(0f, used)
-            }
-            return Offset.Zero
-        }
-
-        override suspend fun onPreFling(available: Velocity): Velocity {
-            if (selectedDay != null) return Velocity.Zero
-            val chromeMax = chromeRangePx()
-            when {
-                available.y < -400f -> {
-                    if (gridScrollState.maxValue > 0 && chromeOffsetPx < chromeMax - 1f) {
-                        animateChromeTo(1f); return available
-                    }
-                }
-                available.y > 400f -> {
-                    if (gridScrollState.value <= 0 && chromeOffsetPx > 0.01f) {
-                        animateChromeTo(0f); return available
-                    }
-                }
-            }
-            return Velocity.Zero
-        }
-    }
-
     BoxWithConstraints(Modifier.fillMaxSize().background(SURFACE_BG)) {
         val containerHeightPx = constraints.maxHeight.toFloat()
         val bottomLimitPx = containerHeightPx - fabTopPaddingPx
@@ -7395,9 +7348,136 @@ fun CalendarContent(
                 }
             }
 
+            // ★ 未選日子：整段可上下捲動（chips + TopStat + 星期 + 格仔）
+            //   項目／圖標模式格仔較高時可捲到下便；捲動時上方 chips／統計一齊被推走
+            if (selectedDay == null) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(bodyScrollState)
+                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                    ) {
+                        Spacer(Modifier.height(4.dp))
+                        AnimatedCalendarCategoryChips(
+                            visibleCategories = visibleCategories,
+                            filterCategory = filterCategory,
+                            onFilterCategoryChange = onFilterCategoryChange
+                        )
+                        Spacer(Modifier.height(14.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AnimatedInfoChip(
+                                label = "總計",
+                                valueText = "$${formatAmountNoDecimal(totalNet)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp,
+                                valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
+                            )
+                            AnimatedInfoChip(
+                                label = "平均每項",
+                                valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp
+                            )
+                            AnimatedInfoChip(
+                                label = "日均支出",
+                                valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                                modifier = Modifier.weight(1f),
+                                valueFontSize = 16.sp
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+
+                    // 星期標題
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(headerHeightDp)
+                            .background(SURFACE_BG)
+                    ) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 13.dp)
+                                .fillMaxHeight(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = w,
+                                        fontSize = 12.sp,
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = TextStyle(
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 日曆格仔：自然高度，唔再 clip 截斷
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                    ) {
+                        for (rowIdx in 0 until totalRows) {
+                            CalendarRow(
+                                rowIdx = rowIdx,
+                                firstDayOffset = firstDayOffset,
+                                daysInMonth = daysInMonth,
+                                today = today,
+                                isCurrentMonth = isCurrentMonth,
+                                recordsByDay = recordsByDay,
+                                displayMode = displayMode,
+                                maxAbsNet = maxAbsNet,
+                                selectedDay = null,
+                                selectedCol = null,
+                                animateValues = animateValues,
+                                heightFraction = 1f,
+                                onCellClick = { day, col ->
+                                    val rowOfDay = ((firstDayOffset + day - 1) / 7)
+                                        .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+                                    selectedDay = day
+                                    selectedRowIdx = rowOfDay
+                                    selectedColIdx = col
+                                    cachedSelectedDay = day
+                                    cachedSelectedRowIdx = rowOfDay
+                                    cachedSelectedCol = col
+                                    detailExpandedId = null
+                                    chromeOffsetPx = 0f
+                                    scope.launch {
+                                        bodyScrollState.scrollTo(0)
+                                        detailScrollState.scrollTo(0)
+                                    }
+                                    animateCollapseTo(1f)
+                                }
+                            )
+                            if (rowIdx < totalRows - 1) {
+                                Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    }
+                }
+            } else {
             // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
-            val topTranslatePx = chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
-            val isChromeCollapsing = topSectionHeightPx > 0f
+            val topTranslatePx = if (selectedDay != null) {
+                chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
+            } else 0f
+            val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
             val topVisibleH = if (isChromeCollapsing && chromeOffsetPx > 0.5f)
                 (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
             else -1f
@@ -7487,6 +7567,10 @@ fun CalendarContent(
                 } else {
                     fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
                 }
+                val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
+                    rowOffsetsPx[selRow] * p
+                } else 0f
+
                 Column(Modifier.fillMaxSize()) {
                     // 星期標題
                     Box(
@@ -7519,9 +7603,21 @@ fun CalendarContent(
                         }
                     }
 
-                    // 日曆(展開態可上下滾動; 揀咗日期就返返原本嘅摺疊/位移邏輯)
-                    val rowsContent: @Composable () -> Unit = {
-for (rowIdx in 0 until totalRows) {
+                    // 日曆
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                            .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
+                            .clipToBounds()
+                    ) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                        ) {
+                            for (rowIdx in 0 until totalRows) {
                                 val isSel = selectedDay != null && rowIdx == selRow
                                 CalendarRow(
                                     rowIdx = rowIdx,
@@ -7565,57 +7661,6 @@ for (rowIdx in 0 until totalRows) {
                                 if (rowIdx < totalRows - 1) {
                                     Spacer(Modifier.height(6.dp))
                                 }
-                            }
-                    }
-                    val gridBottomReserveDp = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp
-                    // 金額模式(displayMode==0)行仔最矮, 成月本身睇得哂 -> 唔需要滾動, 保持固定顯示
-                    val gridScrollable = displayMode != 0
-                    if (selectedDay != null) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp)
-                                .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
-                                .clipToBounds()
-                        ) {
-                            // 折疊態(有揀日期): 改用「死高度 + offset 手動位移」將所選嗰行推到可視區頂部,
-                            // 令當日明細啱啱顯示喺所選嗰行底。唔再用 verticalScroll: 佢會 clamp offset,
-                            // 搞到第二行開始撳唔上去(金額模式)、第4/5行推唔郁(項目模式)、第3行後睇唔到(圖標模式)。
-                            val gridTopOffsetDp = with(density) {
-                                (-(rowOffsetsPx.getOrElse(selRow) { 0f })).toDp()
-                            }
-                            Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(with(density) { fullGridHeightPx.toDp() })
-                                    .offset(y = gridTopOffsetDp)
-                            ) {
-                                rowsContent()
-                                Spacer(Modifier.height(gridBottomReserveDp))
-                            }
-                        }
-                    } else {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp)
-                                .weight(1f)
-                                .clipToBounds()
-                        ) {
-                            Column(
-                                if (gridScrollable)
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .fillMaxHeight()
-                                        .nestedScroll(gridNestedConnection)
-                                        .verticalScroll(gridScrollState)
-                                else
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .fillMaxHeight()
-                            ) {
-                                rowsContent()
-                                Spacer(Modifier.height(gridBottomReserveDp))
                             }
                         }
                     }
@@ -7712,6 +7757,7 @@ for (rowIdx in 0 until totalRows) {
                         }
                     }
                 }
+            }
             }
         }
 
