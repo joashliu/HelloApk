@@ -2432,17 +2432,27 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
     // 單位／口語正規化
     text = text
         .replace("塊錢", "")
-        .replace("蚊半", "點五")
-        .replace("塊半", "點五")
-        .replace("元半", "點五")
+        .replace("蚊半", ".5") // 🟢 修正：轉為 .5 才能完美配合阿拉伯數字
+        .replace("塊半", ".5")
+        .replace("元半", ".5")
+        .replace("個半", ".5") // 🟢 新增：支援「X個半」
         .replace(Regex("[蚊元塊圓块圆錢]"), "")
         .replace(Regex("\\s+"), "")
         .trim()
 
-    // 1) 阿拉伯數字在尾：…28 / …28.5
+    // 1) 阿拉伯數字在尾：…28 / …28.5 (依家「43個半」會變成「43.5」喺呢度完美攔截)
     Regex("""^(.*?)(\d+(?:\.\d+)?)$""").find(text)?.let { m ->
         val amt = m.groupValues[2].toDoubleOrNull()
         if (amt != null && amt > 0) return m.groupValues[1] to amt
+    }
+
+    // 1.5) 中文數字 + .5：處理「四十三個半」被轉為「四十三.5」嘅情況
+    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)\.5$""").find(text)?.let { m ->
+        val whole = parseChineseInteger(m.groupValues[2])
+        if (whole != null) {
+            val amt = whole + 0.5
+            if (amt > 0) return m.groupValues[1] to amt
+        }
     }
 
     // 2) 粵語「X個Y」→ X.Y（例如 四個九 → 4.9、十二個五 → 12.5）
