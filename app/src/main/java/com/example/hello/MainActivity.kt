@@ -2380,7 +2380,8 @@ private val CN_DIGIT_MAP = mapOf(
     '六' to 6, '陸' to 6, '陆' to 6,
     '七' to 7, '柒' to 7,
     '八' to 8, '捌' to 8,
-    '九' to 9, '玖' to 9
+    '九' to 9, '玖' to 9,
+    '狗' to 9 // 🟢 新增：將「狗」當作「9」嘅諧音處理
 )
 
 /** 解析中文整數（支援到百），例如：二十八→28、十二→12、一百零五→105、十→10 */
@@ -2455,9 +2456,10 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
         }
     }
 
-    // 2) 粵語「X個Y」→ X.Y（例如 四個九 → 4.9、十二個五 → 12.5）
-    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖])$""").find(text)?.let { m ->
-        val whole = parseChineseInteger(m.groupValues[2])
+    // 2) 粵語「X個Y」→ X.Y（支援：兩個九、四個狗、2個狗）
+    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗])$""").find(text)?.let { m ->
+        val wholeStr = m.groupValues[2]
+        val whole = wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr)
         val frac = CN_DIGIT_MAP[m.groupValues[3][0]]
         if (whole != null && frac != null) {
             val amt = whole + frac / 10.0
@@ -2465,11 +2467,11 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
         }
     }
 
-    // 3) 「X點Y」→ X.Y
-    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千]+)?點([零〇○一二兩三四五六七八九]+)$""").find(text)?.let { m ->
-        val wholePart = m.groupValues[2]
+    // 3) 「X點Y」→ X.Y（支援：兩點九、2點狗）
+    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千]+)?點([零〇○一二兩三四五六七八九狗]+)$""").find(text)?.let { m ->
+        val wholeStr = m.groupValues[2]
+        val whole = if (wholeStr.isBlank()) 0 else (wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr))
         val fracPart = m.groupValues[3]
-        val whole = if (wholePart.isBlank()) 0 else parseChineseInteger(wholePart)
         if (whole != null && fracPart.isNotEmpty()) {
             var frac = 0.0
             var div = 10.0
