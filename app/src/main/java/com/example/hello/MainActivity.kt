@@ -7562,11 +7562,12 @@ fun CalendarContent(
                 val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
                 val minDetailPeekH = with(density) { 100.dp.toPx() }
                 val maxGridForDetail = (containerHeightPx - headerHeightPx - minDetailPeekH - fabTopPaddingPx).coerceAtLeast(selRowH)
+                
+                // ★ 1. 恢復返呢度嘅 coerceAtMost，令外層 Box 知道自己邊界，啟動內部嘅 verticalScroll
                 val visibleGridH = if (selectedDay != null) {
                     ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
                 } else {
-                    // ★ 放開高度限制，令外層 ScrollState 可以生效，支援上下滾動睇晒所有格仔
-                    fullGridHeightPx
+                    fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
                 }
                 val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
                     rowOffsetsPx[selRow] * p
@@ -7612,7 +7613,6 @@ fun CalendarContent(
                             .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
                             .clipToBounds()
                     ) {
-                        // ★ 1. 新增內部捲動狀態
                         val internalGridScrollState = rememberScrollState()
                         val isCollapsing = p > 0.01f
                         
@@ -7628,10 +7628,10 @@ fun CalendarContent(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                // ★ 刪除咗 wrapContentHeight(unbounded = true)，解除高度衝突
                                 .offset { IntOffset(0, (-gridScroll).roundToInt()) }
-                                // ★ 2. 保留 verticalScroll
                                 .verticalScroll(internalGridScrollState, enabled = !isCollapsing)
+                                // ★ 2. 喺呢度加返 padding，等你滑到最底時，可以將最後一行推高出個遮罩
+                                .padding(bottom = 60.dp)
                         ) {
                             for (rowIdx in 0 until totalRows) {
                                 val isSel = selectedDay != null && rowIdx == selRow
