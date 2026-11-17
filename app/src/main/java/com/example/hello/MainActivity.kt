@@ -12545,87 +12545,56 @@ fun RollingNumber(
     text: String,
     color: Color,
     fontSize: TextUnit,
-    fontWeight: FontWeight = FontWeight.Bold,
+    fontWeight: FontWeight,
     animateChanges: Boolean = true,
-    modifier: Modifier = Modifier,
+    modifier: Modifier = Modifier
 ) {
-    val maxLen = remember { mutableIntStateOf(text.length.coerceAtLeast(1)) }
-    LaunchedEffect(text.length) {
-        if (text.length > maxLen.value) maxLen.value = text.length
-    }
-
-    val totalSlots = maxLen.value
-
-    val compactStyle = remember(fontSize, fontWeight) {
-        TextStyle(
-            fontSize = fontSize,
-            fontWeight = fontWeight,
-            // ★ Top Stat 等寬數字（tabular figures）
-            fontFeatureSettings = "tnum",
-            fontFamily = FontFamily.Monospace,
-            platformStyle = PlatformTextStyle(includeFontPadding = false),
-            lineHeightStyle = LineHeightStyle(
-                alignment = LineHeightStyle.Alignment.Center,
-                trim = LineHeightStyle.Trim.Both
-            )
-        )
-    }
-
-    val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-    val density = LocalDensity.current
-    val cellHeight: Dp = remember(compactStyle) {
-        val layout = textMeasurer.measure("0", compactStyle)
-        with(density) { layout.size.height.toDp() }
-    }
-
-    val currentAnimate by rememberUpdatedState(animateChanges)
-    var displayedText by remember { mutableStateOf(text) }
-
-    // ★ 唔再 finally 強制跳字：取消時保留已顯示進度，新 effect 由當前 displayedText 繼續
-    LaunchedEffect(text, animateChanges) {
-        if (!animateChanges) {
-            displayedText = text
-            return@LaunchedEffect
-        }
-        val target = text
-        val current = displayedText
-        if (target == current) return@LaunchedEffect
-        // 刪字 / 非前綴：即刻對齊，由每位動畫負責出入場
-        if (target.length <= current.length || !target.startsWith(current)) {
-            displayedText = target
-            return@LaunchedEffect
-        }
-        // 一次補多個字先做輕量打字機；中途被取消唔強制跳字
-        var shown = current
-        while (shown.length < target.length && isActive) {
-            if (!target.startsWith(shown)) {
-                displayedText = target
-                return@LaunchedEffect
-            }
-            shown = target.substring(0, shown.length + 1)
-            displayedText = shown
-            if (shown.length < target.length) delay(40)
-        }
-        if (isActive && displayedText != target) displayedText = target
-    }
-
     Row(
-        modifier = modifier.wrapContentWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        for (i in 0 until totalSlots) {
-            val char = displayedText.getOrNull(i)
-            key(i) {
-                val delayMs = (totalSlots - 1 - i) * 8
-                RollingDigit(
-                    targetChar = char,
+        // 將金額字串拆解，為每一位字元建立獨立的動畫容器
+        text.forEachIndexed { index, char ->
+            AnimatedContent(
+                targetState = char,
+                transitionSpec = {
+                    if (!animateChanges) {
+                        return@AnimatedContent EnterTransition.None togetherWith ExitTransition.None
+                    }
+
+                    // 嘗試將字元轉為數字以判斷大小
+                    val oldDigit = initialState.digitToIntOrNull()
+                    val newDigit = targetState.digitToIntOrNull()
+
+                    if (oldDigit != null && newDigit != null) {
+                        if (newDigit > oldDigit) {
+                            // 數字上升：新數字由下往上滑入，舊數字向上滑出
+                            (slideInVertically(tween(400, easing = EaseOut)) { it } + fadeIn(tween(400))) togetherWith
+                            (slideOutVertically(tween(400, easing = EaseOut)) { -it } + fadeOut(tween(400)))
+                        } else if (newDigit < oldDigit) {
+                            // 數字下降：新數字由上往下滑入，舊數字向下滑出
+                            (slideInVertically(tween(400, easing = EaseOut)) { -it } + fadeIn(tween(400))) togetherWith
+                            (slideOutVertically(tween(400, easing = EaseOut)) { it } + fadeOut(tween(400)))
+                        } else {
+                            // 數字不變
+                            fadeIn() togetherWith fadeOut()
+                        }
+                    } else {
+                        // 非數字字元（例如 $ , . 或空白），僅使用淡入淡出，保持版面穩定
+                        fadeIn(tween(400)) togetherWith fadeOut(tween(400))
+                    }
+                },
+                // clipToBounds() 擔任蒙版角色，確保數字滑動時不會溢出所屬的字元空間
+                modifier = Modifier.clipToBounds(),
+                label = "RollingDigit_$index"
+            ) { currentChar ->
+                Text(
+                    text = currentChar.toString(),
                     color = color,
-                    style = compactStyle,
-                    cellHeight = cellHeight,
-                    animate = currentAnimate,
-                    delayMs = delayMs,
-                    modifier = Modifier.wrapContentWidth()
+                    fontSize = fontSize,
+                    fontWeight = fontWeight,
+                    softWrap = false
                 )
             }
         }
