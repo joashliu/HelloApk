@@ -96,6 +96,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha // 新增：用於隱藏佔位字元
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -205,6 +206,7 @@ import java.util.Locale
 import java.util.Random
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
+import kotlin.math.floor // 新增：用於向下取整
 import kotlin.math.max
 import kotlin.math.roundToInt
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -12554,47 +12556,104 @@ fun RollingNumber(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 將金額字串拆解，為每一位字元建立獨立的動畫容器
         text.forEachIndexed { index, char ->
-            AnimatedContent(
-                targetState = char,
-                transitionSpec = {
-                    if (!animateChanges) {
-                        return@AnimatedContent EnterTransition.None togetherWith ExitTransition.None
-                    }
-
-                    // 嘗試將字元轉為數字以判斷大小
-                    val oldDigit = initialState.digitToIntOrNull()
-                    val newDigit = targetState.digitToIntOrNull()
-
-                    if (oldDigit != null && newDigit != null) {
-                        if (newDigit > oldDigit) {
-                            // 數字上升：新數字由下往上滑入，舊數字向上滑出
-                            (slideInVertically(tween(400, easing = EaseOut)) { it } + fadeIn(tween(400))) togetherWith
-                            (slideOutVertically(tween(400, easing = EaseOut)) { -it } + fadeOut(tween(400)))
-                        } else if (newDigit < oldDigit) {
-                            // 數字下降：新數字由上往下滑入，舊數字向下滑出
-                            (slideInVertically(tween(400, easing = EaseOut)) { -it } + fadeIn(tween(400))) togetherWith
-                            (slideOutVertically(tween(400, easing = EaseOut)) { it } + fadeOut(tween(400)))
-                        } else {
-                            // 數字不變
-                            fadeIn() togetherWith fadeOut()
-                        }
-                    } else {
-                        // 非數字字元（例如 $ , . 或空白），僅使用淡入淡出，保持版面穩定
-                        fadeIn(tween(400)) togetherWith fadeOut(tween(400))
-                    }
-                },
-                // clipToBounds() 擔任蒙版角色，確保數字滑動時不會溢出所屬的字元空間
-                modifier = Modifier.clipToBounds(),
-                label = "RollingDigit_$index"
-            ) { currentChar ->
-                Text(
-                    text = currentChar.toString(),
+            // 利用由右至左嘅位置作為 Key
+            // 確保位數增加（例如 50 -> 150）時，個位同十位唔會錯位亂跳
+            val indexFromRight = text.length - index
+            key(indexFromRight) {
+                RollingChar(
+                    targetChar = char,
                     color = color,
                     fontSize = fontSize,
                     fontWeight = fontWeight,
-                    softWrap = false
+                    animateChanges = animateChanges
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RollingChar(
+    targetChar: Char,
+    color: Color,
+    fontSize: TextUnit,
+    fontWeight: FontWeight,
+    animateChanges: Boolean
+) {
+    val targetDigit = targetChar.digitToIntOrNull()
+
+    if (targetDigit == null) {
+        // 標點符號或貨幣單位（如 $ , .），只做淡入淡出保持穩定
+        AnimatedContent(
+            targetState = targetChar,
+            transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) },
+            label = "Symbol_$targetChar"
+        ) { c ->
+            Text(
+                text = c.toString(),
+                color = color,
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                softWrap = false
+            )
+        }
+    } else {
+        // 數字位：使用 Float 動畫，例如 5 -> 8 會經過 5.x, 6.x, 7.x
+        val animatedValue = remember { Animatable(targetDigit.toFloat()) }
+
+        LaunchedEffect(targetDigit, animateChanges) {
+            if (animatedValue.targetValue != targetDigit.toFloat()) {
+                if (animateChanges) {
+                    animatedValue.animateTo(
+                        targetValue = targetDigit.toFloat(),
+                        animationSpec = tween(durationMillis = 500, easing = EaseOut)
+                    )
+                } else {
+                    animatedValue.snapTo(targetDigit.toFloat())
+                }
+            }
+        }
+
+        Box(modifier = Modifier.clipToBounds()) {
+            // 隱藏嘅底層，用嚟撐起 Box 嘅高度同闊度，'8' 通常係字體入面最肥嘅字
+            Text(
+                text = "8",
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                color = Color.Transparent,
+                modifier = Modifier.alpha(0f),
+                softWrap = false
+            )
+
+            val value = animatedValue.value
+            val lower = floor(value).toInt()
+            val upper = lower + 1
+
+            // 畫出較細嘅數字 (Lower Digit)
+            Text(
+                text = (abs(lower) % 10).toString(),
+                color = color,
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                softWrap = false,
+                modifier = Modifier.graphicsLayer {
+                    // 利用小數差值控制上下位移
+                    translationY = (lower - value) * size.height
+                }
+            )
+
+            // 如果帶有小數部分（動畫未停定），畫出較大嘅數字 (Upper Digit)
+            if (value % 1f != 0f) {
+                Text(
+                    text = (abs(upper) % 10).toString(),
+                    color = color,
+                    fontSize = fontSize,
+                    fontWeight = fontWeight,
+                    softWrap = false,
+                    modifier = Modifier.graphicsLayer {
+                        translationY = (upper - value) * size.height
+                    }
                 )
             }
         }
