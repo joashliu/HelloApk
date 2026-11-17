@@ -8519,7 +8519,7 @@ fun LedgerKeyboardPanel(
                             .background(highlightColor)
                             .padding(horizontal = 10.dp, vertical = 2.dp)
                     ) {
-                        AnimatedAmount(
+                        RollingNumber(
                             text = showText,
                             color = if (state.amountText.isEmpty()) TEXT_TERTIARY else TEXT_PRIMARY,
                             fontSize = 38.sp, fontWeight = FontWeight.Bold
@@ -9973,7 +9973,7 @@ fun AnimatedInfoChip(
             Text(label, fontSize = 10.sp, color = Color.Black, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))
             Box(contentAlignment = Alignment.Center) {
-                AnimatedAmount(
+                RollingNumber(
                     text = valueText,
                     color = valueColor,
                     fontSize = valueFontSize,
@@ -10202,7 +10202,7 @@ fun CalendarDayCell(
                             Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            AnimatedAmount(
+                            RollingNumber(
                                 text = summary.compactNet,
                                 color = if (net >= 0) COLOR_INCOME else COLOR_EXPENSE,
                                 fontSize = 11.sp,
