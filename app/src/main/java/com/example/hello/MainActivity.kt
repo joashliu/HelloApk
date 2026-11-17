@@ -2456,19 +2456,27 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
         }
     }
 
-    // 2) 粵語「X個Y」→ X.Y（支援：兩個九、四個狗、2個狗）
-    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗])$""").find(text)?.let { m ->
+    // 2) 粵語「X個Y」→ X.Y（支援：兩個九、四個狗、八個一九、8個19）
+    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([\d零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗]+)$""").find(text)?.let { m ->
         val wholeStr = m.groupValues[2]
         val whole = wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr)
-        val frac = CN_DIGIT_MAP[m.groupValues[3][0]]
-        if (whole != null && frac != null) {
-            val amt = whole + frac / 10.0
+        val fracPart = m.groupValues[3]
+        if (whole != null && fracPart.isNotEmpty()) {
+            var frac = 0.0
+            var div = 10.0
+            for (c in fracPart) {
+                // 🟢 兼容阿拉伯數字同埋中文數字轉換
+                val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
+                frac += d / div
+                div *= 10
+            }
+            val amt = whole + frac
             if (amt > 0) return m.groupValues[1] to amt
         }
     }
 
-    // 3) 「X點Y」→ X.Y（支援：兩點九、2點狗）
-    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千]+)?點([零〇○一二兩三四五六七八九狗]+)$""").find(text)?.let { m ->
+    // 3) 「X點Y」→ X.Y（支援：兩點九、八點一九、8點19）
+    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千]+)?點([\d零〇○一二兩三四五六七八九狗]+)$""").find(text)?.let { m ->
         val wholeStr = m.groupValues[2]
         val whole = if (wholeStr.isBlank()) 0 else (wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr))
         val fracPart = m.groupValues[3]
@@ -2476,7 +2484,7 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
             var frac = 0.0
             var div = 10.0
             for (c in fracPart) {
-                val d = CN_DIGIT_MAP[c] ?: return@let
+                val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
                 frac += d / div
                 div *= 10
             }
