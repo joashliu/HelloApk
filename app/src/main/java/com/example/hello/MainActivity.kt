@@ -7565,7 +7565,8 @@ fun CalendarContent(
                 val visibleGridH = if (selectedDay != null) {
                     ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
                 } else {
-                    fullGridHeightPx.coerceAtMost(containerHeightPx - headerHeightPx - fabTopPaddingPx)
+                    // ★ 放開高度限制，令外層 ScrollState 可以生效，支援上下滾動睇晒所有格仔
+                    fullGridHeightPx
                 }
                 val gridScroll = if (selectedDay != null && selRow in rowOffsetsPx.indices) {
                     rowOffsetsPx[selRow] * p
