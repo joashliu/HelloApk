@@ -4862,7 +4862,7 @@ fun LedgerContent(
 }
 
 // ==========================================
-// ★ TopStats & Helper Composables
+// ★ TopStats & Helper Composables (零重組 GPU 優化版)
 // ==========================================
 
 enum class StatBlockType { CAT, INC, EXP, AVG, BAL, COUNT, TIME_AM, TIME_PM }
@@ -4878,7 +4878,7 @@ fun TopStats(
     avgMorningLabel: String? = null,
     avgAfternoonLabel: String? = null,
     animateValues: Boolean = false,
-    isCompact: Boolean = false 
+    isCompact: Boolean = false
 ) {
     val balance = income - expense
     val targetBalColor = if (balance >= 0) COLOR_INCOME else COLOR_EXPENSE
@@ -4889,7 +4889,6 @@ fun TopStats(
     ) {
         val list = mutableListOf<StatBlockType>()
         if (isFilterMode) {
-            // 篩選模式：唔顯示結餘
             if ((filteredCount ?: 0) > 0) list.add(StatBlockType.COUNT)
             if (income != 0.0) list.add(StatBlockType.INC)
             if (expense != 0.0) list.add(StatBlockType.EXP)
@@ -4910,11 +4909,10 @@ fun TopStats(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            // 收合 Chips 模式減少上下 padding，令頂距更緊
             .padding(top = if (isCompact) 0.dp else 4.dp, bottom = if (isCompact) 2.dp else 4.dp)
     ) {
         val totalW = maxWidth
-        
+
         val geoMapPair = remember(activeBlocks, totalW) {
             val nGapX = 6.dp
             val nGapY = 2.dp
@@ -4942,11 +4940,10 @@ fun TopStats(
             val cGapY = 8.dp
             val cRowH = 34.dp
             val cMap = mutableMapOf<StatBlockType, BlockGeometry>()
-            
+
             val chunked = activeBlocks.chunked(3)
             chunked.forEachIndexed { rIdx, rowBlocks ->
                 val cy = (cRowH + cGapY) * rIdx
-                // 每行用相同欄寬（以最多 3 欄計），未滿行置中，避免左窄右闊
                 val itemW = (totalW - cGapX * 2) / 3
                 val rowContentW = itemW * rowBlocks.size + cGapX * (rowBlocks.size - 1).coerceAtLeast(0)
                 val startX = ((totalW - rowContentW) / 2).coerceAtLeast(0.dp)
@@ -4964,58 +4961,172 @@ fun TopStats(
         val nMaxY = nMap.values.maxOfOrNull { it.y + it.h } ?: 52.dp
         val cMaxY = cMap.values.maxOfOrNull { it.y + it.h } ?: 34.dp
 
-        val targetHeight = if (isCompact) cMaxY else nMaxY
-        val animHeight by animateDpAsState(targetHeight, MASTER_SPRING_DP, label = "containerH")
-        val progress by animateFloatAsState(if (isCompact) 1f else 0f, MASTER_SPRING_FLOAT, label = "compactP")
-
-        val allPossibleBlocks = listOf(
-            StatBlockType.COUNT, StatBlockType.CAT, StatBlockType.INC, StatBlockType.EXP,
-            StatBlockType.AVG, StatBlockType.BAL, StatBlockType.TIME_AM, StatBlockType.TIME_PM
+        // ★ 唔用 `by` 解構，將 State 延遲到 layout / draw 階段先讀，避免整棵樹每幀重組
+        val animHeightState = animateDpAsState(
+            targetValue = if (isCompact) cMaxY else nMaxY,
+            animationSpec = MASTER_SPRING_DP,
+            label = "containerH"
         )
+        val progressState = animateFloatAsState(
+            targetValue = if (isCompact) 1f else 0f,
+            animationSpec = MASTER_SPRING_FLOAT,
+            label = "compactP"
+        )
+        val progressProvider = remember(progressState) { { progressState.value } }
 
-        Box(Modifier.fillMaxWidth().height(animHeight)) {
+        val allPossibleBlocks = remember {
+            listOf(
+                StatBlockType.COUNT, StatBlockType.CAT, StatBlockType.INC, StatBlockType.EXP,
+                StatBlockType.AVG, StatBlockType.BAL, StatBlockType.TIME_AM, StatBlockType.TIME_PM
+            )
+        }
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .layout { measurable, constraints ->
+                    val hPx = animHeightState.value.roundToPx().coerceAtLeast(0)
+                    val placeable = measurable.measure(
+                        constraints.copy(minHeight = hPx, maxHeight = hPx)
+                    )
+                    layout(placeable.width, hPx) {
+                        placeable.placeRelative(0, 0)
+                    }
+                }
+        ) {
             allPossibleBlocks.forEach { block ->
                 val isVisible = activeBlocks.contains(block)
-                
+
                 var memNGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp, 0.dp)) }
                 var memCGeo by remember { mutableStateOf(BlockGeometry(0.dp, 0.dp, 0.dp, 0.dp)) }
-                
+
                 LaunchedEffect(nMap[block]) { nMap[block]?.let { memNGeo = it } }
                 LaunchedEffect(cMap[block]) { cMap[block]?.let { memCGeo = it } }
-                
+
                 val nGeo = nMap[block] ?: memNGeo
                 val cGeo = cMap[block] ?: memCGeo
-                
-                val x by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.x, cGeo.x, progress), MASTER_SPRING_DP, label = "x_$block")
-                val y by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.y, cGeo.y, progress), MASTER_SPRING_DP, label = "y_$block")
-                val w by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.w, cGeo.w, progress), MASTER_SPRING_DP, label = "w_$block")
-                val h by animateDpAsState(androidx.compose.ui.unit.lerp(nGeo.h, cGeo.h, progress), MASTER_SPRING_DP, label = "h_$block")
+                val targetGeo = if (isCompact) cGeo else nGeo
 
-                val bgColor = androidx.compose.ui.graphics.lerp(SURFACE_CARD.copy(alpha = 0f), SURFACE_CARD, progress)
-                val borderColor = androidx.compose.ui.graphics.lerp(DIVIDER_COLOR.copy(alpha = 0f), DIVIDER_COLOR.copy(alpha = 0.5f), progress)
+                // ★ 單次彈簧動畫（移除原本 progress + animateDpAsState 嘅雙重動畫）
+                val xState = animateDpAsState(targetGeo.x, MASTER_SPRING_DP, label = "x_$block")
+                val yState = animateDpAsState(targetGeo.y, MASTER_SPRING_DP, label = "y_$block")
+                val wState = animateDpAsState(targetGeo.w, MASTER_SPRING_DP, label = "w_$block")
+                val hState = animateDpAsState(targetGeo.h, MASTER_SPRING_DP, label = "h_$block")
 
                 androidx.compose.animation.AnimatedVisibility(
                     visible = isVisible,
                     enter = fadeIn(tween(250)) + scaleIn(spring(0.85f, 300f), initialScale = 0.7f),
                     exit = fadeOut(tween(200)) + scaleOut(spring(0.85f, 300f), targetScale = 0.7f),
-                    modifier = Modifier.offset(x = x, y = y).width(w).height(h)
+                    modifier = Modifier.layout { measurable, _ ->
+                        val wPx = wState.value.roundToPx().coerceAtLeast(0)
+                        val hPx = hState.value.roundToPx().coerceAtLeast(0)
+                        val placeable = measurable.measure(Constraints.fixed(wPx, hPx))
+                        layout(wPx, hPx) {
+                            placeable.placeRelative(
+                                xState.value.roundToPx(),
+                                yState.value.roundToPx()
+                            )
+                        }
+                    }
                 ) {
                     Box(
                         Modifier
                             .fillMaxSize()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(bgColor)
-                            .border(BorderStroke(0.5.dp, borderColor), RoundedCornerShape(10.dp))
+                            .drawBehind {
+                                val p = progressState.value.coerceIn(0f, 1f)
+                                if (p > 0.005f) {
+                                    val r = CornerRadius(10.dp.toPx())
+                                    drawRoundRect(
+                                        color = SURFACE_CARD.copy(alpha = p),
+                                        cornerRadius = r
+                                    )
+                                    drawRoundRect(
+                                        color = DIVIDER_COLOR.copy(alpha = 0.5f * p),
+                                        cornerRadius = r,
+                                        style = Stroke(width = 0.5.dp.toPx())
+                                    )
+                                }
+                            }
                     ) {
                         when (block) {
-                            StatBlockType.COUNT -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Numbers, iconColorNormal = BRAND_PRIMARY, labelNormal = "筆數", valueNormal = "${filteredCount ?: 0}", valueColorNormal = BRAND_PRIMARY, showDollar = false, animateValues = animateValues, isCount = true)
-                            StatBlockType.CAT -> AnimatedStatBlock(compactProgress = progress, iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category, iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY, labelNormal = "類別", valueNormal = categoryName, valueColorNormal = TEXT_PRIMARY, showDollar = false, animateValues = animateValues)
-                            StatBlockType.INC -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingUp, iconColorNormal = COLOR_INCOME, labelNormal = "收入", valueNormal = formatAmountNoDecimal(income), valueColorNormal = COLOR_INCOME, animateValues = animateValues)
-                            StatBlockType.EXP -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.TrendingDown, iconColorNormal = COLOR_EXPENSE, labelNormal = "支出", valueNormal = formatAmountNoDecimal(expense), valueColorNormal = COLOR_EXPENSE, animateValues = animateValues)
-                            StatBlockType.AVG -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.Receipt, iconColorNormal = Color(0xFFF59E0B), labelNormal = "均支", valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0), valueColorNormal = Color(0xFFF59E0B), animateValues = animateValues)
-                            StatBlockType.BAL -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.AccountBalanceWallet, iconColorNormal = targetBalColor, labelNormal = "結餘", valueNormal = formatAmountNoDecimal(balance), valueColorNormal = targetBalColor, animateValues = animateValues)
-                            StatBlockType.TIME_AM -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.WbSunny, iconColorNormal = Color(0xFFF59E0B), labelNormal = "上午均時", valueNormal = avgMorningLabel ?: "--:--", valueColorNormal = Color(0xFFF59E0B), showDollar = false, animateValues = animateValues)
-                            StatBlockType.TIME_PM -> AnimatedStatBlock(compactProgress = progress, iconNormal = Icons.Default.NightsStay, iconColorNormal = Color(0xFF6366F1), labelNormal = "下午均時", valueNormal = avgAfternoonLabel ?: "--:--", valueColorNormal = Color(0xFF6366F1), showDollar = false, animateValues = animateValues)
+                            StatBlockType.COUNT -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.Numbers,
+                                iconColorNormal = BRAND_PRIMARY,
+                                labelNormal = "筆數",
+                                valueNormal = "${filteredCount ?: 0}",
+                                valueColorNormal = BRAND_PRIMARY,
+                                showDollar = false,
+                                animateValues = animateValues,
+                                isCount = true
+                            )
+                            StatBlockType.CAT -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = CATEGORY_STYLES[categoryName]?.icon ?: Icons.Default.Category,
+                                iconColorNormal = CATEGORY_STYLES[categoryName]?.fgColor ?: TEXT_PRIMARY,
+                                labelNormal = "類別",
+                                valueNormal = categoryName,
+                                valueColorNormal = TEXT_PRIMARY,
+                                showDollar = false,
+                                animateValues = animateValues
+                            )
+                            StatBlockType.INC -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.TrendingUp,
+                                iconColorNormal = COLOR_INCOME,
+                                labelNormal = "收入",
+                                valueNormal = formatAmountNoDecimal(income),
+                                valueColorNormal = COLOR_INCOME,
+                                animateValues = animateValues
+                            )
+                            StatBlockType.EXP -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.TrendingDown,
+                                iconColorNormal = COLOR_EXPENSE,
+                                labelNormal = "支出",
+                                valueNormal = formatAmountNoDecimal(expense),
+                                valueColorNormal = COLOR_EXPENSE,
+                                animateValues = animateValues
+                            )
+                            StatBlockType.AVG -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.Receipt,
+                                iconColorNormal = Color(0xFFF59E0B),
+                                labelNormal = "均支",
+                                valueNormal = formatAmountNoDecimal(avgExpense ?: 0.0),
+                                valueColorNormal = Color(0xFFF59E0B),
+                                animateValues = animateValues
+                            )
+                            StatBlockType.BAL -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.AccountBalanceWallet,
+                                iconColorNormal = targetBalColor,
+                                labelNormal = "結餘",
+                                valueNormal = formatAmountNoDecimal(balance),
+                                valueColorNormal = targetBalColor,
+                                animateValues = animateValues
+                            )
+                            StatBlockType.TIME_AM -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.WbSunny,
+                                iconColorNormal = Color(0xFFF59E0B),
+                                labelNormal = "上午均時",
+                                valueNormal = avgMorningLabel ?: "--:--",
+                                valueColorNormal = Color(0xFFF59E0B),
+                                showDollar = false,
+                                animateValues = animateValues
+                            )
+                            StatBlockType.TIME_PM -> AnimatedStatBlock(
+                                compactProgressProvider = progressProvider,
+                                iconNormal = Icons.Default.NightsStay,
+                                iconColorNormal = Color(0xFF6366F1),
+                                labelNormal = "下午均時",
+                                valueNormal = avgAfternoonLabel ?: "--:--",
+                                valueColorNormal = Color(0xFF6366F1),
+                                showDollar = false,
+                                animateValues = animateValues
+                            )
                         }
                     }
                 }
@@ -5026,7 +5137,7 @@ fun TopStats(
 
 @Composable
 private fun AnimatedStatBlock(
-    compactProgress: Float,
+    compactProgressProvider: () -> Float,
     iconNormal: ImageVector,
     iconColorNormal: Color,
     labelNormal: String,
@@ -5043,62 +5154,68 @@ private fun AnimatedStatBlock(
         valueNormal
     }
 
-    val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, compactProgress)
-
     androidx.compose.ui.layout.Layout(
         content = {
             Icon(
                 iconNormal,
                 null,
-                tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)),
-                modifier = Modifier.size(16.dp)
+                tint = iconColorNormal,
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer {
+                        alpha = (1f - compactProgressProvider() * 2f).coerceIn(0f, 1f)
+                    }
             )
             Text(
                 text = labelNormal,
                 fontSize = 11.sp,
-                color = currentLabelColor,
-                fontWeight = if (compactProgress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
+                color = TEXT_PRIMARY,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
-                softWrap = false
-            )
-            val currentFontSize = (19f - 6f * compactProgress).sp
-            val currentFontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                RollingNumber(
-                    text = finalValueString,
-                    color = valueColorNormal,
-                    fontSize = currentFontSize,
-                    fontWeight = currentFontWeight,
-                    animateChanges = animateValues
-                )
-                if (isCount) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = compactProgress > 0.5f,
-                        enter = fadeIn(tween(150)) + expandHorizontally(tween(150)),
-                        exit = fadeOut(tween(150)) + shrinkHorizontally(tween(150))
-                    ) {
-                        Text(
-                            text = "筆",
-                            color = valueColorNormal,
-                            fontSize = currentFontSize,
-                            fontWeight = currentFontWeight,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+                softWrap = false,
+                modifier = Modifier.graphicsLayer {
+                    // 由淺灰（TEXT_SECONDARY 視覺）平滑過渡到深黑（TEXT_PRIMARY），零重組
+                    alpha = 0.62f + 0.38f * compactProgressProvider().coerceIn(0f, 1f)
                 }
+            )
+            // ★ 固定 19.sp 排版一次，動畫期間由 GPU placeRelativeWithLayer 縮放，唔再每幀重算字體
+            RollingNumber(
+                text = finalValueString,
+                color = valueColorNormal,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.ExtraBold,
+                animateChanges = animateValues
+            )
+            if (isCount) {
+                Text(
+                    text = "筆",
+                    color = valueColorNormal,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            } else {
+                Spacer(Modifier.size(0.dp))
             }
         },
         modifier = modifier.fillMaxSize()
     ) { measurables, constraints ->
-        val iconP = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val labelP = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0))
-        val valueP = measurables[2].measure(constraints.copy(minWidth = 0, minHeight = 0))
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val iconP = measurables[0].measure(loose)
+        val labelP = measurables[1].measure(loose)
+        val valueP = measurables[2].measure(loose)
+        val unitP = measurables[3].measure(loose)
 
         layout(constraints.maxWidth, constraints.maxHeight) {
             fun lerpI(a: Int, b: Int, p: Float) = (a + (b - a) * p).roundToInt()
-            val titleGapNormal = 4.dp.roundToPx()
 
+            val p = compactProgressProvider().coerceIn(0f, 1f)
+            // 19.sp -> 13.sp 嘅精確縮放比例
+            val valueScale = 1f - (6f / 19f) * p
+            val countReveal = if (isCount) ((p - 0.5f) * 2f).coerceIn(0f, 1f) else 0f
+
+            val titleGapNormal = 4.dp.roundToPx()
             val topRowWNormal = iconP.width + titleGapNormal + labelP.width
             val topRowXNormal = (constraints.maxWidth - topRowWNormal) / 2
             val topRowHNormal = maxOf(iconP.height, labelP.height)
@@ -5112,19 +5229,37 @@ private fun AnimatedStatBlock(
             val nValueY = (constraints.maxHeight / 2) + 1.dp.roundToPx()
 
             val gapCompact = 6.dp.roundToPx()
-            val cTotalW = labelP.width + gapCompact + valueP.width
+            val scaledValW = (valueP.width * valueScale).roundToInt()
+            val scaledUnitW = if (isCount) (unitP.width * valueScale * countReveal).roundToInt() else 0
+            val cTotalW = labelP.width + gapCompact + scaledValW + scaledUnitW
             val cStartX = (constraints.maxWidth - cTotalW) / 2
 
             val cLabelX = cStartX
             val cLabelY = (constraints.maxHeight - labelP.height) / 2
-            val cValueX = cLabelX + labelP.width + gapCompact
+            val cValueVisualLeft = cLabelX + labelP.width + gapCompact
+            val cValueX = cValueVisualLeft - (valueP.width - scaledValW) / 2
             val cValueY = (constraints.maxHeight - valueP.height) / 2
-            val cIconX = cLabelX
-            val cIconY = cLabelY
 
-            iconP.placeRelative(lerpI(nIconX, cIconX, compactProgress), lerpI(nIconY, cIconY, compactProgress))
-            labelP.placeRelative(lerpI(nLabelX, cLabelX, compactProgress), lerpI(nLabelY, cLabelY, compactProgress))
-            valueP.placeRelative(lerpI(nValueX, cValueX, compactProgress), lerpI(nValueY, cValueY, compactProgress))
+            iconP.placeRelative(lerpI(nIconX, cLabelX, p), lerpI(nIconY, cLabelY, p))
+            labelP.placeRelative(lerpI(nLabelX, cLabelX, p), lerpI(nLabelY, cLabelY, p))
+            valueP.placeRelativeWithLayer(
+                lerpI(nValueX, cValueX, p),
+                lerpI(nValueY, cValueY, p)
+            ) {
+                scaleX = valueScale
+                scaleY = valueScale
+            }
+            if (isCount && countReveal > 0.01f) {
+                val unitScaledFullW = (unitP.width * valueScale).roundToInt()
+                val unitVisualLeft = cValueVisualLeft + scaledValW
+                val unitX = unitVisualLeft - (unitP.width - unitScaledFullW) / 2
+                val unitY = (constraints.maxHeight - unitP.height) / 2
+                unitP.placeRelativeWithLayer(unitX, unitY) {
+                    scaleX = valueScale
+                    scaleY = valueScale
+                    alpha = countReveal
+                }
+            }
         }
     }
 }
@@ -5140,30 +5275,51 @@ fun FilterDeckArea(
     onCategorySelect: (String?) -> Unit,
     onMonthSelect: (String?) -> Unit
 ) {
-    val density = LocalDensity.current
     val gap = 6.dp
     val chipH = 34.dp
 
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxWidth().animateContentSize(spring(dampingRatio = 0.8f, stiffness = 300f))
-    ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val totalWidth = maxWidth
         val chipW = (totalWidth - gap * 3) / 4
 
         val catRows = (categories.size + 3) / 4
-        val monthList = listOf<String?>(null) + months
+        val monthList = remember(months) { listOf<String?>(null) + months }
         val monthRows = (monthList.size + 3) / 4
 
         val expandedHeight = (catRows * (chipH + gap).value).dp + 8.dp + (monthRows * (chipH + gap).value).dp
         val collapsedHeight = chipH + 8.dp
 
-        Box(Modifier.fillMaxWidth().height(if (isExpanded) expandedHeight else collapsedHeight)) {
+        val containerHeightState = animateDpAsState(
+            targetValue = if (isExpanded) expandedHeight else collapsedHeight,
+            animationSpec = spring(dampingRatio = 0.8f, stiffness = 300f),
+            label = "deckContainerH"
+        )
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .layout { measurable, constraints ->
+                    val hPx = containerHeightState.value.roundToPx().coerceAtLeast(0)
+                    val placeable = measurable.measure(
+                        constraints.copy(minHeight = hPx, maxHeight = hPx)
+                    )
+                    layout(placeable.width, hPx) {
+                        placeable.placeRelative(0, 0)
+                    }
+                }
+        ) {
             if (!isExpanded) {
-                Box(Modifier.fillMaxSize().clickable(interactionSource = remember{MutableInteractionSource()}, indication=null) { onToggleExpand() })
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onToggleExpand() }
+                )
             }
 
             categories.forEachIndexed { idx, cat ->
-                // ★ 核心修改：加入 key 追蹤 Clip 身份，當 idx 改變時，會觸發流暢嘅位移動畫
                 key(cat ?: "all_categories_key") {
                     val isSelected = cat == selectedCategory
                     val col = idx % 4
@@ -5177,17 +5333,34 @@ fun FilterDeckArea(
                     val colX = deckX + staggerX
                     val colY = staggerY
 
-                    val targetX = if (isExpanded) expX else colX
-                    val targetY = if (isExpanded) expY else colY
+                    // ★ 唔用 `by`，放喺 graphicsLayer 讀取 -> 純 GPU 位移，零重組零重新排版
+                    val animXState = animateFloatAsState(
+                        if (isExpanded) expX else colX,
+                        spring(0.75f, 350f),
+                        label = "x_$cat"
+                    )
+                    val animYState = animateFloatAsState(
+                        if (isExpanded) expY else colY,
+                        spring(0.75f, 350f),
+                        label = "y_$cat"
+                    )
 
-                    val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "x_$cat")
-                    val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "y_$cat")
-                    
                     val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
 
-                    Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                    Box(
+                        Modifier
+                            .graphicsLayer {
+                                translationX = animXState.value.dp.toPx()
+                                translationY = animYState.value.dp.toPx()
+                            }
+                            .width(chipW)
+                            .height(chipH)
+                            .zIndex(if (isExpanded) 1f else zIndex)
+                    ) {
                         AnimatedFilterChip(
-                            selected = isSelected, label = cat ?: "全部", fillWidth = true,
+                            selected = isSelected,
+                            label = cat ?: "全部",
+                            fillWidth = true,
                             onClick = { if (isExpanded) onCategorySelect(cat) else onToggleExpand() }
                         )
                     }
@@ -5196,7 +5369,6 @@ fun FilterDeckArea(
 
             val monthStartY = catRows * (chipH + gap).value + 8f
             monthList.forEachIndexed { idx, m ->
-                // ★ 月份同樣加入 key 綁定
                 key(m ?: "all_months_key") {
                     val isSelected = m == selectedMonth
                     val col = idx % 4
@@ -5210,17 +5382,33 @@ fun FilterDeckArea(
                     val colX = deckX + staggerX
                     val colY = staggerY
 
-                    val targetX = if (isExpanded) expX else colX
-                    val targetY = if (isExpanded) expY else colY
+                    val animXState = animateFloatAsState(
+                        if (isExpanded) expX else colX,
+                        spring(0.75f, 350f),
+                        label = "mx_$m"
+                    )
+                    val animYState = animateFloatAsState(
+                        if (isExpanded) expY else colY,
+                        spring(0.75f, 350f),
+                        label = "my_$m"
+                    )
 
-                    val animX by animateFloatAsState(targetX, spring(0.75f, 350f), label = "mx_$m")
-                    val animY by animateFloatAsState(targetY, spring(0.75f, 350f), label = "my_$m")
-                    
                     val zIndex = if (isSelected) 10f else (1f - idx * 0.01f)
 
-                    Box(Modifier.offset(animX.dp, animY.dp).width(chipW).height(chipH).zIndex(if(isExpanded) 1f else zIndex)) {
+                    Box(
+                        Modifier
+                            .graphicsLayer {
+                                translationX = animXState.value.dp.toPx()
+                                translationY = animYState.value.dp.toPx()
+                            }
+                            .width(chipW)
+                            .height(chipH)
+                            .zIndex(if (isExpanded) 1f else zIndex)
+                    ) {
                         AnimatedFilterChip(
-                            selected = isSelected, label = m?.let{formatMonthLabel(it)} ?: "全年", fillWidth = true,
+                            selected = isSelected,
+                            label = m?.let { formatMonthLabel(it) } ?: "全年",
+                            fillWidth = true,
                             onClick = { if (isExpanded) onMonthSelect(m) else onToggleExpand() }
                         )
                     }
