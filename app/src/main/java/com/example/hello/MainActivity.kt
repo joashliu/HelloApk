@@ -5357,18 +5357,55 @@ private fun AnimatedStatBlock(
 ) {
     val finalValueString = if (showDollar) {
         if (valueNormal.startsWith("-")) "-$" + valueNormal.substring(1) else "$" + valueNormal
-    } else if (isCount && compactProgress > 0.5f) {
-        "${valueNormal}筆"
-    } else valueNormal
+    } else {
+        valueNormal
+    }
 
     val currentLabelColor = androidx.compose.ui.graphics.lerp(TEXT_SECONDARY, TEXT_PRIMARY, compactProgress)
 
     androidx.compose.ui.layout.Layout(
         content = {
-            Icon(iconNormal, null, tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)), modifier = Modifier.size(16.dp))
-            Text(text = labelNormal, fontSize = 11.sp, color = currentLabelColor, fontWeight = if (compactProgress > 0.5f) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, softWrap = false)
+            Icon(
+                iconNormal,
+                null,
+                tint = iconColorNormal.copy(alpha = (1f - compactProgress * 2f).coerceIn(0f, 1f)),
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = labelNormal,
+                fontSize = 11.sp,
+                color = currentLabelColor,
+                fontWeight = if (compactProgress > 0.5f) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false
+            )
             val currentFontSize = (19f - 6f * compactProgress).sp
-            RollingNumber(text = finalValueString, color = valueColorNormal, fontSize = currentFontSize, fontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold, animateChanges = animateValues)
+            val currentFontWeight = if (compactProgress > 0.5f) FontWeight.Bold else FontWeight.ExtraBold
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RollingNumber(
+                    text = finalValueString,
+                    color = valueColorNormal,
+                    fontSize = currentFontSize,
+                    fontWeight = currentFontWeight,
+                    animateChanges = animateValues
+                )
+                if (isCount) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = compactProgress > 0.5f,
+                        enter = fadeIn(tween(150)) + expandHorizontally(tween(150)),
+                        exit = fadeOut(tween(150)) + shrinkHorizontally(tween(150))
+                    ) {
+                        Text(
+                            text = "筆",
+                            color = valueColorNormal,
+                            fontSize = currentFontSize,
+                            fontWeight = currentFontWeight,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
         },
         modifier = modifier.fillMaxSize()
     ) { measurables, constraints ->
@@ -5395,7 +5432,7 @@ private fun AnimatedStatBlock(
             val gapCompact = 6.dp.roundToPx()
             val cTotalW = labelP.width + gapCompact + valueP.width
             val cStartX = (constraints.maxWidth - cTotalW) / 2
-            
+
             val cLabelX = cStartX
             val cLabelY = (constraints.maxHeight - labelP.height) / 2
             val cValueX = cLabelX + labelP.width + gapCompact
@@ -11731,6 +11768,15 @@ private fun RollingChar(
         // 數字位：使用 Float 動畫，例如 5 -> 8 會經過 5.x, 6.x, 7.x
         val animatedValue = remember { Animatable(targetDigit.toFloat()) }
 
+        // ★ 開啟 tnum（等寬數字），0-9 寬度一致且字形自然置中
+        val digitStyle = remember(fontSize, fontWeight) {
+            TextStyle(
+                fontSize = fontSize,
+                fontWeight = fontWeight,
+                fontFeatureSettings = "tnum"
+            )
+        }
+
         LaunchedEffect(targetDigit, animateChanges) {
             if (animatedValue.targetValue != targetDigit.toFloat()) {
                 if (animateChanges) {
@@ -11744,12 +11790,15 @@ private fun RollingChar(
             }
         }
 
-        Box(modifier = Modifier.clipToBounds()) {
-            // 隱藏嘅底層，用嚟撐起 Box 嘅高度同闊度，'8' 通常係字體入面最肥嘅字
+        // ★ 加上 Alignment.Center，避免窄數字（例如 1）靠左留空
+        Box(
+            modifier = Modifier.clipToBounds(),
+            contentAlignment = Alignment.Center
+        ) {
+            // 隱藏嘅底層，用嚟撐起 Box 嘅高度同闊度
             Text(
                 text = "8",
-                fontSize = fontSize,
-                fontWeight = fontWeight,
+                style = digitStyle,
                 color = Color.Transparent,
                 modifier = Modifier.alpha(0f),
                 softWrap = false
@@ -11763,8 +11812,7 @@ private fun RollingChar(
             Text(
                 text = (abs(lower) % 10).toString(),
                 color = color,
-                fontSize = fontSize,
-                fontWeight = fontWeight,
+                style = digitStyle,
                 softWrap = false,
                 modifier = Modifier.graphicsLayer {
                     // 利用小數差值控制上下位移
@@ -11777,8 +11825,7 @@ private fun RollingChar(
                 Text(
                     text = (abs(upper) % 10).toString(),
                     color = color,
-                    fontSize = fontSize,
-                    fontWeight = fontWeight,
+                    style = digitStyle,
                     softWrap = false,
                     modifier = Modifier.graphicsLayer {
                         translationY = (upper - value) * size.height
