@@ -7357,7 +7357,7 @@ fun CalendarContent(
                         .fillMaxWidth()
                         .weight(1f)
                         .verticalScroll(bodyScrollState)
-                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
+                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 100.dp) // 🟢 由 80.dp 加大到 100.dp，確保安全避開 FAB
                 ) {
                     Column(
                         Modifier
@@ -7619,9 +7619,9 @@ fun CalendarContent(
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    // 🟢 刪除咗 wrapContentHeight 嗰行，因為 verticalScroll 本身就支援無限高度測量
                                     .verticalScroll(splitGridScrollState, enabled = p < 0.01f)
                                     .offset { IntOffset(0, correction.roundToInt()) }
+                                    .padding(bottom = 88.dp) // 🟢 新增呢行：喺滾動內容底部加空白，等格仔可以拉高過 FAB
                             ) {
                                 for (rowIdx in 0 until totalRows) {
                                     val isSel = selectedDay != null && rowIdx == selRow
