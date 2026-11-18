@@ -1331,7 +1331,7 @@ data class WeeklyExpenseDay(
 )
 
 @Immutable
-private data class TimestampMeta(
+internal data class TimestampMeta(
     val year: Int,
     val month: Int,
     val dayOfMonth: Int,
@@ -1348,12 +1348,12 @@ private data class TimestampMeta(
 )
 
 private val WEEKDAY_LABELS = arrayOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")
-private val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
+internal val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
 private val dominantColorCache = ConcurrentHashMap<String, Color>(128)
 private val noteTextWidthCache = ConcurrentHashMap<String, Float>()
 
-private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
+internal val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
 }
 
