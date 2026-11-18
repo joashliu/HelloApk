@@ -94,7 +94,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha // 新增：用於隱藏佔位字元
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -204,7 +204,7 @@ import java.util.Locale
 import java.util.Random
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
-import kotlin.math.floor // 新增：用於向下取整
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -218,38 +218,17 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 
 // ===== 由通知／快捷入口啟動時嘅標記（top-level state） =====
-private val keyboardLaunchToken = mutableStateOf(0)
-private val keyboardPrefillNote = mutableStateOf<String?>(null)
-private val keyboardPrefillAmount = mutableStateOf<Double?>(null)
-private val keyboardPrefillCategory = mutableStateOf<String?>(null)
-private val keyboardPrefillNotifId = mutableStateOf<Int?>(null)
-private val keyboardPrefillFluidCardId = mutableStateOf<String?>(null)
+internal val keyboardLaunchToken = mutableStateOf(0)
+internal val keyboardPrefillNote = mutableStateOf<String?>(null)
+internal val keyboardPrefillAmount = mutableStateOf<Double?>(null)
+internal val keyboardPrefillCategory = mutableStateOf<String?>(null)
+internal val keyboardPrefillNotifId = mutableStateOf<Int?>(null)
+internal val keyboardPrefillFluidCardId = mutableStateOf<String?>(null)
 // 🟢 桌面 Shortcut / 外部入口觸發語音記帳
-private val voiceLaunchToken = mutableStateOf(0)
+internal val voiceLaunchToken = mutableStateOf(0)
 
-// 🟢 啟動狀態：等 Firestore 第一次回傳先收 Splash
-object AppStartupState {
-    @Volatile var isFirstDataReady = false
-}
-
-// ===== 供通知顯示嘅最近項目資訊 =====
-@Immutable
-data class QuickNoteInfo(
-    val note: String,
-    val category: String,
-    val amount: Double
-)
-private val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
-
-// ===== 最近捕獲嘅手機消費通知（例如：地鐵 · 4.9） =====
-@Immutable
-data class CapturedNotification(
-    val note: String,
-    val amount: Double,
-    val category: String,
-    val timestamp: Long = System.currentTimeMillis()
-)
-private val topLatestCapturedNotification = mutableStateOf<CapturedNotification?>(null)
+internal val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
+internal val topLatestCapturedNotification = mutableStateOf<CapturedNotification?>(null)
 
 object NotificationCaptureBridge {
 
@@ -495,10 +474,6 @@ object CaptureOverlayController {
         dismissRunnable?.let { mainHandler.removeCallbacks(it) }
     }
 
-    /**
-     * 向下拖走關閉：由手指拖曳嘅位置繼續向下滑出 + 淡出，動畫跟住拖動方向。
-     * 用於 OCR 彈窗「向下滑隱藏」。
-     */
     fun dismissSlidingDown() {
         val ctx = appContext ?: return
         val view = overlayView ?: return
@@ -660,7 +635,6 @@ object CaptureOverlayController {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
-            // 非搶焦：唔搶鍵盤／唔擋住其他 App 操作
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -669,7 +643,6 @@ object CaptureOverlayController {
         ).apply {
             gravity = Gravity.BOTTOM
             y = 0
-            // 只接收浮窗自身點擊
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -690,10 +663,6 @@ object CaptureOverlayController {
         }
     }
 
-    /**
-     * OCR 專用緊湊彈窗：一行顯示「名稱 · HKD 金額 + 記帳」，支援多候選。
-     * 無標題、無忽略按鈕；點擊即記帳並關閉。
-     */
     fun showOcrChoices(context: Context, candidates: List<OcrCandidate>) {
         if (candidates.isEmpty()) return
         val ctx = context.applicationContext
@@ -731,7 +700,6 @@ object CaptureOverlayController {
                 if (index > 0) setPadding(0, dp(8), 0, 0)
             }
 
-            // 項目名：粗體、可省略，佔用剩餘空間
             val nameTv = TextView(ctx).apply {
                 text = cand.note.ifBlank { "消費" }
                 setTextColor(0xFF0F172A.toInt())
@@ -744,7 +712,6 @@ object CaptureOverlayController {
                 }
             }
 
-            // 金額：等寬偏數字體、更粗、靠右，固定喺記帳掣左邊
             val amountTv = TextView(ctx).apply {
                 text = "HKD $amountStr"
                 setTextColor(0xFF0F172A.toInt())
@@ -755,14 +722,12 @@ object CaptureOverlayController {
                 )
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
                 maxLines = 1
-                // 預留固定寬，避免被長名稱擠走
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
                     marginEnd = dp(10)
                 }
-                // 最低寬度約可容納 HKD 9999.99
                 minWidth = dp(96)
             }
 
@@ -792,7 +757,6 @@ object CaptureOverlayController {
             root.addView(row)
         }
 
-        // ★ 支援向下滑動隱藏：跟手拖曳 + 松手跟住方向滑走（唔夠距離就彈返上）
         val swipeSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
         var swipeDownX = 0f
         var swipeDownY = 0f
@@ -816,7 +780,6 @@ object CaptureOverlayController {
                         val dx = kotlin.math.abs(ev.rawX - swipeDownX)
                         if (!swipeIntercepting && dy > swipeSlop * 1.2f && dy > dx * 0.8f) {
                             swipeIntercepting = true
-                            // 拖緊嘅時候唔好自動收埋
                             cancelAutoDismiss()
                         }
                     }
@@ -910,8 +873,6 @@ object CaptureOverlayController {
         try {
             wm.addView(container, params)
             overlayView = container
-            // 入場：淡入 + 微微向上滑入（用 view.alpha／translationY，
-            // 方便之後手指拖曳可以直接接管呢兩個屬性）
             container.alpha = 0f
             container.translationY = 24f * ctx.resources.displayMetrics.density
             container.animate().alpha(1f).translationY(0f)
@@ -1106,245 +1067,6 @@ private val SWIPE_SPRING = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy
 )
 
-// ===== 配色（泥黃色風格）=====
-val BRAND_PRIMARY = Color(0xFFB68D40)       // 泥黃色 (主色)
-val BRAND_PRIMARY_DARK = Color(0xFF8B6A2A)  // 深泥黃色 (用於按壓或強烈對比)
-val BRAND_PRIMARY_LIGHT = Color(0xFFF5EFE6) // 淺泥黃底色 (用於淡色標籤或背景)
-
-// 頂部（TopStats／快速輸入）滑入 同 鍵盤展開：統一時長，同步完成
-const val HEADER_KEYBOARD_EXPAND_DELAY_MS = 30L
-const val HEADER_KEYBOARD_EXPAND_MS = 480
-const val HEADER_KEYBOARD_COLLAPSE_MS = 420
-
-// iOS systemGroupedBackground / secondarySystemGroupedBackground
-val SURFACE_BG = Color(0xFFF2F2F7)
-val SURFACE_CARD = Color(0xFFFFFFFF)
-val SURFACE_ELEVATED = Color(0xFFE9E9EF)
-
-// iOS label / secondaryLabel / tertiaryLabel
-val TEXT_PRIMARY = Color(0xFF1C1C1E)
-val TEXT_SECONDARY = Color(0xFF8E8E93)
-val TEXT_TERTIARY = Color(0xFFC7C7CC)
-val DIVIDER_COLOR = Color(0xFFE5E5EA)
-
-val COLOR_INCOME = Color(0xFF047857)
-val COLOR_EXPENSE = Color(0xFFB91C1C)
-
-val CELL_BG_POS = Color(0xFFD1FAE5)
-val CELL_BAR_POS = Color(0xFF34D399)
-val CELL_BG_NEG = Color(0xFFFEE2E2)
-val CELL_BAR_NEG = Color(0xFFF87171)
-
-const val CLOUDINARY_CLOUD_NAME = "dfl59grn"
-const val CLOUDINARY_UPLOAD_PRESET = "ledger_icons"
-const val ICON_SIZE = 100
-
-val NOTE_FONT_SIZE = 16.sp
-val META_FONT_SIZE = 12.sp
-val AMOUNT_FONT_SIZE = 18.sp
-val STAT_AMOUNT_FONT_SIZE = 22.sp
-val STAT_LABEL_FONT_SIZE = 11.sp
-val NAV_HEIGHT = 60.dp
-val NAV_TAB_WIDTH = 96.dp
-val NAV_BOTTOM_PADDING = 20.dp
-val ROW_ALT_COLOR = Color(0xFFF4F7FC)
-const val FILTER_ANIM_MS = 250
-
-@Immutable
-data class CategoryStyle(val icon: ImageVector, val bgColor: Color, val fgColor: Color)
-
-val CATEGORIES = listOf("收入", "娛樂", "家用", "飲食", "交通", "個人", "購物", "月費", "旅遊", "還錢")
-val EXPENSE_CATEGORIES = CATEGORIES.filter { it != "收入" }
-const val INCOME_CATEGORY = "收入"
-
-val CATEGORY_STYLES: Map<String, CategoryStyle> = mapOf(
-    "收入" to CategoryStyle(Icons.Default.TrendingUp, Color(0xFFD1FAE5), Color(0xFF065F46)),
-    "娛樂" to CategoryStyle(Icons.Default.SportsEsports, Color(0xFFEDE9FE), Color(0xFF5B21B6)),
-    "家用" to CategoryStyle(Icons.Default.Home, Color(0xFFCFFAFE), Color(0xFF155E75)),
-    "飲食" to CategoryStyle(Icons.Default.Restaurant, Color(0xFFFFEDD5), Color(0xFF9A3412)),
-    "交通" to CategoryStyle(Icons.Default.DirectionsBus, Color(0xFFDBEAFE), Color(0xFF1E40AF)),
-    "個人" to CategoryStyle(Icons.Default.Person, Color(0xFFFCE7F3), Color(0xFF9D174D)),
-    "購物" to CategoryStyle(Icons.Default.ShoppingCart, Color(0xFFFEF3C7), Color(0xFF854D0E)),
-    "月費" to CategoryStyle(Icons.Default.CreditCard, Color(0xFFE2E8F0), Color(0xFF334155)),
-    "旅遊" to CategoryStyle(Icons.Default.Flight, Color(0xFFCCFBF1), Color(0xFF115E59)),
-    "還錢" to CategoryStyle(Icons.Default.Payments, Color(0xFFFFE4E6), Color(0xFFBE123C))
-)
-
-@Immutable
-data class Record(
-    val amount: Double = 0.0,
-    val note: String = "",
-    val category: String = "飲食",
-    val timestamp: Long = System.currentTimeMillis(),
-    val iconUrl: String = "",
-    val id: String = ""
-)
-
-@Immutable
-data class NavItem(val label: String, val icon: ImageVector)
-
-@Immutable
-data class KeyboardState(
-    val amountText: String = "",
-    val noteText: String = "",
-    val category: String = "飲食",
-    val editingNote: Boolean = false,
-    val editingRecordId: String? = null,
-    val timestamp: Long = System.currentTimeMillis(),
-    val selectAmountOnInput: Boolean = false,
-    val currency: String = "HKD",
-    val exchangeRateText: String = "0.052",
-    val focusedField: String = "amount"
-)
-
-@Immutable
-data class AfterSaveHint(
-    val recordId: String,
-    val category: String,
-    val monthTotal: Double
-)
-
-@Immutable
-data class DateHeaderInfo(
-    val year: Int,
-    val month: Int,
-    val day: Int,
-    val weekdayChar: String,
-    val isWeekend: Boolean,
-    val dayTag: String?
-)
-
-@Immutable
-data class FilterState(
-    val modeOn: Boolean = false,
-    val category: String? = null,
-    val month: String? = null,
-    val search: String = "",
-    val showFuture: Boolean = false,
-    val startTimeMin: Int = 0,
-    val endTimeMin: Int = 1440,
-)
-
-@Immutable
-data class LedgerUiState(
-    val loading: Boolean = true,
-    val ledgerRecords: List<Record> = emptyList(),
-    val groupedByDate: List<Pair<String, List<Record>>> = emptyList(),
-    val hasIncome: Boolean = false,
-    val hasExpense: Boolean = false,
-    val totalIncome: Double = 0.0,
-    val totalExpense: Double = 0.0,
-    val isExactNoteFilter: Boolean = false,
-    val topNotes: List<Pair<String, Int>> = emptyList(),
-    val recentAmountByNote: Map<String, Double> = emptyMap(),
-    val noteIconMap: Map<String, String> = emptyMap(),
-    val allNoteNames: List<String> = emptyList(),
-    val noteCategoryMap: Map<String, String> = emptyMap(),
-    val noteUsageCount: Map<String, Int> = emptyMap(),
-    val availableMonths: List<String> = emptyList(),
-    val visibleCategories: List<String> = emptyList(),
-    val topQuickNotesInfo: List<QuickNoteInfo> = emptyList(),
-    val hiddenQuickNotes: Set<String> = emptySet(),
-)
-
-@Immutable
-data class NoteIndex(
-    val recentAmountByNote: Map<String, Double> = emptyMap(),
-    val noteIconMap: Map<String, String> = emptyMap(),
-    val allNoteNames: List<String> = emptyList(),
-    val noteCategoryMap: Map<String, String> = emptyMap(),
-    val noteUsageCount: Map<String, Int> = emptyMap(),
-    val topNotes: List<Pair<String, Int>> = emptyList(),
-    // ★ 精簡：移除 topQuickNotesInfo（改由 computeLedgerUiState 現算）
-)
-
-@Immutable
-data class CompareUiState(
-    val categoryMonthSum: Map<String, Map<String, Double>> = emptyMap(),
-    val sortedCategories: List<String> = emptyList(),
-    val displayCategories: List<String> = emptyList(),
-    val incomeA: Double = 0.0,
-    val incomeB: Double = 0.0,
-    val totalExpenseA: Double = 0.0,
-    val totalExpenseB: Double = 0.0,
-    val balanceA: Double = 0.0,
-    val balanceB: Double = 0.0,
-    val histogramData: Map<String, List<Double>> = emptyMap(),
-    val monthlyKeysThisYear: List<String> = emptyList(),
-)
-
-@Immutable
-data class CalendarUiState(
-    val monthKey: String = "",
-    val monthAllRecords: List<Record> = emptyList(),
-    val visibleCategories: List<String> = emptyList(),
-    val monthRecords: List<Record> = emptyList(),
-    val recordsByDay: Map<Int, List<Record>> = emptyMap(),
-    val maxAbsNet: Double = 0.0,
-    val monthIncome: Double = 0.0,
-    val monthExpense: Double = 0.0,
-    val totalNet: Double = 0.0,
-    val itemCount: Int = 0,
-    val avgPerItem: Double = 0.0,
-    val avgPerDay: Double = 0.0,
-)
-
-// =========================================================
-//  ★ 資料透視表 - 數據類（新增）
-// =========================================================
-@Immutable
-data class PivotCell(
-    val total: Double = 0.0,
-    val count: Int = 0
-)
-
-@Immutable
-data class PivotRow(
-    val category: String,
-    val note: String,
-    val isCategory: Boolean,
-    val cells: Map<String, PivotCell> = emptyMap(),
-    val rowTotal: Double = 0.0,
-)
-
-@Immutable
-data class PivotUiState(
-    val months: List<String> = emptyList(),        // 升序：1月 → 至今／12月
-    val rows: List<PivotRow> = emptyList(),
-    val monthTotals: Map<String, Double> = emptyMap(),
-    val grandTotal: Double = 0.0,
-    val loading: Boolean = true,
-    val availableYears: List<Int> = emptyList(),   // 有資料的年份，小→大
-    val selectedYear: Int = 0,
-    val categories: List<String> = emptyList(),    // 顯示順序，供頂部 chips
-    val noteIconMap: Map<String, String> = emptyMap(),
-)
-
-@Immutable
-data class WeeklyExpenseDay(
-    val dayOfMonth: Int,
-    val weekdayChar: String,
-    val amount: Double,
-    val isToday: Boolean
-)
-
-@Immutable
-internal data class TimestampMeta(
-    val year: Int,
-    val month: Int,
-    val dayOfMonth: Int,
-    val dayOfWeek: Int,
-    val hour: Int,
-    val minute: Int,
-    val secOfDay: Int,
-    val startOfDayMillis: Long,
-    val dateKey: String,
-    val monthKey: String,
-    val datePart: String,
-    val timePart: String,
-    val weekTimePrefix: String
-)
-
 private val WEEKDAY_LABELS = arrayOf("週日", "週一", "週二", "週三", "週四", "週五", "週六")
 internal val WEEKDAY_CHARS = arrayOf("日", "一", "二", "三", "四", "五", "六")
 private val timestampMetaCache = ConcurrentHashMap<Long, TimestampMeta>(2048)
@@ -1464,15 +1186,13 @@ private val CN_DIGIT_MAP = mapOf(
     '七' to 7, '柒' to 7,
     '八' to 8, '捌' to 8,
     '九' to 9, '玖' to 9,
-    '狗' to 9 // 🟢 新增：將「狗」當作「9」嘅諧音處理
+    '狗' to 9
 )
 
-/** 解析中文整數（支援到百），例如：二十八→28、十二→12、一百零五→105、十→10 */
 fun parseChineseInteger(s: String): Int? {
     val t = s.trim()
     if (t.isEmpty()) return null
     if (t.all { it in CN_DIGIT_MAP }) {
-        // 純逐位：三二八 → 328（少見，但可兜）
         var v = 0
         for (c in t) v = v * 10 + (CN_DIGIT_MAP[c] ?: return null)
         return v
@@ -1504,33 +1224,25 @@ fun parseChineseInteger(s: String): Int? {
     return result
 }
 
-/**
- * 從字串尾部抽出金額（阿拉伯數字或粵語／中文金額口語）。
- * 支援：28、28.5、四個九(4.9)、四點九、二十八、十二蚊半(12.5)
- * @return Pair(前面剩餘文字, 金額?)
- */
 fun extractTrailingAmount(raw: String): Pair<String, Double?> {
     var text = raw.trim()
     if (text.isEmpty()) return "" to null
 
-    // 單位／口語正規化
     text = text
         .replace("塊錢", "")
-        .replace("蚊半", ".5") // 🟢 修正：轉為 .5 才能完美配合阿拉伯數字
+        .replace("蚊半", ".5")
         .replace("塊半", ".5")
         .replace("元半", ".5")
-        .replace("個半", ".5") // 🟢 新增：支援「X個半」
+        .replace("個半", ".5")
         .replace(Regex("[蚊元塊圓块圆錢]"), "")
         .replace(Regex("\\s+"), "")
         .trim()
 
-    // 1) 阿拉伯數字在尾：…28 / …28.5 (依家「43個半」會變成「43.5」喺呢度完美攔截)
     Regex("""^(.*?)(\d+(?:\.\d+)?)$""").find(text)?.let { m ->
         val amt = m.groupValues[2].toDoubleOrNull()
         if (amt != null && amt > 0) return m.groupValues[1] to amt
     }
 
-    // 1.5) 中文數字 + .5：處理「四十三個半」被轉為「四十三.5」嘅情況
     Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)\.5$""").find(text)?.let { m ->
         val whole = parseChineseInteger(m.groupValues[2])
         if (whole != null) {
@@ -1539,7 +1251,6 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
         }
     }
 
-    // 2) 粵語「X個Y」→ X.Y（支援：兩個九、四個狗、八個一九、8個19）
     Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([\d零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗]+)$""").find(text)?.let { m ->
         val wholeStr = m.groupValues[2]
         val whole = wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr)
@@ -1548,7 +1259,6 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
             var frac = 0.0
             var div = 10.0
             for (c in fracPart) {
-                // 🟢 兼容阿拉伯數字同埋中文數字轉換
                 val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
                 frac += d / div
                 div *= 10
@@ -1558,7 +1268,6 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
         }
     }
 
-    // 3) 「X點Y」→ X.Y（支援：兩點九、八點一九、8點19）
     Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千]+)?點([\d零〇○一二兩三四五六七八九狗]+)$""").find(text)?.let { m ->
         val wholeStr = m.groupValues[2]
         val whole = if (wholeStr.isBlank()) 0 else (wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr))
@@ -1576,7 +1285,6 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
         }
     }
 
-    // 4) 純中文整數在尾：…二十八
     Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)$""").find(text)?.let { m ->
         val whole = parseChineseInteger(m.groupValues[2])
         if (whole != null && whole > 0) return m.groupValues[1] to whole.toDouble()
@@ -1585,11 +1293,6 @@ fun extractTrailingAmount(raw: String): Pair<String, Double?> {
     return text to null
 }
 
-/**
- * 解析語音記帳輸入，例如：
- * 「麥當勞28」「麥當勞 28 蚊」「地鐵四個九」「咖啡十五」「28」
- */
-/** 語音項目名：首個字母默認大寫（只影響英文字母） */
 fun capitalizeNoteFirstLetter(name: String): String {
     val t = name.trim()
     if (t.isEmpty()) return t
@@ -1607,19 +1310,16 @@ fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
     val (prefix, amt) = extractTrailingAmount(text)
     val name = capitalizeNoteFirstLetter(prefix.trim())
 
-    // 整句都係金額
     if (name.isEmpty() && amt != null) return "" to amt
-    // 有名稱 + 金額
     if (name.isNotEmpty() && amt != null && amt > 0) return name to amt
-    // 金額在前：28麥當勞
     Regex("""^(\d+(?:\.\d+)?)(.+)$""").find(text.replace(" ", ""))?.let { m ->
         val a = m.groupValues[1].toDoubleOrNull()
         val n = capitalizeNoteFirstLetter(m.groupValues[2].trim())
         if (a != null && a > 0 && n.isNotEmpty()) return n to a
     }
-    // 淨係名稱
     return capitalizeNoteFirstLetter(text) to null
 }
+
 fun compactAmount(value: Double): String {
     val absV = abs(value)
     val sign = if (value < 0) "-" else ""
@@ -1631,9 +1331,11 @@ fun compactAmount(value: Double): String {
         else -> "${sign}${(absV / 1000000.0).roundToInt()}M"
     }
 }
+
 fun displayAmount(record: Record): String =
     if (record.category == INCOME_CATEGORY) formatAmount(record.amount)
     else formatAmount(-record.amount)
+
 fun amountColor(category: String): Color =
     if (category == INCOME_CATEGORY) COLOR_INCOME else COLOR_EXPENSE
 
@@ -1719,10 +1421,6 @@ fun parseDateHeader(dateKey: String): DateHeaderInfo? {
     return DateHeaderInfo(y, mo, d, weekdayChar, isWeekend, tag)
 }
 
-/**
- * 項目名稱相似度（0~1）：完全相同 / 前綴 / 包含 / 字元重疊。
- * 用於「從其他項目選擇圖標」排序，最接近當前名稱排最前。
- */
 fun noteNameSimilarity(query: String, candidate: String): Double {
     val q = query.trim().lowercase()
     val c = candidate.trim().lowercase()
@@ -1738,13 +1436,11 @@ fun noteNameSimilarity(query: String, candidate: String): Double {
         val longer = maxOf(q.length, c.length).toDouble()
         return 0.55 + 0.2 * (shorter / longer)
     }
-    // 字元 Jaccard
     val qs = q.toSet()
     val cs = c.toSet()
     val inter = qs.intersect(cs).size.toDouble()
     val union = qs.union(cs).size.toDouble().coerceAtLeast(1.0)
     val jaccard = inter / union
-    // 連續共同子字串加分（簡化）
     var bestRun = 0
     var i = 0
     while (i < q.length) {
@@ -1767,7 +1463,6 @@ fun filterNoteSuggestions(query: String, all: List<String>): List<String> {
     if (q.isEmpty()) return emptyList()
     val result = ArrayList<String>(8)
     for (s in all) {
-        // ★ 移除咗 s != q，就算項目名完全等於搜尋字，都會正常彈出嚟俾你撳
         if (s.startsWith(q, ignoreCase = true)) {
             result.add(s)
             if (result.size >= 8) return result
@@ -1782,12 +1477,6 @@ fun filterNoteSuggestions(query: String, all: List<String>): List<String> {
     return result
 }
 
-val AVATAR_COLORS = listOf(
-    Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD),
-    Color(0xFF7986CB), Color(0xFF64B5F6), Color(0xFF4FC3F7), Color(0xFF4DB6AC),
-    Color(0xFF81C784), Color(0xFFAED581), Color(0xFFFFB74D), Color(0xFFFF8A65),
-    Color(0xFFA1887F), Color(0xFF90A4AE)
-)
 fun avatarColor(name: String): Color {
     if (name.isBlank()) return AVATAR_COLORS[0]
     return AVATAR_COLORS[(name.hashCode() and 0x7fffffff) % AVATAR_COLORS.size]
@@ -1837,17 +1526,15 @@ fun getHoveredActionIndexWithCenter(
     touch: Offset,
     minRadiusPx: Float,
     arcCenterAngle: Float,
-    radiusPx: Float,          // 實際扇形半徑
-    hitRadiusPx: Float        // 按鈕可點擊半徑
+    radiusPx: Float,
+    hitRadiusPx: Float
 ): Int? {
     val dx = touch.x - center.x
     val dy = touch.y - center.y
     val distFromCenter = kotlin.math.hypot(dx, dy)
 
-    // 1. 縮短死區判定：只要手指離開起點極短距離就開始判定
     if (distFromCenter < minRadiusPx) return null
 
-    // 2. 計算手指相對於中心點嘅滑動方向角度 (0~360度)
     val touchAngleRad = kotlin.math.atan2(dy, dx)
     var touchAngleDeg = Math.toDegrees(touchAngleRad.toDouble()).toFloat()
     if (touchAngleDeg < 0) touchAngleDeg += 360f
@@ -1855,7 +1542,6 @@ fun getHoveredActionIndexWithCenter(
     var bestIndex: Int? = null
     var minAngleDiff = Float.MAX_VALUE
 
-    // 3. 搵出角度最接近嘅按鈕
     for (i in 0 until 4) {
         var btnAngle = arcCenterAngle - 60f + i * 40f
         btnAngle = (btnAngle % 360f + 360f) % 360f
@@ -1869,13 +1555,10 @@ fun getHoveredActionIndexWithCenter(
         }
     }
 
-    // 4. 極大寬容度判定：只要角度偏差喺 60 度以內，無論手指滑到幾遠都算命中！
-    // 咁樣基本上成個上半螢幕都係觸發區，隨手一滑就自動吸附
     if (minAngleDiff <= 60f) {
         return bestIndex
     }
 
-    // 5. 保底機制：傳統嘅圓形半徑判定
     for (i in 0 until 4) {
         val angleRad = Math.toRadians((arcCenterAngle - 60f + i * 40f).toDouble())
         val cx = center.x + radiusPx * kotlin.math.cos(angleRad).toFloat()
@@ -1914,11 +1597,10 @@ fun FanMenuOverlay(
     val configuration = LocalConfiguration.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
 
-    // ★ 大幅縮短距離：死區由 40dp 減至 16dp，彈出距離由 105dp 減至 85dp
     val minRadiusPx = remember(density) { with(density) { 16.dp.toPx() } }
-val radiusPx = remember(density) { with(density) { 105.dp.toPx() } } 
-val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
-    val hitRadiusPx = remember(density) { with(density) { 40.dp.toPx() } } // 加大保底半徑
+    val radiusPx = remember(density) { with(density) { 105.dp.toPx() } } 
+    val halfBtnPx = remember(density) { with(density) { 24.dp.toPx() } }
+    val hitRadiusPx = remember(density) { with(density) { 40.dp.toPx() } }
 
     val edgeThreshold = radiusPx + halfBtnPx
     val leftSpace = center.x
