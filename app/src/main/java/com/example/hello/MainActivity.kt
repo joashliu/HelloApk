@@ -5333,7 +5333,6 @@ fun FilterDeckArea(
                     val colX = deckX + staggerX
                     val colY = staggerY
 
-                    // ★ 唔用 `by`，放喺 graphicsLayer 讀取 -> 純 GPU 位移，零重組零重新排版
                     val animXState = animateFloatAsState(
                         if (isExpanded) expX else colX,
                         spring(0.75f, 350f),
@@ -5349,13 +5348,13 @@ fun FilterDeckArea(
 
                     Box(
                         Modifier
+                            .zIndex(zIndex)
                             .graphicsLayer {
                                 translationX = animXState.value.dp.toPx()
                                 translationY = animYState.value.dp.toPx()
                             }
                             .width(chipW)
                             .height(chipH)
-                            .zIndex(if (isExpanded) 1f else zIndex)
                     ) {
                         AnimatedFilterChip(
                             selected = isSelected,
@@ -5397,13 +5396,13 @@ fun FilterDeckArea(
 
                     Box(
                         Modifier
+                            .zIndex(zIndex)
                             .graphicsLayer {
                                 translationX = animXState.value.dp.toPx()
                                 translationY = animYState.value.dp.toPx()
                             }
                             .width(chipW)
                             .height(chipH)
-                            .zIndex(if (isExpanded) 1f else zIndex)
                     ) {
                         AnimatedFilterChip(
                             selected = isSelected,
