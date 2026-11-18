@@ -6096,21 +6096,25 @@ fun CalendarContent(
     fun applyDragDown(px: Float): Float {
         if (px <= 0f || selectedDay == null) return 0f
         var consumed = 0f
+        // 先還原階段2：上方類別 chips 同 top stats 滑返落嚟
+        if (chromeOffsetPx > 0.001f) {
+            val newOffset = (chromeOffsetPx - px).coerceAtLeast(0f)
+            val used = chromeOffsetPx - newOffset
+            chromeOffsetPx = newOffset
+            consumed += used
+            if (newOffset <= 0.001f) {
+                chromeOffsetPx = 0f
+                collapsedInCurrentGesture = true
+            }
+            return consumed
+        }
+        if (collapsedInCurrentGesture) return 0f
+        // 再還原階段1：展開返成個月曆格仔
         if (collapseP > 0.001f) {
             val range = collapseRangeForDay(selectedDay).coerceAtLeast(1f)
             val newP = (collapseP - px / range).coerceIn(0f, 1f)
             val used = (collapseP - newP) * range
             collapseP = newP
-            consumed += used
-            if (newP <= 0.001f) collapsedInCurrentGesture = true
-            return consumed
-        }
-        if (collapsedInCurrentGesture) return 0f
-        if (chromeOffsetPx > 0.001f) {
-            val range = chromeRangePx()
-            val newOffset = (chromeOffsetPx - px).coerceAtLeast(0f)
-            val used = chromeOffsetPx - newOffset
-            chromeOffsetPx = newOffset
             consumed += used
         }
         return consumed
@@ -6149,14 +6153,13 @@ fun CalendarContent(
     }
 
     fun snapAfterDrag() {
-        if (collapseP > 0.01f && collapseP < 0.99f) {
-            if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
-            collapsedInCurrentGesture = true
+        val chromeMax = chromeRangePx()
+        if (chromeOffsetPx > 0.01f && chromeOffsetPx < chromeMax - 1f) {
+            if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
             return
         }
-        if (collapsedInCurrentGesture) return
-        if (chromeOffsetPx > 0.01f && chromeOffsetPx < chromeRangePx() - 1f) {
-            if (currentChromeP() >= 0.45f) animateChromeTo(1f) else animateChromeTo(0f)
+        if (collapseP > 0.01f && collapseP < 0.99f) {
+            if (collapseP >= 0.5f) animateCollapseTo(1f) else animateCollapseTo(0f)
         }
     }
 
