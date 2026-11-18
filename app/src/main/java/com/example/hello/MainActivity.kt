@@ -11148,7 +11148,7 @@ fun PivotContent(
     onAddClick: () -> Unit,
 ) {
     val hState = rememberScrollState()
-    val listState = rememberLazyListState() // 🟢 已經有 listState
+    val listState = rememberLazyListState()
     
     // 🟢 1. 加入 isAtTop 判斷
     val isAtTop by remember { 
@@ -11232,7 +11232,7 @@ fun PivotContent(
                 .padding(top = 8.dp, bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 80.dp)
         ) {
             
-            // 🟢 2. 用 AnimatedVisibility 包住頂部區域（年份選擇 + 類別 chips）
+            // 🟢 2. 用 AnimatedVisibility 淨係包住「年份選擇 + 總計欄開關」
             androidx.compose.animation.AnimatedVisibility(
                 visible = isAtTop,
                 enter = androidx.compose.animation.expandVertically(
@@ -11242,81 +11242,80 @@ fun PivotContent(
                     animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 300f)
                 ) + androidx.compose.animation.fadeOut()
             ) {
-                Column(Modifier.fillMaxWidth()) {
-                    // ===== 年份 + 總計欄開關（唔顯示大標題）=====
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (pivotUi.availableYears.isNotEmpty()) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                pivotUi.availableYears.forEach { y ->
-                                    val selected = y == pivotUi.selectedYear
-                                    Surface(
-                                        onClick = { onYearChange(y) },
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
-                                        border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
-                                    ) {
-                                        Text(
-                                            "$y",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (selected) Color.White else TEXT_PRIMARY,
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                        )
-                                    }
+                // ===== 年份 + 總計欄開關（唔顯示大標題）=====
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (pivotUi.availableYears.isNotEmpty()) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            pivotUi.availableYears.forEach { y ->
+                                val selected = y == pivotUi.selectedYear
+                                Surface(
+                                    onClick = { onYearChange(y) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (selected) BRAND_PRIMARY else SURFACE_ELEVATED,
+                                    border = if (selected) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
+                                ) {
+                                    Text(
+                                        "$y",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selected) Color.White else TEXT_PRIMARY,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
                                 }
                             }
-                        } else {
-                            Spacer(Modifier.weight(1f))
                         }
-                        // 顯示／隱藏右邊總計欄
-                        Surface(
-                            onClick = { showTotalColumn = !showTotalColumn },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (showTotalColumn) BRAND_PRIMARY else SURFACE_ELEVATED,
-                            border = if (showTotalColumn) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (showTotalColumn) Icons.Default.ViewColumn else Icons.Default.ViewAgenda,
-                                    contentDescription = "總計欄",
-                                    tint = if (showTotalColumn) Color.White else TEXT_SECONDARY,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    "總計",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (showTotalColumn) Color.White else TEXT_SECONDARY
-                                )
-                            }
-                        }
+                    } else {
+                        Spacer(Modifier.weight(1f))
                     }
-
-                    // ===== 類別 chips：每行最少 5 個、等寬、左右對齊、少空隙 =====
-                    if (pivotUi.categories.isNotEmpty()) {
-                        PivotCategoryChipGrid(
-                            categories = pivotUi.categories,
-                            onClick = { scrollToCategory(it) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 10.dp)
-                        )
+                    // 顯示／隱藏右邊總計欄
+                    Surface(
+                        onClick = { showTotalColumn = !showTotalColumn },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (showTotalColumn) BRAND_PRIMARY else SURFACE_ELEVATED,
+                        border = if (showTotalColumn) null else BorderStroke(0.5.dp, DIVIDER_COLOR)
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (showTotalColumn) Icons.Default.ViewColumn else Icons.Default.ViewAgenda,
+                                contentDescription = "總計欄",
+                                tint = if (showTotalColumn) Color.White else TEXT_SECONDARY,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "總計",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (showTotalColumn) Color.White else TEXT_SECONDARY
+                            )
+                        }
                     }
                 }
             } // 🟢 AnimatedVisibility 結束
+
+            // 🟢 3. 類別 chips 移到外面，永遠保持顯示
+            // ===== 類別 chips：每行最少 5 個、等寬、左右對齊、少空隙 =====
+            if (pivotUi.categories.isNotEmpty()) {
+                PivotCategoryChipGrid(
+                    categories = pivotUi.categories,
+                    onClick = { scrollToCategory(it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp)
+                )
+            }
 
             Surface(
                 modifier = Modifier.fillMaxWidth().weight(1f),
