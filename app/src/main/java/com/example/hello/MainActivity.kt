@@ -11140,6 +11140,7 @@ fun MonthDropdown(value: String, months: List<String>, onChange: (String) -> Uni
 // =========================================================
 //  ★ PivotContent（資料透視表頁面）
 // =========================================================
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PivotContent(
     pivotUi: PivotUiState,
