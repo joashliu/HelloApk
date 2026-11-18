@@ -7569,11 +7569,12 @@ fun CalendarContent(
                         if (rowBottom > maxGridForDetail) rowBottom - maxGridForDetail else 0f
                     } else 0f
 
+                    val splitGridScrollState = rememberScrollState(initial = requiredBaseScroll.roundToInt())
                     val visibleGridH = ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
                     
-                    val gridScroll = if (selRow in rowOffsetsPx.indices) {
-                        requiredBaseScroll * (1f - p) + rowOffsetsPx[selRow] * p
-                    } else 0f
+                    val actualScroll = splitGridScrollState.value.toFloat()
+                    val targetTranslation = actualScroll * (1f - p) + (rowOffsetsPx.getOrNull(selRow) ?: 0f) * p
+                    val correction = actualScroll - targetTranslation
 
                     Column(Modifier.fillMaxSize()) {
                         // 星期標題
@@ -7614,24 +7615,13 @@ fun CalendarContent(
                                 .padding(horizontal = 10.dp)
                                 .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
                                 .clipToBounds()
-                                .pointerInput(selRow) {
-                                    detectVerticalDragGestures(
-                                        onDragStart = { collapsedInCurrentGesture = false },
-                                        onDragEnd = { snapAfterDrag() },
-                                        onVerticalDrag = { change, dragAmount ->
-                                            change.consume()
-                                            if (isSettling) return@detectVerticalDragGestures
-                                            if (dragAmount < 0f) applyDragUp(-dragAmount)
-                                            else applyDragDown(dragAmount)
-                                        }
-                                    )
-                                }
                         ) {
                             Column(
                                 Modifier
                                     .fillMaxWidth()
                                     .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                                    .offset { IntOffset(0, (-gridScroll).roundToInt()) }
+                                    .verticalScroll(splitGridScrollState, enabled = p < 0.01f)
+                                    .offset { IntOffset(0, correction.roundToInt()) }
                             ) {
                                 for (rowIdx in 0 until totalRows) {
                                     val isSel = selectedDay != null && rowIdx == selRow
