@@ -7619,7 +7619,7 @@ fun CalendarContent(
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                    // 🟢 刪除咗 wrapContentHeight 嗰行，因為 verticalScroll 本身就支援無限高度測量
                                     .verticalScroll(splitGridScrollState, enabled = p < 0.01f)
                                     .offset { IntOffset(0, correction.roundToInt()) }
                             ) {
