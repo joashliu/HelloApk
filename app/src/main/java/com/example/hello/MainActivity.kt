@@ -6278,11 +6278,11 @@ fun CalendarContent(
                 }
                 available.y > 400f -> {
                     if (detailScrollState.value > 0) return Velocity.Zero
-                    if (collapseP > 0.05f) {
-                        animateCollapseTo(0f)
-                        collapsedInCurrentGesture = true
-                    } else if (!collapsedInCurrentGesture && chromeOffsetPx > 0.01f) {
+                    if (chromeOffsetPx > 0.01f) {
                         animateChromeTo(0f)
+                        collapsedInCurrentGesture = true
+                    } else if (!collapsedInCurrentGesture && collapseP > 0.05f) {
+                        animateCollapseTo(0f)
                     }
                 }
                 else -> snapAfterDrag()
