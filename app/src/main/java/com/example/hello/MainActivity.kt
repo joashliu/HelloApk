@@ -5766,7 +5766,7 @@ fun CalendarContent(
     var isSettling by remember { mutableStateOf(false) }
     var topSectionHeightPx by remember { mutableFloatStateOf(0f) }
     var collapsedInCurrentGesture by remember { mutableStateOf(false) }
-    
+
     fun currentChromeP(): Float {
         val range = topSectionHeightPx.coerceAtLeast(1f)
         return (chromeOffsetPx / range).coerceIn(0f, 1f)
@@ -5916,7 +5916,7 @@ fun CalendarContent(
             collapseP = newP
             consumed += used
             if (newP <= 0.001f) collapsedInCurrentGesture = true
-            return consumed 
+            return consumed
         }
         if (collapsedInCurrentGesture) return 0f
         if (chromeOffsetPx > 0.001f) {
@@ -6152,126 +6152,157 @@ fun CalendarContent(
                 }
             }
 
-            // ★ 未選日子：整段可上下捲動（chips + TopStat + 星期 + 格仔）
+            // ★ 未選日子：只有當內容超出安全可視高度（有格仔顯示唔晒）時，先開啟上下滑動
             if (selectedDay == null) {
-                Column(
+                BoxWithConstraints(
                     Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .verticalScroll(bodyScrollState)
-                        .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 100.dp) // 🟢 由 80.dp 加大到 100.dp，確保安全避開 FAB
                 ) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp)
-                    ) {
-                        Spacer(Modifier.height(4.dp))
-                        AnimatedCalendarCategoryChips(
-                            visibleCategories = visibleCategories,
-                            filterCategory = filterCategory,
-                            onFilterCategoryChange = onFilterCategoryChange
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            AnimatedInfoChip(
-                                label = "總計",
-                                valueText = "$${formatAmountNoDecimal(totalNet)}",
-                                modifier = Modifier.weight(1f),
-                                valueFontSize = 16.sp,
-                                valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
-                            )
-                            AnimatedInfoChip(
-                                label = "平均每項",
-                                valueText = "$${formatAmountNoDecimal(avgPerItem)}",
-                                modifier = Modifier.weight(1f),
-                                valueFontSize = 16.sp
-                            )
-                            AnimatedInfoChip(
-                                label = "日均支出",
-                                valueText = "$${formatAmountNoDecimal(avgPerDay)}",
-                                modifier = Modifier.weight(1f),
-                                valueFontSize = 16.sp
-                            )
+                    val viewportHeightPx = constraints.maxHeight.toFloat()
+                    val safeBottomClearancePx = with(density) {
+                        (NAV_HEIGHT + NAV_BOTTOM_PADDING + 16.dp).toPx()
+                    }
+                    var naturalContentHeightPx by remember { mutableFloatStateOf(0f) }
+                    val needsBodyScroll = naturalContentHeightPx > (viewportHeightPx - safeBottomClearancePx + 1f)
+
+                    LaunchedEffect(needsBodyScroll) {
+                        if (!needsBodyScroll && bodyScrollState.value != 0) {
+                            bodyScrollState.scrollTo(0)
                         }
-                        Spacer(Modifier.height(10.dp))
                     }
 
-                    // 星期標題
-                    Box(
+                    Column(
                         Modifier
-                            .fillMaxWidth()
-                            .height(headerHeightDp)
-                            .background(SURFACE_BG)
+                            .fillMaxSize()
+                            .verticalScroll(bodyScrollState, enabled = needsBodyScroll)
                     ) {
-                        Row(
+                        Column(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 13.dp)
-                                .fillMaxHeight(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .onSizeChanged { sz ->
+                                    if (sz.height > 0) {
+                                        naturalContentHeightPx = sz.height.toFloat()
+                                    }
+                                }
                         ) {
-                            CALENDAR_WEEKDAY_HEADERS.forEach { w ->
-                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = w,
-                                        fontSize = 12.sp,
-                                        color = Color.Black,
-                                        fontWeight = FontWeight.SemiBold,
-                                        style = TextStyle(
-                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
-                                        )
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp)
+                            ) {
+                                Spacer(Modifier.height(4.dp))
+                                AnimatedCalendarCategoryChips(
+                                    visibleCategories = visibleCategories,
+                                    filterCategory = filterCategory,
+                                    onFilterCategoryChange = onFilterCategoryChange
+                                )
+                                Spacer(Modifier.height(14.dp))
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    AnimatedInfoChip(
+                                        label = "總計",
+                                        valueText = "$${formatAmountNoDecimal(totalNet)}",
+                                        modifier = Modifier.weight(1f),
+                                        valueFontSize = 16.sp,
+                                        valueColor = if (totalNet >= 0) COLOR_INCOME else COLOR_EXPENSE
                                     )
+                                    AnimatedInfoChip(
+                                        label = "平均每項",
+                                        valueText = "$${formatAmountNoDecimal(avgPerItem)}",
+                                        modifier = Modifier.weight(1f),
+                                        valueFontSize = 16.sp
+                                    )
+                                    AnimatedInfoChip(
+                                        label = "日均支出",
+                                        valueText = "$${formatAmountNoDecimal(avgPerDay)}",
+                                        modifier = Modifier.weight(1f),
+                                        valueFontSize = 16.sp
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                            }
+
+                            // 星期標題
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(headerHeightDp)
+                                    .background(SURFACE_BG)
+                            ) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 13.dp)
+                                        .fillMaxHeight(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CALENDAR_WEEKDAY_HEADERS.forEach { w ->
+                                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = w,
+                                                fontSize = 12.sp,
+                                                color = Color.Black,
+                                                fontWeight = FontWeight.SemiBold,
+                                                style = TextStyle(
+                                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 日曆格仔：自然高度
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp)
+                            ) {
+                                for (rowIdx in 0 until totalRows) {
+                                    CalendarRow(
+                                        rowIdx = rowIdx,
+                                        firstDayOffset = firstDayOffset,
+                                        daysInMonth = daysInMonth,
+                                        today = today,
+                                        isCurrentMonth = isCurrentMonth,
+                                        recordsByDay = recordsByDay,
+                                        displayMode = displayMode,
+                                        maxAbsNet = maxAbsNet,
+                                        selectedDay = null,
+                                        selectedCol = null,
+                                        animateValues = animateValues,
+                                        heightFraction = 1f,
+                                        onCellClick = { day, col ->
+                                            val rowOfDay = ((firstDayOffset + day - 1) / 7)
+                                                .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
+                                            selectedDay = day
+                                            selectedRowIdx = rowOfDay
+                                            selectedColIdx = col
+                                            cachedSelectedDay = day
+                                            cachedSelectedRowIdx = rowOfDay
+                                            cachedSelectedCol = col
+                                            detailExpandedId = null
+                                            chromeOffsetPx = 0f
+                                            scope.launch {
+                                                bodyScrollState.scrollTo(0)
+                                                detailScrollState.scrollTo(0)
+                                            }
+                                            animateCollapseTo(1f)
+                                        }
+                                    )
+                                    if (rowIdx < totalRows - 1) {
+                                        Spacer(Modifier.height(6.dp))
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // 日曆格仔：自然高度
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp)
-                    ) {
-                        for (rowIdx in 0 until totalRows) {
-                            CalendarRow(
-                                rowIdx = rowIdx,
-                                firstDayOffset = firstDayOffset,
-                                daysInMonth = daysInMonth,
-                                today = today,
-                                isCurrentMonth = isCurrentMonth,
-                                recordsByDay = recordsByDay,
-                                displayMode = displayMode,
-                                maxAbsNet = maxAbsNet,
-                                selectedDay = null,
-                                selectedCol = null,
-                                animateValues = animateValues,
-                                heightFraction = 1f,
-                                onCellClick = { day, col ->
-                                    val rowOfDay = ((firstDayOffset + day - 1) / 7)
-                                        .coerceIn(0, (totalRows - 1).coerceAtLeast(0))
-                                    selectedDay = day
-                                    selectedRowIdx = rowOfDay
-                                    selectedColIdx = col
-                                    cachedSelectedDay = day
-                                    cachedSelectedRowIdx = rowOfDay
-                                    cachedSelectedCol = col
-                                    detailExpandedId = null
-                                    chromeOffsetPx = 0f
-                                    scope.launch {
-                                        bodyScrollState.scrollTo(0)
-                                        detailScrollState.scrollTo(0)
-                                    }
-                                    animateCollapseTo(1f)
-                                }
-                            )
-                            if (rowIdx < totalRows - 1) {
-                                Spacer(Modifier.height(6.dp))
-                            }
+                        if (needsBodyScroll) {
+                            Spacer(Modifier.height(NAV_HEIGHT + NAV_BOTTOM_PADDING + 100.dp))
                         }
                     }
                 }
@@ -6364,7 +6395,7 @@ fun CalendarContent(
                     val collapseRange = (fullGridHeightPx - selRowH).coerceAtLeast(0f)
                     val minDetailPeekH = with(density) { 100.dp.toPx() }
                     val maxGridForDetail = (containerHeightPx - headerHeightPx - minDetailPeekH - fabTopPaddingPx).coerceAtLeast(selRowH)
-                    
+
                     val requiredBaseScroll = if (selRow in rowOffsetsPx.indices) {
                         val rowTop = rowOffsetsPx[selRow]
                         val rowBottom = rowTop + selRowH
@@ -6373,7 +6404,7 @@ fun CalendarContent(
 
                     val splitGridScrollState = rememberScrollState(initial = requiredBaseScroll.roundToInt())
                     val visibleGridH = ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
-                    
+
                     val actualScroll = splitGridScrollState.value.toFloat()
                     val targetTranslation = actualScroll * (1f - p) + (rowOffsetsPx.getOrNull(selRow) ?: 0f) * p
                     val correction = actualScroll - targetTranslation
@@ -6411,6 +6442,12 @@ fun CalendarContent(
                         }
 
                         // 日曆
+                        val needsSplitGridScroll = fullGridHeightPx > visibleGridH + 1f
+                        LaunchedEffect(needsSplitGridScroll) {
+                            if (!needsSplitGridScroll && splitGridScrollState.value != 0) {
+                                splitGridScrollState.scrollTo(0)
+                            }
+                        }
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -6421,9 +6458,12 @@ fun CalendarContent(
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .verticalScroll(splitGridScrollState, enabled = p < 0.01f)
+                                    .verticalScroll(
+                                        splitGridScrollState,
+                                        enabled = p < 0.01f && needsSplitGridScroll
+                                    )
                                     .offset { IntOffset(0, correction.roundToInt()) }
-                                    .padding(bottom = 88.dp) // 🟢 新增呢行：喺滾動內容底部加空白，等格仔可以拉高過 FAB
+                                    .padding(bottom = if (needsSplitGridScroll) 88.dp else 0.dp)
                             ) {
                                 for (rowIdx in 0 until totalRows) {
                                     val isSel = selectedDay != null && rowIdx == selRow
