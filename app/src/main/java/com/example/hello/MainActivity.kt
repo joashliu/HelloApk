@@ -1357,9 +1357,9 @@ private val threadLocalCal = object : java.lang.ThreadLocal<Calendar>() {
     override fun initialValue(): Calendar = Calendar.getInstance()
 }
 
-private fun pad2(n: Int): String = if (n < 10) "0$n" else n.toString()
+internal fun pad2(n: Int): String = if (n < 10) "0$n" else n.toString()
 
-private fun getTimestampMeta(timestamp: Long): TimestampMeta {
+internal fun getTimestampMeta(timestamp: Long): TimestampMeta {
     timestampMetaCache[timestamp]?.let { return it }
     val cal = threadLocalCal.get()!!
     cal.timeInMillis = timestamp
@@ -1401,7 +1401,7 @@ private fun getTimestampMeta(timestamp: Long): TimestampMeta {
 @Volatile private var cachedTodayStartMillis = 0L
 @Volatile private var cachedCurrentYear = 2026
 
-private fun getTodayStartMillis(): Long {
+internal fun getTodayStartMillis(): Long {
     val now = System.currentTimeMillis()
     if (now - cachedTodayCheckMillis < 30_000L && cachedTodayStartMillis > 0L) {
         return cachedTodayStartMillis
