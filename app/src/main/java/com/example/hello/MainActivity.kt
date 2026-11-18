@@ -7563,7 +7563,6 @@ fun CalendarContent(
                     val minDetailPeekH = with(density) { 100.dp.toPx() }
                     val maxGridForDetail = (containerHeightPx - headerHeightPx - minDetailPeekH - fabTopPaddingPx).coerceAtLeast(selRowH)
                     
-                    // ★ 修正：確保即使日曆被壓縮到 maxGridForDetail，選中嘅嗰一行都會被自動推入可見範圍內，唔會被裁切。
                     val requiredBaseScroll = if (selRow in rowOffsetsPx.indices) {
                         val rowTop = rowOffsetsPx[selRow]
                         val rowBottom = rowTop + selRowH
@@ -7572,7 +7571,6 @@ fun CalendarContent(
 
                     val visibleGridH = ((fullGridHeightPx - collapseRange * p).coerceAtLeast(selRowH)).coerceAtMost(maxGridForDetail)
                     
-                    // ★ 完美過渡：p=0 時只推高必要距離；p=1 時推到最頂
                     val gridScroll = if (selRow in rowOffsetsPx.indices) {
                         requiredBaseScroll * (1f - p) + rowOffsetsPx[selRow] * p
                     } else 0f
@@ -7616,6 +7614,18 @@ fun CalendarContent(
                                 .padding(horizontal = 10.dp)
                                 .height(with(density) { visibleGridH.toDp().coerceAtLeast(0.dp) })
                                 .clipToBounds()
+                                .pointerInput(selRow) {
+                                    detectVerticalDragGestures(
+                                        onDragStart = { collapsedInCurrentGesture = false },
+                                        onDragEnd = { snapAfterDrag() },
+                                        onVerticalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            if (isSettling) return@detectVerticalDragGestures
+                                            if (dragAmount < 0f) applyDragUp(-dragAmount)
+                                            else applyDragDown(dragAmount)
+                                        }
+                                    )
+                                }
                         ) {
                             Column(
                                 Modifier
