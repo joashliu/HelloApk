@@ -11110,18 +11110,20 @@ fun ImageEffectSelectionPanel(
         }
     }
 
+    // ★ 改用第 1 種嘅去白底結果（whiteRemovedBitmap）再做強化 + 貼邊緊裁
     val tightCroppedEnhancedBitmap by produceState<Bitmap?>(
         initialValue = null,
-        key1 = state.processedBitmap
+        key1 = whiteRemovedBitmap
     ) {
+        val base = whiteRemovedBitmap ?: return@produceState
         value = withContext(Dispatchers.Default) {
             try {
-                val enhanced = applyEnhancedFilter(state.processedBitmap)
+                val enhanced = applyEnhancedFilter(base)
                 val cropped = tightCropAroundSubject(enhanced)
                 if (cropped !== enhanced) enhanced.recycle()
                 cropped
             } catch (e: Exception) {
-                state.processedBitmap
+                base
             }
         }
     }
@@ -11161,7 +11163,7 @@ fun ImageEffectSelectionPanel(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp)
             ) {
-                // ★ 第 1 位：簡單去白底
+                // 第 1 位：簡單去白底
                 item {
                     val preview = whiteRemovedBitmap ?: state.originalBitmap
                     EffectOptionCard(
@@ -11179,7 +11181,7 @@ fun ImageEffectSelectionPanel(
                         }
                     )
                 }
-                // ★ 第 2 位：自動去背圖
+                // 第 2 位：自動去背圖
                 item {
                     EffectOptionCard(
                         title = "自動去背圖", bitmap = state.processedBitmap,
@@ -11187,17 +11189,9 @@ fun ImageEffectSelectionPanel(
                         onClick = { safeSelect(state.processedBitmap, false, false) }
                     )
                 }
-                // 第 3 位：手動裁剪
+                // ★ 第 3 位：緊裁 + 強化（基於簡單去白底）
                 item {
-                    EffectOptionCard(
-                        title = "手動裁剪", bitmap = state.originalBitmap,
-                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
-                        onClick = { showCropDialog = true }
-                    )
-                }
-                // 第 4 位：緊裁 + 強化
-                item {
-                    val preview = tightCroppedEnhancedBitmap ?: state.processedBitmap
+                    val preview = tightCroppedEnhancedBitmap ?: whiteRemovedBitmap ?: state.originalBitmap
                     EffectOptionCard(
                         title = if (tightCroppedEnhancedBitmap == null)
                             "裁剪強化（計算中）"
@@ -11210,17 +11204,26 @@ fun ImageEffectSelectionPanel(
                             scope.launch {
                                 val target = tightCroppedEnhancedBitmap ?: withContext(Dispatchers.Default) {
                                     try {
-                                        val enhanced = applyEnhancedFilter(state.processedBitmap)
+                                        val base = whiteRemovedBitmap ?: removeWhiteBackgroundSimple(state.originalBitmap)
+                                        val enhanced = applyEnhancedFilter(base)
                                         val cropped = tightCropAroundSubject(enhanced)
                                         if (cropped !== enhanced) enhanced.recycle()
                                         cropped
                                     } catch (e: Exception) {
-                                        state.processedBitmap
+                                        whiteRemovedBitmap ?: state.originalBitmap
                                     }
                                 }
                                 safeSelect(target, false, false)
                             }
                         }
+                    )
+                }
+                // ★ 第 4 位：手動裁剪
+                item {
+                    EffectOptionCard(
+                        title = "手動裁剪", bitmap = state.originalBitmap,
+                        buttonText = "手動裁剪", isPrimary = false, showCropGrid = true,
+                        onClick = { showCropDialog = true }
                     )
                 }
             }
