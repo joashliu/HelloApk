@@ -11161,20 +11161,14 @@ fun ImageEffectSelectionPanel(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp)
             ) {
-                item {
-                    EffectOptionCard(
-                        title = "自動去背圖", bitmap = state.processedBitmap,
-                        buttonText = "使用去背圖", isPrimary = true,
-                        onClick = { safeSelect(state.processedBitmap, false, false) }
-                    )
-                }
+                // ★ 第 1 位：簡單去白底
                 item {
                     val preview = whiteRemovedBitmap ?: state.originalBitmap
                     EffectOptionCard(
                         title = if (whiteRemovedBitmap == null) "去白底（計算中）" else "簡單去白底",
                         bitmap = preview,
                         buttonText = "使用去白底",
-                        isPrimary = false,
+                        isPrimary = true,
                         onClick = {
                             scope.launch {
                                 val target = whiteRemovedBitmap ?: withContext(Dispatchers.Default) {
@@ -11185,6 +11179,15 @@ fun ImageEffectSelectionPanel(
                         }
                     )
                 }
+                // ★ 第 2 位：自動去背圖
+                item {
+                    EffectOptionCard(
+                        title = "自動去背圖", bitmap = state.processedBitmap,
+                        buttonText = "使用去背圖", isPrimary = false,
+                        onClick = { safeSelect(state.processedBitmap, false, false) }
+                    )
+                }
+                // 第 3 位：手動裁剪
                 item {
                     EffectOptionCard(
                         title = "手動裁剪", bitmap = state.originalBitmap,
@@ -11192,13 +11195,14 @@ fun ImageEffectSelectionPanel(
                         onClick = { showCropDialog = true }
                     )
                 }
+                // 第 4 位：緊裁 + 強化
                 item {
                     val preview = tightCroppedEnhancedBitmap ?: state.processedBitmap
                     EffectOptionCard(
                         title = if (tightCroppedEnhancedBitmap == null)
-                                    "裁剪強化（計算中）"
-                                else
-                                    "緊裁 + 強化",
+                            "裁剪強化（計算中）"
+                        else
+                            "緊裁 + 強化",
                         bitmap = preview,
                         buttonText = "使用緊裁版",
                         isPrimary = false,
@@ -11207,7 +11211,9 @@ fun ImageEffectSelectionPanel(
                                 val target = tightCroppedEnhancedBitmap ?: withContext(Dispatchers.Default) {
                                     try {
                                         val enhanced = applyEnhancedFilter(state.processedBitmap)
-                                        tightCropAroundSubject(enhanced)
+                                        val cropped = tightCropAroundSubject(enhanced)
+                                        if (cropped !== enhanced) enhanced.recycle()
+                                        cropped
                                     } catch (e: Exception) {
                                         state.processedBitmap
                                     }
@@ -11496,54 +11502,90 @@ fun CropDialog(
     }
 }
 
-suspend fun tightCropAroundSubject(
-    src: Bitmap,
-    paddingPercent: Float = 0.08f,
-    alphaThreshold: Int = 20
-): Bitmap = withContext(Dispatchers.Default) {
+fun tightCropAroundSubject(src: Bitmap): Bitmap {
     val w = src.width
     val h = src.height
-    if (w <= 0 || h <= 0) return@withContext src
+    if (w <= 2 || h <= 2) return src
 
     val pixels = IntArray(w * h)
     src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-    var minX = w
-    var minY = h
-    var maxX = -1
-    var maxY = -1
+    // 判斷四邊係咪有透明背景
+    var transparentEdgeCount = 0
+    val edgeSamples = listOf(
+        pixels[0], pixels[w - 1], pixels[(h - 1) * w], pixels[h * w - 1],
+        pixels[w / 2], pixels[(h - 1) * w + w / 2],
+        pixels[(h / 2) * w], pixels[(h / 2) * w + w - 1]
+    )
+    for (p in edgeSamples) {
+        if ((p ushr 24) < 200) transparentEdgeCount++
+    }
+    val hasTransparentBg = transparentEdgeCount >= 2
 
-    for (y in 0 until h) {
-        val rowStart = y * w
-        for (x in 0 until w) {
-            val a = (pixels[rowStart + x] ushr 24) and 0xFF
-            if (a >= alphaThreshold) {
-                if (x < minX) minX = x
-                if (x > maxX) maxX = x
-                if (y < minY) minY = y
-                if (y > maxY) maxY = y
-            }
+    // 若無透明背景，取左上角作參考底色
+    val bgPixel = pixels[0]
+    val bgR = (bgPixel shr 16) and 0xFF
+    val bgG = (bgPixel shr 8) and 0xFF
+    val bgB = bgPixel and 0xFF
+
+    fun isSubjectPixel(p: Int): Boolean {
+        val a = p ushr 24
+        if (hasTransparentBg) {
+            // 濾走 ML Kit 去背殘留嘅半透明光暈
+            return a >= 96
+        } else {
+            if (a < 96) return false
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            val diff = kotlin.math.abs(r - bgR) + kotlin.math.abs(g - bgG) + kotlin.math.abs(b - bgB)
+            return diff > 45
         }
     }
 
-    if (maxX < 0 || maxY < 0) return@withContext src
+    // 計算每行／每列嘅主體像素數量，無視 1–2px 孤立雜點
+    val rowCounts = IntArray(h)
+    val colCounts = IntArray(w)
+    for (y in 0 until h) {
+        val rowOffset = y * w
+        var rCnt = 0
+        for (x in 0 until w) {
+            if (isSubjectPixel(pixels[rowOffset + x])) {
+                rCnt++
+                colCounts[x]++
+            }
+        }
+        rowCounts[y] = rCnt
+    }
 
-    val subjectW = maxX - minX + 1
-    val subjectH = maxY - minY + 1
+    val minRowPixels = maxOf(2, (w * 0.01f).toInt())
+    val minColPixels = maxOf(2, (h * 0.01f).toInt())
 
-    val side = maxOf(subjectW, subjectH)
-    val padding = (side * paddingPercent).toInt().coerceAtLeast(2)
-    val finalSide = side + padding * 2
+    var top = 0
+    while (top < h && rowCounts[top] < minRowPixels) top++
+    var bottom = h - 1
+    while (bottom > top && rowCounts[bottom] < minRowPixels) bottom--
 
-    val cx = (minX + maxX) / 2f
-    val cy = (minY + maxY) / 2f
+    var left = 0
+    while (left < w && colCounts[left] < minColPixels) left++
+    var right = w - 1
+    while (right > left && colCounts[right] < minColPixels) right--
 
-    val result = Bitmap.createBitmap(finalSide, finalSide, Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(result)
-    val dx = finalSide / 2f - cx
-    val dy = finalSide / 2f - cy
-    canvas.drawBitmap(src, dx, dy, null)
-    result
+    // 保護：如果整張圖被判空，退回原圖
+    val cropW = right - left + 1
+    val cropH = bottom - top + 1
+    if (cropW <= 4 || cropH <= 4) return src
+
+    // 零留白貼實四邊，並放落正方形透明畫布（長邊 100% 貼邊）
+    val side = maxOf(cropW, cropH)
+    val out = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(out)
+    val srcRect = android.graphics.Rect(left, top, right + 1, bottom + 1)
+    val dstLeft = (side - cropW) / 2
+    val dstTop = (side - cropH) / 2
+    val dstRect = android.graphics.Rect(dstLeft, dstTop, dstLeft + cropW, dstTop + cropH)
+    canvas.drawBitmap(src, srcRect, dstRect, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+    return out
 }
 
 @Composable
