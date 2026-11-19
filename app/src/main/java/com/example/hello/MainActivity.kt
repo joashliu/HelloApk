@@ -10864,25 +10864,207 @@ private val segmenterOptions = com.google.mlkit.vision.segmentation.subject.Subj
     .build()
 private val subjectSegmenter = com.google.mlkit.vision.segmentation.subject.SubjectSegmentation.getClient(segmenterOptions)
 
-suspend fun removeBackground(bitmap: Bitmap): Bitmap = withContext(Dispatchers.Default) {
-    var argbBitmap: Bitmap? = null
-    try {
-        argbBitmap = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap
-                     else bitmap.copy(Bitmap.Config.ARGB_8888, true)
-        if (argbBitmap == null) return@withContext bitmap
-        val image = com.google.mlkit.vision.common.InputImage.fromBitmap(argbBitmap, 0)
-        val result = subjectSegmenter.process(image).await()
-        result.foregroundBitmap ?: bitmap
-    } catch (e: Exception) {
-        e.printStackTrace()
-        bitmap
-    } finally {
-        if (argbBitmap != null && argbBitmap !== bitmap) {
-            argbBitmap.recycle()
+suspend fun removeBackground(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+    val w = src.width
+    val h = src.height
+    if (w <= 2 || h <= 2) return@withContext src
+
+    val pixels = IntArray(w * h)
+    src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+    // 1. 掃描四邊像素：檢查係咪已經透明，或者係咪純色底
+    val borderPixels = ArrayList<Int>((w + h) * 2)
+    var transparentBorder = 0
+    for (x in 0 until w) {
+        val pTop = pixels[x]
+        val pBot = pixels[(h - 1) * w + x]
+        if ((pTop ushr 24) < 200) transparentBorder++ else borderPixels.add(pTop)
+        if ((pBot ushr 24) < 200) transparentBorder++ else borderPixels.add(pBot)
+    }
+    for (y in 1 until h - 1) {
+        val pLeft = pixels[y * w]
+        val pRight = pixels[y * w + (w - 1)]
+        if ((pLeft ushr 24) < 200) transparentBorder++ else borderPixels.add(pLeft)
+        if ((pRight ushr 24) < 200) transparentBorder++ else borderPixels.add(pRight)
+    }
+
+    val totalBorder = (w + h) * 2 - 4
+    // 如果本身已經係透明底 PNG，直接返回，唔好俾 AI 破壞
+    if (transparentBorder > totalBorder * 0.35f) {
+        return@withContext src.copy(Bitmap.Config.ARGB_8888, true)
+    }
+
+    // 搵出四邊最主要嘅底色（量化成 16 級容差）
+    val colorBuckets = HashMap<Int, Int>(64)
+    var dominantKey = 0
+    var dominantCount = 0
+    for (p in borderPixels) {
+        val r = ((p shr 16) and 0xFF) / 16
+        val g = ((p shr 8) and 0xFF) / 16
+        val b = (p and 0xFF) / 16
+        val key = (r shl 8) or (g shl 4) or b
+        val cnt = (colorBuckets[key] ?: 0) + 1
+        colorBuckets[key] = cnt
+        if (cnt > dominantCount) {
+            dominantCount = cnt
+            dominantKey = key
         }
     }
+
+    // 計算最主要底色嘅精確平均 RGB
+    var sumR = 0L; var sumG = 0L; var sumB = 0L; var bgSamples = 0
+    val targetR = ((dominantKey shr 8) and 0xF) * 16 + 8
+    val targetG = ((dominantKey shr 4) and 0xF) * 16 + 8
+    val targetB = (dominantKey and 0xF) * 16 + 8
+    for (p in borderPixels) {
+        val r = (p shr 16) and 0xFF
+        val g = (p shr 8) and 0xFF
+        val b = p and 0xFF
+        if (abs(r - targetR) + abs(g - targetG) + abs(b - targetB) <= 60) {
+            sumR += r; sumG += g; sumB += b; bgSamples++
+        }
+    }
+
+    val uniformRatio = if (borderPixels.isEmpty()) 0f else bgSamples.toFloat() / borderPixels.size
+
+    // 2. 純色底 Logo／網圖模式（四邊超過 62% 係同一底色）
+    if (uniformRatio >= 0.62f && bgSamples > 0) {
+        val bgR = (sumR / bgSamples).toInt()
+        val bgG = (sumG / bgSamples).toInt()
+        val bgB = (sumB / bgSamples).toInt()
+        return@withContext removeSolidBackgroundSmart(pixels, w, h, bgR, bgG, bgB)
+    }
+
+    // 3. 複雜背景（實物／食物相）-> 交畀 ML Kit 去背
+    try {
+        val options = SubjectSegmenterOptions.Builder()
+            .enableForegroundConfidenceMask()
+            .build()
+        val segmenter = SubjectSegmentation.getClient(options)
+        val inputImage = InputImage.fromBitmap(src, 0)
+        val result = segmenter.process(inputImage).await()
+        val mask = result.foregroundConfidenceMask
+        segmenter.close()
+
+        if (mask != null) {
+            val outPixels = IntArray(w * h)
+            mask.rewind()
+            for (i in 0 until w * h) {
+                val conf = mask.get()
+                val p = pixels[i]
+                val newAlpha = when {
+                    conf <= 0.35f -> 0
+                    conf >= 0.78f -> (p ushr 24)
+                    else -> {
+                        val t = (conf - 0.35f) / (0.78f - 0.35f)
+                        (((p ushr 24) * t).toInt()).coerceIn(0, 255)
+                    }
+                }
+                outPixels[i] = (newAlpha shl 24) or (p and 0x00FFFFFF)
+            }
+            return@withContext Bitmap.createBitmap(outPixels, w, h, Bitmap.Config.ARGB_8888)
+        }
+    } catch (_: Exception) {
+        // ML Kit 失敗時退回原圖
+    }
+
+    src.copy(Bitmap.Config.ARGB_8888, true)
 }
 
+/**
+ * 專為純色底 Logo 設計：
+ * - 外圍 Flood-Fill（唔會誤傷主體）
+ * - 內部封閉窿自動清理（解決「剩一忽白色喺入面」）
+ * - 邊緣柔化 + 去底色殘留（Defringe）
+ */
+private fun removeSolidBackgroundSmart(
+    srcPixels: IntArray,
+    w: Int,
+    h: Int,
+    bgR: Int,
+    bgG: Int,
+    bgB: Int
+): Bitmap {
+    val size = w * h
+    val out = srcPixels.copyOf()
+    val visited = BooleanArray(size)
+    val isBg = BooleanArray(size)
+    val queue = IntArray(size)
+    var head = 0
+    var tail = 0
+
+    fun colorDist(p: Int): Int {
+        val r = (p shr 16) and 0xFF
+        val g = (p shr 8) and 0xFF
+        val b = p and 0xFF
+        return abs(r - bgR) + abs(g - bgG) + abs(b - bgB)
+    }
+
+    val outerTol = 65 // 外圍容差（處理 JPEG 壓縮雜訊）
+
+    fun tryEnqueue(idx: Int) {
+        if (!visited[idx] && colorDist(out[idx]) <= outerTol) {
+            visited[idx] = true
+            isBg[idx] = true
+            queue[tail++] = idx
+        }
+    }
+
+    // 由四條邊作為起點做 Flood-Fill
+    for (x in 0 until w) {
+        tryEnqueue(x)
+        tryEnqueue((h - 1) * w + x)
+    }
+    for (y in 1 until h - 1) {
+        tryEnqueue(y * w)
+        tryEnqueue(y * w + (w - 1))
+    }
+
+    while (head < tail) {
+        val idx = queue[head++]
+        val x = idx % w
+        val y = idx / w
+        if (x > 0) tryEnqueue(idx - 1)
+        if (x < w - 1) tryEnqueue(idx + 1)
+        if (y > 0) tryEnqueue(idx - w)
+        if (y < h - 1) tryEnqueue(idx + w)
+    }
+
+    // 清除內部封閉底色窿（用較嚴格容差，避免誤刪淺色主體）
+    val innerTol = 28
+    for (i in 0 until size) {
+        if (!isBg[i] && colorDist(out[i]) <= innerTol) {
+            isBg[i] = true
+        }
+    }
+
+    // 套用透明
+    for (i in 0 until size) {
+        if (isBg[i]) {
+            out[i] = 0
+        }
+    }
+
+    // 邊緣去白邊／去毛刺（對貼住透明區域嘅 1px 邊界做平滑過渡）
+    val featherTol = 110
+    for (y in 1 until h - 1) {
+        val row = y * w
+        for (x in 1 until w - 1) {
+            val idx = row + x
+            if (isBg[idx]) continue
+            if (isBg[idx - 1] || isBg[idx + 1] || isBg[idx - w] || isBg[idx + w]) {
+                val dist = colorDist(out[idx])
+                if (dist < featherTol) {
+                    val alpha = ((dist.toFloat() / featherTol) * 255f).toInt().coerceIn(0, 255)
+                    out[idx] = (alpha shl 24) or (out[idx] and 0x00FFFFFF)
+                }
+            }
+        }
+    }
+
+    return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
+}
+    
 suspend fun applyUrlToSameName(context: Context, db: FirebaseFirestore, name: String, url: String) {
     try {
         if (name.isBlank()) return
