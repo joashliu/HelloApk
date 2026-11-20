@@ -1,5 +1,6 @@
 package com.example.hello
 
+import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -1709,13 +1710,22 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+   override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         splash.setKeepOnScreenCondition { !AppStartupState.isFirstDataReady }
         super.onCreate(savedInstanceState)
 
-        // ★ 強制 edge-to-edge + 自己控制 Insets
-        enableEdgeToEdge()
+        // ★ 強制 edge-to-edge + 透明狀態欄同導航欄（深色圖示）
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            ),
+            navigationBarStyle = SystemBarStyle.light(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            )
+        )
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         val isColdStart = !isProcessAlive
@@ -1758,47 +1768,49 @@ class MainActivity : ComponentActivity() {
 
             MaterialTheme {
                 Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .windowInsetsPadding(WindowInsets.systemBars),   // ★ 最關鍵
+                    modifier = Modifier.fillMaxSize(),
                     color = SURFACE_BG
                 ) {
-                    if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
-                        LightweightEntryApp(
-                            vm = viewModel(),
-                            onTransitionToMain = { stateToTransfer ->
-                                if (stateToTransfer != null) {
-                                    keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
-                                    keyboardPrefillNote.value = stateToTransfer.noteText
-                                    keyboardPrefillCategory.value = stateToTransfer.category
-                                    keyboardLaunchToken.value += 1
-                                } else {
-                                    keyboardLaunchToken.value = 0
-                                    keyboardPrefillAmount.value = null
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.systemBars)
+                    ) {
+                        if (currentAppMode == AppUiMode.LIGHTWEIGHT) {
+                            LightweightEntryApp(
+                                vm = viewModel(),
+                                onTransitionToMain = { stateToTransfer ->
+                                    if (stateToTransfer != null) {
+                                        keyboardPrefillAmount.value = stateToTransfer.amountText.toDoubleOrNull()
+                                        keyboardPrefillNote.value = stateToTransfer.noteText
+                                        keyboardPrefillCategory.value = stateToTransfer.category
+                                        keyboardLaunchToken.value += 1
+                                    } else {
+                                        keyboardLaunchToken.value = 0
+                                        keyboardPrefillAmount.value = null
+                                        keyboardPrefillNote.value = null
+                                        keyboardPrefillCategory.value = null
+                                    }
+                                    currentAppMode = AppUiMode.FULL
+                                }
+                            )
+                        } else {
+                            MainApp(
+                                keyboardLaunchToken = token,
+                                voiceLaunchToken = voiceToken,
+                                prefillNoteOnLaunch = prefillNote,
+                                prefillAmountOnLaunch = prefillAmount,
+                                prefillCategoryOnLaunch = prefillCategory,
+                                onKeyboardLaunchConsumed = {
                                     keyboardPrefillNote.value = null
+                                    keyboardPrefillAmount.value = null
                                     keyboardPrefillCategory.value = null
                                 }
-                                currentAppMode = AppUiMode.FULL
-                            }
-                        )
-                    } else {
-                        MainApp(
-                            keyboardLaunchToken = token,
-                            voiceLaunchToken = voiceToken,
-                            prefillNoteOnLaunch = prefillNote,
-                            prefillAmountOnLaunch = prefillAmount,
-                            prefillCategoryOnLaunch = prefillCategory,
-                            onKeyboardLaunchConsumed = {
-                                keyboardPrefillNote.value = null
-                                keyboardPrefillAmount.value = null
-                                keyboardPrefillCategory.value = null
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }
-        }
-    }
 
     override fun onResume() {
         super.onResume()
