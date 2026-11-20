@@ -1827,6 +1827,8 @@ class MainActivity : ComponentActivity() {
 
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
+        // ★ 忽略由「最近任務」切返入嚟嘅舊 Intent，避免重複觸發語音捷徑
+        if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
 
         // 🟢 桌面 Shortcut：語音記帳（extra 可能係 boolean 或字串 "true"）
         val voiceExtra = intent.getBooleanExtra(EXTRA_VOICE_INPUT, false) ||
@@ -3577,6 +3579,8 @@ private fun AnimatedFabLayer(
     LaunchedEffect(voiceLaunchToken) {
         if (voiceLaunchToken <= 0) return@LaunchedEffect
         delay(450)
+        // ★ 觸發前即刻歸零，確保只彈一次，下次入 App 唔會再自動彈
+        com.example.hello.voiceLaunchToken.value = 0
         requestVoiceInput()
     }
 
