@@ -6729,11 +6729,15 @@ fun CalendarContent(
                                     .weight(1f)
                                     .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp)
                             ) {
-                                TrianglePointer(
-                                    colIndex = cachedSelectedCol,
-                                    color = SURFACE_CARD,
-                                    triangleHeight = triangleHeightDp
-                                )
+                                // ★ 只喺當日明細展開到接近頂部（p > 0.65）先平滑浮現，縮喺下面時完全隱藏
+                                val triangleProgress = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
+                                if (triangleProgress > 0.01f) {
+                                    TrianglePointer(
+                                        colIndex = cachedSelectedCol,
+                                        color = SURFACE_CARD.copy(alpha = triangleProgress),
+                                        triangleHeight = triangleHeightDp * triangleProgress
+                                    )
+                                }
                                 Box(
                                     Modifier
                                         .fillMaxWidth()
