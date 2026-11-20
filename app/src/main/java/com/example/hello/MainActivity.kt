@@ -1807,10 +1807,12 @@ class MainActivity : ComponentActivity() {
                                     keyboardPrefillCategory.value = null
                                 }
                             )
-                        }
-                    }
-                }
-            }
+                        } // 閂 else
+                    } // 閂 Box  <-- 檢查係咪漏咗呢個！
+                } // 閂 Surface
+            } // 閂 MaterialTheme
+        } // 閂 setContent
+    } // 閂 onCreate
 
     override fun onResume() {
         super.onResume()
