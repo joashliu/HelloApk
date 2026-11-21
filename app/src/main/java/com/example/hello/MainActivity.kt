@@ -2108,6 +2108,14 @@ fun MainApp(
 
     var expandedId by remember { mutableStateOf<String?>(null) }
     var currentPage by remember { mutableIntStateOf(0) }
+    // 記錄開過邊幾頁，開過就保留唔銷毀（Keep-Alive）
+    var visitedPages by remember { mutableStateOf(setOf(0)) }
+    LaunchedEffect(currentPage) {
+        if (currentPage !in visitedPages) {
+            visitedPages = visitedPages + currentPage
+        }
+    }
+
     // 其他頁撳 FAB 返記帳頁：首幀由隱藏狀態開始滑入（避免閃爍）
     var headerEnterFromHidden by remember { mutableStateOf(false) }
 
@@ -2211,15 +2219,13 @@ fun MainApp(
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     // 唔自動開關鍵盤；只確保草稿仍在 memory
-                    val (open, draft) = loadKeyboardDraft(context)
+                    val (_, draft) = loadKeyboardDraft(context)
                     // 若 memory 已被清但 prefs 有草稿，補返
                     if (keyboardState.amountText.isBlank() && keyboardState.noteText.isBlank() &&
                         (draft.amountText.isNotBlank() || draft.noteText.isNotBlank())
                     ) {
                         keyboardState = draft
                     }
-                    // 唔喺 resume 強行 set showKeyboard，避免同用戶意圖衝突
-                    // （重新進入由 remember 初值／Activity recreate 還原）
                 }
                 else -> Unit
             }
@@ -2253,8 +2259,6 @@ fun MainApp(
     var recentlyDeletedRecord by remember { mutableStateOf<Record?>(null) }
     var showUndoToast by remember { mutableStateOf(false) }
     var deleteJob by remember { mutableStateOf<Job?>(null) }
-
-    // (刪除咗 transportDialogState 同 transportPendingNotifId)
 
     val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         val target = iconTargetRecord
@@ -2513,69 +2517,93 @@ fun MainApp(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
 
-        when (currentPage) {
-            0 -> LedgerContent(
-                isFirstShow = !ledgerHasBeenShownOnce,
-                loading = ui.loading,
-                filtered = ui.ledgerRecords,
-                groupedByDate = ui.groupedByDate,
-                topNotes = ui.topNotes,
-                noteIconMap = ui.noteIconMap,
-                noteCategoryMap = ui.noteCategoryMap,
-                noteUsageCount = ui.noteUsageCount,
-                hasIncome = ui.hasIncome,
-                hasExpense = ui.hasExpense,
-                totalIncome = ui.totalIncome,
-                totalExpense = ui.totalExpense,
-                filterMode = filter.modeOn,
-                filterCategory = filter.category,
-                onFilterCategoryChange = { vm.setFilterCategory(it) },
-                filterMonth = filter.month,
-                onFilterMonthChange = { vm.setFilterMonth(it) },
-                // 👉 加入呢三行
-                filterStartTimeMin = filter.startTimeMin,
-                filterEndTimeMin = filter.endTimeMin,
-                onFilterTimeRangeChange = { s, e -> vm.setFilterTimeRange(s, e) },
-                availableMonths = ui.availableMonths,
-                visibleCategories = ui.visibleCategories,
-                expandedId = expandedId,
-                onExpandChange = { expandedId = it },
-                isExactNoteFilter = ui.isExactNoteFilter,
-                onQuickInputClick = { name ->
-                    val amt = ui.recentAmountByNote[name]
-                    openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
-                },
-                onCopyClick = { openKeyboardForCopy(it) },
-                onEditClick = { openKeyboardForEdit(it) },
-                onDeleteClick = { deleteRecordWithUndo(it) },
-                onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                onFilterByName = { name ->
-                    vm.setFilterCategory(null)
-                    vm.setFilterMonth(null)
-                    filterSearch = TextFieldValue(name)
-                    vm.setFilterSearch(name)
-                    vm.setFilterModeOn(true)
-                },
-                showKeyboard = showKeyboard,
-                showFuture = filter.showFuture,
-                onShowFutureChange = { vm.setShowFuture(it) },
-                scrollToTopTrigger = scrollToTopTrigger,
-                justAddedIds = justAddedIds,
-                deletingIds = deletingIds,
-                afterSaveHint = afterSaveHint,
-                afterSaveHintVisible = afterSaveHintVisible,
-                keyboardProgressProvider = keyboardProgressProvider,
-                weeklyExpenses = weeklyExpenses,
-                shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
-                onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true },
-                hiddenQuickNotes = ui.hiddenQuickNotes,
-                onHideNote = { vm.hideQuickNote(it) },
-                onUnhideNote = { vm.unhideQuickNote(it) },
-                quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger,
-                headerEnterFromHidden = headerEnterFromHidden,
-                onHeaderEnterConsumed = { headerEnterFromHidden = false }
-            )
-            1 -> {
+        // ===== Page 0: 記帳 =====
+        if (0 in visitedPages) {
+            val active = currentPage == 0
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(if (active) 0f else -1f)
+                    .graphicsLayer {
+                        alpha = if (active) 1f else 0f
+                        translationX = if (active) 0f else 100_000f
+                    }
+            ) {
+                LedgerContent(
+                    isFirstShow = !ledgerHasBeenShownOnce,
+                    loading = ui.loading,
+                    filtered = ui.ledgerRecords,
+                    groupedByDate = ui.groupedByDate,
+                    topNotes = ui.topNotes,
+                    noteIconMap = ui.noteIconMap,
+                    noteCategoryMap = ui.noteCategoryMap,
+                    noteUsageCount = ui.noteUsageCount,
+                    hasIncome = ui.hasIncome,
+                    hasExpense = ui.hasExpense,
+                    totalIncome = ui.totalIncome,
+                    totalExpense = ui.totalExpense,
+                    filterMode = filter.modeOn,
+                    filterCategory = filter.category,
+                    onFilterCategoryChange = { vm.setFilterCategory(it) },
+                    filterMonth = filter.month,
+                    onFilterMonthChange = { vm.setFilterMonth(it) },
+                    filterStartTimeMin = filter.startTimeMin,
+                    filterEndTimeMin = filter.endTimeMin,
+                    onFilterTimeRangeChange = { s, e -> vm.setFilterTimeRange(s, e) },
+                    availableMonths = ui.availableMonths,
+                    visibleCategories = ui.visibleCategories,
+                    expandedId = expandedId,
+                    onExpandChange = { expandedId = it },
+                    isExactNoteFilter = ui.isExactNoteFilter,
+                    onQuickInputClick = { name ->
+                        val amt = ui.recentAmountByNote[name]
+                        openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
+                    },
+                    onCopyClick = { openKeyboardForCopy(it) },
+                    onEditClick = { openKeyboardForEdit(it) },
+                    onDeleteClick = { deleteRecordWithUndo(it) },
+                    onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+                    onFilterByName = { name ->
+                        vm.setFilterCategory(null)
+                        vm.setFilterMonth(null)
+                        filterSearch = TextFieldValue(name)
+                        vm.setFilterSearch(name)
+                        vm.setFilterModeOn(true)
+                    },
+                    showKeyboard = showKeyboard,
+                    showFuture = filter.showFuture,
+                    onShowFutureChange = { vm.setShowFuture(it) },
+                    scrollToTopTrigger = scrollToTopTrigger,
+                    justAddedIds = justAddedIds,
+                    deletingIds = deletingIds,
+                    afterSaveHint = afterSaveHint,
+                    afterSaveHintVisible = afterSaveHintVisible,
+                    keyboardProgressProvider = keyboardProgressProvider,
+                    weeklyExpenses = weeklyExpenses,
+                    shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
+                    onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true },
+                    hiddenQuickNotes = ui.hiddenQuickNotes,
+                    onHideNote = { vm.hideQuickNote(it) },
+                    onUnhideNote = { vm.unhideQuickNote(it) },
+                    quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger,
+                    headerEnterFromHidden = headerEnterFromHidden,
+                    onHeaderEnterConsumed = { headerEnterFromHidden = false }
+                )
+            }
+        }
+
+        // ===== Page 1: 比較 =====
+        if (1 in visitedPages) {
+            val active = currentPage == 1
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(if (active) 0f else -1f)
+                    .graphicsLayer {
+                        alpha = if (active) 1f else 0f
+                        translationX = if (active) 0f else 100_000f
+                    }
+            ) {
                 val compareMonthA by vm.compareMonthA.collectAsState()
                 val compareMonthB by vm.compareMonthB.collectAsState()
                 val compareUi by vm.compareUiState.collectAsState()
@@ -2598,7 +2626,20 @@ fun MainApp(
                     onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
                 )
             }
-            2 -> {
+        }
+
+        // ===== Page 2: 月曆 =====
+        if (2 in visitedPages) {
+            val active = currentPage == 2
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(if (active) 0f else -1f)
+                    .graphicsLayer {
+                        alpha = if (active) 1f else 0f
+                        translationX = if (active) 0f else 100_000f
+                    }
+            ) {
                 val calendarMonthKey by vm.calendarMonthKey.collectAsState()
                 val calendarFilterCategory by vm.calendarFilterCategory.collectAsState()
                 val calendarUi by vm.calendarUiState.collectAsState()
@@ -2623,11 +2664,24 @@ fun MainApp(
                     onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                     onAddClick = { goLedgerAndAdd { openKeyboardForNew() } },
                     deletingIds = deletingIds,
-                    justAddedIds = justAddedIds
+                    justAddedIds = justAddedIds,
+                    isActive = active
                 )
             }
-            // ★ 資料透視表頁
-            3 -> {
+        }
+
+        // ===== Page 3: 透視 =====
+        if (3 in visitedPages) {
+            val active = currentPage == 3
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(if (active) 0f else -1f)
+                    .graphicsLayer {
+                        alpha = if (active) 1f else 0f
+                        translationX = if (active) 0f else 100_000f
+                    }
+            ) {
                 val pivotUi by vm.pivotUiState.collectAsState()
                 PivotContent(
                     pivotUi = pivotUi,
@@ -2781,7 +2835,7 @@ fun MainApp(
             onKeyboardNext = { keyboardState = keyboardState.copy(editingNote = true) },
             allNoteNames = ui.allNoteNames,
             noteCategoryMap = ui.noteCategoryMap,
-            noteIconMap = ui.noteIconMap, // ★ 加入呢行
+            noteIconMap = ui.noteIconMap,
             nameFlashTrigger = nameFlashTrigger
         )
 
@@ -3205,7 +3259,7 @@ fun MainApp(
             }
         }
     }
-} // 👈 呢個大括號係 MainApp 嘅結尾，貼到呢度為止！
+}
 // =========================================================
 //  ★ KeyboardAndFabLayer
 // =========================================================
