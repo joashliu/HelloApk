@@ -6828,7 +6828,6 @@ fun CalendarContent(
         }
     }
 }
-```[cite: 3]
 
 @Composable
 fun TrianglePointer(
