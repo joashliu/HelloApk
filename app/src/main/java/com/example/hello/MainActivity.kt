@@ -6320,7 +6320,7 @@ fun CalendarContent(
                     Surface(
                         onClick = { monthDirection = -1; onMonthChange(shiftMonthKey(currentMonthKey, -1)) },
                         modifier = Modifier.size(36.dp), shape = CircleShape, color = SURFACE_CARD, border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChevronLeft, "上個月", tint = Color.Black, modifier = Modifier.size(22.dp)) } }
+                    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChevronLeft, "上個月", tint = TEXT_PRIMARY, modifier = Modifier.size(22.dp)) } }
                     Spacer(Modifier.width(10.dp))
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -6331,7 +6331,7 @@ fun CalendarContent(
                             }
                         }
                     ) {
-                        Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp, color = Color.Black, fontWeight = FontWeight.Medium)
+                        Text("${year}年", fontSize = 11.sp, lineHeight = 12.sp, color = TEXT_PRIMARY, fontWeight = FontWeight.Medium)
                         AnimatedContent(
                             targetState = currentMonthKey,
                             transitionSpec = {
@@ -6354,7 +6354,7 @@ fun CalendarContent(
                     Surface(
                         onClick = { monthDirection = 1; onMonthChange(shiftMonthKey(currentMonthKey, 1)) },
                         modifier = Modifier.size(36.dp), shape = CircleShape, color = SURFACE_CARD, border = BorderStroke(0.5.dp, DIVIDER_COLOR)
-                    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChevronRight, "下個月", tint = Color.Black, modifier = Modifier.size(22.dp)) } }
+                    ) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChevronRight, "下個月", tint = TEXT_PRIMARY, modifier = Modifier.size(22.dp)) } }
                     Spacer(Modifier.weight(1f))
                     SegmentedModeControl(displayMode = displayMode, onModeChange = { displayMode = it })
                 }
@@ -6453,7 +6453,7 @@ fun CalendarContent(
                                             Text(
                                                 text = w,
                                                 fontSize = 12.sp,
-                                                color = Color.Black,
+                                                color = TEXT_PRIMARY,
                                                 fontWeight = FontWeight.SemiBold,
                                                 style = TextStyle(
                                                     platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -6626,7 +6626,7 @@ fun CalendarContent(
                                         Text(
                                             text = w,
                                             fontSize = 12.sp,
-                                            color = Color.Black,
+                                            color = TEXT_PRIMARY,
                                             fontWeight = FontWeight.SemiBold,
                                             style = TextStyle(
                                                 platformStyle = PlatformTextStyle(includeFontPadding = false)
@@ -6717,7 +6717,6 @@ fun CalendarContent(
                                     .weight(1f)
                                     .padding(bottom = NAV_HEIGHT + NAV_BOTTOM_PADDING + 56.dp + 20.dp)
                             ) {
-                                // ★ 只喺當日明細展開到接近頂部（p > 0.65）先平滑浮現，縮喺下面時完全隱藏
                                 val triangleProgress = ((p - 0.65f) / 0.35f).coerceIn(0f, 1f)
                                 if (triangleProgress > 0.01f) {
                                     TrianglePointer(
@@ -9189,7 +9188,6 @@ fun CalendarDayCell(
         else -> SURFACE_CARD
     }
 
-    // ★ 全部保持 State 唔用 by 解構，延遲到 GPU Draw / Layer 階段先讀，動畫期間 0 重組、0 重新排版
     val bgColorState = animateColorAsState(
         targetValue = targetBgColor,
         animationSpec = tween(220, easing = FastOutSlowInEasing),
@@ -9237,9 +9235,7 @@ fun CalendarDayCell(
             )
             .clip(CALENDAR_CELL_SHAPE)
             .drawBehind {
-                // 背景色
                 drawRect(color = bgColorState.value)
-                // 棒形圖（純 GPU 繪製，唔觸發 Layout）
                 if (displayMode == 0) {
                     val ratio = barRatioState.value
                     if (ratio > 0.001f) {
@@ -9271,7 +9267,7 @@ fun CalendarDayCell(
                 fontSize = 13.sp,
                 lineHeight = 14.sp,
                 fontWeight = FontWeight.Black,
-                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else Color.Black,
+                color = if (isToday || isSelected) BRAND_PRIMARY_DARK else TEXT_PRIMARY,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -9297,7 +9293,6 @@ fun CalendarDayCell(
                 }
                 1 -> {
                     if (isSelected) {
-                        // ★ 選中時只顯示一行摘要
                         val count = records.size
                         val summaryText = when {
                             count == 0 -> ""
@@ -9333,7 +9328,6 @@ fun CalendarDayCell(
                             }
                         }
                     } else {
-                        // 未選中：原本多行
                         summary.sortedAsc.forEach { r ->
                             Row(Modifier.fillMaxWidth().height(16.dp)) {
                                 FadedText(
@@ -9461,11 +9455,11 @@ fun SegmentedModeControl(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(icon, label,
-                            tint = if (selected) BRAND_PRIMARY else Color.Black,
+                            tint = if (selected) BRAND_PRIMARY else TEXT_PRIMARY,
                             modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(label, fontSize = 12.sp,
-                            color = if (selected) TEXT_PRIMARY else Color.Black,
+                            color = TEXT_PRIMARY,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1)
                     }
