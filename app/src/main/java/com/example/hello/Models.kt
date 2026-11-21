@@ -46,7 +46,7 @@ val SURFACE_CARD = Color(0xFFFFFFFF)
 val SURFACE_ELEVATED = Color(0xFFE9E9EF)
 
 // iOS label / secondaryLabel / tertiaryLabel
-val TEXT_PRIMARY = Color(0xFF1C1C1E)
+val TEXT_PRIMARY = Color(0xFF2A2B33)
 val TEXT_SECONDARY = Color(0xFF8E8E93)
 val TEXT_TERTIARY = Color(0xFFC7C7CC)
 val DIVIDER_COLOR = Color(0xFFE5E5EA)
