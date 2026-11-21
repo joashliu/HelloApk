@@ -6515,44 +6515,32 @@ fun CalendarContent(
                     }
                 }
             } else {
-                // ===== 統計區：只喺階段2（chromeOffsetPx）先跟手推走；階段1 保持不動 =====
-                val topTranslatePx = if (selectedDay != null) {
-                    chromeOffsetPx.coerceIn(0f, topSectionHeightPx.coerceAtLeast(0f))
-                } else 0f
-                val isChromeCollapsing = selectedDay != null && topSectionHeightPx > 0f
-                val topVisibleH = if (isChromeCollapsing && chromeOffsetPx > 0.5f)
-                    (topSectionHeightPx - topTranslatePx).coerceAtLeast(0f)
-                else -1f
-
-                LaunchedEffect(visibleCategories, filterCategory) {
-                    kotlinx.coroutines.delay(16)
-                }
-
+                // ===== 統計區：保持原裝高度，階段2（chromeOffsetPx）純粹向上滑入年份/月份 bar 後面 =====
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (topVisibleH < 0f) Modifier.wrapContentHeight()
-                            else Modifier
-                                .height(with(density) { topVisibleH.toDp() })
-                                .clipToBounds()
-                        )
+                        .clipToBounds()
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(
+                                constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+                            )
+                            val fullH = placeable.height
+                            val translate = if (selectedDay != null) {
+                                chromeOffsetPx.coerceIn(0f, fullH.toFloat())
+                            } else 0f
+                            val visibleH = (fullH - translate).roundToInt().coerceIn(0, fullH)
+                            layout(placeable.width, visibleH) {
+                                placeable.placeRelative(0, -translate.roundToInt())
+                            }
+                        }
                 ) {
                     Column(
                         Modifier
                             .fillMaxWidth()
                             .onSizeChanged { sz ->
-                                if (sz.height <= 0) return@onSizeChanged
-                                if (chromeOffsetPx > 0.5f) return@onSizeChanged
-                                if (sz.height > topSectionHeightPx + 1f) {
+                                if (sz.height > 0) {
                                     topSectionHeightPx = sz.height.toFloat()
                                 }
-                            }
-                            .offset {
-                                IntOffset(
-                                    0,
-                                    if (isChromeCollapsing) (-topTranslatePx).roundToInt() else 0
-                                )
                             }
                             .padding(horizontal = 10.dp)
                     ) {
@@ -6840,6 +6828,7 @@ fun CalendarContent(
         }
     }
 }
+```[cite: 3]
 
 @Composable
 fun TrianglePointer(
