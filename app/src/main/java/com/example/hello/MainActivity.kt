@@ -9390,6 +9390,91 @@ fun CalendarDayCell(
     }
 }
 
+private val CALENDAR_WEEKDAY_HEADERS = listOf("日", "一", "二", "三", "四", "五", "六")
+
+private val SEGMENTED_MODES = listOf(
+    Triple("金額", Icons.Default.AttachMoney, 0),
+    Triple("項目", Icons.Default.List, 1),
+    Triple("圖標", Icons.Default.Apps, 2)
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SegmentedModeControl(
+    displayMode: Int,
+    onModeChange: (Int) -> Unit
+) {
+    val itemWidth = 76.dp
+    val itemHeight = 28.dp
+    val density = LocalDensity.current
+    val itemWidthPx = remember(density) { with(density) { itemWidth.toPx() } }
+
+    var dragAccum by remember { mutableFloatStateOf(0f) }
+    val latestMode by rememberUpdatedState(displayMode)
+    val latestOnChange by rememberUpdatedState(onModeChange)
+
+    Surface(shape = RoundedCornerShape(12.dp), color = SURFACE_ELEVATED) {
+        Box(
+            Modifier.padding(3.dp).pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { dragAccum = 0f },
+                    onDragEnd = { dragAccum = 0f },
+                    onDragCancel = { dragAccum = 0f },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragAccum += dragAmount.x
+                        val steps = (dragAccum / itemWidthPx).toInt()
+                        if (steps != 0) {
+                            val newMode = (latestMode + steps).coerceIn(0, 2)
+                            if (newMode != latestMode) latestOnChange(newMode)
+                            dragAccum -= steps * itemWidthPx
+                        }
+                    }
+                )
+            }
+        ) {
+            val indicatorOffset by animateDpAsState(
+                targetValue = itemWidth * displayMode,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow),
+                label = "segIndicator"
+            )
+
+            Box(
+                Modifier.offset(x = indicatorOffset)
+                    .width(itemWidth).height(itemHeight)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(SURFACE_CARD)
+            )
+
+            Row {
+                SEGMENTED_MODES.forEach { (label, icon, mode) ->
+                    val selected = displayMode == mode
+                    Row(
+                        modifier = Modifier.width(itemWidth).height(itemHeight)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onModeChange(mode) }
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(icon, label,
+                            tint = if (selected) BRAND_PRIMARY else Color.Black,
+                            modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(label, fontSize = 12.sp,
+                            color = if (selected) TEXT_PRIMARY else Color.Black,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun FadedText(
     text: String, color: Color, fontSize: TextUnit,
