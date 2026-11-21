@@ -9057,6 +9057,9 @@ fun AnimatedInfoChip(
     }
 }
 
+private val CALENDAR_CELL_SHAPE = RoundedCornerShape(12.dp)
+private val CELL_SHADOW_COLOR = Color(0x1A000000)
+
 @Composable
 fun CalendarRow(
     rowIdx: Int, firstDayOffset: Int, daysInMonth: Int, today: Calendar,
@@ -9104,6 +9107,7 @@ fun CalendarRow(
     val rowHeight = baseRowHeight * frac
 
     val todayDayOfMonth = remember(today) { today.get(Calendar.DAY_OF_MONTH) }
+    val latestOnCellClick by rememberUpdatedState(onCellClick)
 
     if (rowHeight < 0.5.dp) return
 
@@ -9123,6 +9127,9 @@ fun CalendarRow(
             Box(Modifier.weight(1f).fillMaxHeight().padding(vertical = verticalPad)) {
                 if (dayOfMonth in 1..daysInMonth) {
                     val dayRecords = recordsByDay[dayOfMonth] ?: emptyList()
+                    val onClick = remember(dayOfMonth, col) {
+                        { latestOnCellClick(dayOfMonth, col) }
+                    }
                     CalendarDayCell(
                         day = dayOfMonth,
                         isToday = isCurrentMonth && dayOfMonth == todayDayOfMonth,
@@ -9130,7 +9137,7 @@ fun CalendarRow(
                         records = dayRecords,
                         displayMode = displayMode,
                         maxAbsNet = maxAbsNet,
-                        onClick = { onCellClick(dayOfMonth, col) },
+                        onClick = onClick,
                         animateValues = animateValues
                     )
                 }
@@ -9151,7 +9158,6 @@ fun CalendarDayCell(
     records: List<Record>, displayMode: Int, maxAbsNet: Double, onClick: () -> Unit,
     animateValues: Boolean = false,
 ) {
-    val shape = RoundedCornerShape(12.dp)
     val hasRecords = records.isNotEmpty()
 
     val summary = remember(records) {
@@ -9182,72 +9188,77 @@ fun CalendarDayCell(
         hasRecords && net < 0 -> CELL_BG_NEG
         else -> SURFACE_CARD
     }
-    val bgColor = if (!isSelected) targetBgColor else {
-        animateColorAsState(
-            targetValue = targetBgColor,
-            animationSpec = tween(220, easing = FastOutSlowInEasing),
-            label = "cellBg"
-        ).value
-    }
 
-    val selectionScale by animateFloatAsState(
+    // ★ 全部保持 State 唔用 by 解構，延遲到 GPU Draw / Layer 階段先讀，動畫期間 0 重組、0 重新排版
+    val bgColorState = animateColorAsState(
+        targetValue = targetBgColor,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "cellBg_$day"
+    )
+    val selectionScaleState = animateFloatAsState(
         targetValue = if (isSelected) 1.06f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMediumLow
         ),
-        label = "selScale"
+        label = "selScale_$day"
+    )
+
+    val targetBarRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
+        (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
+    else 0f
+
+    val barRatioState = animateFloatAsState(
+        targetValue = targetBarRatio,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "calendarBarRatio_$day"
+    )
+    val barColorState = animateColorAsState(
+        targetValue = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "calendarBarColor_$day"
     )
 
     val borderWidth = if (isSelected) 2.dp else 0.5.dp
     val borderColor = if (isSelected) BRAND_PRIMARY else DIVIDER_COLOR
     val elevation = if (hasRecords || isToday || isSelected) 1.dp else 0.dp
 
-    val targetBarRatio = if (maxAbsNet > 0.0 && hasRecords && absNet > 0.0)
-        (absNet / maxAbsNet).toFloat().coerceIn(0f, 1f)
-    else 0f
-
-    val animatedBarRatio by animateFloatAsState(
-        targetValue = targetBarRatio,
-        animationSpec = tween(400, easing = FastOutSlowInEasing),
-        label = "calendarBarRatio_$day"
-    )
-
-    val animatedBarColor by animateColorAsState(
-        targetValue = if (net >= 0) CELL_BAR_POS else CELL_BAR_NEG,
-        animationSpec = tween(400, easing = FastOutSlowInEasing),
-        label = "calendarBarColor_$day"
-    )
-
     Box(
         Modifier
             .fillMaxSize()
             .graphicsLayer {
-                scaleX = selectionScale
-                scaleY = selectionScale
+                val s = selectionScaleState.value
+                scaleX = s
+                scaleY = s
             }
             .shadow(
-                elevation, shape, clip = false,
-                ambientColor = Color(0x1A000000), spotColor = Color(0x1A000000)
+                elevation, CALENDAR_CELL_SHAPE, clip = false,
+                ambientColor = CELL_SHADOW_COLOR, spotColor = CELL_SHADOW_COLOR
             )
-            .clip(shape)
-            .background(bgColor)
-            .border(width = borderWidth, color = borderColor, shape = shape)
+            .clip(CALENDAR_CELL_SHAPE)
+            .drawBehind {
+                // 背景色
+                drawRect(color = bgColorState.value)
+                // 棒形圖（純 GPU 繪製，唔觸發 Layout）
+                if (displayMode == 0) {
+                    val ratio = barRatioState.value
+                    if (ratio > 0.001f) {
+                        val barH = size.height * ratio
+                        drawRect(
+                            color = barColorState.value.copy(alpha = 0.75f),
+                            topLeft = Offset(0f, size.height - barH),
+                            size = Size(size.width, barH)
+                        )
+                    }
+                }
+            }
+            .border(width = borderWidth, color = borderColor, shape = CALENDAR_CELL_SHAPE)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onClick() }
-    ) {
-        if (displayMode == 0 && animatedBarRatio > 0.001f) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(animatedBarRatio)
-                    .background(animatedBarColor.copy(alpha = 0.75f))
+                indication = null,
+                onClick = onClick
             )
-        }
-
+    ) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -9372,91 +9383,6 @@ fun CalendarDayCell(
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                         Spacer(Modifier.height(2.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-private val CALENDAR_WEEKDAY_HEADERS = listOf("日", "一", "二", "三", "四", "五", "六")
-
-private val SEGMENTED_MODES = listOf(
-    Triple("金額", Icons.Default.AttachMoney, 0),
-    Triple("項目", Icons.Default.List, 1),
-    Triple("圖標", Icons.Default.Apps, 2)
-)
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SegmentedModeControl(
-    displayMode: Int,
-    onModeChange: (Int) -> Unit
-) {
-    val itemWidth = 76.dp
-    val itemHeight = 28.dp
-    val density = LocalDensity.current
-    val itemWidthPx = remember(density) { with(density) { itemWidth.toPx() } }
-
-    var dragAccum by remember { mutableFloatStateOf(0f) }
-    val latestMode by rememberUpdatedState(displayMode)
-    val latestOnChange by rememberUpdatedState(onModeChange)
-
-    Surface(shape = RoundedCornerShape(12.dp), color = SURFACE_ELEVATED) {
-        Box(
-            Modifier.padding(3.dp).pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { dragAccum = 0f },
-                    onDragEnd = { dragAccum = 0f },
-                    onDragCancel = { dragAccum = 0f },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        dragAccum += dragAmount.x
-                        val steps = (dragAccum / itemWidthPx).toInt()
-                        if (steps != 0) {
-                            val newMode = (latestMode + steps).coerceIn(0, 2)
-                            if (newMode != latestMode) latestOnChange(newMode)
-                            dragAccum -= steps * itemWidthPx
-                        }
-                    }
-                )
-            }
-        ) {
-            val indicatorOffset by animateDpAsState(
-                targetValue = itemWidth * displayMode,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow),
-                label = "segIndicator"
-            )
-
-            Box(
-                Modifier.offset(x = indicatorOffset)
-                    .width(itemWidth).height(itemHeight)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(SURFACE_CARD)
-            )
-
-            Row {
-                SEGMENTED_MODES.forEach { (label, icon, mode) ->
-                    val selected = displayMode == mode
-                    Row(
-                        modifier = Modifier.width(itemWidth).height(itemHeight)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onModeChange(mode) }
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(icon, label,
-                            tint = if (selected) BRAND_PRIMARY else Color.Black,
-                            modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(label, fontSize = 12.sp,
-                            color = if (selected) TEXT_PRIMARY else Color.Black,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                            maxLines = 1)
                     }
                 }
             }
