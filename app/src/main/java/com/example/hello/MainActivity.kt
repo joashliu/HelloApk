@@ -5907,7 +5907,8 @@ fun CalendarContent(
     onChangeIconClick: (Record) -> Unit,
     onAddClick: () -> Unit,
     deletingIds: Set<String> = emptySet(),
-    justAddedIds: Set<String> = emptySet()
+    justAddedIds: Set<String> = emptySet(),
+    isActive: Boolean = true
 ) {
     // 狀態鎖 (State Lock) 攔截唔匹配嘅過期數據
     var safeUiState by remember { mutableStateOf(calendarUi) }
@@ -6306,7 +6307,7 @@ fun CalendarContent(
 
     LaunchedEffect(currentMonthKey) { handleDismiss() }
     BackHandler(
-        enabled = selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f
+        enabled = isActive && (selectedDay != null || collapseP > 0.01f || chromeOffsetPx > 0.01f)
     ) { handleBackStep() }
 
     val detailNestedConnection = object : NestedScrollConnection {
