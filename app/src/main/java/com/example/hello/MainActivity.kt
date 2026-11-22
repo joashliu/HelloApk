@@ -2077,6 +2077,116 @@ private fun getCachedBlurEffect(radiusPx: Int): androidx.compose.ui.graphics.Ren
 // =========================================================
 //  ★ MainApp
 // =========================================================
+@Immutable
+private data class RepaymentReminderInfo(
+    val note: String,
+    val dueDay: Int,
+    val amount: Double
+)
+
+private fun computeRepaymentReminder(records: List<Record>): RepaymentReminderInfo? {
+    val nowMeta = getTimestampMeta(System.currentTimeMillis())
+    val curMonthKey = nowMeta.monthKey
+    val prevMonthKey = shiftMonthKey(curMonthKey, -1)
+
+    // 搵出上個月所有「還錢」記錄
+    val prevRepayments = records.filter {
+        it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == prevMonthKey
+    }
+    if (prevRepayments.isEmpty()) return null
+
+    // 搵出今個月已經還咗嘅項目名稱
+    val curRepaidNotes = records
+        .filter { it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == curMonthKey }
+        .map { it.note.trim() }
+        .toSet()
+
+    // 處理月底日數差異（例如上月 31 號，今月得 30 號）
+    val maxDayThisMonth = Calendar.getInstance().getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    // 搵出已到期且今個月未還嘅項目
+    val dueItem = prevRepayments
+        .sortedBy { getTimestampMeta(it.timestamp).dayOfMonth }
+        .firstOrNull { r ->
+            val effectiveDueDay = getTimestampMeta(r.timestamp).dayOfMonth.coerceAtMost(maxDayThisMonth)
+            val alreadyPaid = r.note.trim() in curRepaidNotes
+            nowMeta.dayOfMonth >= effectiveDueDay && !alreadyPaid
+        } ?: return null
+
+    val dueDay = getTimestampMeta(dueItem.timestamp).dayOfMonth.coerceAtMost(maxDayThisMonth)
+    return RepaymentReminderInfo(
+        note = dueItem.note.ifBlank { "還錢" },
+        dueDay = dueDay,
+        amount = dueItem.amount
+    )
+}
+
+@Composable
+private fun RepaymentReminderBanner(
+    info: RepaymentReminderInfo?,
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onTapToPay: (RepaymentReminderInfo) -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible && info != null,
+        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(250)),
+        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(200))
+    ) {
+        val item = info ?: return@AnimatedVisibility
+        val infiniteTransition = rememberInfiniteTransition(label = "repayBannerPulse")
+        val pulse by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "repayPulse"
+        )
+
+        val bgColor = androidx.compose.ui.graphics.lerp(COLOR_EXPENSE, Color.White, pulse)
+        val contentColor = androidx.compose.ui.graphics.lerp(Color.White, COLOR_EXPENSE, pulse)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(bgColor)
+                .clickable { onTapToPay(item) }
+                .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.NotificationsActive,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "到期還錢提醒：記得還「${item.note}」（每月${item.dueDay}日）",
+                color = contentColor,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(30.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "隱藏提示",
+                    tint = contentColor,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun MainApp(
     keyboardLaunchToken: Int = 0,
@@ -2102,6 +2212,10 @@ fun MainApp(
     val rawRecords by vm.records.collectAsState()
     val weeklyExpenses = remember(rawRecords) { computeWeeklyExpenses(rawRecords) }
     var hasPlayedWeeklyIntro by rememberSaveable { mutableStateOf(false) }
+
+    // 全局到期還錢提示（每次重開 App 都會自動重設顯示）
+    val repaymentReminder = remember(rawRecords) { computeRepaymentReminder(rawRecords) }
+    var repaymentBannerDismissed by remember { mutableStateOf(false) }
 
     var ledgerHasBeenShownOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { ledgerHasBeenShownOnce = true }
@@ -2517,171 +2631,193 @@ fun MainApp(
 
     Box(Modifier.fillMaxSize().background(SURFACE_BG)) {
 
-        // ===== Page 0: 記帳 =====
-        if (0 in visitedPages) {
-            val active = currentPage == 0
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .zIndex(if (active) 0f else -1f)
-                    .graphicsLayer {
-                        alpha = if (active) 1f else 0f
-                        translationX = if (active) 0f else 100_000f
+        Column(Modifier.fillMaxSize()) {
+            // ===== 全局最頂到期還錢提示條 =====
+            RepaymentReminderBanner(
+                info = repaymentReminder,
+                visible = !repaymentBannerDismissed,
+                onDismiss = { repaymentBannerDismissed = true },
+                onTapToPay = { item ->
+                    goLedgerAndAdd {
+                        openKeyboardForNew(
+                            note = item.note,
+                            amount = item.amount.takeIf { it > 0.0 },
+                            forceCategory = "還錢"
+                        )
                     }
-            ) {
-                LedgerContent(
-                    isFirstShow = !ledgerHasBeenShownOnce,
-                    loading = ui.loading,
-                    filtered = ui.ledgerRecords,
-                    groupedByDate = ui.groupedByDate,
-                    topNotes = ui.topNotes,
-                    noteIconMap = ui.noteIconMap,
-                    noteCategoryMap = ui.noteCategoryMap,
-                    noteUsageCount = ui.noteUsageCount,
-                    hasIncome = ui.hasIncome,
-                    hasExpense = ui.hasExpense,
-                    totalIncome = ui.totalIncome,
-                    totalExpense = ui.totalExpense,
-                    filterMode = filter.modeOn,
-                    filterCategory = filter.category,
-                    onFilterCategoryChange = { vm.setFilterCategory(it) },
-                    filterMonth = filter.month,
-                    onFilterMonthChange = { vm.setFilterMonth(it) },
-                    filterStartTimeMin = filter.startTimeMin,
-                    filterEndTimeMin = filter.endTimeMin,
-                    onFilterTimeRangeChange = { s, e -> vm.setFilterTimeRange(s, e) },
-                    availableMonths = ui.availableMonths,
-                    visibleCategories = ui.visibleCategories,
-                    expandedId = expandedId,
-                    onExpandChange = { expandedId = it },
-                    isExactNoteFilter = ui.isExactNoteFilter,
-                    onQuickInputClick = { name ->
-                        val amt = ui.recentAmountByNote[name]
-                        openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
-                    },
-                    onCopyClick = { openKeyboardForCopy(it) },
-                    onEditClick = { openKeyboardForEdit(it) },
-                    onDeleteClick = { deleteRecordWithUndo(it) },
-                    onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                    onFilterByName = { name ->
-                        filterSearch = TextFieldValue(name)
-                        vm.filterByName(name)
-                    },
-                    showKeyboard = showKeyboard,
-                    showFuture = filter.showFuture,
-                    onShowFutureChange = { vm.setShowFuture(it) },
-                    scrollToTopTrigger = scrollToTopTrigger,
-                    justAddedIds = justAddedIds,
-                    deletingIds = deletingIds,
-                    afterSaveHint = afterSaveHint,
-                    afterSaveHintVisible = afterSaveHintVisible,
-                    keyboardProgressProvider = keyboardProgressProvider,
-                    weeklyExpenses = weeklyExpenses,
-                    shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
-                    onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true },
-                    hiddenQuickNotes = ui.hiddenQuickNotes,
-                    onHideNote = { vm.hideQuickNote(it) },
-                    onUnhideNote = { vm.unhideQuickNote(it) },
-                    quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger,
-                    headerEnterFromHidden = headerEnterFromHidden,
-                    onHeaderEnterConsumed = { headerEnterFromHidden = false }
-                )
-            }
-        }
+                }
+            )
 
-        // ===== Page 1: 比較 =====
-        if (1 in visitedPages) {
-            val active = currentPage == 1
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .zIndex(if (active) 0f else -1f)
-                    .graphicsLayer {
-                        alpha = if (active) 1f else 0f
-                        translationX = if (active) 0f else 100_000f
-                    }
-            ) {
-                val compareMonthA by vm.compareMonthA.collectAsState()
-                val compareMonthB by vm.compareMonthB.collectAsState()
-                val compareUi by vm.compareUiState.collectAsState()
-                CompareContent(
-                    compareUi = compareUi,
-                    selectedMonthA = compareMonthA,
-                    onMonthAChange = { newA ->
-                        var newB = compareMonthB
-                        if (newA == newB) newB = shiftMonthKey(newA, 1)
-                        vm.setCompareMonthA(newA)
-                        if (newB != compareMonthB) vm.setCompareMonthB(newB)
-                    },
-                    selectedMonthB = compareMonthB,
-                    onMonthBChange = { newB ->
-                        var newA = compareMonthA
-                        if (newB == newA) newA = shiftMonthKey(newB, -1)
-                        vm.setCompareMonthB(newB)
-                        if (newA != compareMonthA) vm.setCompareMonthA(newA)
-                    },
-                    onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
-                )
-            }
-        }
+            // ===== 4 個頁面容器 =====
+            Box(Modifier.weight(1f).fillMaxWidth()) {
 
-        // ===== Page 2: 月曆 =====
-        if (2 in visitedPages) {
-            val active = currentPage == 2
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .zIndex(if (active) 0f else -1f)
-                    .graphicsLayer {
-                        alpha = if (active) 1f else 0f
-                        translationX = if (active) 0f else 100_000f
+                // ===== Page 0: 記帳 =====
+                if (0 in visitedPages) {
+                    val active = currentPage == 0
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (active) 0f else -1f)
+                            .graphicsLayer {
+                                alpha = if (active) 1f else 0f
+                                translationX = if (active) 0f else 100_000f
+                            }
+                    ) {
+                        LedgerContent(
+                            isFirstShow = !ledgerHasBeenShownOnce,
+                            loading = ui.loading,
+                            filtered = ui.ledgerRecords,
+                            groupedByDate = ui.groupedByDate,
+                            topNotes = ui.topNotes,
+                            noteIconMap = ui.noteIconMap,
+                            noteCategoryMap = ui.noteCategoryMap,
+                            noteUsageCount = ui.noteUsageCount,
+                            hasIncome = ui.hasIncome,
+                            hasExpense = ui.hasExpense,
+                            totalIncome = ui.totalIncome,
+                            totalExpense = ui.totalExpense,
+                            filterMode = filter.modeOn,
+                            filterCategory = filter.category,
+                            onFilterCategoryChange = { vm.setFilterCategory(it) },
+                            filterMonth = filter.month,
+                            onFilterMonthChange = { vm.setFilterMonth(it) },
+                            filterStartTimeMin = filter.startTimeMin,
+                            filterEndTimeMin = filter.endTimeMin,
+                            onFilterTimeRangeChange = { s, e -> vm.setFilterTimeRange(s, e) },
+                            availableMonths = ui.availableMonths,
+                            visibleCategories = ui.visibleCategories,
+                            expandedId = expandedId,
+                            onExpandChange = { expandedId = it },
+                            isExactNoteFilter = ui.isExactNoteFilter,
+                            onQuickInputClick = { name ->
+                                val amt = ui.recentAmountByNote[name]
+                                openKeyboardForNew(name, if (amt != null && amt > 0.0) amt else null)
+                            },
+                            onCopyClick = { openKeyboardForCopy(it) },
+                            onEditClick = { openKeyboardForEdit(it) },
+                            onDeleteClick = { deleteRecordWithUndo(it) },
+                            onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+                            onFilterByName = { name ->
+                                filterSearch = TextFieldValue(name)
+                                vm.filterByName(name)
+                            },
+                            showKeyboard = showKeyboard,
+                            showFuture = filter.showFuture,
+                            onShowFutureChange = { vm.setShowFuture(it) },
+                            scrollToTopTrigger = scrollToTopTrigger,
+                            justAddedIds = justAddedIds,
+                            deletingIds = deletingIds,
+                            afterSaveHint = afterSaveHint,
+                            afterSaveHintVisible = afterSaveHintVisible,
+                            keyboardProgressProvider = keyboardProgressProvider,
+                            weeklyExpenses = weeklyExpenses,
+                            shouldPlayWeeklyIntro = !hasPlayedWeeklyIntro && !ui.loading,
+                            onWeeklyIntroFinished = { hasPlayedWeeklyIntro = true },
+                            hiddenQuickNotes = ui.hiddenQuickNotes,
+                            onHideNote = { vm.hideQuickNote(it) },
+                            onUnhideNote = { vm.unhideQuickNote(it) },
+                            quickInputScrollToFirstTrigger = quickInputScrollToFirstTrigger,
+                            headerEnterFromHidden = headerEnterFromHidden,
+                            onHeaderEnterConsumed = { headerEnterFromHidden = false }
+                        )
                     }
-            ) {
-                val calendarMonthKey by vm.calendarMonthKey.collectAsState()
-                val calendarFilterCategory by vm.calendarFilterCategory.collectAsState()
-                val calendarUi by vm.calendarUiState.collectAsState()
-                CalendarContent(
-                    calendarUi = calendarUi,
-                    currentMonthKey = calendarMonthKey,
-                    onMonthChange = { vm.setCalendarMonthKey(it) },
-                    filterCategory = calendarFilterCategory,
-                    onFilterCategoryChange = { vm.setCalendarFilterCategory(it) },
-                    onCopyClick = { r -> goLedgerAndAdd { openKeyboardForCopy(r) } },
-                    onEditClick = { r -> goLedgerAndAdd { openKeyboardForEdit(r) } },
-                    onFilterClick = { r ->
-                        goLedgerAndAdd {
-                            filterSearch = TextFieldValue(r.note)
-                            vm.filterByName(r.note)
-                        }
-                    },
-                    onDeleteClick = { deleteRecordWithUndo(it) },
-                    onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
-                    onAddClick = { goLedgerAndAdd { openKeyboardForNew() } },
-                    deletingIds = deletingIds,
-                    justAddedIds = justAddedIds,
-                    isActive = active
-                )
-            }
-        }
+                }
 
-        // ===== Page 3: 透視 =====
-        if (3 in visitedPages) {
-            val active = currentPage == 3
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .zIndex(if (active) 0f else -1f)
-                    .graphicsLayer {
-                        alpha = if (active) 1f else 0f
-                        translationX = if (active) 0f else 100_000f
+                // ===== Page 1: 比較 =====
+                if (1 in visitedPages) {
+                    val active = currentPage == 1
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (active) 0f else -1f)
+                            .graphicsLayer {
+                                alpha = if (active) 1f else 0f
+                                translationX = if (active) 0f else 100_000f
+                            }
+                    ) {
+                        val compareMonthA by vm.compareMonthA.collectAsState()
+                        val compareMonthB by vm.compareMonthB.collectAsState()
+                        val compareUi by vm.compareUiState.collectAsState()
+                        CompareContent(
+                            compareUi = compareUi,
+                            selectedMonthA = compareMonthA,
+                            onMonthAChange = { newA ->
+                                var newB = compareMonthB
+                                if (newA == newB) newB = shiftMonthKey(newA, 1)
+                                vm.setCompareMonthA(newA)
+                                if (newB != compareMonthB) vm.setCompareMonthB(newB)
+                            },
+                            selectedMonthB = compareMonthB,
+                            onMonthBChange = { newB ->
+                                var newA = compareMonthA
+                                if (newB == newA) newA = shiftMonthKey(newB, -1)
+                                vm.setCompareMonthB(newB)
+                                if (newA != compareMonthA) vm.setCompareMonthA(newA)
+                            },
+                            onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
+                        )
                     }
-            ) {
-                val pivotUi by vm.pivotUiState.collectAsState()
-                PivotContent(
-                    pivotUi = pivotUi,
-                    onYearChange = { vm.setPivotYear(it) },
-                    onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
-                )
+                }
+
+                // ===== Page 2: 月曆 =====
+                if (2 in visitedPages) {
+                    val active = currentPage == 2
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (active) 0f else -1f)
+                            .graphicsLayer {
+                                alpha = if (active) 1f else 0f
+                                translationX = if (active) 0f else 100_000f
+                            }
+                    ) {
+                        val calendarMonthKey by vm.calendarMonthKey.collectAsState()
+                        val calendarFilterCategory by vm.calendarFilterCategory.collectAsState()
+                        val calendarUi by vm.calendarUiState.collectAsState()
+                        CalendarContent(
+                            calendarUi = calendarUi,
+                            currentMonthKey = calendarMonthKey,
+                            onMonthChange = { vm.setCalendarMonthKey(it) },
+                            filterCategory = calendarFilterCategory,
+                            onFilterCategoryChange = { vm.setCalendarFilterCategory(it) },
+                            onCopyClick = { r -> goLedgerAndAdd { openKeyboardForCopy(r) } },
+                            onEditClick = { r -> goLedgerAndAdd { openKeyboardForEdit(r) } },
+                            onFilterClick = { r ->
+                                goLedgerAndAdd {
+                                    filterSearch = TextFieldValue(r.note)
+                                    vm.filterByName(r.note)
+                                }
+                            },
+                            onDeleteClick = { deleteRecordWithUndo(it) },
+                            onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
+                            onAddClick = { goLedgerAndAdd { openKeyboardForNew() } },
+                            deletingIds = deletingIds,
+                            justAddedIds = justAddedIds,
+                            isActive = active
+                        )
+                    }
+                }
+
+                // ===== Page 3: 透視 =====
+                if (3 in visitedPages) {
+                    val active = currentPage == 3
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .zIndex(if (active) 0f else -1f)
+                            .graphicsLayer {
+                                alpha = if (active) 1f else 0f
+                                translationX = if (active) 0f else 100_000f
+                            }
+                    ) {
+                        val pivotUi by vm.pivotUiState.collectAsState()
+                        PivotContent(
+                            pivotUi = pivotUi,
+                            onYearChange = { vm.setPivotYear(it) },
+                            onAddClick = { goLedgerAndAdd { openKeyboardForNew() } }
+                        )
+                    }
+                }
             }
         }
 
