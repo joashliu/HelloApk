@@ -2088,37 +2088,68 @@ private fun computeRepaymentReminder(records: List<Record>): RepaymentReminderIn
     val nowMeta = getTimestampMeta(System.currentTimeMillis())
     val curMonthKey = nowMeta.monthKey
     val prevMonthKey = shiftMonthKey(curMonthKey, -1)
+    val nextMonthKey = shiftMonthKey(curMonthKey, 1)
 
-    // 搵出上個月所有「還錢」記錄
+    val maxDayThisMonth = Calendar.getInstance().getActualMaximum(Calendar.DAY_OF_MONTH)
+
+    // 1. 檢查今個月到期（根據上個月嘅「還錢」記錄，提早 5 日開始提，一路提到今個月還咗為止）
     val prevRepayments = records.filter {
         it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == prevMonthKey
     }
-    if (prevRepayments.isEmpty()) return null
+    if (prevRepayments.isNotEmpty()) {
+        val curRepaidNotes = records
+            .filter { it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == curMonthKey }
+            .map { it.note.trim() }
+            .toSet()
 
-    // 搵出今個月已經還咗嘅項目名稱
-    val curRepaidNotes = records
-        .filter { it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == curMonthKey }
-        .map { it.note.trim() }
-        .toSet()
+        val dueItem = prevRepayments
+            .sortedBy { getTimestampMeta(it.timestamp).dayOfMonth }
+            .firstOrNull { r ->
+                val effectiveDueDay = getTimestampMeta(r.timestamp).dayOfMonth.coerceAtMost(maxDayThisMonth)
+                val alreadyPaid = r.note.trim() in curRepaidNotes
+                nowMeta.dayOfMonth >= (effectiveDueDay - 5) && !alreadyPaid
+            }
 
-    // 處理月底日數差異（例如上月 31 號，今月得 30 號）
-    val maxDayThisMonth = Calendar.getInstance().getActualMaximum(Calendar.DAY_OF_MONTH)
+        if (dueItem != null) {
+            val dueDay = getTimestampMeta(dueItem.timestamp).dayOfMonth.coerceAtMost(maxDayThisMonth)
+            return RepaymentReminderInfo(
+                note = dueItem.note.ifBlank { "還錢" },
+                dueDay = dueDay,
+                amount = dueItem.amount
+            )
+        }
+    }
 
-    // 搵出已到期且今個月未還嘅項目
-    val dueItem = prevRepayments
-        .sortedBy { getTimestampMeta(it.timestamp).dayOfMonth }
-        .firstOrNull { r ->
-            val effectiveDueDay = getTimestampMeta(r.timestamp).dayOfMonth.coerceAtMost(maxDayThisMonth)
-            val alreadyPaid = r.note.trim() in curRepaidNotes
-            nowMeta.dayOfMonth >= effectiveDueDay && !alreadyPaid
-        } ?: return null
+    // 2. 跨月檢查：如果還錢日係月初（1～5 號），月底距離下個月還錢日 <= 5 日亦會開始提
+    val curRepayments = records.filter {
+        it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == curMonthKey
+    }
+    if (curRepayments.isNotEmpty()) {
+        val nextRepaidNotes = records
+            .filter { it.category == "還錢" && getTimestampMeta(it.timestamp).monthKey == nextMonthKey }
+            .map { it.note.trim() }
+            .toSet()
 
-    val dueDay = getTimestampMeta(dueItem.timestamp).dayOfMonth.coerceAtMost(maxDayThisMonth)
-    return RepaymentReminderInfo(
-        note = dueItem.note.ifBlank { "還錢" },
-        dueDay = dueDay,
-        amount = dueItem.amount
-    )
+        val upcomingItem = curRepayments
+            .sortedBy { getTimestampMeta(it.timestamp).dayOfMonth }
+            .firstOrNull { r ->
+                val dueDay = getTimestampMeta(r.timestamp).dayOfMonth
+                val daysUntilNextDue = (maxDayThisMonth - nowMeta.dayOfMonth) + dueDay
+                val alreadyPaidNext = r.note.trim() in nextRepaidNotes
+                daysUntilNextDue in 1..5 && !alreadyPaidNext
+            }
+
+        if (upcomingItem != null) {
+            val dueDay = getTimestampMeta(upcomingItem.timestamp).dayOfMonth
+            return RepaymentReminderInfo(
+                note = upcomingItem.note.ifBlank { "還錢" },
+                dueDay = dueDay,
+                amount = upcomingItem.amount
+            )
+        }
+    }
+
+    return null
 }
 
 @Composable
