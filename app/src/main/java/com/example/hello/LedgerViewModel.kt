@@ -467,17 +467,21 @@ internal fun buildNoteIndex(records: List<Record>): NoteIndex {
     val TIME_MATCH_THRESHOLD_SEC = 6 * 3600
     val timeMatchedNote: String? = minDistByNote.entries
         .filter { it.value <= TIME_MATCH_THRESHOLD_SEC }
-        .minWithOrNull(
-            compareBy> { it.value }
-                .thenBy { firstSeenOrder[it.key] ?: Int.MAX_VALUE }
-        )?.key
+        .minWithOrNull(Comparator { a, b ->
+            val cmp = a.value.compareTo(b.value)
+            if (cmp != 0) cmp
+            else (firstSeenOrder[a.key] ?: Int.MAX_VALUE)
+                .compareTo(firstSeenOrder[b.key] ?: Int.MAX_VALUE)
+        })?.key
 
     val restSorted = usageCountByNote.entries
         .filter { it.key != timeMatchedNote }
-        .sortedWith(
-            compareByDescending> { it.value }
-                .thenBy { firstSeenOrder[it.key] ?: Int.MAX_VALUE }
-        )
+        .sortedWith(Comparator { a, b ->
+            val cmp = b.value.compareTo(a.value)
+            if (cmp != 0) cmp
+            else (firstSeenOrder[a.key] ?: Int.MAX_VALUE)
+                .compareTo(firstSeenOrder[b.key] ?: Int.MAX_VALUE)
+        })
         .map { it.key to it.value }
 
     val topNotes = ArrayList<Pair<String, Int>>(30)
