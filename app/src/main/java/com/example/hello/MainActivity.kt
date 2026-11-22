@@ -2564,11 +2564,8 @@ fun MainApp(
                     onDeleteClick = { deleteRecordWithUndo(it) },
                     onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                     onFilterByName = { name ->
-                        vm.setFilterCategory(null)
-                        vm.setFilterMonth(null)
                         filterSearch = TextFieldValue(name)
-                        vm.setFilterSearch(name)
-                        vm.setFilterModeOn(true)
+                        vm.filterByName(name)
                     },
                     showKeyboard = showKeyboard,
                     showFuture = filter.showFuture,
@@ -2653,11 +2650,8 @@ fun MainApp(
                     onEditClick = { r -> goLedgerAndAdd { openKeyboardForEdit(r) } },
                     onFilterClick = { r ->
                         goLedgerAndAdd {
-                            vm.setFilterCategory(null)
-                            vm.setFilterMonth(null)
                             filterSearch = TextFieldValue(r.note)
-                            vm.setFilterSearch(r.note)
-                            vm.setFilterModeOn(true)
+                            vm.filterByName(r.note)
                         }
                     },
                     onDeleteClick = { deleteRecordWithUndo(it) },
@@ -4100,12 +4094,20 @@ fun LedgerContent(
                 isExitingFilter = false
             } else {
                 quickInputCollapseOffset = 0f
-                if (listState.firstVisibleItemIndex > 20) {
-                    listState.animateScrollToItem(0)
-                }
+                // 進入篩選模式即刻瞬間跳返去最頂，唔做捲動動畫
+                listState.scrollToItem(0)
             }
         } catch (_: Exception) {
             isExitingFilter = false
+        }
+    }
+
+    // 如果已經喺篩選模式入面，再長撳另一個項目或改變篩選條件，都確保瞬間跳返最頂
+    LaunchedEffect(filterMode, groupedByDate) {
+        if (filterMode) {
+            try {
+                listState.scrollToItem(0)
+            } catch (_: Exception) {}
         }
     }
 
