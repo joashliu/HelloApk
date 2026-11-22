@@ -56,6 +56,19 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         _filter.update { it.copy(startTimeMin = startMin, endTimeMin = endMin) }
     }
 
+    fun filterByName(name: String) {
+        _filter.update {
+            it.copy(
+                modeOn = true,
+                category = null,
+                month = null,
+                search = name,
+                startTimeMin = 0,
+                endTimeMin = 1440
+            )
+        }
+    }
+
     private val _justAddedIds = MutableStateFlow<Set<String>>(emptySet())
     val justAddedIds: StateFlow<Set<String>> = _justAddedIds.asStateFlow()
 
@@ -455,14 +468,14 @@ internal fun buildNoteIndex(records: List<Record>): NoteIndex {
     val timeMatchedNote: String? = minDistByNote.entries
         .filter { it.value <= TIME_MATCH_THRESHOLD_SEC }
         .minWithOrNull(
-            compareBy<Map.Entry<String, Int>> { it.value }
+            compareBy> { it.value }
                 .thenBy { firstSeenOrder[it.key] ?: Int.MAX_VALUE }
         )?.key
 
     val restSorted = usageCountByNote.entries
         .filter { it.key != timeMatchedNote }
         .sortedWith(
-            compareByDescending<Map.Entry<String, Int>> { it.value }
+            compareByDescending> { it.value }
                 .thenBy { firstSeenOrder[it.key] ?: Int.MAX_VALUE }
         )
         .map { it.key to it.value }
