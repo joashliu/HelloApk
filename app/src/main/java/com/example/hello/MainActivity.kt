@@ -9903,8 +9903,8 @@ fun CompareContent(
     var showAllMonths by rememberSaveable { mutableStateOf(false) }
 
     // ★ 變動行高亮控制（唔再鎖住數字動畫，金額一改即時滾動 + 移位）
-    var previousSums by remember { mutableStateOf>>(emptyMap()) }
-    var highlightedCategories by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var previousSums: Map<String, Pair<Double, Double>> by remember { mutableStateOf(emptyMap()) }
+    var highlightedCategories: Set<String> by remember { mutableStateOf(emptySet()) }
 
     LaunchedEffect(displayCategories, selectedMonthA, selectedMonthB, categoryMonthSum) {
         val newSums = displayCategories.associateWith { cat ->
