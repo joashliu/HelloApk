@@ -12717,6 +12717,7 @@ class LedgerAccessibilityService : android.accessibilityservice.AccessibilitySer
 /** 系統級可拖動懸浮掣（顯示在其他 App 之上）
  * - 5 秒無操作自動貼邊：邊近貼邊（左／右都得），蝕一半入邊框 + 半透明
  * - 鍵盤彈出時：只有本身喺鍵盤區域內先至抬升避讓（剛剛好離開鍵盤頂邊）
+ * - 鍵盤開住時拖入鍵盤區：有阻尼並喺放手時自動彈返上鍵盤頂，永唔飛出畫面
  */
 object ScreenReadFabController {
     private var appContext: Context? = null
@@ -12724,10 +12725,12 @@ object ScreenReadFabController {
     private var layoutParams: android.view.WindowManager.LayoutParams? = null
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var dockRunnable: Runnable? = null
+    private var yAnimator: android.animation.ValueAnimator? = null
     private var isDocked = false
     private var dockedOnLeft = false
     private var baseY = 0
-    private var keyboardLiftPx = 0
+    private var currentKeyboardHeightPx = 0
+    private var currentImeTopPx = Int.MAX_VALUE
     private var buttonSizePx = 0
     private var btnView: android.widget.TextView? = null
 
@@ -12743,6 +12746,8 @@ object ScreenReadFabController {
 
     fun dismiss() {
         cancelDockTimer()
+        yAnimator?.cancel()
+        yAnimator = null
         val ctx = appContext ?: return
         val view = overlayView ?: return
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
@@ -12752,7 +12757,8 @@ object ScreenReadFabController {
         btnView = null
         isDocked = false
         dockedOnLeft = false
-        keyboardLiftPx = 0
+        currentKeyboardHeightPx = 0
+        currentImeTopPx = Int.MAX_VALUE
     }
 
     /** 螢幕寬度（px）：用嚟判斷懸浮掣貼邊應該貼左定貼右 */
@@ -12793,6 +12799,55 @@ object ScreenReadFabController {
         }
     }
 
+    private fun effectiveButtonSizePx(ctx: Context): Int =
+        if (buttonSizePx > 0) buttonSizePx else (52 * ctx.resources.displayMetrics.density + 0.5f).toInt()
+
+    /** 冇鍵盤時螢幕內最大合法 Y */
+    private fun maxScreenY(ctx: Context): Int {
+        val size = effectiveButtonSizePx(ctx)
+        val bottomInset = (12 * ctx.resources.displayMetrics.density + 0.5f).toInt()
+        return (screenHeightPx() - size - bottomInset).coerceAtLeast(0)
+    }
+
+    /** 考慮鍵盤狀態後嘅最大合法 Y（鍵盤開住時鎖喺鍵盤頂上方） */
+    private fun maxAllowedY(ctx: Context): Int {
+        val normalMax = maxScreenY(ctx)
+        if (currentKeyboardHeightPx <= 0 || currentImeTopPx == Int.MAX_VALUE) return normalMax
+        val size = effectiveButtonSizePx(ctx)
+        val gap = (10 * ctx.resources.displayMetrics.density + 0.5f).toInt()
+        val imeMax = (currentImeTopPx - size - gap).coerceAtLeast(0)
+        return minOf(normalMax, imeMax).coerceAtLeast(0)
+    }
+
+    private fun animateYTo(targetY: Int, durationMs: Long = 170L) {
+        val lp = layoutParams ?: return
+        val view = overlayView ?: return
+        val ctx = appContext ?: return
+        yAnimator?.cancel()
+        if (lp.y == targetY) return
+        val startY = lp.y
+        try {
+            yAnimator = android.animation.ValueAnimator.ofInt(startY, targetY).apply {
+                duration = durationMs
+                interpolator = android.view.animation.DecelerateInterpolator()
+                addUpdateListener { va ->
+                    lp.y = va.animatedValue as Int
+                    try {
+                        (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                            ?.updateViewLayout(view, lp)
+                    } catch (_: Exception) {}
+                }
+                start()
+            }
+        } catch (_: Exception) {
+            lp.y = targetY
+            try {
+                (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                    ?.updateViewLayout(view, lp)
+            } catch (_: Exception) {}
+        }
+    }
+
     fun refresh(context: Context) {
         val ctx = context.applicationContext
         appContext = ctx
@@ -12811,53 +12866,22 @@ object ScreenReadFabController {
     }
 
     /**
-     * 鍵盤避讓。
-     * ★ 重點：唔再「一有鍵盤就刻意升高」——
-     *   只有懸浮掣本身（未抬升時嘅位置）真係跌入咗鍵盤區域先至抬升，
-     *   而且只抬升到「剛剛好離開鍵盤頂邊」，唔會刻意升多。
-     * @param keyboardHeightPx 鍵盤高度（px）
-     * @param imeTopPx         鍵盤頂邊嘅螢幕 y（未知時傳 Int.MAX_VALUE → 視為唔抬升）
+     * 鍵盤避讓：永遠由安全基準 baseY 計算目標位置，唔再做相對加減。
      */
     fun setKeyboardLift(keyboardHeightPx: Int, imeTopPx: Int = Int.MAX_VALUE) {
         val lp = layoutParams ?: return
-        val view = overlayView ?: return
         val ctx = appContext ?: return
         val kbH = keyboardHeightPx.coerceAtLeast(0)
-        val density = ctx.resources.displayMetrics.density
-        val gap = (10 * density + 0.5f).toInt()
+        val effectiveImeTop = if (kbH > 0) imeTopPx else Int.MAX_VALUE
 
-        // 未抬升時嘅按鈕底邊
-        val restingBottom = baseY + if (buttonSizePx > 0) buttonSizePx else (52 * density).toInt()
-        val overlapsIme = kbH > 0 && imeTopPx < Int.MAX_VALUE && restingBottom > imeTopPx
+        if (kbH == currentKeyboardHeightPx && effectiveImeTop == currentImeTopPx) return
+        currentKeyboardHeightPx = kbH
+        currentImeTopPx = effectiveImeTop
 
-        val newLift = if (overlapsIme) {
-            // 淨係升到剛剛好離開鍵盤頂邊（加少少縫隙），唔超過鍵盤本身高度
-            ((restingBottom - imeTopPx) + gap).coerceAtMost(kbH)
-        } else 0
-
-        if (newLift == keyboardLiftPx) return
-        keyboardLiftPx = newLift
-        val targetY = (baseY - keyboardLiftPx).coerceAtLeast(0)
-        if (lp.y == targetY) return
-        val startY = lp.y
-        try {
-            android.animation.ValueAnimator.ofInt(startY, targetY).apply {
-                duration = 170
-                interpolator = android.view.animation.DecelerateInterpolator()
-                addUpdateListener { va ->
-                    lp.y = va.animatedValue as Int
-                    try {
-                        (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
-                            ?.updateViewLayout(view, lp)
-                    } catch (_: Exception) {}
-                }
-            }.start()
-        } catch (_: Exception) {
-            lp.y = targetY
-            try {
-                (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
-                    ?.updateViewLayout(view, lp)
-            } catch (_: Exception) {}
+        baseY = baseY.coerceIn(0, maxScreenY(ctx))
+        val targetY = baseY.coerceIn(0, maxAllowedY(ctx))
+        if (lp.y != targetY) {
+            animateYTo(targetY, 170L)
         }
     }
 
@@ -12889,12 +12913,8 @@ object ScreenReadFabController {
         if (buttonSizePx <= 0) return
         val half = buttonSizePx / 2
         val screenW = screenWidthPx().coerceAtLeast(buttonSizePx * 2)
-        // gravity = END，lp.x 係「距離右邊幾多」。
-        // 中心點（以左邊為原點）= screenW - lp.x - half
         val centerX = screenW - lp.x - half
         val nearLeft = centerX < screenW / 2f
-        // 左邊蝕一半：view.left = -half → x = screenW - size + half
-        // 右邊蝕一半：view.left = screenW - half → x = -half
         val targetX = if (nearLeft) screenW - buttonSizePx + half else -half
         dockedOnLeft = nearLeft
         if (kotlin.math.abs(lp.x - targetX) <= 2) {
@@ -12921,7 +12941,6 @@ object ScreenReadFabController {
             }
         }
         anim.start()
-        // 同步變半透明
         btnView?.animate()?.alpha(DOCKED_ALPHA)?.setDuration(280)?.start()
     }
 
@@ -12941,7 +12960,6 @@ object ScreenReadFabController {
         val screenW = screenWidthPx().coerceAtLeast(buttonSizePx * 2)
         val centerX = screenW - lp.x - buttonSizePx / 2
         val nearLeft = dockedOnLeft || centerX < screenW / 2f
-        // 撳返出嚟之後，靠返原本嗰邊、留返 12dp inset
         val targetX = if (nearLeft) (screenW - buttonSizePx - inset).coerceAtLeast(0) else inset
         if (lp.x != targetX) {
             lp.x = targetX
@@ -13005,7 +13023,8 @@ object ScreenReadFabController {
         baseY = params.y
         isDocked = false
         dockedOnLeft = false
-        keyboardLiftPx = 0
+        currentKeyboardHeightPx = 0
+        currentImeTopPx = Int.MAX_VALUE
 
         var downX = 0f
         var downY = 0f
@@ -13013,13 +13032,14 @@ object ScreenReadFabController {
         var startY = 0
         var dragged = false
         var longPressFired = false
-        val longPressTimeout = android.view.ViewConfiguration.getLongPressTimeout().toLong() // ~500ms
+        val longPressTimeout = android.view.ViewConfiguration.getLongPressTimeout().toLong()
         var longPressRunnable: Runnable? = null
 
         btn.setOnTouchListener { v, ev ->
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     cancelDockTimer()
+                    yAnimator?.cancel()
                     undockIfNeeded()
                     downX = ev.rawX
                     downY = ev.rawY
@@ -13027,14 +13047,11 @@ object ScreenReadFabController {
                     startY = params.y
                     dragged = false
                     longPressFired = false
-                    // 長按 500ms → 直接開啟語音記帳
                     longPressRunnable?.let { mainHandler.removeCallbacks(it) }
                     val runnable = Runnable {
                         if (!dragged) {
                             longPressFired = true
-                            // 觸發語音記帳（透過 voiceLaunchToken 讓 Compose 端啟動語音）
                             voiceLaunchToken.value += 1
-                            // 震動回饋
                             try {
                                 val vib = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
                                 if (vib != null && vib.hasVibrator()) {
@@ -13046,7 +13063,6 @@ object ScreenReadFabController {
                                     }
                                 }
                             } catch (_: Exception) {}
-                            // 視覺回饋：瞬間縮細再彈返
                             btn.animate()?.scaleX(0.82f)?.scaleY(0.82f)?.setDuration(80)?.withEndAction {
                                 btn.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(120)?.start()
                             }?.start()
@@ -13061,16 +13077,21 @@ object ScreenReadFabController {
                     val dy = (ev.rawY - downY).toInt()
                     if (kotlin.math.abs(dx) > dp(4) || kotlin.math.abs(dy) > dp(4)) {
                         dragged = true
-                        // 拖動時取消長按計時
                         longPressRunnable?.let { mainHandler.removeCallbacks(it) }
                         longPressRunnable = null
                     }
-                    // x 以右邊為原點：0 = 貼右，screenW - size = 貼右以左最遠（貼左）
                     val maxX = (screenWidthPx() - size).coerceAtLeast(0)
                     params.x = (startX - dx).coerceIn(0, maxX)
-                    val newY = (startY + dy).coerceAtLeast(0)
-                    params.y = newY
-                    baseY = newY + keyboardLiftPx
+
+                    val limitY = maxAllowedY(ctx)
+                    val screenMaxY = maxScreenY(ctx)
+                    val rawY = (startY + dy).coerceAtLeast(0)
+                    // 鍵盤開住時如果拖入鍵盤區：加 0.22x 阻尼，放手即彈返上鍵盤頂
+                    params.y = if (rawY > limitY) {
+                        (limitY + ((rawY - limitY) * 0.22f).toInt()).coerceAtMost(screenMaxY)
+                    } else {
+                        rawY.coerceAtMost(screenMaxY)
+                    }
                     try {
                         (ctx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
                             ?.updateViewLayout(v, params)
@@ -13078,10 +13099,16 @@ object ScreenReadFabController {
                     true
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
-                    // 清除長按計時
                     longPressRunnable?.let { mainHandler.removeCallbacks(it) }
                     longPressRunnable = null
-                    if (!dragged && !longPressFired) {
+                    if (dragged) {
+                        val limitY = maxAllowedY(ctx)
+                        val safeY = params.y.coerceIn(0, limitY)
+                        baseY = safeY.coerceIn(0, maxScreenY(ctx))
+                        if (params.y != safeY) {
+                            animateYTo(safeY, 200L)
+                        }
+                    } else if (!longPressFired) {
                         v.performClick()
                     }
                     scheduleDock()
