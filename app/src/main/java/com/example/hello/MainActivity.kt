@@ -9902,21 +9902,19 @@ fun CompareContent(
     // false = 兩個月對比；true = 一次顯示全年各月欄
     var showAllMonths by rememberSaveable { mutableStateOf(false) }
 
-    // ★ 高亮 + 延遲滾動控制
-    var previousSums by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
+    // ★ 變動行高亮控制（唔再鎖住數字動畫，金額一改即時滾動 + 移位）
+    var previousSums by remember { mutableStateOf>>(emptyMap()) }
     var highlightedCategories by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var allowNumberAnimate by remember { mutableStateOf(true) }
 
     LaunchedEffect(displayCategories, selectedMonthA, selectedMonthB, categoryMonthSum) {
         val newSums = displayCategories.associateWith { cat ->
             sumLocal(cat, selectedMonthA) to sumLocal(cat, selectedMonthB)
         }
 
-        // ① 第一次入比較頁：記錄 baseline，唔 highlight、唔動畫
+        // ① 第一次入比較頁：記錄 baseline，唔 highlight
         if (previousSums.isEmpty()) {
             previousSums = newSums
             highlightedCategories = emptySet()
-            allowNumberAnimate = true
             return@LaunchedEffect
         }
 
@@ -9924,23 +9922,16 @@ fun CompareContent(
             previousSums[cat] != pair
         }.keys
 
+        previousSums = newSums
         if (changed.isEmpty()) {
-            previousSums = newSums
             highlightedCategories = emptySet()
-            allowNumberAnimate = true
             return@LaunchedEffect
         }
 
-        // ② 即刻顯示藍色 highlight（唔延遲）
+        // ② 即刻顯示藍色 highlight，同時數字滾動 + 行平滑移動
         highlightedCategories = changed
-        allowNumberAnimate = false
 
-        // ③ highlight 停留 1 秒，數字先至開始滾動
-        delay(1000)
-        allowNumberAnimate = true
-        previousSums = newSums
-
-        // ④ 等滾動 + 行移動完成（約 1.5 秒），之後才開始漸退
+        // ③ 停留 1.5 秒後淡出
         delay(1500)
         highlightedCategories = emptySet()
     }
@@ -9963,7 +9954,6 @@ fun CompareContent(
                 val segHeight = 36.dp
                 val segGap = 4.dp
                 val segIndex = if (showAllMonths) 1 else 0
-                // 非線性彈簧曲線：自然加減速、輕微回彈，切換時膠囊平滑滑動
                 val indicatorOffset by animateDpAsState(
                     targetValue = (segWidth + segGap) * segIndex,
                     animationSpec = spring(
@@ -9986,7 +9976,6 @@ fun CompareContent(
                         .background(SURFACE_ELEVATED)
                         .padding(4.dp)
                 ) {
-                    // 滑動嘅主色膠囊（繪喺文字之下）
                     Box(
                         Modifier
                             .offset(x = indicatorOffset)
@@ -10048,7 +10037,7 @@ fun CompareContent(
                     label = "compareMode"
                 ) { allMonthsMode ->
                     if (!allMonthsMode) {
-                        // ===== 兩個月對比（原有） =====
+                        // ===== 兩個月對比 =====
                         Column(Modifier.fillMaxSize()) {
                             Row(
                                 Modifier
@@ -10117,7 +10106,18 @@ fun CompareContent(
                                                     tween(600, easing = FastOutSlowInEasing),
                                                     label = "hl_$cat"
                                                 )
-                                                Column(Modifier.fillMaxWidth()) {
+                                                Column(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .animateItem(
+                                                            fadeInSpec = tween(250),
+                                                            fadeOutSpec = tween(200),
+                                                            placementSpec = spring(
+                                                                dampingRatio = 0.85f,
+                                                                stiffness = 300f
+                                                            )
+                                                        )
+                                                ) {
                                                     Row(
                                                         Modifier
                                                             .fillMaxWidth()
@@ -10149,9 +10149,9 @@ fun CompareContent(
                                                                 )
                                                             }
                                                         }
-                                                        CompareValueCell(amtA, isIncome, pctA, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                                                        CompareValueCell(amtA, isIncome, pctA, animateValues, Modifier.weight(1.55f))
                                                         Spacer(Modifier.width(6.dp))
-                                                        CompareValueCell(amtB, isIncome, pctB, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                                                        CompareValueCell(amtB, isIncome, pctB, animateValues, Modifier.weight(1.55f))
                                                     }
                                                     if (idx < displayCategories.lastIndex) {
                                                         HorizontalDivider(Modifier.padding(horizontal = 10.dp), color = DIVIDER_COLOR, thickness = dividerThickness)
@@ -10169,9 +10169,9 @@ fun CompareContent(
                             ) {
                                 Text("餘額", Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = BRAND_PRIMARY_DARK)
                                 Spacer(Modifier.weight(0.65f))
-                                CompareValueCell(balanceA, balanceA >= 0, null, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                                CompareValueCell(balanceA, balanceA >= 0, null, animateValues, Modifier.weight(1.55f))
                                 Spacer(Modifier.width(6.dp))
-                                CompareValueCell(balanceB, balanceB >= 0, null, animateValues && allowNumberAnimate, Modifier.weight(1.55f))
+                                CompareValueCell(balanceB, balanceB >= 0, null, animateValues, Modifier.weight(1.55f))
                             }
                         }
                     } else {
@@ -10231,7 +10231,18 @@ fun CompareContent(
                                             itemsIndexed(displayCategories, key = { _, c -> "y_$c" }) { idx, cat ->
                                                 val style = CATEGORY_STYLES[cat]
                                                 val isIncome = cat == INCOME_CATEGORY
-                                                Column(Modifier.fillMaxWidth()) {
+                                                Column(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .animateItem(
+                                                            fadeInSpec = tween(250),
+                                                            fadeOutSpec = tween(200),
+                                                            placementSpec = spring(
+                                                                dampingRatio = 0.85f,
+                                                                stiffness = 300f
+                                                            )
+                                                        )
+                                                ) {
                                                     Row(
                                                         Modifier
                                                             .fillMaxWidth()
@@ -10270,7 +10281,6 @@ fun CompareContent(
                                                         ) {
                                                             monthlyKeysThisYear.forEach { mk ->
                                                                 val amt = sumLocal(cat, mk)
-                                                                // 全年模式：支出類別用括號顯示（同兩月模式一致）
                                                                 val amtText = when {
                                                                     amt == 0.0 -> "—"
                                                                     isIncome -> formatAmountNoDecimal(amt)
@@ -10334,7 +10344,6 @@ fun CompareContent(
                                             .filter { it != INCOME_CATEGORY }
                                             .sumOf { sumLocal(it, mk) }
                                         val bal = inc - exp
-                                        // 全年餘額：負數用括號（同兩月模式）
                                         val balText = when {
                                             bal == 0.0 && inc == 0.0 -> "—"
                                             bal >= 0 -> formatAmountNoDecimal(bal)
