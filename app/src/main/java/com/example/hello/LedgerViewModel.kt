@@ -75,9 +75,21 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val _deletingIds = MutableStateFlow<Set<String>>(emptySet())
     val deletingIds: StateFlow<Set<String>> = _deletingIds.asStateFlow()
 
-    // 保留空方法，避免 MainActivity.kt 呼叫報錯
-    fun onComparePageEnter() {}
-    fun onComparePageExit() {}
+    private val _compareSnapshotRecords = MutableStateFlow<List<Record>>(emptyList())
+    private val _isComparePageActive = MutableStateFlow(false)
+    @Volatile private var hasInitializedCompareSnapshot = false
+
+    fun onComparePageEnter() {
+        _isComparePageActive.value = true
+        if (!_loading.value) {
+            _compareSnapshotRecords.value = _records.value.filter { it.category != "還錢" }
+            hasInitializedCompareSnapshot = true
+        }
+    }
+
+    fun onComparePageExit() {
+        _isComparePageActive.value = false
+    }
 
     private val _defaultMonthA = monthKeyFromTimestamp(System.currentTimeMillis())
     private val _defaultMonthB = shiftMonthKey(_defaultMonthA, -1)
@@ -157,9 +169,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LedgerUiState())
 
-    // 直接即時監聽 _records，任何增刪改即時同步到比較頁
     val compareUiState: StateFlow<CompareUiState> = combine(
-        _records, _compareMonthA, _compareMonthB
+        _compareSnapshotRecords, _compareMonthA, _compareMonthB
     ) { records, a, b -> computeCompareUiState(records, a, b) }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CompareUiState())
@@ -196,6 +207,18 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             _compareMonthB.value = savedMonthB
             _hiddenQuickNotes.value = savedHidden
             withContext(Dispatchers.Default) { listenToFirestore() }
+        }
+
+        viewModelScope.launch {
+            _records.collect { records ->
+                val shouldSync =
+                    _isComparePageActive.value ||
+                    (!hasInitializedCompareSnapshot && !_loading.value)
+                if (shouldSync) {
+                    _compareSnapshotRecords.value = records.filter { it.category != "還錢" }
+                    hasInitializedCompareSnapshot = true
+                }
+            }
         }
 
         viewModelScope.launch {
