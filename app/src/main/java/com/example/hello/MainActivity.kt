@@ -12091,28 +12091,111 @@ fun RollingNumber(
     text: String,
     color: Color,
     fontSize: TextUnit,
-    fontWeight: FontWeight,
+    fontWeight: FontWeight = FontWeight.Bold,
     animateChanges: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val style = TextStyle(
+        color = color,
+        fontSize = fontSize,
+        fontWeight = fontWeight,
+        fontFeatureSettings = "tnum",
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        text.forEachIndexed { index, char ->
-            // 利用由右至左嘅位置作為 Key
-            // 確保位數增加（例如 50 -> 150）時，個位同十位唔會錯位亂跳
-            val indexFromRight = text.length - index
-            key(indexFromRight) {
-                RollingChar(
-                    targetChar = char,
-                    color = color,
-                    fontSize = fontSize,
-                    fontWeight = fontWeight,
-                    animateChanges = animateChanges
-                )
+        val len = text.length
+        for (i in 0 until len) {
+            val ch = text[i]
+            // ★ 由右至左計位（個位 = 0、十位 = 1...），位數增減時唔會重建舊槽位
+            val rightIndex = len - 1 - i
+            if (ch in '0'..'9') {
+                key("digit_$rightIndex") {
+                    ContinuousRollingDigit(
+                        digit = ch - '0',
+                        style = style,
+                        animate = animateChanges
+                    )
+                }
+            } else {
+                key("sym_${rightIndex}_$ch") {
+                    Text(
+                        text = ch.toString(),
+                        style = style,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun ContinuousRollingDigit(
+    digit: Int,
+    style: TextStyle,
+    animate: Boolean
+) {
+    val anim = remember { Animatable(digit.toFloat()) }
+
+    LaunchedEffect(digit, animate) {
+        val target = digit.toFloat()
+        if (!animate) {
+            anim.snapTo(target)
+        } else {
+            // 永遠由當前滾動位置平滑滾去新目標，唔做 snapTo，連撳幾快都唔會閃
+            anim.animateTo(
+                targetValue = target,
+                animationSpec = spring(
+                    dampingRatio = 0.85f,
+                    stiffness = 380f
+                )
+            )
+        }
+    }
+
+    Box(
+        modifier = Modifier.clipToBounds(),
+        contentAlignment = Alignment.Center
+    ) {
+        // 隱形 "8" 撐起穩定寬高，避免滾動時左右抖動
+        Text(
+            text = "8",
+            style = style,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.alpha(0f)
+        )
+
+        val currentVal = anim.value
+        val floorIdx = floor(currentVal).toInt()
+        val frac = currentVal - floorIdx
+        val currDigit = ((floorIdx % 10) + 10) % 10
+        val nextDigit = (currDigit + 1) % 10
+
+        Text(
+            text = currDigit.toString(),
+            style = style,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.graphicsLayer {
+                translationY = -frac * size.height
+            }
+        )
+        if (frac > 0.001f) {
+            Text(
+                text = nextDigit.toString(),
+                style = style,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.graphicsLayer {
+                    translationY = (1f - frac) * size.height
+                }
+            )
         }
     }
 }
