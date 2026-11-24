@@ -7863,82 +7863,102 @@ fun LedgerKeyboardPanel(
                 filterNoteSuggestions(state.noteText, allNoteNames)
             }
 
-            Box(Modifier.fillMaxWidth().height(190.dp)) {
+            Box(Modifier.fillMaxWidth()) {
                 androidx.compose.animation.AnimatedContent(
                     targetState = showNoteSuggestions,
+                    contentAlignment = Alignment.BottomCenter,
                     transitionSpec = {
                         (fadeIn(tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
                             .togetherWith(fadeOut(tween(120)) + scaleOut(targetScale = 0.96f, animationSpec = tween(120)))
+                            .using(
+                                SizeTransform(clip = true) { _, _ ->
+                                    spring(dampingRatio = 0.85f, stiffness = 360f)
+                                }
+                            )
                     },
                     label = "keyboard_or_suggestions"
                 ) { showSuggestions ->
                     if (showSuggestions) {
-                        if (noteSuggestions.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = if (state.noteText.isBlank()) "輸入名稱以搜尋項目" else "搵唔到相關項目",
-                                    color = TEXT_SECONDARY,
-                                    fontSize = 14.sp
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .animateContentSize(
+                                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 360f),
+                                    alignment = Alignment.BottomCenter
                                 )
-                            }
-                        } else {
-                            BoxWithConstraints(Modifier.fillMaxSize()) {
-                                val maxChipWidth = maxWidth
-                                val suggestScroll = rememberScrollState()
-                                FlowRow(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .verticalScroll(suggestScroll)
-                                        .padding(bottom = 8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (noteSuggestions.isEmpty()) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    noteSuggestions.forEach { s ->
-                                        key(s) {
-                                            // pointerInteropFilter：系統 IME 開啟時仍收到原生 touch，唔會第一下只收鍵盤
-                                            var pressed by remember { mutableStateOf(false) }
-                                            Surface(
-                                                modifier = Modifier
-                                                    .height(44.dp)
-                                                    .widthIn(max = maxChipWidth)
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .pointerInteropFilter { ev ->
-                                                        when (ev.actionMasked) {
-                                                            MotionEvent.ACTION_DOWN -> {
-                                                                pressed = true
-                                                                true
-                                                            }
-                                                            MotionEvent.ACTION_UP -> {
-                                                                if (pressed) {
-                                                                    pressed = false
-                                                                    applySuggestionNote(s)
+                                    Text(
+                                        text = if (state.noteText.isBlank()) "輸入名稱以搜尋項目" else "搵唔到相關項目",
+                                        color = TEXT_SECONDARY,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            } else {
+                                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                    val maxChipWidth = maxWidth
+                                    val suggestScroll = rememberScrollState()
+                                    FlowRow(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 190.dp)
+                                            .verticalScroll(suggestScroll),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        noteSuggestions.forEach { s ->
+                                            key(s) {
+                                                // pointerInteropFilter：系統 IME 開啟時仍收到原生 touch，唔會第一下只收鍵盤
+                                                var pressed by remember { mutableStateOf(false) }
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .height(44.dp)
+                                                        .widthIn(max = maxChipWidth)
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .pointerInteropFilter { ev ->
+                                                            when (ev.actionMasked) {
+                                                                MotionEvent.ACTION_DOWN -> {
+                                                                    pressed = true
+                                                                    true
                                                                 }
-                                                                true
+                                                                MotionEvent.ACTION_UP -> {
+                                                                    if (pressed) {
+                                                                        pressed = false
+                                                                        applySuggestionNote(s)
+                                                                    }
+                                                                    true
+                                                                }
+                                                                MotionEvent.ACTION_CANCEL -> {
+                                                                    pressed = false
+                                                                    true
+                                                                }
+                                                                else -> true
                                                             }
-                                                            MotionEvent.ACTION_CANCEL -> {
-                                                                pressed = false
-                                                                true
-                                                            }
-                                                            else -> true
-                                                        }
-                                                    },
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED
-                                            ) {
-                                                Row(
-                                                    Modifier.padding(horizontal = 10.dp).fillMaxHeight(),
-                                                    horizontalArrangement = Arrangement.Center,
-                                                    verticalAlignment = Alignment.CenterVertically
+                                                        },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = if (pressed) BRAND_PRIMARY_LIGHT else SURFACE_ELEVATED
                                                 ) {
-                                                    IconView(noteIconMap[s] ?: "", s, size = 18.dp)
-                                                    Spacer(Modifier.width(6.dp))
-                                                    Text(
-                                                        s,
-                                                        fontSize = 13.sp,
-                                                        color = TEXT_PRIMARY,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
+                                                    Row(
+                                                        Modifier.padding(horizontal = 10.dp).fillMaxHeight(),
+                                                        horizontalArrangement = Arrangement.Center,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        IconView(noteIconMap[s] ?: "", s, size = 18.dp)
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text(
+                                                            s,
+                                                            fontSize = 13.sp,
+                                                            color = TEXT_PRIMARY,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -7948,7 +7968,9 @@ fun LedgerKeyboardPanel(
                         }
                     } else {
                         Column(
-                            Modifier.fillMaxSize(),
+                            Modifier
+                                .fillMaxWidth()
+                                .height(190.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             KEYBOARD_ROWS.forEach { row ->
