@@ -3799,14 +3799,15 @@ private fun AnimatedFabLayer(
 
     LaunchedEffect(voiceLaunchToken) {
         if (voiceLaunchToken <= 0) return@LaunchedEffect
-        // ★ 立即歸零，確保唔會重複觸發
-        com.example.hello.voiceLaunchToken.value = 0
         // ★ 超過 3 秒視為過期（防止之前喺背景失敗，之後手動開 App 先突然彈語音）
         val reqTime = com.example.hello.voiceLaunchRequestTimeMs.value
         if (reqTime > 0L && (System.currentTimeMillis() - reqTime) > 3000L) {
+            com.example.hello.voiceLaunchToken.value = 0
             return@LaunchedEffect
         }
-        delay(120)
+        delay(150)
+        // ★ 一定要喺 delay 之後、呼叫語音前先歸零，避免提早 cancel 咗個 Effect
+        com.example.hello.voiceLaunchToken.value = 0
         requestVoiceInput()
     }
 
