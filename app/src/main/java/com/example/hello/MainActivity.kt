@@ -227,6 +227,8 @@ internal val keyboardPrefillNotifId = mutableStateOf<Int?>(null)
 internal val keyboardPrefillFluidCardId = mutableStateOf<String?>(null)
 // 🟢 桌面 Shortcut / 外部入口觸發語音記帳
 internal val voiceLaunchToken = mutableStateOf(0)
+// ★ 記錄觸發語音嘅時間戳，超過 3 秒過期就唔會喺手動開 App 時誤彈
+internal val voiceLaunchRequestTimeMs = mutableStateOf(0L)
 
 internal val topQuickNotesInfo = mutableStateOf<List<QuickNoteInfo>>(emptyList())
 internal val topLatestCapturedNotification = mutableStateOf<CapturedNotification?>(null)
@@ -1834,6 +1836,7 @@ class MainActivity : ComponentActivity() {
         val voiceExtra = intent.getBooleanExtra(EXTRA_VOICE_INPUT, false) ||
             intent.getStringExtra(EXTRA_VOICE_INPUT) == "true"
         if (voiceExtra) {
+            voiceLaunchRequestTimeMs.value = System.currentTimeMillis()
             voiceLaunchToken.value += 1
             intent.removeExtra(EXTRA_VOICE_INPUT)
             return
@@ -1841,6 +1844,7 @@ class MainActivity : ComponentActivity() {
         // 🟢 DeepLink：ledgerapp://voice
         val uri = intent.data
         if (uri != null && uri.scheme == "ledgerapp" && uri.host == "voice") {
+            voiceLaunchRequestTimeMs.value = System.currentTimeMillis()
             voiceLaunchToken.value += 1
             intent.data = null
             return
@@ -2286,9 +2290,9 @@ fun MainApp(
     var uploading by remember { mutableStateOf(false) }
     // ★ 待確認圖片效果
     var pendingImageUpload by remember { mutableStateOf<PendingImageUpload?>(null) }
-    // 還原未完成入帳草稿；唔自動開鍵盤（除 shortcut／磁貼）
+    // 還原未完成入帳草稿；普通開 App 永遠唔自動彈鍵盤（除 shortcut／磁貼）
     val restoredDraft = remember { loadKeyboardDraft(context) }
-    var showKeyboard by remember { mutableStateOf(restoredDraft.first) }
+    var showKeyboard by remember { mutableStateOf(false) }
     var keyboardState by remember { mutableStateOf(restoredDraft.second) }
 
     var lastManualAmountInputMs by remember { mutableLongStateOf(0L) }
@@ -3774,6 +3778,8 @@ private fun AnimatedFabLayer(
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         try {
             val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                // ★ 強制清走上一次可能卡住嘅語音彈窗，確保每次長撳都彈到全新語音介面
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_HISTORY)
                 putExtra(
                     android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                     android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
@@ -3793,9 +3799,14 @@ private fun AnimatedFabLayer(
 
     LaunchedEffect(voiceLaunchToken) {
         if (voiceLaunchToken <= 0) return@LaunchedEffect
-        delay(450)
-        // ★ 觸發前即刻歸零，確保只彈一次，下次入 App 唔會再自動彈
+        // ★ 立即歸零，確保唔會重複觸發
         com.example.hello.voiceLaunchToken.value = 0
+        // ★ 超過 3 秒視為過期（防止之前喺背景失敗，之後手動開 App 先突然彈語音）
+        val reqTime = com.example.hello.voiceLaunchRequestTimeMs.value
+        if (reqTime > 0L && (System.currentTimeMillis() - reqTime) > 3000L) {
+            return@LaunchedEffect
+        }
+        delay(120)
         requestVoiceInput()
     }
 
@@ -13124,7 +13135,8 @@ object ScreenReadFabController {
         var startY = 0
         var dragged = false
         var longPressFired = false
-        val longPressTimeout = android.view.ViewConfiguration.getLongPressTimeout().toLong()
+        // ★ 縮短長撳時間至 280ms（原本 ~500ms 太長）
+        val longPressTimeout = 280L
         var longPressRunnable: Runnable? = null
 
         btn.setOnTouchListener { v, ev ->
@@ -13143,7 +13155,24 @@ object ScreenReadFabController {
                     val runnable = Runnable {
                         if (!dragged) {
                             longPressFired = true
-                            voiceLaunchToken.value += 1
+                            // ★ 記錄觸發時間 + 主動拉起 MainActivity 並帶 EXTRA_VOICE_INPUT，確保喺任何 App 長撳都即刻彈語音
+                            voiceLaunchRequestTimeMs.value = System.currentTimeMillis()
+                            try {
+                                val intent = android.content.Intent(ctx, MainActivity::class.java).apply {
+                                    addFlags(
+                                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                        android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                    )
+                                    putExtra(MainActivity.EXTRA_VOICE_INPUT, true)
+                                }
+                                ctx.startActivity(intent)
+                            } catch (_: Exception) {
+                                // 後備方案：如果已經喺前景就直接推 token
+                                voiceLaunchToken.value += 1
+                            }
+
                             try {
                                 val vib = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
                                 if (vib != null && vib.hasVibrator()) {
