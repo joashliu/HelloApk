@@ -2280,6 +2280,11 @@ fun MainApp(
     var filterSelectAllTrigger by remember { mutableIntStateOf(0) }
     val filterSearchFocusRequester = remember { FocusRequester() }
 
+    fun exitFilterMode() {
+        filterSearch = TextFieldValue("")
+        vm.setFilterModeOn(false)
+    }
+
     var iconTargetRecord by remember { mutableStateOf<Record?>(null) }
     var webSearchTarget by remember { mutableStateOf<Record?>(null) }
     var showIconSourceDialog by remember { mutableStateOf(false) }
@@ -2385,7 +2390,10 @@ fun MainApp(
 
     LaunchedEffect(filterSearch.text) {
         delay(250)
-        vm.setFilterSearch(filterSearch.text)
+        val cur = vm.filterState.value
+        if (cur.modeOn && filterSearch.text != cur.search) {
+            vm.setFilterSearch(filterSearch.text)
+        }
     }
 
     LaunchedEffect(ui.topQuickNotesInfo) {
@@ -2623,7 +2631,7 @@ fun MainApp(
     LaunchedEffect(keyboardLaunchToken) {
         if (keyboardLaunchToken > 0) {
             delay(400)
-            if (filter.modeOn) vm.setFilterModeOn(false)
+            if (filter.modeOn) exitFilterMode()
             if (currentPage != 0) currentPage = 0
 
             val note = prefillNoteOnLaunch
@@ -2650,7 +2658,7 @@ fun MainApp(
 
     BackHandler(enabled = showKeyboard) { dismissKeyboard() }
     BackHandler(enabled = filter.modeOn && !showKeyboard && currentPage == 0) {
-        vm.setFilterModeOn(false)
+        exitFilterMode()
     }
     LaunchedEffect(filterSelectAllTrigger) {
         if (filterSelectAllTrigger > 0 && filter.modeOn && currentPage == 0) {
@@ -2711,10 +2719,10 @@ fun MainApp(
                             hasExpense = ui.hasExpense,
                             totalIncome = ui.totalIncome,
                             totalExpense = ui.totalExpense,
-                            filterMode = filter.modeOn,
-                            filterCategory = filter.category,
+                            filterMode = ui.appliedFilterMode,
+                            filterCategory = ui.appliedFilterCategory,
                             onFilterCategoryChange = { vm.setFilterCategory(it) },
-                            filterMonth = filter.month,
+                            filterMonth = ui.appliedFilterMonth,
                             onFilterMonthChange = { vm.setFilterMonth(it) },
                             filterStartTimeMin = filter.startTimeMin,
                             filterEndTimeMin = filter.endTimeMin,
@@ -2733,8 +2741,9 @@ fun MainApp(
                             onDeleteClick = { deleteRecordWithUndo(it) },
                             onChangeIconClick = { iconTargetRecord = it; showIconSourceDialog = true },
                             onFilterByName = { name ->
-                                filterSearch = TextFieldValue(name)
-                                vm.filterByName(name)
+                                val trimmed = name.trim()
+                                filterSearch = TextFieldValue(trimmed)
+                                vm.filterByName(trimmed)
                             },
                             showKeyboard = showKeyboard,
                             showFuture = filter.showFuture,
@@ -2819,8 +2828,9 @@ fun MainApp(
                             onEditClick = { r -> goLedgerAndAdd { openKeyboardForEdit(r) } },
                             onFilterClick = { r ->
                                 goLedgerAndAdd {
-                                    filterSearch = TextFieldValue(r.note)
-                                    vm.filterByName(r.note)
+                                    val trimmed = r.note.trim()
+                                    filterSearch = TextFieldValue(trimmed)
+                                    vm.filterByName(trimmed)
                                 }
                             },
                             onDeleteClick = { deleteRecordWithUndo(it) },
@@ -2947,7 +2957,7 @@ fun MainApp(
             showKeyboard = showKeyboard,
             progressProvider = keyboardProgressProvider,
             currentPage = currentPage,
-            filterModeOn = filter.modeOn,
+            filterModeOn = ui.appliedFilterMode,
             filterSearch = filterSearch,
             onFilterSearchChange = { filterSearch = it },
             filterSearchHasFocus = filterSearchHasFocus,
@@ -2968,12 +2978,12 @@ fun MainApp(
                 if (showKeyboard) {
                     keyboardState = keyboardState.copy(amountText = "", selectAmountOnInput = false)
                 } else {
-                    if (filter.modeOn) vm.setFilterModeOn(false)
+                    if (filter.modeOn) exitFilterMode()
                     goLedgerAndAdd { openKeyboardForNew() }
                 }
             },
             onVoiceResult = { note, amount ->
-                if (filter.modeOn) vm.setFilterModeOn(false)
+                if (filter.modeOn) exitFilterMode()
                 val cat = when {
                     note.isNotBlank() -> ui.noteCategoryMap[note]
                     else -> null
