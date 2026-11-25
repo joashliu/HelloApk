@@ -46,7 +46,23 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     private val _filter = MutableStateFlow(FilterState())
     val filterState: StateFlow<FilterState> = _filter.asStateFlow()
 
-    fun setFilterModeOn(v: Boolean)     { _filter.update { it.copy(modeOn = v) } }
+    fun setFilterModeOn(v: Boolean) {
+        _filter.update {
+            if (v) {
+                it.copy(modeOn = true)
+            } else {
+                it.copy(
+                    modeOn = false,
+                    category = null,
+                    month = null,
+                    search = "",
+                    startTimeMin = 0,
+                    endTimeMin = 1440
+                )
+            }
+        }
+    }
+
     fun setFilterCategory(v: String?)   { _filter.update { it.copy(category = v) } }
     fun setFilterMonth(v: String?)      { _filter.update { it.copy(month = v) } }
     fun setFilterSearch(v: String)      { _filter.update { it.copy(search = v) } }
@@ -62,7 +78,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 modeOn = true,
                 category = null,
                 month = null,
-                search = name,
+                search = name.trim(),
                 startTimeMin = 0,
                 endTimeMin = 1440
             )
@@ -517,8 +533,27 @@ internal fun computeLedgerUiState(
         }
     }
 
-    val filterCat = filter.category
-    val filterMon = filter.month
+    val monthsSet = HashSet<String>()
+    for (r in searchFiltered) {
+        monthsSet.add(getTimestampMeta(r.timestamp).monthKey)
+    }
+    val availableMonths = monthsSet.sorted()
+    val filterMon = filter.month?.takeIf { it in availableMonths }
+
+    var hasIncForCat = false
+    val expenseSums = HashMap<String, Double>()
+    for (r in searchFiltered) {
+        val mKey = getTimestampMeta(r.timestamp).monthKey
+        if (filterMon == null || mKey == filterMon) {
+            if (r.category == INCOME_CATEGORY) hasIncForCat = true
+            else expenseSums[r.category] = (expenseSums[r.category] ?: 0.0) + r.amount
+        }
+    }
+    val expenseCats = expenseSums.entries.sortedByDescending { it.value }.map { it.key }
+    val visibleCategories =
+        (if (hasIncForCat) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
+
+    val filterCat = filter.category?.takeIf { it in visibleCategories }
     val startMin = filter.startTimeMin
     val endMin = filter.endTimeMin
 
@@ -546,8 +581,8 @@ internal fun computeLedgerUiState(
     val currentMonthKey = getTimestampMeta(now).monthKey
     val topStatRecords = when {
         !filter.modeOn -> ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == currentMonthKey }
-        filter.month == null -> ledgerRecords
-        else -> ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == filter.month }
+        filterMon == null -> ledgerRecords
+        else -> ledgerRecords.filter { getTimestampMeta(it.timestamp).monthKey == filterMon }
     }
 
     for (r in topStatRecords) {
@@ -572,23 +607,6 @@ internal fun computeLedgerUiState(
     val groupedByDate = groupedMap.entries.map { it.key to it.value }
     val isExactNoteFilter = filter.modeOn && ledgerRecords.isNotEmpty() && allSameNote
 
-    val monthsSet = HashSet<String>()
-    var hasIncForCat = false
-    val expenseSums = HashMap<String, Double>()
-    for (r in searchFiltered) {
-        val mKey = getTimestampMeta(r.timestamp).monthKey
-        monthsSet.add(mKey)
-        if (filterMon == null || mKey == filterMon) {
-            if (r.category == INCOME_CATEGORY) hasIncForCat = true
-            else expenseSums[r.category] = (expenseSums[r.category] ?: 0.0) + r.amount
-        }
-    }
-
-    val availableMonths = monthsSet.sorted()
-    val expenseCats = expenseSums.entries.sortedByDescending { it.value }.map { it.key }
-    val visibleCategories =
-        (if (hasIncForCat) listOf(INCOME_CATEGORY) else emptyList()) + expenseCats
-
     val finalTopNotes = if (filter.showFuture) noteIndex.topNotes else {
         val notesWithPast = HashSet<String>()
         for (r in records) {
@@ -611,6 +629,9 @@ internal fun computeLedgerUiState(
 
     return LedgerUiState(
         loading = loading,
+        appliedFilterMode = filter.modeOn,
+        appliedFilterCategory = filterCat,
+        appliedFilterMonth = filterMon,
         ledgerRecords = ledgerRecords,
         groupedByDate = groupedByDate,
         hasIncome = hasIncome,
