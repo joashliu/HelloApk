@@ -159,6 +159,9 @@ data class FilterState(
 @Immutable
 data class LedgerUiState(
     val loading: Boolean = true,
+    val appliedFilterMode: Boolean = false,
+    val appliedFilterCategory: String? = null,
+    val appliedFilterMonth: String? = null,
     val ledgerRecords: List<Record> = emptyList(),
     val groupedByDate: List<Pair<String, List<Record>>> = emptyList(),
     val hasIncome: Boolean = false,
