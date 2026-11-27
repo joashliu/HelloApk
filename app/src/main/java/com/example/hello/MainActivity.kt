@@ -1181,15 +1181,57 @@ fun formatAmountNoDecimal(amount: Double): String = String.format(Locale.US, "%,
 private val CN_DIGIT_MAP = mapOf(
     '零' to 0, '〇' to 0, '○' to 0,
     '一' to 1, '壹' to 1,
-    '二' to 2, '兩' to 2, '贰' to 2, '貳' to 2,
+    '二' to 2, '兩' to 2, '两' to 2, '贰' to 2, '貳' to 2,
     '三' to 3, '叁' to 3,
     '四' to 4, '肆' to 4,
     '五' to 5, '伍' to 5,
     '六' to 6, '陸' to 6, '陆' to 6,
     '七' to 7, '柒' to 7,
     '八' to 8, '捌' to 8,
-    '九' to 9, '玖' to 9,
-    '狗' to 9
+    '九' to 9, '玖' to 9
+)
+
+// 小數位額外容錯粵語語音常將「九」聽成「狗」
+private val CN_FRAC_DIGIT_MAP = CN_DIGIT_MAP + ('狗' to 9)
+
+private const val CN_NUM_CHARS = "零〇○一二兩两三四五六七八九十百千萬万廿卅壹贰貳叁肆伍陸陆柒捌玖"
+private const val CN_FRAC_CHARS = "0-9零〇○一二兩两三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗"
+private const val CUR_PREFIX = """(?:(?:HK\$|HKD|\$)\s*)?"""
+private const val CUR_SUFFIX = """(?:港幣|港元|塊錢|块钱|[蚊元塊块圓圆錢钱])?"""
+
+private val TRAILING_HALF_REGEX = Regex(
+    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半$"""
+)
+private val TRAILING_DOLLAR_DIME_REGEX = Regex(
+    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+\vert{}[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?$"""
+)
+private val TRAILING_DOT_REGEX = Regex(
+    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX$"""
+)
+private val TRAILING_ARABIC_REGEX = Regex(
+    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+(?:\.\d+)?)\s*$CUR_SUFFIX$"""
+)
+private val TRAILING_CN_INT_REGEX = Regex(
+    """^(.*?)[\s，,、]*$CUR_PREFIX([$CN_NUM_CHARS]+)\s*$CUR_SUFFIX$"""
+)
+
+private val LEADING_HALF_REGEX = Regex(
+    """^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半[\s，,、]*(.+)$"""
+)
+private val LEADING_DOLLAR_DIME_REGEX = Regex(
+    """^$CUR_PREFIX(\d+\vert{}[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?[\s，,、]*(.+)$"""
+)
+private val LEADING_DOT_REGEX = Regex(
+    """^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX[\s，,、]*(.+)$"""
+)
+private val LEADING_ARABIC_REGEX = Regex(
+    """^$CUR_PREFIX(\d+(?:\.\d+)?)\s*$CUR_SUFFIX[\s，,、]*(.+)$"""
+)
+private val LEADING_CN_WITH_CUR_REGEX = Regex(
+    """^$CUR_PREFIX([$CN_NUM_CHARS]+)\s*(?:港幣\vert{}港元\vert{}塊錢\vert{}块钱\vert{}[蚊元塊块圓圆錢钱])[\s，,、]*(.+)$"""
+)
+private val LEADING_CN_WITH_SPACE_REGEX = Regex(
+    """^$CUR_PREFIX([$CN_NUM_CHARS]+)[\s，,、]+(.+)$"""
 )
 
 fun parseChineseInteger(s: String): Int? {
@@ -1202,98 +1244,244 @@ fun parseChineseInteger(s: String): Int? {
     }
     var result = 0
     var unit = 0
-    var i = 0
-    while (i < t.length) {
-        val c = t[i]
+    var lastUnitMul = 0
+    var hadZero = false
+    for (c in t) {
         when {
+            c == '零' || c == '〇' || c == '○' -> {
+                hadZero = true
+                unit = 0
+            }
             c in CN_DIGIT_MAP -> unit = CN_DIGIT_MAP[c]!!
+            c == '廿' -> {
+                result += 20
+                unit = 0
+                lastUnitMul = 10
+                hadZero = false
+            }
+            c == '卅' -> {
+                result += 30
+                unit = 0
+                lastUnitMul = 10
+                hadZero = false
+            }
             c == '十' -> {
                 result += (if (unit == 0) 1 else unit) * 10
                 unit = 0
+                lastUnitMul = 10
+                hadZero = false
             }
             c == '百' -> {
                 result += (if (unit == 0) 1 else unit) * 100
                 unit = 0
+                lastUnitMul = 100
+                hadZero = false
             }
             c == '千' -> {
                 result += (if (unit == 0) 1 else unit) * 1000
                 unit = 0
+                lastUnitMul = 1000
+                hadZero = false
+            }
+            c == '萬' || c == '万' -> {
+                result += (if (unit == 0) 1 else unit) * 10000
+                unit = 0
+                lastUnitMul = 10000
+                hadZero = false
             }
             else -> return null
         }
-        i++
     }
-    result += unit
+    if (unit > 0) {
+        // 支援粵語「百五」= 150、「兩百五」= 250、「兩千三」= 2300；有「零」如「一百零五」則為 105
+        result += if (!hadZero && lastUnitMul >= 100) unit * (lastUnitMul / 10) else unit
+    }
     return result
 }
 
+private fun parseWholePart(raw: String): Int? {
+    val t = raw.trim()
+    if (t.isEmpty()) return null
+    return t.toIntOrNull() ?: parseChineseInteger(t)
+}
+
+private fun parseFracPart(raw: String): Double? {
+    val t = raw.trim()
+    if (t.isEmpty()) return null
+    var frac = 0.0
+    var div = 10.0
+    for (c in t) {
+        val d = if (c in '0'..'9') c - '0' else (CN_FRAC_DIGIT_MAP[c] ?: return null)
+        frac += d / div
+        div *= 10.0
+    }
+    return frac
+}
+
+/** 專門解析「純金額字串」（例如："6 个半"、"六個半"、"四個九"、"4.9"、"廿五蚊"、"百五"） */
+fun parseAmountExpression(raw: String): Double? {
+    val s = raw.trim()
+        .trim('，', ',', '、', '。', '！', '!', '？', '?')
+        .replace(Regex("""^(?:HK\$|HKD|\$)\s*""", RegexOption.IGNORE_CASE), "")
+        .trim()
+    if (s.isEmpty()) return null
+
+    if (s == "半蚊" || s == "半個" || s == "半个" || s == "半塊" || s == "半块" || s == "半元") {
+        return 0.5
+    }
+
+    // 1. 半蚊／個半（6 个半、六個半、十二蚊半）
+    Regex("""^(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半$""").matchEntire(s)?.let { m ->
+        val whole = parseWholePart(m.groupValues[1]) ?: return@let
+        val amt = whole + 0.5
+        if (amt > 0.0) return amt
+    }
+
+    // 2. 粵語「X個Y／X蚊Y」（四個九、4个9、4蚊9毫、十二個五）
+    Regex("""^(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?$""")
+        .matchEntire(s)?.let { m ->
+            val whole = parseWholePart(m.groupValues[1]) ?: return@let
+            val frac = parseFracPart(m.groupValues[2]) ?: return@let
+            val amt = whole + frac
+            if (amt > 0.0) return amt
+        }
+
+    // 3. 小數點「X點Y／X点Y」（六點五、6 点 5、點五）
+    Regex("""^(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX$""")
+        .matchEntire(s)?.let { m ->
+            val wholeStr = m.groupValues[1]
+            val whole = if (wholeStr.isBlank()) 0 else (parseWholePart(wholeStr) ?: return@let)
+            val frac = parseFracPart(m.groupValues[2]) ?: return@let
+            val amt = whole + frac
+            if (amt > 0.0) return amt
+        }
+
+    // 4. 阿拉伯數字（6.5、6.5蚊、120元）
+    Regex("""^(\d+(?:\.\d+)?)\s*$CUR_SUFFIX$""").matchEntire(s)?.let { m ->
+        val amt = m.groupValues[1].toDoubleOrNull()
+        if (amt != null && amt > 0.0) return amt
+    }
+
+    // 5. 中文整數（五十、五十蚊、廿五蚊、百五）
+    Regex("""^([$CN_NUM_CHARS]+)\s*$CUR_SUFFIX$""").matchEntire(s)?.let { m ->
+        val whole = parseChineseInteger(m.groupValues[1])
+        if (whole != null && whole > 0) return whole.toDouble()
+    }
+
+    return null
+}
+
+private fun cleanNoteName(raw: String): String =
+    raw.trim().trim('，', ',', '、', '。', '！', '!', '？', '?').trim()
+
 fun extractTrailingAmount(raw: String): Pair<String, Double?> {
-    var text = raw.trim()
+    val text = raw.trim().trimEnd('。', '！', '!', '？', '?', '，', ',', '、').trim()
     if (text.isEmpty()) return "" to null
 
-    text = text
-        .replace("塊錢", "")
-        .replace("蚊半", ".5")
-        .replace("塊半", ".5")
-        .replace("元半", ".5")
-        .replace("個半", ".5")
-        .replace(Regex("[蚊元塊圓块圆錢]"), "")
-        .replace(Regex("\\s+"), "")
-        .trim()
+    TRAILING_HALF_REGEX.find(text)?.let { m ->
+        val whole = parseWholePart(m.groupValues[2])
+        if (whole != null && whole + 0.5 > 0.0) {
+            return cleanNoteName(m.groupValues[1]) to (whole + 0.5)
+        }
+    }
 
-    Regex("""^(.*?)(\d+(?:\.\d+)?)$""").find(text)?.let { m ->
+    TRAILING_DOLLAR_DIME_REGEX.find(text)?.let { m ->
+        val whole = parseWholePart(m.groupValues[2])
+        val frac = parseFracPart(m.groupValues[3])
+        if (whole != null && frac != null && whole + frac > 0.0) {
+            return cleanNoteName(m.groupValues[1]) to (whole + frac)
+        }
+    }
+
+    TRAILING_DOT_REGEX.find(text)?.let { m ->
+        val wholeStr = m.groupValues[2]
+        val whole = if (wholeStr.isBlank()) 0 else parseWholePart(wholeStr)
+        val frac = parseFracPart(m.groupValues[3])
+        if (whole != null && frac != null && whole + frac > 0.0) {
+            return cleanNoteName(m.groupValues[1]) to (whole + frac)
+        }
+    }
+
+    TRAILING_ARABIC_REGEX.find(text)?.let { m ->
         val amt = m.groupValues[2].toDoubleOrNull()
-        if (amt != null && amt > 0) return m.groupValues[1] to amt
+        if (amt != null && amt > 0.0) {
+            return cleanNoteName(m.groupValues[1]) to amt
+        }
     }
 
-    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)\.5$""").find(text)?.let { m ->
+    TRAILING_CN_INT_REGEX.find(text)?.let { m ->
         val whole = parseChineseInteger(m.groupValues[2])
-        if (whole != null) {
-            val amt = whole + 0.5
-            if (amt > 0) return m.groupValues[1] to amt
+        if (whole != null && whole > 0) {
+            return cleanNoteName(m.groupValues[1]) to whole.toDouble()
         }
     }
 
-    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([\d零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗]+)$""").find(text)?.let { m ->
-        val wholeStr = m.groupValues[2]
-        val whole = wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr)
-        val fracPart = m.groupValues[3]
-        if (whole != null && fracPart.isNotEmpty()) {
-            var frac = 0.0
-            var div = 10.0
-            for (c in fracPart) {
-                val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
-                frac += d / div
-                div *= 10
-            }
-            val amt = whole + frac
-            if (amt > 0) return m.groupValues[1] to amt
+    return cleanNoteName(text) to null
+}
+
+fun extractLeadingAmount(raw: String): Pair<String, Double?> {
+    val text = raw.trim().trimEnd('。', '！', '!', '？', '?', '，', ',', '、').trim()
+    if (text.isEmpty()) return "" to null
+
+    fun validNote(s: String): String? {
+        val n = cleanNoteName(s)
+        if (n.isEmpty()) return null
+        if (n.first() in charArrayOf('-', '.', '/', '%')) return null
+        return n
+    }
+
+    LEADING_HALF_REGEX.find(text)?.let { m ->
+        val whole = parseWholePart(m.groupValues[1])
+        val note = validNote(m.groupValues[2])
+        if (whole != null && whole + 0.5 > 0.0 && note != null) {
+            return note to (whole + 0.5)
         }
     }
 
-    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千]+)?點([\d零〇○一二兩三四五六七八九狗]+)$""").find(text)?.let { m ->
-        val wholeStr = m.groupValues[2]
-        val whole = if (wholeStr.isBlank()) 0 else (wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr))
-        val fracPart = m.groupValues[3]
-        if (whole != null && fracPart.isNotEmpty()) {
-            var frac = 0.0
-            var div = 10.0
-            for (c in fracPart) {
-                val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
-                frac += d / div
-                div *= 10
-            }
-            val amt = whole + frac
-            if (amt > 0) return m.groupValues[1] to amt
+    LEADING_DOLLAR_DIME_REGEX.find(text)?.let { m ->
+        val whole = parseWholePart(m.groupValues[1])
+        val frac = parseFracPart(m.groupValues[2])
+        val note = validNote(m.groupValues[3])
+        if (whole != null && frac != null && whole + frac > 0.0 && note != null) {
+            return note to (whole + frac)
         }
     }
 
-    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)$""").find(text)?.let { m ->
-        val whole = parseChineseInteger(m.groupValues[2])
-        if (whole != null && whole > 0) return m.groupValues[1] to whole.toDouble()
+    LEADING_DOT_REGEX.find(text)?.let { m ->
+        val wholeStr = m.groupValues[1]
+        val whole = if (wholeStr.isBlank()) 0 else parseWholePart(wholeStr)
+        val frac = parseFracPart(m.groupValues[2])
+        val note = validNote(m.groupValues[3])
+        if (whole != null && frac != null && whole + frac > 0.0 && note != null) {
+            return note to (whole + frac)
+        }
     }
 
-    return text to null
+    LEADING_ARABIC_REGEX.find(text)?.let { m ->
+        val amt = m.groupValues[1].toDoubleOrNull()
+        val note = validNote(m.groupValues[2])
+        if (amt != null && amt > 0.0 && note != null) {
+            return note to amt
+        }
+    }
+
+    LEADING_CN_WITH_CUR_REGEX.find(text)?.let { m ->
+        val whole = parseChineseInteger(m.groupValues[1])
+        val note = validNote(m.groupValues[2])
+        if (whole != null && whole > 0 && note != null) {
+            return note to whole.toDouble()
+        }
+    }
+
+    LEADING_CN_WITH_SPACE_REGEX.find(text)?.let { m ->
+        val whole = parseChineseInteger(m.groupValues[1])
+        val note = validNote(m.groupValues[2])
+        if (whole != null && whole > 0 && note != null) {
+            return note to whole.toDouble()
+        }
+    }
+
+    return cleanNoteName(text) to null
 }
 
 fun capitalizeNoteFirstLetter(name: String): String {
@@ -1306,20 +1494,66 @@ fun capitalizeNoteFirstLetter(name: String): String {
     return t.substring(0, idx) + ch.titlecase(Locale.getDefault()) + t.substring(idx + 1)
 }
 
-fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
-    val text = raw.trim()
+fun parseVoiceLedgerInput(
+    raw: String,
+    knownNotes: List<String> = emptyList()
+): Pair<String, Double?> {
+    val text = raw.trim().trimEnd('。', '！', '!', '？', '?', '，', ',', '、').trim()
     if (text.isEmpty()) return "" to null
 
-    val (prefix, amt) = extractTrailingAmount(text)
-    val name = capitalizeNoteFirstLetter(prefix.trim())
+    val sortedKnown = knownNotes
+        .asSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .sortedByDescending { it.length }
+        .toList()
 
-    if (name.isEmpty() && amt != null) return "" to amt
-    if (name.isNotEmpty() && amt != null && amt > 0) return name to amt
-    Regex("""^(\d+(?:\.\d+)?)(.+)$""").find(text.replace(" ", ""))?.let { m ->
-        val a = m.groupValues[1].toDoubleOrNull()
-        val n = capitalizeNoteFirstLetter(m.groupValues[2].trim())
-        if (a != null && a > 0 && n.isNotEmpty()) return n to a
+    // 0. 如果整句正正係一個已知項目名（例如「7-Eleven」、「三哥」），直接當純項目名
+    sortedKnown.firstOrNull { it.equals(text, ignoreCase = true) }?.let { exact ->
+        return exact to null
     }
+
+    // 1. 先用已知項目名做前綴／後綴精準拆分（支援「四個九地鐵」、「四個九一蘭」、「7-Eleven 15個半」）
+    for (known in sortedKnown) {
+        if (text.length <= known.length) continue
+
+        // 1a. 金額在前 + 已知項目名在後（例如「四個九地鐵」）
+        if (text.endsWith(known, ignoreCase = true)) {
+            val amountPart = text.dropLast(known.length)
+            val amt = parseAmountExpression(amountPart)
+            if (amt != null && amt > 0.0) {
+                return known to amt
+            }
+        }
+
+        // 1b. 已知項目名在前 + 金額在後（例如「地鐵 6 個半」、「地鐵六個半」）
+        if (text.startsWith(known, ignoreCase = true)) {
+            val amountPart = text.drop(known.length)
+            val amt = parseAmountExpression(amountPart)
+            if (amt != null && amt > 0.0) {
+                return known to amt
+            }
+        }
+    }
+
+    // 2. 如果整句純粹係金額（例如只講「四個九」或「6個半」）
+    parseAmountExpression(text)?.let { pureAmt ->
+        if (pureAmt > 0.0) return "" to pureAmt
+    }
+
+    // 3. 通用尾置金額拆分（項目名在前 + 金額在後，適用未記過嘅新項目或簡體如「地铁 6 个半」）
+    val (trailPrefix, trailAmt) = extractTrailingAmount(text)
+    if (trailAmt != null && trailAmt > 0.0) {
+        return capitalizeNoteFirstLetter(trailPrefix) to trailAmt
+    }
+
+    // 4. 通用前置金額拆分（金額在前 + 項目名在後，例如「四個九地铁」、「6個半巴士」、「廿五蚊午餐」）
+    val (leadNote, leadAmt) = extractLeadingAmount(text)
+    if (leadAmt != null && leadAmt > 0.0 && leadNote.isNotBlank()) {
+        return capitalizeNoteFirstLetter(leadNote) to leadAmt
+    }
+
     return capitalizeNoteFirstLetter(text) to null
 }
 
@@ -2984,13 +3218,14 @@ fun MainApp(
             },
             onVoiceResult = { note, amount ->
                 if (filter.modeOn) exitFilterMode()
+                val resolved = if (note.isNotBlank()) resolveNoteAlias(context, note) else note
                 val cat = when {
-                    note.isNotBlank() -> ui.noteCategoryMap[note]
+                    resolved.isNotBlank() -> ui.noteCategoryMap[resolved]
                     else -> null
                 }
                 goLedgerAndAdd {
                     openKeyboardForNew(
-                        note = note,
+                        note = resolved,
                         amount = amount,
                         forceCategory = cat
                     )
@@ -3630,6 +3865,7 @@ private fun BoxScope.KeyboardAndFabLayer(
             onFabTap = onFabTap,
             onVoiceResult = wrappedOnVoiceResult,
             voiceLaunchToken = voiceLaunchToken,
+            allNoteNames = allNoteNames,
             modifier = Modifier.align(Alignment.BottomEnd)
         )
 
@@ -3737,10 +3973,12 @@ private fun AnimatedFabLayer(
     onFabTap: () -> Unit,
     onVoiceResult: (note: String, amount: Double?) -> Unit = { _, _ -> },
     voiceLaunchToken: Int = 0,
+    allNoteNames: List<String> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val latestAllNoteNames by rememberUpdatedState(allNoteNames)
     val currentP = progressProvider()
     val alpha = (1f - currentP * 2.5f).coerceIn(0f, 1f)
     val scale = 1f - (0.5f * currentP)
@@ -3753,12 +3991,25 @@ private fun AnimatedFabLayer(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val spoken = result.data
+            val candidates = result.data
                 ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-                ?.trim()
-            if (!spoken.isNullOrBlank()) {
-                val (note, amount) = parseVoiceLedgerInput(spoken)
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
+
+            if (candidates.isNotEmpty()) {
+                val aliasKeys = loadNoteAliases(context).keys
+                val knownNotes = latestAllNoteNames + aliasKeys
+                val knownSet = knownNotes.map { it.lowercase(Locale.getDefault()) }.toSet()
+
+                val parsedList = candidates.map { parseVoiceLedgerInput(it, knownNotes) }
+                // 優先揀：同時拆到「已知項目名」＋金額 → 其次拆到任何項目名＋金額 → 最後取第一個候選
+                val (note, amount) = parsedList.firstOrNull { (n, a) ->
+                    n.isNotBlank() && a != null && a > 0.0 && n.lowercase(Locale.getDefault()) in knownSet
+                } ?: parsedList.firstOrNull { (n, a) ->
+                    n.isNotBlank() && a != null && a > 0.0
+                } ?: parsedList.first()
+
                 if (note.isBlank() && (amount == null || amount <= 0.0)) {
                     statusHint = "聽唔明"
                     voiceBubbleVisible = true
