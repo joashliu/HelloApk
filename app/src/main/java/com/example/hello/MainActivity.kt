@@ -1191,48 +1191,47 @@ private val CN_DIGIT_MAP = mapOf(
     '九' to 9, '玖' to 9
 )
 
-// 小數位額外容錯粵語語音常將「九」聽成「狗」
-private val CN_FRAC_DIGIT_MAP = CN_DIGIT_MAP + ('狗' to 9)
+private val CN_FRAC_DIGIT_MAP by lazy { CN_DIGIT_MAP + ('狗' to 9) }
 
 private const val CN_NUM_CHARS = "零〇○一二兩两三四五六七八九十百千萬万廿卅壹贰貳叁肆伍陸陆柒捌玖"
 private const val CN_FRAC_CHARS = "0-9零〇○一二兩两三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗"
 private const val CUR_PREFIX = """(?:(?:HK\$|HKD|\$)\s*)?"""
 private const val CUR_SUFFIX = """(?:港幣|港元|塊錢|块钱|[蚊元塊块圓圆錢钱])?"""
 
-private val TRAILING_HALF_REGEX = Regex(
-    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半$"""
-)
-private val TRAILING_DOLLAR_DIME_REGEX = Regex(
-    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+\vert{}[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?$"""
-)
-private val TRAILING_DOT_REGEX = Regex(
-    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX$"""
-)
-private val TRAILING_ARABIC_REGEX = Regex(
-    """^(.*?)[\s，,、]*$CUR_PREFIX(\d+(?:\.\d+)?)\s*$CUR_SUFFIX$"""
-)
-private val TRAILING_CN_INT_REGEX = Regex(
-    """^(.*?)[\s，,、]*$CUR_PREFIX([$CN_NUM_CHARS]+)\s*$CUR_SUFFIX$"""
-)
+private val TRAILING_HALF_REGEX by lazy {
+    Regex("""^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半$""")
+}
+private val TRAILING_DOLLAR_DIME_REGEX by lazy {
+    Regex("""^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?$""")
+}
+private val TRAILING_DOT_REGEX by lazy {
+    Regex("""^(.*?)[\s，,、]*$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX$""")
+}
+private val TRAILING_ARABIC_REGEX by lazy {
+    Regex("""^(.*?)[\s，,、]*$CUR_PREFIX(\d+(?:\.\d+)?)\s*$CUR_SUFFIX$""")
+}
+private val TRAILING_CN_INT_REGEX by lazy {
+    Regex("""^(.*?)[\s，,、]*$CUR_PREFIX([$CN_NUM_CHARS]+)\s*$CUR_SUFFIX$""")
+}
 
-private val LEADING_HALF_REGEX = Regex(
-    """^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半[\s，,、]*(.+)$"""
-)
-private val LEADING_DOLLAR_DIME_REGEX = Regex(
-    """^$CUR_PREFIX(\d+\vert{}[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?[\s，,、]*(.+)$"""
-)
-private val LEADING_DOT_REGEX = Regex(
-    """^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX[\s，,、]*(.+)$"""
-)
-private val LEADING_ARABIC_REGEX = Regex(
-    """^$CUR_PREFIX(\d+(?:\.\d+)?)\s*$CUR_SUFFIX[\s，,、]*(.+)$"""
-)
-private val LEADING_CN_WITH_CUR_REGEX = Regex(
-    """^$CUR_PREFIX([$CN_NUM_CHARS]+)\s*(?:港幣\vert{}港元\vert{}塊錢\vert{}块钱\vert{}[蚊元塊块圓圆錢钱])[\s，,、]*(.+)$"""
-)
-private val LEADING_CN_WITH_SPACE_REGEX = Regex(
-    """^$CUR_PREFIX([$CN_NUM_CHARS]+)[\s，,、]+(.+)$"""
-)
+private val LEADING_HALF_REGEX by lazy {
+    Regex("""^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*半[\s，,、]*(.+)$""")
+}
+private val LEADING_DOLLAR_DIME_REGEX by lazy {
+    Regex("""^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)\s*[個个蚊塊块元]\s*([$CN_FRAC_CHARS]{1,2})(?:\s*毫子?)?[\s，,、]*(.+)$""")
+}
+private val LEADING_DOT_REGEX by lazy {
+    Regex("""^$CUR_PREFIX(\d+|[$CN_NUM_CHARS]+)?\s*[點点]\s*([$CN_FRAC_CHARS]{1,2})\s*$CUR_SUFFIX[\s，,、]*(.+)$""")
+}
+private val LEADING_ARABIC_REGEX by lazy {
+    Regex("""^$CUR_PREFIX(\d+(?:\.\d+)?)\s*$CUR_SUFFIX[\s，,、]*(.+)$""")
+}
+private val LEADING_CN_WITH_CUR_REGEX by lazy {
+    Regex("""^$CUR_PREFIX([$CN_NUM_CHARS]+)\s*(?:港幣|港元|塊錢|块钱|[蚊元塊块圓圆錢钱])[\s，,、]*(.+)$""")
+}
+private val LEADING_CN_WITH_SPACE_REGEX by lazy {
+    Regex("""^$CUR_PREFIX([$CN_NUM_CHARS]+)[\s，,、]+(.+)$""")
+}
 
 fun parseChineseInteger(s: String): Int? {
     val t = s.trim()
