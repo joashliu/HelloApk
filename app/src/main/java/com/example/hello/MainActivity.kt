@@ -1181,7 +1181,7 @@ fun formatAmountNoDecimal(amount: Double): String = String.format(Locale.US, "%,
 private val CN_DIGIT_MAP = mapOf(
     '零' to 0, '〇' to 0, '○' to 0,
     '一' to 1, '壹' to 1,
-    '二' to 2, '兩' to 2, '贰' to 2, '貳' to 2,
+    '二' to 2, '兩' to 2, '两' to 2, '贰' to 2, '貳' to 2,
     '三' to 3, '叁' to 3,
     '四' to 4, '肆' to 4,
     '五' to 5, '伍' to 5,
@@ -1194,30 +1194,25 @@ private val CN_DIGIT_MAP = mapOf(
 
 // ---------- 正则片段 ----------
 
-private const val CN_INT_CHARS  = "零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖"
-private const val CN_FRAC_CHARS = "零〇○一二兩三四五六七八九狗壹贰貳叁肆伍陸陆柒捌玖"
+private const val CN_INT_CHARS  = "零〇○一二兩两三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖"
+private const val CN_FRAC_CHARS = "零〇○一二兩两三四五六七八九狗壹贰貳叁肆伍陸陆柒捌玖"
 
 private const val INT_PART  = "(?:\\d+|[$CN_INT_CHARS]+)"
 private const val FRAC_PART = "(?:[$CN_FRAC_CHARS]+|半)"
-private const val DOT_CHARS = "[.個个點点]"
+// 关键修复：把中文句号、间隔号、顿号、全角点都算作「口语小数点」
+private const val DOT_CHARS = "[.。·・個个點点、]"
 private const val CURRENCY_OPT = "(?:块钱|塊錢|[蚊元塊块圓圆钱錢币幣])?"
 private const val CURRENCY_REQ = "(?:块钱|塊錢|[蚊元塊块圓圆钱錢币幣])"
-
-// ---------- 开头金额（金额 + 项目名）----------
-// 必须先有"明确金额信号"才允许拆：小数点词 / 半 / 货币单位
-// 防止把 "七十一便利店" 误拆成 "71 + 便利店"
 
 private val LEADING_DECIMAL = Regex("^($INT_PART)$DOT_CHARS($FRAC_PART)$CURRENCY_OPT(.+)\$")
 private val LEADING_HALF    = Regex("^($INT_PART)半$CURRENCY_OPT(.+)\$")
 private val LEADING_CURR    = Regex("^($INT_PART)$CURRENCY_REQ(.+)\$")
 
-// ---------- 末尾金额（项目名 + 金额）----------
-
 private val TRAILING_DECIMAL = Regex("^(.*?)($INT_PART)$DOT_CHARS($FRAC_PART)$CURRENCY_OPT\$")
 private val TRAILING_HALF    = Regex("^(.*?)($INT_PART)半$CURRENCY_OPT\$")
 private val TRAILING_INT     = Regex("^(.*?)($INT_PART)[個个]?$CURRENCY_OPT\$")
 
-// ---------- 解析工具 ----------
+// ---------- 工具 ----------
 
 fun parseChineseInteger(s: String): Int? {
     val t = s.trim()
@@ -1259,6 +1254,16 @@ private fun parseAmount(intStr: String, fracStr: String?): Double? {
     return intPart + frac
 }
 
+// 把「数字 + 奇怪分隔符 + 数字」中的分隔符统一成 '.'
+// 只动数字两侧，绝不会误伤项目名里的标点
+private fun normalizeNumericSeparators(s: String): String {
+    val sep = "[.。·・個个點点、]"
+    val cnNum = "[$CN_INT_CHARS$CN_FRAC_CHARS]"
+    val digitLike = "(?:\\d|$cnNum)"
+    val re = Regex("($digitLike)$sep(?=$digitLike)")
+    return re.replace(s, "$1.")
+}
+
 fun capitalizeNoteFirstLetter(name: String): String {
     val t = name.trim()
     if (t.isEmpty()) return t
@@ -1266,7 +1271,9 @@ fun capitalizeNoteFirstLetter(name: String): String {
     if (idx < 0) return t
     val ch = t[idx]
     if (!ch.isLowerCase()) return t
-    return t.substring(0, idx) + ch.titlecase(java.util.Locale.getDefault()) + t.substring(idx + 1)
+    return t.substring(0, idx) +
+            ch.titlecase(java.util.Locale.getDefault()) +
+            t.substring(idx + 1)
 }
 
 // ---------- 主入口 ----------
@@ -1274,9 +1281,11 @@ fun capitalizeNoteFirstLetter(name: String): String {
 fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
     val original = raw.trim()
     if (original.isEmpty()) return "" to null
-    val compact = original.replace(Regex("\\s+"), "")
 
-    // 1) 金额在前（需有明确信号：點/個/半/货币单位）
+    // 关键一步：先规范化数字间的分隔符，再压空白
+    val compact = normalizeNumericSeparators(original).replace(Regex("\\s+"), "")
+
+    // 1) 金额在前（需明确信号）
     LEADING_DECIMAL.find(compact)?.let { m ->
         val amt = parseAmount(m.groupValues[1], m.groupValues[2])
         val rest = m.groupValues[3]
@@ -1296,7 +1305,7 @@ fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
             return capitalizeNoteFirstLetter(rest) to amt
     }
 
-    // 2) 金额在后（最常见）
+    // 2) 金额在后
     TRAILING_DECIMAL.find(compact)?.let { m ->
         val amt = parseAmount(m.groupValues[2], m.groupValues[3])
         if (amt != null && amt > 0)
@@ -1313,7 +1322,6 @@ fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
             return capitalizeNoteFirstLetter(m.groupValues[1]) to amt
     }
 
-    // 3) 兜底：整体作为项目名
     return capitalizeNoteFirstLetter(original) to null
 }
 
