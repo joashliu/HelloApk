@@ -1178,6 +1178,8 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun formatAmountNoDecimal(amount: Double): String = String.format(Locale.US, "%,.0f", amount)
 
+import java.util.Locale
+
 private val CN_DIGIT_MAP = mapOf(
     '零' to 0, '〇' to 0, '○' to 0,
     '一' to 1, '壹' to 1,
@@ -1192,6 +1194,33 @@ private val CN_DIGIT_MAP = mapOf(
     '狗' to 9
 )
 
+// ---------- 正则片段 ----------
+
+private const val CN_INT_CHARS  = "零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖"
+private const val CN_FRAC_CHARS = "零〇○一二兩三四五六七八九狗壹贰貳叁肆伍陸陆柒捌玖"
+
+private const val INT_PART  = "(?:\\d+|[$CN_INT_CHARS]+)"
+private const val FRAC_PART = "(?:[$CN_FRAC_CHARS]+|半)"
+private const val DOT_CHARS = "[.個个點点]"
+private const val CURRENCY_OPT = "(?:块钱|塊錢|[蚊元塊块圓圆钱錢币幣])?"
+private const val CURRENCY_REQ = "(?:块钱|塊錢|[蚊元塊块圓圆钱錢币幣])"
+
+// ---------- 开头金额（金额 + 项目名）----------
+// 必须先有"明确金额信号"才允许拆：小数点词 / 半 / 货币单位
+// 防止把 "七十一便利店" 误拆成 "71 + 便利店"
+
+private val LEADING_DECIMAL = Regex("^($INT_PART)$DOT_CHARS($FRAC_PART)$CURRENCY_OPT(.+)\$")
+private val LEADING_HALF    = Regex("^($INT_PART)半$CURRENCY_OPT(.+)\$")
+private val LEADING_CURR    = Regex("^($INT_PART)$CURRENCY_REQ(.+)\$")
+
+// ---------- 末尾金额（项目名 + 金额）----------
+
+private val TRAILING_DECIMAL = Regex("^(.*?)($INT_PART)$DOT_CHARS($FRAC_PART)$CURRENCY_OPT\$")
+private val TRAILING_HALF    = Regex("^(.*?)($INT_PART)半$CURRENCY_OPT\$")
+private val TRAILING_INT     = Regex("^(.*?)($INT_PART)[個个]?$CURRENCY_OPT\$")
+
+// ---------- 解析工具 ----------
+
 fun parseChineseInteger(s: String): Int? {
     val t = s.trim()
     if (t.isEmpty()) return null
@@ -1202,98 +1231,34 @@ fun parseChineseInteger(s: String): Int? {
     }
     var result = 0
     var unit = 0
-    var i = 0
-    while (i < t.length) {
-        val c = t[i]
+    for (c in t) {
         when {
             c in CN_DIGIT_MAP -> unit = CN_DIGIT_MAP[c]!!
-            c == '十' -> {
-                result += (if (unit == 0) 1 else unit) * 10
-                unit = 0
-            }
-            c == '百' -> {
-                result += (if (unit == 0) 1 else unit) * 100
-                unit = 0
-            }
-            c == '千' -> {
-                result += (if (unit == 0) 1 else unit) * 1000
-                unit = 0
-            }
+            c == '十' -> { result += (if (unit == 0) 1 else unit) * 10; unit = 0 }
+            c == '百' -> { result += (if (unit == 0) 1 else unit) * 100; unit = 0 }
+            c == '千' -> { result += (if (unit == 0) 1 else unit) * 1000; unit = 0 }
             else -> return null
         }
-        i++
     }
     result += unit
     return result
 }
 
-fun extractTrailingAmount(raw: String): Pair<String, Double?> {
-    var text = raw.trim()
-    if (text.isEmpty()) return "" to null
-
-    text = text
-        .replace("塊錢", "")
-        .replace("蚊半", ".5")
-        .replace("塊半", ".5")
-        .replace("元半", ".5")
-        .replace("個半", ".5")
-        .replace(Regex("[蚊元塊圓块圆錢]"), "")
-        .replace(Regex("\\s+"), "")
-        .trim()
-
-    Regex("""^(.*?)(\d+(?:\.\d+)?)$""").find(text)?.let { m ->
-        val amt = m.groupValues[2].toDoubleOrNull()
-        if (amt != null && amt > 0) return m.groupValues[1] to amt
-    }
-
-    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)\.5$""").find(text)?.let { m ->
-        val whole = parseChineseInteger(m.groupValues[2])
-        if (whole != null) {
-            val amt = whole + 0.5
-            if (amt > 0) return m.groupValues[1] to amt
+private fun parseAmount(intStr: String, fracStr: String?): Double? {
+    val intPart = intStr.toIntOrNull() ?: parseChineseInteger(intStr) ?: return null
+    if (fracStr.isNullOrEmpty()) return intPart.toDouble()
+    if (fracStr == "半") return intPart + 0.5
+    var frac = 0.0
+    var div = 10.0
+    for (c in fracStr) {
+        val d = when {
+            c in '0'..'9' -> c - '0'
+            else -> CN_DIGIT_MAP[c] ?: return null
         }
+        frac += d / div
+        div *= 10
     }
-
-    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)個([\d零〇○一二兩三四五六七八九壹贰貳叁肆伍陸陆柒捌玖狗]+)$""").find(text)?.let { m ->
-        val wholeStr = m.groupValues[2]
-        val whole = wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr)
-        val fracPart = m.groupValues[3]
-        if (whole != null && fracPart.isNotEmpty()) {
-            var frac = 0.0
-            var div = 10.0
-            for (c in fracPart) {
-                val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
-                frac += d / div
-                div *= 10
-            }
-            val amt = whole + frac
-            if (amt > 0) return m.groupValues[1] to amt
-        }
-    }
-
-    Regex("""^(.*?)(\d+|[零〇○一二兩三四五六七八九十百千]+)?點([\d零〇○一二兩三四五六七八九狗]+)$""").find(text)?.let { m ->
-        val wholeStr = m.groupValues[2]
-        val whole = if (wholeStr.isBlank()) 0 else (wholeStr.toIntOrNull() ?: parseChineseInteger(wholeStr))
-        val fracPart = m.groupValues[3]
-        if (whole != null && fracPart.isNotEmpty()) {
-            var frac = 0.0
-            var div = 10.0
-            for (c in fracPart) {
-                val d = if (c in '0'..'9') c - '0' else (CN_DIGIT_MAP[c] ?: return@let)
-                frac += d / div
-                div *= 10
-            }
-            val amt = whole + frac
-            if (amt > 0) return m.groupValues[1] to amt
-        }
-    }
-
-    Regex("""^(.*?)([零〇○一二兩三四五六七八九十百千壹贰貳叁肆伍陸陆柒捌玖]+)$""").find(text)?.let { m ->
-        val whole = parseChineseInteger(m.groupValues[2])
-        if (whole != null && whole > 0) return m.groupValues[1] to whole.toDouble()
-    }
-
-    return text to null
+    return intPart + frac
 }
 
 fun capitalizeNoteFirstLetter(name: String): String {
@@ -1306,21 +1271,52 @@ fun capitalizeNoteFirstLetter(name: String): String {
     return t.substring(0, idx) + ch.titlecase(Locale.getDefault()) + t.substring(idx + 1)
 }
 
+// ---------- 主入口 ----------
+
 fun parseVoiceLedgerInput(raw: String): Pair<String, Double?> {
-    val text = raw.trim()
-    if (text.isEmpty()) return "" to null
+    val original = raw.trim()
+    if (original.isEmpty()) return "" to null
+    val compact = original.replace(Regex("\\s+"), "")
 
-    val (prefix, amt) = extractTrailingAmount(text)
-    val name = capitalizeNoteFirstLetter(prefix.trim())
-
-    if (name.isEmpty() && amt != null) return "" to amt
-    if (name.isNotEmpty() && amt != null && amt > 0) return name to amt
-    Regex("""^(\d+(?:\.\d+)?)(.+)$""").find(text.replace(" ", ""))?.let { m ->
-        val a = m.groupValues[1].toDoubleOrNull()
-        val n = capitalizeNoteFirstLetter(m.groupValues[2].trim())
-        if (a != null && a > 0 && n.isNotEmpty()) return n to a
+    // 1) 金额在前（需有明确信号：點/個/半/货币单位）
+    LEADING_DECIMAL.find(compact)?.let { m ->
+        val amt = parseAmount(m.groupValues[1], m.groupValues[2])
+        val rest = m.groupValues[3]
+        if (amt != null && amt > 0 && rest.isNotEmpty())
+            return capitalizeNoteFirstLetter(rest) to amt
     }
-    return capitalizeNoteFirstLetter(text) to null
+    LEADING_HALF.find(compact)?.let { m ->
+        val amt = parseAmount(m.groupValues[1], "半")
+        val rest = m.groupValues[2]
+        if (amt != null && amt > 0 && rest.isNotEmpty())
+            return capitalizeNoteFirstLetter(rest) to amt
+    }
+    LEADING_CURR.find(compact)?.let { m ->
+        val amt = parseAmount(m.groupValues[1], null)
+        val rest = m.groupValues[2]
+        if (amt != null && amt > 0 && rest.isNotEmpty())
+            return capitalizeNoteFirstLetter(rest) to amt
+    }
+
+    // 2) 金额在后（最常见）
+    TRAILING_DECIMAL.find(compact)?.let { m ->
+        val amt = parseAmount(m.groupValues[2], m.groupValues[3])
+        if (amt != null && amt > 0)
+            return capitalizeNoteFirstLetter(m.groupValues[1]) to amt
+    }
+    TRAILING_HALF.find(compact)?.let { m ->
+        val amt = parseAmount(m.groupValues[2], "半")
+        if (amt != null && amt > 0)
+            return capitalizeNoteFirstLetter(m.groupValues[1]) to amt
+    }
+    TRAILING_INT.find(compact)?.let { m ->
+        val amt = parseAmount(m.groupValues[2], null)
+        if (amt != null && amt > 0)
+            return capitalizeNoteFirstLetter(m.groupValues[1]) to amt
+    }
+
+    // 3) 兜底：整体作为项目名
+    return capitalizeNoteFirstLetter(original) to null
 }
 
 fun compactAmount(value: Double): String {
