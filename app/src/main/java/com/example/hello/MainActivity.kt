@@ -1178,8 +1178,6 @@ object AboveAnchorPositionProvider : PopupPositionProvider {
 fun formatAmount(amount: Double): String = String.format(Locale.US, "%,.1f", amount)
 fun formatAmountNoDecimal(amount: Double): String = String.format(Locale.US, "%,.0f", amount)
 
-import java.util.Locale
-
 private val CN_DIGIT_MAP = mapOf(
     '零' to 0, '〇' to 0, '○' to 0,
     '一' to 1, '壹' to 1,
@@ -1268,7 +1266,7 @@ fun capitalizeNoteFirstLetter(name: String): String {
     if (idx < 0) return t
     val ch = t[idx]
     if (!ch.isLowerCase()) return t
-    return t.substring(0, idx) + ch.titlecase(Locale.getDefault()) + t.substring(idx + 1)
+    return t.substring(0, idx) + ch.titlecase(java.util.Locale.getDefault()) + t.substring(idx + 1)
 }
 
 // ---------- 主入口 ----------
